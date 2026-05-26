@@ -2,135 +2,40 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ноосфера v3.0 - Автоматический ИИ</title>
-    
-    <!-- Подключаем библиотеку v3 через стабильный ESM-модуль -->
+    <title>Transformers.js Test</title>
+</head>
+<body>
+    <h1>Тест эмбеддингов</h1>
+    <button id="calc-btn">Создать эмбеддинг</button>
+    <pre id="output">Нажмите кнопку для старта...</pre>
+
+    <!-- Важно: используем type="module" -->
     <script type="module">
-        import { pipeline, env } from 'https://jsdelivr.net';
+        // Импортируем библиотеку напрямую из CDN
+        import { pipeline } from 'https://jsdelivr.net';
 
-        // Настройка, чтобы ИИ автоматически качал модель напрямую из облака
-        env.allowLocalModels = false; 
+        const btn = document.getElementById('calc-btn');
+        const output = document.getElementById('output');
 
-        let pipe = null;
-        const notesDatabase = []; 
-
-        function screenLog(message, isError = false) {
-            const consoleDiv = document.getElementById('screenConsole');
-            if (!consoleDiv) return;
-            const time = new Date().toLocaleTimeString();
-            const color = isError ? '#ff4d4f' : '#00ff00';
-            consoleDiv.innerHTML += `<div style="color: ${color}; margin-bottom: 4px;">[${time}] ${message}</div>`;
-            consoleDiv.scrollTop = consoleDiv.scrollHeight;
-        }
-
-        async function initAI() {
-            screenLog("Старт Ноосферы v3...");
-            screenLog("Запрос модели с Hugging Face...");
-
+        btn.addEventListener('click', async () => {
+            output.innerText = 'Загрузка модели (это займет время при первом запуске)...';
+            
             try {
-                // Инициализируем легкую модель. Она сама скачается автоматически!
-                pipe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-                    progress_callback: (data) => {
-                        if (data.status === 'progress') {
-                            const percent = data.progress ? data.progress.toFixed(0) : 0;
-                            document.getElementById('progressBar').style.width = `${percent}%`;
-                            document.getElementById('progressText').innerText = `Авто-загрузка ИИ-ядра: ${percent}%`;
-                        }
-                    }
-                });
+                // Модель скачается сама из интернета, ничего локально класть не надо!
+                const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
                 
-                screenLog("✓ УСПЕХ! Модель скачана и запущена локально в браузеры.");
-                document.getElementById('loader').style.display = 'none';
-                document.getElementById('app').style.display = 'block';
-
+                output.innerText = 'Модель загружена. Считаем вектор...';
+                
+                const result = await extractor('Привет, мир!', { pooling: 'mean', normalize: true });
+                
+                // Выводим первые 5 чисел вектора для проверки
+                const vectorArray = Array.from(result.data).slice(0, 5);
+                output.innerText = `Успех!\nРазмерность вектора: ${result.data.length}\nПервые 5 значений: ${JSON.stringify(vectorArray)}`;
             } catch (error) {
-                screenLog(`Критический сбой автозагрузки: ${error.message}`, true);
+                output.innerText = `Ошибка: ${error.message}`;
                 console.error(error);
             }
-        }
-
-        async function getVector(text) {
-            const output = await pipe(text, { pooling: 'mean', normalize: true });
-            return Array.from(output.data);
-        }
-
-        function cosineSimilarity(vecA, vecB) {
-            let dotProduct = 0.0;
-            for (let i = 0; i < vecA.length; i++) {
-                dotProduct += vecA[i] * vecB[i];
-            }
-            return dotProduct;
-        }
-
-        window.saveNote = async function() {
-            const textInput = document.getElementById('noteText').value.trim();
-            if (!textInput) return;
-
-            screenLog("Анализ смысла...");
-            try {
-                const vector = await getVector(textInput);
-                let bestMatch = null;
-                let highestScore = 0;
-
-                for (let oldNote of notesDatabase) {
-                    const score = cosineSimilarity(vector, oldNote.vector);
-                    if (score > highestScore) {
-                        highestScore = score;
-                        bestMatch = oldNote;
-                    }
-                }
-
-                notesDatabase.push({ text: textInput, vector: vector });
-
-                const synergyDiv = document.getElementById('synergyResult');
-                if (bestMatch && highestScore > 0.50) { 
-                    synergyDiv.innerHTML = `
-                        <div style="background: #e6f7ff; padding: 12px; border-left: 4px solid #1890ff; margin: 15px 0; border-radius: 4px; font-size: 14px;">
-                            <strong>Синергия графа (${(highestScore * 100).toFixed(0)}%):</strong><br>
-                            "${bestMatch.text}"
-                        </div>
-                    `;
-                } else {
-                    synergyDiv.innerHTML = `<p style="color: #888; font-size: 13px;">Сохранено в память.</p>`;
-                }
-
-                document.getElementById('notesList').innerHTML = notesDatabase.map(n => `
-                    <li style="background: #f5f5f5; padding: 10px; margin-bottom: 6px; border-radius: 4px; list-style-type: none; font-size: 14px;">${n.text}</li>
-                `).reverse().join('');
-                
-                document.getElementById('noteText').value = '';
-            } catch (err) {
-                screenLog(`Ошибка: ${err.message}`, true);
-            }
-        }
-
-        // Запуск системы
-        initAI();
+        });
     </script>
-</head>
-<body style="font-family: sans-serif; max-width: 500px; margin: 20px auto; padding: 0 15px; color: #222; background: #fafafa;">
-
-    <h2>Ноосфера v3.0</h2>
-    <p style="color: #666; margin-top: 0; font-size: 13px;">Облачный узел с автоматической установкой ИИ</p>
-    
-    <div style="background: #1a1a1a; color: #00ff00; padding: 10px; border-radius: 6px; font-family: monospace; font-size: 11px; height: 110px; overflow-y: auto; margin-bottom: 15px;" id="screenConsole"></div>
-    
-    <div id="loader">
-        <div id="progressText" style="font-size: 14px; color: #555; margin-bottom: 5px;">Синхронизация контекста...</div>
-        <div style="width: 100%; background-color: #ddd; border-radius: 4px; height: 8px;">
-            <div id="progressBar" style="width: 0%; height: 100%; background-color: #00ff00; border-radius: 4px; transition: width 0.1s;"></div>
-        </div>
-    </div>
-
-    <div id="app" style="display: none;">
-        <textarea id="noteText" style="width: 100%; height: 80px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 15px;" placeholder="Введи концепт на английском (например: bank money)..."></textarea>
-        <button onclick="saveNote()" style="margin-top: 10px; width: 100%; padding: 12px; background: #2b82c9; color: white; border: none; border-radius: 4px; font-weight: bold;">
-            Сохранить мысль
-        </button>
-        <div id="synergyResult"></div>
-        <ul id="notesList" style="padding: 0;"></ul>
-    </div>
-
 </body>
 </html>
