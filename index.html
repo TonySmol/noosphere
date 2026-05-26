@@ -3,58 +3,70 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Локальная структура Transformers.js</title>
+    <title>Transformers.js в 1 файл</title>
     <style>
-        body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
+        body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; }
         button { padding: 12px 24px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; font-weight: bold;}
-        button:hover { background: #0056b3; }
         #status { margin: 20px 0; font-weight: bold; color: #333; }
         pre { background: #f4f4f4; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 14px; border: 1px solid #ddd; white-space: pre-wrap; }
     </style>
+
+    <!-- Подключаем библиотеку как обычный глобальный скрипт. GitHub Pages это разрешает -->
+    <script src="https://jsdelivr.net"></script>
 </head>
 <body>
 
-    <h2>Эмбеддинги по архитектуре Web Worker</h2>
-    <p>Проект разделен на 3 локальных файла. Потоки изолированы.</p>
+    <h2>Эмбеддинги в один HTML-файл</h2>
+    <p>Рабочий вариант для GitHub Pages без использования ES-модулей.</p>
     
     <button id="run-btn">Сгенерировать вектор</button>
     <div id="status">Статус: Ожидание нажатия кнопки...</div>
     <pre id="output">Результат появится здесь...</pre>
 
-    <script type="module">
+    <script>
+        // В классическом скрипте библиотека регистрирует себя в глобальном объекте `hf_transformers`
+        // Достаем из неё функции по учебнику
+        const { pipeline, env } = hf_transformers; 
+
+        // Настройки: качаем модель напрямую из репозитория Hugging Face
+        env.allowRemoteModels = true; 
+        env.allowLocalModels = false;
+
         const runBtn = document.getElementById('run-btn');
         const statusDiv = document.getElementById('status');
         const outputDiv = document.getElementById('output');
 
-        // Создаем фоновый рабочий процесс из нашего локального файла worker.js
-        const worker = new Worker('./worker.js', { type: 'module' });
-
-        runBtn.addEventListener('click', () => {
-            statusDiv.innerText = "Статус: Запрос отправлен в воркер...";
+        runBtn.addEventListener('click', async () => {
+            statusDiv.innerText = "Статус: Загрузка модели из Hugging Face... (~90МБ, подождите)";
             statusDiv.style.color = "orange";
             outputDiv.innerText = "";
-            
-            // Передаем текст для анализа в фоновый поток
-            worker.postMessage({ text: "Привет, этот код работает правильно!" });
-        });
 
-        // Ловим сообщения, которые воркер присылает обратно
-        worker.onmessage = (event) => {
-            const { status, message, data } = event.data;
+            try {
+                // Инициализируем пайплайн на CPU (wasm) для работы на ПК и смартфонах
+                const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+                    device: 'wasm'
+                });
 
-            if (status === 'progress' || status === 'ready') {
-                statusDiv.innerText = `Статус: ${message}`;
-            } else if (status === 'complete') {
+                statusDiv.innerText = "Статус: Модель готова. Расчет вектора...";
+                
+                const result = await extractor('Тестовый текст для проверки работы нейросети', { 
+                    pooling: 'mean', 
+                    normalize: true 
+                });
+
                 statusDiv.innerText = "Статус: Успешно выполнено!";
                 statusDiv.style.color = "green";
-                
-                outputDiv.innerText = `Размерность полученного эмбеддинга: ${data.length} чисел.\n\nПервые 10 значений:\n${JSON.stringify(data.slice(0, 10), null, 2)}`;
-            } else if (status === 'error') {
-                statusDiv.innerText = "Статус: Критическая ошибка в воркере!";
+
+                const vector = Array.from(result.data);
+                outputDiv.innerText = `Размерность вектора: ${vector.length} измерений.\n\nПервые 10 значений:\n${JSON.stringify(vector.slice(0, 10), null, 2)}`;
+
+            } catch (error) {
+                statusDiv.innerText = "Статус: Ошибка!";
                 statusDiv.style.color = "red";
-                outputDiv.innerText = `Ошибка: ${message}`;
+                outputDiv.innerText = `Ошибка: ${error.message}`;
+                console.error(error);
             }
-        };
+        });
     </script>
 </body>
 </html>
