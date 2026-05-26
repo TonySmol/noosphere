@@ -2,37 +2,48 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Transformers.js Test</title>
+    <title>Transformers.js Vanilla Тест</title>
 </head>
 <body>
-    <h1>Тест эмбеддингов</h1>
-    <button id="calc-btn">Создать эмбеддинг</button>
-    <pre id="output">Нажмите кнопку для старта...</pre>
+    <h1>Тест эмбеддингов по документации</h1>
+    <button id="start-btn">Запустить расчет</button>
+    <div id="status" style="margin-top: 20px; font-weight: bold; color: blue;">Ожидание нажатия кнопки...</div>
+    <pre id="output" style="margin-top: 20px; background: #eee; padding: 10px; white-space: pre-wrap;"></pre>
 
-    <!-- Важно: используем type="module" -->
+    <!-- Используем скрипт-модуль, как требует документация -->
     <script type="module">
-        // Импортируем библиотеку напрямую из CDN
+        // 1. Импортируем строго по спецификации ESM напрямую из CDN
         import { pipeline } from 'https://jsdelivr.net';
 
-        const btn = document.getElementById('calc-btn');
-        const output = document.getElementById('output');
-
-        btn.addEventListener('click', async () => {
-            output.innerText = 'Загрузка модели (это займет время при первом запуске)...';
+        document.getElementById('start-btn').addEventListener('click', async () => {
+            const statusDiv = document.getElementById('status');
+            const outputDiv = document.getElementById('output');
             
+            statusDiv.innerText = "1. Загрузка модели из Hugging Face... (Пожалуйста, подождите, файлы весят ~90МБ)";
+            outputDiv.innerText = "";
+
             try {
-                // Модель скачается сама из интернета, ничего локально класть не надо!
+                // 2. Создаем пайплайн для эмбеддингов (feature-extraction)
+                // Модель Xenova/all-MiniLM-L6-v2 — стандарт по умолчанию для тестов
                 const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
                 
-                output.innerText = 'Модель загружена. Считаем вектор...';
+                statusDiv.innerText = "2. Модель успешно загружена. Выполняем генерацию вектора...";
+
+                // 3. Вызываем модель для текста (согласно официальным параметрам пулинга)
+                const result = await extractor('Hello World', { pooling: 'mean', normalize: true });
                 
-                const result = await extractor('Привет, мир!', { pooling: 'mean', normalize: true });
+                // 4. Выводим результат на экран
+                statusDiv.innerText = "3. Успех!";
+                statusDiv.style.color = "green";
                 
-                // Выводим первые 5 чисел вектора для проверки
-                const vectorArray = Array.from(result.data).slice(0, 5);
-                output.innerText = `Успех!\nРазмерность вектора: ${result.data.length}\nПервые 5 значений: ${JSON.stringify(vectorArray)}`;
+                // Преобразуем Float32Array в обычный массив, чтобы показать первые 5 чисел
+                const rawVector = Array.from(result.data);
+                outputDiv.innerText = `Длина вектора: ${rawVector.length} чисел.\n\nПервые 5 значений эмбеддинга:\n${JSON.stringify(rawVector.slice(0, 5), null, 2)}`;
+                
             } catch (error) {
-                output.innerText = `Ошибка: ${error.message}`;
+                statusDiv.innerText = "Произошла ошибка!";
+                statusDiv.style.color = "red";
+                outputDiv.innerText = `Текст ошибки: ${error.message}\n\nПодробности смотрите в консоли F12.`;
                 console.error(error);
             }
         });
