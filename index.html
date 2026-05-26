@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Transformers.js в 1 файл (Финальное решение)</title>
+    <title>Локальная структура Transformers.js</title>
     <style>
         body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
         button { padding: 12px 24px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; font-weight: bold;}
@@ -14,57 +14,47 @@
 </head>
 <body>
 
-    <h2>Эмбеддинги в один HTML-файл</h2>
-    <p>Решение через ES-модули на зеркале UNPKG. Никаких конфликтов имён.</p>
+    <h2>Эмбеддинги по архитектуре Web Worker</h2>
+    <p>Проект разделен на 3 локальных файла. Потоки изолированы.</p>
     
     <button id="run-btn">Сгенерировать вектор</button>
     <div id="status">Статус: Ожидание нажатия кнопки...</div>
     <pre id="output">Результат появится здесь...</pre>
 
-    <!-- Используем type="module", браузер сам поймет импорт без глобальных переменных -->
     <script type="module">
-        // Импортируем напрямую через unpkg — это зеркало открывается без туннельных ошибок
-        import { pipeline, env } from 'https://unpkg.com';
-
-        // Настраиваем окружение: качаем напрямую с серверов Hugging Face
-        env.allowRemoteModels = true; 
-        env.allowLocalModels = false;
-
         const runBtn = document.getElementById('run-btn');
         const statusDiv = document.getElementById('status');
         const outputDiv = document.getElementById('output');
 
-        runBtn.addEventListener('click', async () => {
-            statusDiv.innerText = "Статус: Подключение к Hugging Face и скачивание модели... (~90МБ, подождите)";
+        // Создаем фоновый рабочий процесс из нашего локального файла worker.js
+        const worker = new Worker('./worker.js', { type: 'module' });
+
+        runBtn.addEventListener('click', () => {
+            statusDiv.innerText = "Статус: Запрос отправлен в воркер...";
             statusDiv.style.color = "orange";
             outputDiv.innerText = "";
+            
+            // Передаем текст для анализа в фоновый поток
+            worker.postMessage({ text: "Привет, этот код работает правильно!" });
+        });
 
-            try {
-                // Запускаем через CPU (wasm) для максимальной совместимости на любых ПК/смартфонах
-                const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-                    device: 'wasm'
-                });
+        // Ловим сообщения, которые воркер присылает обратно
+        worker.onmessage = (event) => {
+            const { status, message, data } = event.data;
 
-                statusDiv.innerText = "Статус: Модель успешно загружена. Считаем эмбеддинг...";
-                
-                const result = await extractor('Тестовый текст для проверки работы нейросети', { 
-                    pooling: 'mean', 
-                    normalize: true 
-                });
-
+            if (status === 'progress' || status === 'ready') {
+                statusDiv.innerText = `Статус: ${message}`;
+            } else if (status === 'complete') {
                 statusDiv.innerText = "Статус: Успешно выполнено!";
                 statusDiv.style.color = "green";
-
-                const vector = Array.from(result.data);
-                outputDiv.innerText = `Размерность вектора: ${vector.length} измерений.\n\nПервые 10 значений:\n${JSON.stringify(vector.slice(0, 10), null, 2)}`;
-
-            } catch (error) {
-                statusDiv.innerText = "Статус: Ошибка!";
+                
+                outputDiv.innerText = `Размерность полученного эмбеддинга: ${data.length} чисел.\n\nПервые 10 значений:\n${JSON.stringify(data.slice(0, 10), null, 2)}`;
+            } else if (status === 'error') {
+                statusDiv.innerText = "Статус: Критическая ошибка в воркере!";
                 statusDiv.style.color = "red";
-                outputDiv.innerText = `Критическое исключение: ${error.message}\n\nЕсли скачивание оборвалось, попробуйте обновить страницу.`;
-                console.error(error);
+                outputDiv.innerText = `Ошибка: ${message}`;
             }
-        });
+        };
     </script>
 </body>
 </html>
