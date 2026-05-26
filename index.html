@@ -190,24 +190,21 @@ const UI = {
   }
 };
 
-// --- 4. CORE LOGIC (Model & Search) ---
 const Engine = {
   model: null,
-  // Cache for vectors: Map<NoteId, Vector>
   vectorCache: new Map(),
 
   async init() {
     try {
-      UI.setStatus('Загрузка нейросети (~25 МБ)...');
+      UI.setStatus('Загрузка нейросети...');
       this.model = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', {
         pooling: 'mean',
         quantized: true
       });
       
-      // Pre-calculate vectors for existing notes
       UI.setStatus('Индексация архива...');
       for (const note of Store.notes) {
-        await this.vectorize(note.id, note.text);
+        await this.vectorize(String(note.id), note.text);
       }
 
       UI.setStatus('Система готова', 'ok');
@@ -215,16 +212,15 @@ const Engine = {
       UI.renderArchive();
     } catch (e) {
       UI.setStatus(`Ошибка: ${e.message}`, 'error');
-      console.error(e);
     }
   },
 
   async vectorize(id, text) {
     if (this.vectorCache.has(id)) return this.vectorCache.get(id);
     
-    // Model returns Tensor. We take .data (Float32Array) and Normalize.
     const output = await this.model([text]);
-    const rawVec = output.data; 
+    // КРИТИЧНО: клонируем буфер, иначе WASM переиспользует память и вектора коллапсируют
+    const rawVec = new Float32Array(output.data); 
     const normVec = VectorMath.normalize(rawVec);
     
     this.vectorCache.set(id, normVec);
@@ -234,22 +230,17 @@ const Engine = {
   async search(queryText) {
     if (!queryText.trim() || !this.model) return [];
 
-    // Get vector for query
-    const queryVec = await this.vectorize('query_temp', queryText);
-    
+    const queryVec = await this.vectorize('_query', queryText);
     const results = [];
+
     for (const note of Store.notes) {
-      const noteVec = this.vectorCache.get(note.id);
-      if (!noteVec) continue; // Should not happen if cache is synced
+      const noteVec = this.vectorCache.get(String(note.id));
+      if (!noteVec) continue;
 
       const score = VectorMath.cosineSimilarity(queryVec, noteVec);
-      // Filter low relevance
-      if (score > 0.3) { 
-        results.push({ ...note, score });
-      }
+      if (score > 0.3) results.push({ ...note, score });
     }
 
-    // Sort by score descending
     return results.sort((a, b) => b.score - a.score).slice(0, 5);
   }
 };
