@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Semantic Notebook</title>
+  <title>Semantic Notebook Pro</title>
   <style>
     :root {
       --bg: #f4f6f8; --surface: #ffffff; --text: #1f2937;
@@ -12,17 +12,24 @@
       --font-mono: 'SF Mono', 'Fira Code', monospace;
     }
     body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 2rem; display: flex; justify-content: center; }
-    .app { width: 100%; max-width: 700px; background: var(--surface); border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); padding: 2rem; }
-    
-    h1 { margin: 0 0 1.5rem 0; font-size: 1.5rem; letter-spacing: -0.025em; }
-    
+    .app { width: 100%; max-width: 720px; background: var(--surface); border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); padding: 2rem; }
+    h1 { margin: 0 0 0.75rem 0; font-size: 1.5rem; letter-spacing: -0.025em; display: flex; justify-content: space-between; align-items: center; }
+    .settings-toggle { background: none; border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.8rem; cursor: pointer; font-size: 0.85rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.25rem; }
+    .settings-toggle:hover { background: #f3f4f6; }
+    .settings-panel { margin: 1rem 0 1.5rem; padding: 1rem; background: #f9fafb; border-radius: 8px; border: 1px solid var(--border); display: none; }
+    .settings-panel.open { display: block; }
+    .setting-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
+    .setting-row:last-child { margin-bottom: 0; }
+    .setting-label { font-size: 0.9rem; color: var(--text); }
+    select, input[type="range"] { font-size: 0.9rem; padding: 0.25rem 0.5rem; border-radius: 4px; border: 1px solid var(--border); }
+    input[type="range"] { width: 120px; }
+    .range-value { font-size: 0.8rem; color: var(--text-muted); margin-left: 0.5rem; min-width: 2.5rem; display: inline-block; }
+
     .status-bar { padding: 0.75rem; background: #f3f4f6; border-radius: 6px; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; }
     .status-bar.error { background: #fef2f2; color: var(--danger); }
     .status-bar.ok { background: #ecfdf5; color: var(--success); }
-
     textarea { width: 100%; min-height: 120px; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; resize: vertical; font-family: inherit; box-sizing: border-box; transition: border-color 0.2s; }
     textarea:focus { outline: none; border-color: var(--accent); }
-
     .controls { display: flex; gap: 0.5rem; margin-top: 1rem; justify-content: flex-end; }
     button { padding: 0.6rem 1.2rem; border: none; border-radius: 6px; font-weight: 500; cursor: pointer; transition: opacity 0.2s; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -30,9 +37,7 @@
     .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
     .btn-ghost { background: transparent; color: var(--text-muted); }
     .btn-ghost:hover { background: #f3f4f6; }
-
-    .section-title { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 2rem 0 1rem 0; font-weight: 600; }
-    
+    .section-title { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 2rem 0 1rem 0; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
     .note-list { list-style: none; padding: 0; margin: 0; }
     .note-item { padding: 1rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
     .note-item:last-child { border-bottom: none; }
@@ -40,28 +45,56 @@
     .note-meta { font-size: 0.75rem; color: var(--text-muted); text-align: right; min-width: 60px; }
     .score-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; background: #eff6ff; color: var(--accent); font-weight: 600; font-family: var(--font-mono); }
     .empty-state { text-align: center; color: var(--text-muted); padding: 2rem 0; font-style: italic; }
-
+    .hint { font-size: 0.75rem; color: var(--text-muted); font-weight: normal; margin-left: 0.5rem; }
     .spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 6px; }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-
 <div class="app">
-  <h1>Semantic Notebook</h1>
-  
-  <div id="status" class="status-bar"><span class="spinner"></span> Инициализация системы...</div>
+  <h1>
+    Semantic Notebook
+    <button id="settingsToggle" class="settings-toggle">⚙️ Настройки</button>
+  </h1>
 
+  <!-- Панель настроек -->
+  <div id="settingsPanel" class="settings-panel">
+    <div class="setting-row">
+      <span class="setting-label">Модель:</span>
+      <select id="modelSelect">
+        <option value="Xenova/paraphrase-multilingual-MiniLM-L12-v2" selected>paraphrase-multilingual-MiniLM (быстрая, ~25 МБ)</option>
+        <option value="Xenova/LaBSE">LaBSE (точнее, ~70 МБ)</option>
+      </select>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">Порог сходства (0-1):</span>
+      <div style="display: flex; align-items: center;">
+        <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.15">
+        <span class="range-value" id="thresholdValue">0.15</span>
+      </div>
+    </div>
+    <div class="setting-row">
+      <span class="setting-label">Максимум результатов:</span>
+      <select id="maxResultsSelect">
+        <option value="3">3</option>
+        <option value="5" selected>5</option>
+        <option value="10">10</option>
+      </select>
+    </div>
+    <button id="applySettingsBtn" class="btn-primary" style="width:100%; margin-top:0.5rem;">Применить и переиндексировать</button>
+  </div>
+
+  <div id="status" class="status-bar"><span class="spinner"></span> Инициализация системы...</div>
   <textarea id="input" placeholder="Начните вводить заметку..." disabled></textarea>
-  
   <div class="controls">
     <button id="clearBtn" class="btn-ghost" disabled>Очистить всё</button>
     <button id="saveBtn" class="btn-primary" disabled>Сохранить (Ctrl+Enter)</button>
   </div>
-
-  <div class="section-title">Семантически связанные заметки</div>
+  <div class="section-title">
+    Семантически связанные заметки
+    <span id="thresholdInfo" class="hint"></span>
+  </div>
   <ul id="relatedList" class="note-list"></ul>
-
   <div class="section-title">Архив заметок</div>
   <ul id="archiveList" class="note-list"></ul>
 </div>
@@ -69,14 +102,33 @@
 <script type="module">
 import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-// --- 1. MATH MODULE (Vector Operations) ---
+// --- Глобальные настройки ---
+const Settings = {
+  modelName: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+  threshold: 0.15,
+  maxResults: 5,
+  load() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('semantic_settings'));
+      if (saved) Object.assign(this, saved);
+    } catch(e) {}
+  },
+  save() {
+    localStorage.setItem('semantic_settings', JSON.stringify({
+      modelName: this.modelName,
+      threshold: this.threshold,
+      maxResults: this.maxResults
+    }));
+  }
+};
+
+// --- Векторная математика ---
 const VectorMath = {
   normalize(vec) {
-    const magnitude = Math.sqrt(vec.reduce((sum, val) => sum + val * val, 0));
-    if (magnitude === 0) return new Float32Array(vec.length);
-    return new Float32Array(vec.map(val => val / magnitude));
+    const mag = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
+    if (mag === 0) return new Float32Array(vec.length);
+    return new Float32Array(vec.map(v => v / mag));
   },
-
   cosineSimilarity(a, b) {
     let dot = 0;
     for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
@@ -84,42 +136,24 @@ const VectorMath = {
   }
 };
 
-// --- 2. DATA LAYER (Storage & State) ---
+// --- Хранилище заметок ---
 const Store = {
   notes: [],
-  
   load() {
-    try {
-      const raw = localStorage.getItem('semantic_notes');
-      this.notes = raw ? JSON.parse(raw) : [];
-    } catch (e) {
-      console.error('Storage access failed', e);
-      this.notes = [];
-    }
+    try { this.notes = JSON.parse(localStorage.getItem('semantic_notes') || '[]'); }
+    catch(e) { this.notes = []; }
   },
-
-  save() {
-    try {
-      localStorage.setItem('semantic_notes', JSON.stringify(this.notes));
-    } catch (e) {
-      console.error('Storage write failed', e);
-    }
-  },
-
+  save() { localStorage.setItem('semantic_notes', JSON.stringify(this.notes)); },
   add(text) {
     const note = { id: Date.now(), text, createdAt: new Date().toISOString() };
     this.notes.unshift(note);
     this.save();
     return note;
   },
-
-  clear() {
-    this.notes = [];
-    localStorage.removeItem('semantic_notes');
-  }
+  clear() { this.notes = []; localStorage.removeItem('semantic_notes'); }
 };
 
-// --- 3. UI CONTROLLER ---
+// --- UI ---
 const UI = {
   elements: {
     status: document.getElementById('status'),
@@ -127,24 +161,31 @@ const UI = {
     saveBtn: document.getElementById('saveBtn'),
     clearBtn: document.getElementById('clearBtn'),
     relatedList: document.getElementById('relatedList'),
-    archiveList: document.getElementById('archiveList')
+    archiveList: document.getElementById('archiveList'),
+    thresholdInfo: document.getElementById('thresholdInfo'),
+    settingsToggle: document.getElementById('settingsToggle'),
+    settingsPanel: document.getElementById('settingsPanel'),
+    modelSelect: document.getElementById('modelSelect'),
+    thresholdSlider: document.getElementById('thresholdSlider'),
+    thresholdValue: document.getElementById('thresholdValue'),
+    maxResultsSelect: document.getElementById('maxResultsSelect'),
+    applySettingsBtn: document.getElementById('applySettingsBtn')
   },
-
   setStatus(msg, type = '') {
     const el = this.elements.status;
-    el.innerHTML = msg;            // allow HTML for spinner
+    el.innerHTML = msg;
     el.className = `status-bar ${type}`;
   },
-
   setLoading(isLoading) {
     this.elements.input.disabled = isLoading;
     this.elements.saveBtn.disabled = isLoading;
     this.elements.clearBtn.disabled = isLoading;
+    this.elements.applySettingsBtn.disabled = isLoading;
+    this.elements.modelSelect.disabled = isLoading;
   },
-
   renderArchive() {
     const list = this.elements.archiveList;
-    if (Store.notes.length === 0) {
+    if (!Store.notes.length) {
       list.innerHTML = '<div class="empty-state">Нет сохраненных заметок</div>';
       return;
     }
@@ -155,11 +196,12 @@ const UI = {
       </li>
     `).join('');
   },
-
   renderRelated(results) {
     const list = this.elements.relatedList;
+    const info = this.elements.thresholdInfo;
     if (!results || results.length === 0) {
-      list.innerHTML = '<div class="empty-state">Нет похожих заметок</div>';
+      list.innerHTML = '<div class="empty-state">Нет заметок с достаточным сходством</div>';
+      info.textContent = `(порог ${Settings.threshold.toFixed(2)})`;
       return;
     }
     list.innerHTML = results.map(r => `
@@ -168,8 +210,8 @@ const UI = {
         <div class="note-meta"><span class="score-badge">${r.score.toFixed(2)}</span></div>
       </li>
     `).join('');
+    info.textContent = `найдено ${results.length} · макс. ${results[0].score.toFixed(2)}`;
   },
-
   escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -177,118 +219,168 @@ const UI = {
   }
 };
 
-// --- 4. CORE LOGIC (Model & Search) ---
+// --- Движок ---
 const Engine = {
   model: null,
   vectorCache: new Map(),
-
   async init() {
     try {
-      UI.setStatus('<span class="spinner"></span> Загрузка нейросети (~25 МБ)...');
-      this.model = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', {
+      UI.setStatus('<span class="spinner"></span> Загрузка модели...');
+      this.model = await pipeline('feature-extraction', Settings.modelName, {
         pooling: 'mean',
         quantized: true
       });
-      
-      // Индексация архива
-      if (Store.notes.length > 0) {
-        UI.setStatus('<span class="spinner"></span> Индексация архива...');
-        for (const note of Store.notes) {
-          try {
-            await this.vectorize(note.id, note.text);
-          } catch (err) {
-            console.warn(`Skip indexing note ${note.id}`, err);
-          }
-        }
-      }
-
+      await this.reindexAll();
       UI.setStatus('Система готова', 'ok');
       UI.setLoading(false);
       UI.renderArchive();
       UI.renderRelated([]);
-    } catch (e) {
+    } catch(e) {
       UI.setStatus(`Ошибка: ${e.message}`, 'error');
-      UI.setLoading(false); // разблокируем интерфейс даже при ошибке
+      UI.setLoading(false);
       console.error(e);
     }
   },
-
+  async reindexAll() {
+    if (!this.model) return;
+    this.vectorCache.clear();
+    if (!Store.notes.length) return;
+    UI.setStatus('<span class="spinner"></span> Переиндексация архива...');
+    for (const note of Store.notes) {
+      try {
+        await this.vectorize(note.id, note.text);
+      } catch(e) {
+        console.warn(`Пропущена заметка ${note.id}`, e);
+      }
+    }
+  },
   async vectorize(id, text) {
-    if (!this.model) return null;          // модель не готова
+    if (!this.model) return null;
     if (this.vectorCache.has(id)) return this.vectorCache.get(id);
-    
     const output = await this.model([text]);
-    const rawVec = output.data;
-    const normVec = VectorMath.normalize(rawVec);
-    
+    const normVec = VectorMath.normalize(output.data);
     this.vectorCache.set(id, normVec);
     return normVec;
   },
-
   async search(queryText) {
     if (!queryText.trim() || !this.model) return [];
-
-    // Честный вектор запроса без кэширования
     const output = await this.model([queryText]);
     const queryVec = VectorMath.normalize(output.data);
-
     const results = [];
     for (const note of Store.notes) {
       const noteVec = this.vectorCache.get(note.id);
       if (!noteVec) continue;
-
       const score = VectorMath.cosineSimilarity(queryVec, noteVec);
-      // Снижен порог – для многоязычной модели 0.15 уже хорошая связь
-      if (score > 0.15) {
+      if (score > Settings.threshold) {
         results.push({ ...note, score });
       }
     }
-
-    // Сортировка по убыванию сходства, топ-5
-    const sorted = results.sort((a, b) => b.score - a.score).slice(0, 5);
-    console.log(`🔍 "${queryText}" → найдено ${sorted.length} заметок`, sorted);
+    const sorted = results.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults);
+    console.log(`🔍 "${queryText}" → найдено ${sorted.length}`, sorted);
+    if (sorted.length === 0) {
+      UI.setStatus('🔍 Нет похожих заметок', '');
+    } else {
+      UI.setStatus(`🔍 Найдено ${sorted.length} (макс. ${sorted[0].score.toFixed(2)})`, 'ok');
+    }
     return sorted;
   }
 };
 
-// --- 5. INITIALIZATION & EVENTS ---
-(async function bootstrap() {
+// --- Применение настроек ---
+async function applySettings(needReindex = true) {
+  Settings.modelName = UI.elements.modelSelect.value;
+  Settings.threshold = parseFloat(UI.elements.thresholdSlider.value);
+  Settings.maxResults = parseInt(UI.elements.maxResultsSelect.value);
+  Settings.save();
+
+  UI.elements.thresholdValue.textContent = Settings.threshold.toFixed(2);
+  UI.elements.thresholdInfo.textContent = `(порог ${Settings.threshold.toFixed(2)})`;
+
+  if (needReindex) {
+    UI.setLoading(true);
+    UI.setStatus('<span class="spinner"></span> Загрузка новой модели и индексация...');
+    try {
+      // выгружаем старую модель (просто пересоздадим)
+      Engine.model = null;
+      Engine.vectorCache.clear();
+      Engine.model = await pipeline('feature-extraction', Settings.modelName, {
+        pooling: 'mean',
+        quantized: true
+      });
+      await Engine.reindexAll();
+      UI.setStatus('Настройки применены', 'ok');
+      UI.setLoading(false);
+      UI.renderArchive();
+      UI.renderRelated([]);
+    } catch(e) {
+      UI.setStatus(`Ошибка загрузки модели: ${e.message}`, 'error');
+      UI.setLoading(false);
+    }
+  } else {
+    // Если только порог изменился, просто обновим поиск
+    const currentQuery = UI.elements.input.value;
+    if (currentQuery.trim()) {
+      const results = await Engine.search(currentQuery);
+      UI.renderRelated(results);
+    }
+  }
+}
+
+// --- Инициализация ---
+(async function() {
+  Settings.load();
   Store.load();
+
+  // Синхронизация UI с настройками
+  UI.elements.modelSelect.value = Settings.modelName;
+  UI.elements.thresholdSlider.value = Settings.threshold;
+  UI.elements.thresholdValue.textContent = Settings.threshold.toFixed(2);
+  UI.elements.maxResultsSelect.value = Settings.maxResults;
+
+  // Обработчики панели настроек
+  UI.elements.settingsToggle.addEventListener('click', () => {
+    UI.elements.settingsPanel.classList.toggle('open');
+  });
+
+  UI.elements.thresholdSlider.addEventListener('input', (e) => {
+    UI.elements.thresholdValue.textContent = parseFloat(e.target.value).toFixed(2);
+  });
+
+  // При изменении порога/количества без смены модели — применять на лету (без переиндексации)
+  UI.elements.thresholdSlider.addEventListener('change', async () => {
+    await applySettings(false);
+  });
+  UI.elements.maxResultsSelect.addEventListener('change', async () => {
+    await applySettings(false);
+  });
+
+  // Кнопка "Применить" с переиндексацией (если модель изменилась)
+  UI.elements.applySettingsBtn.addEventListener('click', async () => {
+    await applySettings(true);
+  });
+
+  // Запуск движка
   await Engine.init();
 
-  let debounceTimer;
+  let debounce;
   UI.elements.input.addEventListener('input', (e) => {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(async () => {
-      const query = e.target.value;
-      const results = await Engine.search(query);
+    clearTimeout(debounce);
+    debounce = setTimeout(async () => {
+      const results = await Engine.search(e.target.value);
       UI.renderRelated(results);
-    }, 400); // небольшая задержка для плавности
+    }, 400);
   });
 
-  // Сохранение по кнопке
-  UI.elements.saveBtn.addEventListener('click', async () => {
-    await saveCurrentNote();
-  });
-
-  // Сохранение по Ctrl+Enter
+  UI.elements.saveBtn.addEventListener('click', saveNote);
   UI.elements.input.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault();
-      saveCurrentNote();
-    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveNote(); }
   });
 
-  async function saveCurrentNote() {
+  async function saveNote() {
     const text = UI.elements.input.value.trim();
     if (!text) return;
-
-    const newNote = Store.add(text);
-    try {
-      await Engine.vectorize(newNote.id, newNote.text);
-    } catch (err) {
-      console.warn('Failed to vectorize new note', err);
-    }
+    const note = Store.add(text);
+    try { await Engine.vectorize(note.id, note.text); } catch(e) { console.warn(e); }
     UI.renderArchive();
     UI.elements.input.value = '';
     UI.renderRelated([]);
