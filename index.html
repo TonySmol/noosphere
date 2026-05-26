@@ -50,13 +50,13 @@
 <div class="app">
   <h1>Semantic Notebook</h1>
   
-  <div id="status" class="status-bar">Инициализация системы...</div>
+  <div id="status" class="status-bar"><span class="spinner"></span> Инициализация системы...</div>
 
   <textarea id="input" placeholder="Начните вводить заметку..." disabled></textarea>
   
   <div class="controls">
     <button id="clearBtn" class="btn-ghost" disabled>Очистить всё</button>
-    <button id="saveBtn" class="btn-primary" disabled>Сохранить</button>
+    <button id="saveBtn" class="btn-primary" disabled>Сохранить (Ctrl+Enter)</button>
   </div>
 
   <div class="section-title">Семантически связанные заметки</div>
@@ -190,47 +190,36 @@ const Engine = {
         quantized: true
       });
       
-      UI.setStatus('<span class="spinner"></span> Индексация архива...');
-      for (const note of Store.notes) {
-        try {
-          await this.vectorize(String(note.id), note.text);
-        } catch (err) {
-          console.warn(`Skip indexing note ${note.id}`, err);
+      // Индексация архива
+      if (Store.notes.length > 0) {
+        UI.setStatus('<span class="spinner"></span> Индексация архива...');
+        for (const note of Store.notes) {
+          try {
+            await this.vectorize(note.id, note.text);
+          } catch (err) {
+            console.warn(`Skip indexing note ${note.id}`, err);
+          }
         }
       }
 
       UI.setStatus('Система готова', 'ok');
       UI.setLoading(false);
       UI.renderArchive();
+      UI.renderRelated([]);
     } catch (e) {
       UI.setStatus(`Ошибка: ${e.message}`, 'error');
-      UI.setLoading(false);
+      UI.setLoading(false); // разблокируем интерфейс даже при ошибке
       console.error(e);
     }
   },
 
   async vectorize(id, text) {
-    if (!this.model) return null;
+    if (!this.model) return null;          // модель не готова
     if (this.vectorCache.has(id)) return this.vectorCache.get(id);
     
     const output = await this.model([text]);
-    
-    // 🔥 КРИТИЧНО: клонируем буфер, иначе WASM переиспользует память
-    const rawVec = new Float32Array(output.data);
-    
-    // Sanity check: вектора должны быть в диапазоне [-0.1, 0.1] для сырых значений
-    // Если видите значения >1 или <−1 — что-то не так
-    if (rawVec.some(v => Math.abs(v) > 10)) {
-      console.warn('Suspicious vector values', rawVec.slice(0, 5));
-    }
-    
+    const rawVec = output.data;
     const normVec = VectorMath.normalize(rawVec);
-    
-    // Проверка после нормализации: сумма квадратов должна быть ~1.0
-    const magCheck = Math.sqrt(normVec.reduce((s, v) => s + v*v, 0));
-    if (Math.abs(magCheck - 1.0) > 0.01) {
-      console.warn('Normalization failed, magnitude:', magCheck);
-    }
     
     this.vectorCache.set(id, normVec);
     return normVec;
@@ -239,26 +228,26 @@ const Engine = {
   async search(queryText) {
     if (!queryText.trim() || !this.model) return [];
 
+    // Честный вектор запроса без кэширования
     const output = await this.model([queryText]);
-    // 🔥 Также клонируем для запроса
-    const queryVec = VectorMath.normalize(new Float32Array(output.data));
+    const queryVec = VectorMath.normalize(output.data);
 
     const results = [];
     for (const note of Store.notes) {
-      const noteVec = this.vectorCache.get(String(note.id));
+      const noteVec = this.vectorCache.get(note.id);
       if (!noteVec) continue;
 
       const score = VectorMath.cosineSimilarity(queryVec, noteVec);
-      
-      // 🔧 Временно снизим порог для отладки: 0.2 вместо 0.3
-      // Если скоры в диапазоне 0.2–0.4 — модель работает, но тексты не очень похожи
-      if (score > 0.2) {
+      // Снижен порог – для многоязычной модели 0.15 уже хорошая связь
+      if (score > 0.15) {
         results.push({ ...note, score });
       }
     }
 
-    // Сортируем и возвращаем топ-5
-    return results.sort((a, b) => b.score - a.score).slice(0, 5);
+    // Сортировка по убыванию сходства, топ-5
+    const sorted = results.sort((a, b) => b.score - a.score).slice(0, 5);
+    console.log(`🔍 "${queryText}" → найдено ${sorted.length} заметок`, sorted);
+    return sorted;
   }
 };
 
@@ -274,10 +263,23 @@ const Engine = {
       const query = e.target.value;
       const results = await Engine.search(query);
       UI.renderRelated(results);
-    }, 500);
+    }, 400); // небольшая задержка для плавности
   });
 
+  // Сохранение по кнопке
   UI.elements.saveBtn.addEventListener('click', async () => {
+    await saveCurrentNote();
+  });
+
+  // Сохранение по Ctrl+Enter
+  UI.elements.input.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      saveCurrentNote();
+    }
+  });
+
+  async function saveCurrentNote() {
     const text = UI.elements.input.value.trim();
     if (!text) return;
 
@@ -292,7 +294,7 @@ const Engine = {
     UI.renderRelated([]);
     UI.setStatus('Заметка сохранена', 'ok');
     setTimeout(() => UI.setStatus('Система готова', 'ok'), 2000);
-  });
+  }
 
   UI.elements.clearBtn.addEventListener('click', () => {
     if (confirm('Удалить все заметки?')) {
