@@ -1,32 +1,32 @@
-// Импортируем библиотеку. В реальном проекте вы скачиваете этот файл к себе, 
-// чтобы не зависеть от CDN и обойти ошибку ERR_TUNNEL_CONNECTION_FAILED
-import { pipeline, env } from 'https://jsdelivr.net';
+// Импортируем нашу локальную прослойку библиотеки
+import { pipeline, env } from './transformers.js';
 
-// Разрешаем удаленные модели (чтобы они качались с Hugging Face напрямую)
+// Говорим библиотеке качать саму модель напрямую из репозитория Hugging Face
 env.allowRemoteModels = true;
+env.allowLocalModels = false;
 
 let extractor = null;
 
-// Слушаем команды от главного окна
+// Принимаем текст на расчет от главного HTML
 self.onmessage = async (event) => {
     const { text } = event.data;
 
     try {
-        // Инициализируем пайплайн только один раз при первом клике
         if (!extractor) {
-            self.postMessage({ status: 'progress', message: 'Инициализация пайплайна...' });
+            self.postMessage({ status: 'progress', message: 'Загрузка весов модели из Hugging Face...' });
             
+            // Инициализируем модель (all-MiniLM-L6-v2) на процессоре (wasm)
             extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-                device: 'wasm' // CPU вычисления для гарантированной работы везде
+                device: 'wasm'
             });
         }
 
-        self.postMessage({ status: 'ready' });
+        self.postMessage({ status: 'ready', message: 'Модель готова. Считаем...' });
 
-        // Считаем эмбеддинг
+        // Вычисляем эмбеддинг
         const result = await extractor(text, { pooling: 'mean', normalize: true });
         
-        // Возвращаем результат обратно в интерфейс
+        // Отправляем вектор обратно в index.html
         self.postMessage({ 
             status: 'complete', 
             data: Array.from(result.data) 
