@@ -150,12 +150,13 @@
     }
     .archive-item .actions button:hover { background: var(--bg); }
 
-    .settings-trigger {
+    .burger-btn {
       position: fixed; top: 1rem; right: 1rem;
       width: 44px; height: 44px; background: var(--surface);
       border: 1px solid var(--border); border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       cursor: pointer; box-shadow: var(--shadow); z-index: 5;
+      font-size: 1.5rem; color: var(--text);
     }
     .settings-panel {
       position: fixed; top: 0; right: 0; width: 340px; max-width: 85vw;
@@ -192,16 +193,15 @@
       <textarea id="thoughtInput" placeholder="Поделитесь мыслью..."></textarea>
       <div class="input-actions">
         <label class="share-toggle">
-          <input type="checkbox" id="shareCheckbox"> <span>В общий поток</span>
+          <input type="checkbox" id="shareCheckbox"> <span id="shareToggleText">В общий поток</span>
         </label>
         <button id="saveBtn" class="btn" disabled>Отправить</button>
       </div>
     </div>
 
-    <!-- Личные связанные (изначально скрыты) -->
     <div id="personalSection" class="feed-section" style="display:none;">
       <div class="section-header" data-section="personalBody">
-        <span class="section-label">🧠 Мои похожие мысли</span>
+        <span class="section-label" id="personalFeedLabel">🧠 Мои похожие мысли</span>
         <span class="collapse-icon">▼</span>
       </div>
       <div class="section-body" id="personalBody">
@@ -209,10 +209,9 @@
       </div>
     </div>
 
-    <!-- Мировые релевантные (изначально скрыты) -->
     <div id="relevantSection" class="feed-section" style="display:none;">
       <div class="section-header" data-section="relevantBody">
-        <span class="section-label">🌍 Релевантные идеи мира</span>
+        <span class="section-label" id="relevantFeedLabel">🌍 Релевантные идеи мира</span>
         <span class="collapse-icon">▼</span>
       </div>
       <div class="section-body" id="relevantBody">
@@ -220,10 +219,9 @@
       </div>
     </div>
 
-    <!-- Смежные (изначально скрыты) -->
     <div id="serendipitySection" class="feed-section" style="display:none;">
       <div class="section-header" data-section="serendipityBody">
-        <span class="section-label">🌀 Смежные (неожиданные)</span>
+        <span class="section-label" id="serendipityFeedLabel">🌀 Смежные (неожиданные)</span>
         <span class="collapse-icon">▼</span>
       </div>
       <div class="section-body" id="serendipityBody">
@@ -241,8 +239,8 @@
   </div>
 </div>
 
-<!-- Настройки -->
-<div class="settings-trigger" id="settingsTrigger">⚙️</div>
+<!-- Настройки (бургер) -->
+<div class="burger-btn" id="settingsTrigger">☰</div>
 <div class="overlay" id="overlay"></div>
 <div class="settings-panel" id="settingsPanel">
   <h2 style="margin-bottom:1.5rem;">Настройки</h2>
@@ -285,7 +283,7 @@
     <button id="rebuildVectorsBtn" class="btn btn-ghost">Пересоздать векторы</button>
   </div>
   <div style="display:flex; gap:0.5rem; margin:1rem 0;">
-    <button id="resetSettingsBtn" class="btn btn-ghost" style="flex:1;">Сбросить</button>
+    <button id="resetSettingsBtn" class="btn btn-ghost" style="flex:1;">Сбросить всё</button>
     <button id="applySettingsBtn" class="btn" style="flex:1;">Применить</button>
   </div>
   <p style="font-size:0.75rem;color:var(--text-secondary);">Модель: MiniLM (25 МБ)</p>
@@ -304,7 +302,9 @@ const translations = {
     emptyWorld: 'Ничего не найдено',
     edit: 'ред.', save: 'сохр.', cancel: 'отм.', delete: 'удал.',
     noteEdited: '(изм.)', today: 'Сегодня', yesterday: 'Вчера',
-    confirmDelete: 'Удалить заметку?'
+    confirmDelete: 'Удалить заметку?',
+    shareToggle: 'В общий поток',
+    saveBtn: 'Отправить'
   },
   en: {
     personalFeed: '🧠 My related thoughts',
@@ -314,12 +314,30 @@ const translations = {
     emptyWorld: 'Nothing found',
     edit: 'edit', save: 'save', cancel: 'cancel', delete: 'delete',
     noteEdited: '(edited)', today: 'Today', yesterday: 'Yesterday',
-    confirmDelete: 'Delete note?'
+    confirmDelete: 'Delete note?',
+    shareToggle: 'Share to world',
+    saveBtn: 'Send'
   }
 };
 
 let currentLang = 'ru';
-function t(key) { return translations[currentLang]?.[key] || key; }
+function t(key) { return translations[currentLang]?.[key] || translations['ru'][key] || key; }
+
+// Обновление всех видимых текстов на странице
+function updateUILanguage() {
+  // Заголовки секций
+  document.getElementById('personalFeedLabel').textContent = t('personalFeed');
+  document.getElementById('relevantFeedLabel').textContent = t('relevantFeed');
+  document.getElementById('serendipityFeedLabel').textContent = t('serendipityFeed');
+  document.getElementById('shareToggleText').textContent = t('shareToggle');
+  document.getElementById('saveBtn').textContent = t('saveBtn');
+  // Кнопки в настройках (если нужно, но они обычно статичны)
+  // Кнопки в истории перерисовываются при renderHistory()
+  // Перерисовать историю, чтобы кнопки «ред.» и «удал.» обновились
+  if (document.getElementById('historyView').classList.contains('active')) {
+    renderHistory();
+  }
+}
 
 // ---------- Тема ----------
 function applyTheme(mode) {
@@ -617,7 +635,6 @@ async function handleInput() {
   const qVec = await Engine.embed(q);
   const [local, world] = await Promise.all([Engine.searchLocal(qVec), Engine.searchWorld(qVec)]);
 
-  // Показываем секции только если есть результаты
   D.personalSection.style.display = local.length ? 'flex' : 'none';
   showCards(D.personalCards, local);
 
@@ -670,23 +687,33 @@ function applySettings(skipReindex=true) {
   D.serendipityVal.textContent = Settings.serendipityDelta.toFixed(2);
   if (currentLang !== Settings.lang) {
     currentLang = Settings.lang;
-    // Обновить все тексты, включая кнопки в истории
-    renderHistory();
+    updateUILanguage();
   }
   applyTheme(Settings.theme);
   if (!skipReindex) handleInput();
 }
-function resetSettings() {
+
+function resetAllData() {
+  // Сброс заметок
+  MyNotes.clear();
+  Engine.cache.clear();
+  // Сброс настроек
   Object.assign(Settings, DEFAULT_SETTINGS);
   Settings.save();
+  // Обновить UI
   D.thresholdSl.value = Settings.threshold; D.thresholdVal.textContent = Settings.threshold.toFixed(2);
   D.serendipitySl.value = Settings.serendipityDelta; D.serendipityVal.textContent = Settings.serendipityDelta.toFixed(2);
   D.minRatingSel.value = Settings.minRating; D.maxResSel.value = Settings.maxResults;
   D.langSelect.value = Settings.lang; D.themeSelect.value = Settings.theme;
   currentLang = Settings.lang;
+  updateUILanguage();
   applyTheme(Settings.theme);
+  // Очистить поле ввода и скрыть секции
+  D.input.value = '';
   handleInput();
+  renderHistory();
 }
+
 async function rebuildVectors() {
   D.rebuildBtn.disabled = true; D.rebuildBtn.textContent = '⏳';
   await Engine.reindex();
@@ -700,13 +727,13 @@ async function rebuildVectors() {
 (async () => {
   Settings.load(); MyNotes.load(); World.load();
   currentLang = Settings.lang;
+  updateUILanguage();
   applyTheme(Settings.theme);
   D.thresholdSl.value = Settings.threshold; D.thresholdVal.textContent = Settings.threshold.toFixed(2);
   D.serendipitySl.value = Settings.serendipityDelta; D.serendipityVal.textContent = Settings.serendipityDelta.toFixed(2);
   D.minRatingSel.value = Settings.minRating; D.maxResSel.value = Settings.maxResults;
   D.langSelect.value = Settings.lang; D.themeSelect.value = Settings.theme;
 
-  // Изначально все секции скрыты (уже через style в HTML)
   D.saveBtn.disabled = true;
   try { await Engine.init(); D.saveBtn.disabled = false; } catch(e) {}
 
@@ -721,7 +748,13 @@ async function rebuildVectors() {
   D.serendipitySl.addEventListener('input', () => D.serendipityVal.textContent = parseFloat(D.serendipitySl.value).toFixed(2));
 
   D.applyBtn.addEventListener('click', () => { applySettings(false); D.overlay.classList.remove('open'); D.panel.classList.remove('open'); });
-  D.resetBtn.addEventListener('click', () => { if (confirm('Сбросить?')) resetSettings(); });
+  D.resetBtn.addEventListener('click', () => {
+    if (confirm('Сбросить все заметки и настройки?')) {
+      resetAllData();
+      D.overlay.classList.remove('open');
+      D.panel.classList.remove('open');
+    }
+  });
   D.rebuildBtn.addEventListener('click', rebuildVectors);
   D.exportBtn.addEventListener('click', exportCapsule);
   D.importBtn.addEventListener('click', () => D.importFile.click());
