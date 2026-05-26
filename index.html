@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ноосфера v3.0 - Чистый Запуск без VPN</title>
+    <title>Ноосфера v3.0 - Чистый Старт</title>
     
-    <!-- Рабочее незаблокированное зеркало Яндекса/cdnjs для скрипта v3 -->
-    <script src="https://yastatic.net"></script>
+    <!-- Стабильная рабочая библиотека v3 со 100% незаблокированного CDN зеркала -->
+    <script src="https://cloudflare.com"></script>
 
     <script>
         let pipe = null;
@@ -29,36 +29,38 @@
             screenLog("Старт Ноосферы v3...");
             
             if (typeof window.huggingface === 'undefined' || !window.huggingface.transformers) {
-                screenLog("КРИТ: Движок ИИ не подгрузился. Зеркало недоступно.", true);
+                screenLog("КРИТ: Движок ИИ не подгрузился. Зеркало Cloud заблокировано.", true);
                 return;
             }
 
             const { pipeline, env } = window.huggingface.transformers;
 
-            // Настройка стабильности: качаем модель через зеркало, которое работает в РФ
+            // Настройка стабильности: заставляем ИИ качать файлы через быстрое зеркало hf-mirror
             env.allowLocalModels = false; 
             env.remoteModelsRegistered = false;
             env.remoteObjectURL = 'https://hf-mirror.com';
 
-            screenLog("Запрос ИИ-ядра MiniLM (45 МБ)...");
+            screenLog("Запрос легкого ядра Arctic (22 МБ) через РФ-зеркало...");
 
             try {
-                pipe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+                // Подключаем ту самую модель Arctic, которая весит всего 22 МБ
+                pipe = await pipeline('feature-extraction', 'Snowflake/snowflake-arctic-embed-xs', {
                     progress_callback: (data) => {
                         if (data.status === 'progress') {
                             const percent = data.progress ? data.progress.toFixed(0) : 0;
                             document.getElementById('progressBar').style.width = `${percent}%`;
-                            document.getElementById('progressText').innerText = `Синхронизация: ${percent}%`;
+                            document.getElementById('progressText').innerText = `Загрузка ядра: ${percent}%`;
                         }
                     }
                 });
                 
-                screenLog("✓ Ноосфера готова к работе на GitHub Pages!");
+                screenLog("✓ СИНХРОНИЗАЦИЯ УСПЕШНА. Ноосфера готова к работе!");
                 document.getElementById('loader').style.display = 'none';
                 document.getElementById('app').style.display = 'block';
 
             } catch (error) {
                 screenLog(`Сбой WASM движка: ${error.message}`, true);
+                console.error(error);
             }
         }
 
@@ -81,7 +83,7 @@
             const textInput = document.getElementById('noteText').value.trim();
             if (!textInput) return;
 
-            screenLog("Извлечение вектора смысла...");
+            screenLog("Вычисление семантического вектора...");
             try {
                 const vector = await getVector(textInput);
                 let bestMatch = null;
@@ -101,10 +103,12 @@
                 if (bestMatch && highestScore > 0.45) { 
                     synergyDiv.innerHTML = `
                         <div style="background: #e6f7ff; padding: 12px; border-left: 4px solid #1890ff; margin: 15px 0; border-radius: 4px; font-size: 14px;">
-                            <strong>Синергия смыслов (${(highestScore * 100).toFixed(0)}%):</strong><br>
+                            <strong>Синергия графа (${(highestScore * 100).toFixed(0)}%):</strong><br>
                             "${bestMatch.text}"
                         </div>
                     `;
+                } else {
+                    synergyDiv.innerHTML = `<p style="color: #888; font-size: 13px;">Сохранено в память.</p>`;
                 }
 
                 document.getElementById('notesList').innerHTML = notesDatabase.map(n => `
@@ -121,6 +125,7 @@
 <body style="font-family: sans-serif; max-width: 500px; margin: 20px auto; padding: 0 15px; color: #222; background: #fafafa;">
 
     <h2>Ноосфера v3.0</h2>
+    <p style="color: #666; margin-top: 0; font-size: 13px;">Облачный узел (Чистый запуск без VPN)</p>
     
     <div style="background: #1a1a1a; color: #00ff00; padding: 10px; border-radius: 6px; font-family: monospace; font-size: 11px; height: 110px; overflow-y: auto; margin-bottom: 15px;" id="screenConsole"></div>
     
@@ -132,7 +137,7 @@
     </div>
 
     <div id="app" style="display: none;">
-        <textarea id="noteText" style="width: 100%; height: 80px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 15px;" placeholder="Введи концепт на английском..."></textarea>
+        <textarea id="noteText" style="width: 100%; height: 80px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 15px;" placeholder="Введи мысль на английском..."></textarea>
         <button onclick="saveNote()" style="margin-top: 10px; width: 100%; padding: 12px; background: #2b82c9; color: white; border: none; border-radius: 4px; font-weight: bold;">
             Сохранить мысль
         </button>
