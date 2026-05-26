@@ -2,321 +2,400 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Flow мысли</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Semantic Notebook Pro – fixed</title>
   <style>
     :root {
-      --bg: #0d0f12; --card: #161a1f; --border: #2d333b;
-      --text: #adbac7; --accent: #539bf5; --dim: #768390;
-      --radius: 12px; --font: system-ui, -apple-system, sans-serif;
+      --bg: #f4f6f8; --surface: #ffffff; --text: #1f2937;
+      --text-muted: #6b7280; --border: #e5e7eb; --accent: #2563eb;
+      --accent-hover: #1d4ed8; --danger: #ef4444; --success: #10b981;
+      --font-mono: 'SF Mono', 'Fira Code', monospace;
     }
-    :root.light {
-      --bg: #ffffff; --card: #f6f8fa; --border: #d0d7de;
-      --text: #1f2328; --accent: #0969da; --dim: #656d76;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100dvh; display: flex; justify-content: center; overflow: hidden; }
-    #app { width: 100%; max-width: 600px; height: 100%; display: flex; flex-direction: column; padding: 16px; }
-
-    .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-    .logo { font-weight: 700; font-size: 1.2rem; color: var(--accent); }
-    .actions { display: flex; gap: 8px; }
-    .icon-btn { background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 1.2rem; }
-
-    textarea { width: 100%; flex: 0 0 auto; min-height: 100px; padding: 12px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-size: 1rem; resize: vertical; outline: none; font-family: inherit; margin-bottom: 12px; }
-    textarea:focus { border-color: var(--accent); }
-
-    .carousel-container { position: relative; flex: 1; display: flex; align-items: center; overflow: hidden; }
-    .cards-wrapper { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; scroll-behavior: smooth; width: 100%; padding-bottom: 8px; }
-    .cards-wrapper::-webkit-scrollbar { display: none; }
-    .card { flex: 0 0 100%; scroll-snap-align: center; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; justify-content: space-between; min-height: 200px; cursor: pointer; transition: border-color 0.2s; }
-    .card:hover { border-color: var(--accent); }
-    .card-type { font-size: 0.75rem; text-transform: uppercase; color: var(--dim); margin-bottom: 8px; }
-    .card-text { font-size: 1rem; line-height: 1.5; flex: 1; white-space: pre-wrap; word-break: break-word; }
-    .card-score { font-size: 0.8rem; color: var(--accent); align-self: flex-end; }
-
-    .carousel-btn { position: absolute; top: 50%; transform: translateY(-50%); background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 2; }
-    .carousel-btn.left { left: 8px; }
-    .carousel-btn.right { right: 8px; }
-    .carousel-btn:active { background: var(--accent); }
-
-    .save-bar { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
-    .status-text { font-size: 0.85rem; color: var(--dim); }
-    .save-btn { background: var(--accent); color: white; border: none; border-radius: var(--radius); padding: 12px 24px; font-weight: 600; cursor: pointer; }
-
-    .settings-panel { display: none; position: fixed; top: 60px; right: 20px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; z-index: 100; flex-direction: column; gap: 12px; min-width: 200px; }
-    .settings-panel.open { display: flex; }
-    select { background: var(--bg); color: var(--text); border: 1px solid var(--border); padding: 8px; border-radius: 6px; }
-
-    .empty-state { color: var(--dim); text-align: center; margin-top: 40px; font-style: italic; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 2rem; display: flex; justify-content: center; }
+    .app { width: 100%; max-width: 720px; background: var(--surface); border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); padding: 2rem; }
+    h1 { margin: 0 0 0.75rem 0; font-size: 1.5rem; letter-spacing: -0.025em; display: flex; justify-content: space-between; align-items: center; }
+    .settings-toggle { background: none; border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.8rem; cursor: pointer; font-size: 0.85rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.25rem; }
+    .settings-toggle:hover { background: #f3f4f6; }
+    .settings-panel { margin: 1rem 0 1.5rem; padding: 1rem; background: #f9fafb; border-radius: 8px; border: 1px solid var(--border); display: none; }
+    .settings-panel.open { display: block; }
+    .setting-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
+    .setting-row:last-child { margin-bottom: 0; }
+    .setting-label { font-size: 0.9rem; color: var(--text); }
+    select, input[type="range"] { font-size: 0.9rem; padding: 0.25rem 0.5rem; border-radius: 4px; border: 1px solid var(--border); }
+    input[type="range"] { width: 120px; }
+    .range-value { font-size: 0.8rem; color: var(--text-muted); margin-left: 0.5rem; min-width: 2.5rem; display: inline-block; }
+    .status-bar { padding: 0.75rem; background: #f3f4f6; border-radius: 6px; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; }
+    .status-bar.error { background: #fef2f2; color: var(--danger); }
+    .status-bar.ok { background: #ecfdf5; color: var(--success); }
+    textarea { width: 100%; min-height: 120px; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; resize: vertical; font-family: inherit; box-sizing: border-box; transition: border-color 0.2s; }
+    textarea:focus { outline: none; border-color: var(--accent); }
+    .controls { display: flex; gap: 0.5rem; margin-top: 1rem; justify-content: flex-end; }
+    button { padding: 0.6rem 1.2rem; border: none; border-radius: 6px; font-weight: 500; cursor: pointer; transition: opacity 0.2s; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-ghost { background: transparent; color: var(--text-muted); }
+    .btn-ghost:hover { background: #f3f4f6; }
+    .section-title { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 2rem 0 1rem 0; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+    .note-list { list-style: none; padding: 0; margin: 0; }
+    .note-item { padding: 1rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+    .note-item:last-child { border-bottom: none; }
+    .note-content { flex: 1; white-space: pre-wrap; line-height: 1.5; }
+    .note-meta { font-size: 0.75rem; color: var(--text-muted); text-align: right; min-width: 60px; }
+    .score-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; background: #eff6ff; color: var(--accent); font-weight: 600; font-family: var(--font-mono); }
+    .empty-state { text-align: center; color: var(--text-muted); padding: 2rem 0; font-style: italic; }
+    .hint { font-size: 0.75rem; color: var(--text-muted); font-weight: normal; margin-left: 0.5rem; }
+    .spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 6px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-<div id="app">
-  <div class="top-bar">
-    <span class="logo">🌀 Flow мысли</span>
-    <div class="actions">
-      <button class="icon-btn" id="themeBtn" title="Сменить тему">🌓</button>
-      <button class="icon-btn" id="settingsBtn" title="Настройки модели">⚙️</button>
+<div class="app">
+  <h1>
+    Semantic Notebook
+    <button id="settingsToggle" class="settings-toggle">⚙️ Настройки</button>
+  </h1>
+
+  <div id="settingsPanel" class="settings-panel">
+    <div class="setting-row">
+      <span class="setting-label">Модель:</span>
+      <select id="modelSelect">
+        <option value="Xenova/paraphrase-multilingual-MiniLM-L12-v2" selected>MiniLM multilingual (быстрая, 25 МБ)</option>
+        <option value="Xenova/distiluse-base-multilingual-cased-v2">DistilUSE multilingual (точнее, 90 МБ)</option>
+      </select>
     </div>
-  </div>
-  <div class="settings-panel" id="settingsPanel">
-    <label>Модель:</label>
-    <select id="modelSelect">
-      <option value="Xenova/paraphrase-multilingual-MiniLM-L12-v2">MiniLM (быстрая, 25МБ)</option>
-      <option value="Xenova/multilingual-e5-small">E5 Small (точнее, 40МБ)</option>
-    </select>
-    <button id="applyModelBtn">Применить и переиндексировать</button>
-  </div>
-
-  <textarea id="thoughtInput" placeholder="О чём думаешь?"></textarea>
-
-  <div class="carousel-container">
-    <button class="carousel-btn left" id="prevCard">←</button>
-    <div class="cards-wrapper" id="cardsWrapper">
-      <div class="empty-state" id="emptyPlaceholder">Начни вводить мысль, чтобы увидеть подсказки из архива.</div>
+    <div class="setting-row">
+      <span class="setting-label">Порог сходства (0-1):</span>
+      <div style="display: flex; align-items: center;">
+        <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.15">
+        <span class="range-value" id="thresholdValue">0.15</span>
+      </div>
     </div>
-    <button class="carousel-btn right" id="nextCard">→</button>
+    <div class="setting-row">
+      <span class="setting-label">Максимум результатов:</span>
+      <select id="maxResultsSelect">
+        <option value="3">3</option>
+        <option value="5" selected>5</option>
+        <option value="10">10</option>
+      </select>
+    </div>
+    <button id="applySettingsBtn" class="btn-primary" style="width:100%; margin-top:0.5rem;">Применить и переиндексировать</button>
   </div>
 
-  <div class="save-bar">
-    <span class="status-text" id="statusText"></span>
-    <button class="save-btn" id="saveBtn">Сохранить мысль</button>
+  <div id="status" class="status-bar"><span class="spinner"></span> Инициализация...</div>
+  <textarea id="input" placeholder="Начните вводить заметку..." disabled></textarea>
+  <div class="controls">
+    <button id="clearBtn" class="btn-ghost" disabled>Очистить всё</button>
+    <button id="saveBtn" class="btn-primary" disabled>Сохранить (Ctrl+Enter)</button>
   </div>
+  <div class="section-title">
+    Семантически связанные заметки
+    <span id="thresholdInfo" class="hint"></span>
+  </div>
+  <ul id="relatedList" class="note-list"></ul>
+  <div class="section-title">Архив заметок</div>
+  <ul id="archiveList" class="note-list"></ul>
 </div>
 
 <script type="module">
 import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-// ---------- Конфигурация ----------
+// --- Настройки ---
 const Settings = {
   modelName: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
-  load() { this.modelName = localStorage.getItem('flow_model') || this.modelName; },
-  save() { localStorage.setItem('flow_model', this.modelName); }
+  threshold: 0.15,
+  maxResults: 5,
+  load() {
+    try {
+      const saved = JSON.parse(localStorage.getItem('semantic_settings'));
+      if (saved) Object.assign(this, saved);
+    } catch(e) {}
+  },
+  save() {
+    localStorage.setItem('semantic_settings', JSON.stringify({
+      modelName: this.modelName, threshold: this.threshold, maxResults: this.maxResults
+    }));
+  }
 };
 
-// ---------- Хранилище заметок ----------
-let notes = JSON.parse(localStorage.getItem('flow_notes') || '[]');
-function persistNotes() { localStorage.setItem('flow_notes', JSON.stringify(notes)); }
+// --- Векторная математика ---
+const VectorMath = {
+  normalize(vec) {
+    const mag = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
+    if (mag === 0) return new Float32Array(vec.length);
+    return new Float32Array(vec.map(v => v / mag));
+  },
+  cosineSimilarity(a, b) {
+    let dot = 0;
+    for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+    return dot;
+  }
+};
 
-// ---------- Векторный движок с защитой от гонок и mean pooling ----------
+// --- Хранилище заметок ---
+const Store = {
+  notes: [],
+  load() {
+    try { this.notes = JSON.parse(localStorage.getItem('semantic_notes') || '[]'); }
+    catch(e) { this.notes = []; }
+  },
+  save() { localStorage.setItem('semantic_notes', JSON.stringify(this.notes)); },
+  add(text) {
+    const note = { id: Date.now(), text, createdAt: new Date().toISOString() };
+    this.notes.unshift(note);
+    this.save();
+    return note;
+  },
+  clear() { this.notes = []; localStorage.removeItem('semantic_notes'); }
+};
+
+// --- UI ---
+const UI = {
+  elements: {
+    status: document.getElementById('status'),
+    input: document.getElementById('input'),
+    saveBtn: document.getElementById('saveBtn'),
+    clearBtn: document.getElementById('clearBtn'),
+    relatedList: document.getElementById('relatedList'),
+    archiveList: document.getElementById('archiveList'),
+    thresholdInfo: document.getElementById('thresholdInfo'),
+    settingsToggle: document.getElementById('settingsToggle'),
+    settingsPanel: document.getElementById('settingsPanel'),
+    modelSelect: document.getElementById('modelSelect'),
+    thresholdSlider: document.getElementById('thresholdSlider'),
+    thresholdValue: document.getElementById('thresholdValue'),
+    maxResultsSelect: document.getElementById('maxResultsSelect'),
+    applySettingsBtn: document.getElementById('applySettingsBtn')
+  },
+  setStatus(msg, type = '') {
+    this.elements.status.innerHTML = msg;
+    this.elements.status.className = `status-bar ${type}`;
+  },
+  setLoading(isLoading) {
+    this.elements.input.disabled = isLoading;
+    this.elements.saveBtn.disabled = isLoading;
+    this.elements.clearBtn.disabled = isLoading;
+    this.elements.applySettingsBtn.disabled = isLoading;
+    this.elements.modelSelect.disabled = isLoading;
+  },
+  renderArchive() {
+    const list = this.elements.archiveList;
+    if (!Store.notes.length) {
+      list.innerHTML = '<div class="empty-state">Нет сохраненных заметок</div>';
+      return;
+    }
+    list.innerHTML = Store.notes.map(n => `
+      <li class="note-item">
+        <div class="note-content">${this.escapeHtml(n.text)}</div>
+        <div class="note-meta">${new Date(n.createdAt).toLocaleDateString()}</div>
+      </li>
+    `).join('');
+  },
+  renderRelated(results) {
+    const list = this.elements.relatedList;
+    const info = this.elements.thresholdInfo;
+    if (!results || results.length === 0) {
+      list.innerHTML = '<div class="empty-state">Нет заметок с достаточным сходством</div>';
+      info.textContent = `(порог ${Settings.threshold.toFixed(2)})`;
+      return;
+    }
+    list.innerHTML = results.map(r => `
+      <li class="note-item">
+        <div class="note-content">${this.escapeHtml(r.text)}</div>
+        <div class="note-meta"><span class="score-badge">${r.score.toFixed(2)}</span></div>
+      </li>
+    `).join('');
+    info.textContent = `найдено ${results.length} · макс. ${results[0].score.toFixed(2)}`;
+  },
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+};
+
+// --- Движок (исправлен!) ---
 const Engine = {
   model: null,
-  cache: new Map(),
-  searchVersion: 0, // для отмены устаревших поисков
+  vectorCache: new Map(),
+
+  /** Получить эмбеддинг текста (правильный mean pooling) */
+  async getEmbedding(text) {
+    if (!this.model) throw new Error('Модель не загружена');
+    const output = await this.model([text]);
+    // output: { data: Float32Array, dims: number[] }
+    // dims = [batch, tokens, hidden_size]
+    const { data, dims } = output;
+    const [batch, tokens, hidden] = dims;
+    if (!tokens || !hidden) {
+      // если уже одномерный (баг?), берем как есть
+      return VectorMath.normalize(data);
+    }
+    // Вычисляем среднее по токенам (mean pooling)
+    const embedding = new Float32Array(hidden);
+    for (let t = 0; t < tokens; t++) {
+      const offset = t * hidden;
+      for (let h = 0; h < hidden; h++) {
+        embedding[h] += data[offset + h];
+      }
+    }
+    // делим на количество токенов
+    for (let h = 0; h < hidden; h++) {
+      embedding[h] /= tokens;
+    }
+    return VectorMath.normalize(embedding);
+  },
 
   async init() {
-    this.model = await pipeline('feature-extraction', Settings.modelName, { quantized: true });
-    // Индексация архива с пропуском ошибок
-    for (const note of notes) {
-      try { await this.vectorize(note.id, note.text); }
-      catch (e) { console.warn('Пропущена заметка при индексации', note.id, e); }
+    try {
+      UI.setStatus('<span class="spinner"></span> Загрузка модели...');
+      this.model = await pipeline('feature-extraction', Settings.modelName, {
+        quantized: true
+      });
+      await this.reindexAll();
+      UI.setStatus('Система готова', 'ok');
+      UI.setLoading(false);
+      UI.renderArchive();
+      UI.renderRelated([]);
+    } catch(e) {
+      UI.setStatus(`Ошибка: ${e.message}`, 'error');
+      UI.setLoading(false);
+      console.error(e);
     }
   },
 
-  async getEmbedding(text, prefix = '') {
-    const output = await this.model([prefix + text]);
-    const { data, dims } = output;
-    const [batch, tokens, hidden] = dims;
-    // Если тензор одномерный (маловероятно, но бывает)
-    if (!tokens || !hidden) {
-      const mag = Math.sqrt(data.reduce((s,x)=>s+x*x,0));
-      return mag ? data.map(x=>x/mag) : data;
+  async reindexAll() {
+    if (!this.model) return;
+    this.vectorCache.clear();
+    if (!Store.notes.length) return;
+    UI.setStatus('<span class="spinner"></span> Переиндексация архива...');
+    for (const note of Store.notes) {
+      try {
+        await this.vectorize(note.id, note.text);
+      } catch(e) { console.warn(`Пропущена заметка ${note.id}`, e); }
     }
-    const emb = new Float32Array(hidden);
-    for (let t = 0; t < tokens; t++) {
-      const offset = t * hidden;
-      for (let h = 0; h < hidden; h++) emb[h] += data[offset + h];
-    }
-    for (let h = 0; h < hidden; h++) emb[h] /= tokens;
-    // L2-нормализация
-    const mag = Math.sqrt(emb.reduce((s,x)=>s+x*x,0));
-    return mag ? emb.map(x=>x/mag) : emb;
   },
 
   async vectorize(id, text) {
-    if (this.cache.has(id)) return;
-    const prefix = Settings.modelName.includes('e5') ? 'passage: ' : '';
-    const vec = await this.getEmbedding(text, prefix);
-    this.cache.set(id, vec);
+    if (!this.model) return null;
+    if (this.vectorCache.has(id)) return this.vectorCache.get(id);
+    const vec = await this.getEmbedding(text);
+    this.vectorCache.set(id, vec);
+    return vec;
   },
 
-  async search(query) {
-    if (!query.trim() || !this.model) return [];
-    const currentVersion = ++this.searchVersion; // увеличиваем версию
-
-    const prefix = Settings.modelName.includes('e5') ? 'query: ' : '';
-    let qVec;
-    try {
-      qVec = await this.getEmbedding(query, prefix);
-    } catch (e) {
-      console.warn('Ошибка векторизации запроса', e);
-      return [];
-    }
-
-    // Если версия устарела (новый поиск уже запущен), игнорируем результат
-    if (currentVersion !== this.searchVersion) return [];
-
+  async search(queryText) {
+    if (!queryText.trim() || !this.model) return [];
+    const queryVec = await this.getEmbedding(queryText);
     const results = [];
-    for (const note of notes) {
-      const nVec = this.cache.get(note.id);
-      if (!nVec) continue;
-      let dot = 0;
-      for (let i = 0; i < qVec.length; i++) dot += qVec[i] * nVec[i];
-      if (dot > 0.15) results.push({ ...note, score: dot });
+    for (const note of Store.notes) {
+      const noteVec = this.vectorCache.get(note.id);
+      if (!noteVec) continue;
+      const score = VectorMath.cosineSimilarity(queryVec, noteVec);
+      if (score > Settings.threshold) {
+        results.push({ ...note, score });
+      }
     }
-
-    // Ещё одна проверка версии после сортировки
-    if (currentVersion !== this.searchVersion) return [];
-
-    return results.sort((a,b) => b.score - a.score).slice(0, 5);
+    const sorted = results.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults);
+    console.log(`🔍 "${queryText}" → найдено ${sorted.length}`, sorted);
+    if (sorted.length === 0) {
+      UI.setStatus('🔍 Нет похожих заметок', '');
+    } else {
+      UI.setStatus(`🔍 Найдено ${sorted.length} (макс. ${sorted[0].score.toFixed(2)})`, 'ok');
+    }
+    return sorted;
   }
 };
 
-// ---------- UI ----------
-const elements = {
-  input: document.getElementById('thoughtInput'),
-  cardsWrapper: document.getElementById('cardsWrapper'),
-  prevBtn: document.getElementById('prevCard'),
-  nextBtn: document.getElementById('nextCard'),
-  saveBtn: document.getElementById('saveBtn'),
-  themeBtn: document.getElementById('themeBtn'),
-  settingsBtn: document.getElementById('settingsBtn'),
-  settingsPanel: document.getElementById('settingsPanel'),
-  modelSelect: document.getElementById('modelSelect'),
-  applyModelBtn: document.getElementById('applyModelBtn'),
-  statusText: document.getElementById('statusText')
-};
-
-function renderCards(results) {
-  const wrapper = elements.cardsWrapper;
-  if (!results || results.length === 0) {
-    wrapper.innerHTML = '<div class="empty-state">Нет подходящих мыслей в архиве. Сохрани первую!</div>';
-    return;
-  }
-  const types = ['Продолжение', 'Неочевидно', 'Альтернатива'];
-  wrapper.innerHTML = results.slice(0,3).map((r, i) => `
-    <div class="card" data-text="${escapeHTML(r.text)}">
-      <div class="card-type">${types[i] || 'Вариант'}</div>
-      <div class="card-text">${escapeHTML(r.text)}</div>
-      <div class="card-score">${r.score.toFixed(2)}</div>
-    </div>
-  `).join('');
-
-  wrapper.querySelectorAll('.card').forEach(card => {
-    card.addEventListener('click', () => {
-      elements.input.value = card.dataset.text;
-      elements.input.focus();
-      // Автоматически запускаем поиск по новому тексту
-      elements.input.dispatchEvent(new Event('input'));
-    });
-  });
-}
-
-function escapeHTML(str) {
-  const d = document.createElement('div');
-  d.textContent = str;
-  return d.innerHTML;
-}
-
-// Листание карточек
-elements.prevBtn.addEventListener('click', () => {
-  const cards = elements.cardsWrapper.children;
-  if (cards.length === 0) return;
-  const current = Math.round(elements.cardsWrapper.scrollLeft / elements.cardsWrapper.clientWidth);
-  const target = cards[Math.min(Math.max(current - 1, 0), cards.length - 1)];
-  target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-});
-elements.nextBtn.addEventListener('click', () => {
-  const cards = elements.cardsWrapper.children;
-  if (cards.length === 0) return;
-  const current = Math.round(elements.cardsWrapper.scrollLeft / elements.cardsWrapper.clientWidth);
-  const target = cards[Math.min(Math.max(current + 1, 0), cards.length - 1)];
-  target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-});
-
-// Тема
-elements.themeBtn.addEventListener('click', () => {
-  const isLight = document.documentElement.classList.toggle('light');
-  localStorage.setItem('flow_theme', isLight ? 'light' : 'dark');
-  elements.themeBtn.textContent = isLight ? '☀️' : '🌙';
-});
-(function initTheme() {
-  const saved = localStorage.getItem('flow_theme');
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-  if (saved === 'light' || (!saved && !prefersDark)) {
-    document.documentElement.classList.add('light');
-    elements.themeBtn.textContent = '☀️';
-  } else {
-    document.documentElement.classList.remove('light');
-    elements.themeBtn.textContent = '🌙';
-  }
-})();
-
-// Настройки модели
-elements.settingsBtn.addEventListener('click', () => elements.settingsPanel.classList.toggle('open'));
-elements.applyModelBtn.addEventListener('click', async () => {
-  const newModel = elements.modelSelect.value;
-  if (newModel === Settings.modelName) {
-    elements.settingsPanel.classList.remove('open');
-    return;
-  }
-  Settings.modelName = newModel;
+// --- Применение настроек ---
+async function applySettings(needReindex = true) {
+  Settings.modelName = UI.elements.modelSelect.value;
+  Settings.threshold = parseFloat(UI.elements.thresholdSlider.value);
+  Settings.maxResults = parseInt(UI.elements.maxResultsSelect.value);
   Settings.save();
-  elements.settingsPanel.classList.remove('open');
 
-  // Перезагрузка модели
-  Engine.model = null;
-  Engine.cache.clear();
-  elements.statusText.textContent = 'Загрузка новой модели...';
-  try {
-    await Engine.init();
-    elements.statusText.textContent = 'Модель обновлена';
-  } catch (e) {
-    elements.statusText.textContent = 'Ошибка загрузки модели';
-    console.error(e);
+  UI.elements.thresholdValue.textContent = Settings.threshold.toFixed(2);
+  UI.elements.thresholdInfo.textContent = `(порог ${Settings.threshold.toFixed(2)})`;
+
+  if (needReindex) {
+    UI.setLoading(true);
+    UI.setStatus('<span class="spinner"></span> Загрузка новой модели...');
+    try {
+      Engine.model = null;
+      Engine.vectorCache.clear();
+      Engine.model = await pipeline('feature-extraction', Settings.modelName, { quantized: true });
+      await Engine.reindexAll();
+      UI.setStatus('Настройки применены', 'ok');
+      UI.setLoading(false);
+      UI.renderArchive();
+      UI.renderRelated([]);
+    } catch(e) {
+      UI.setStatus(`Ошибка: ${e.message}`, 'error');
+      UI.setLoading(false);
+      console.error(e);
+    }
+  } else {
+    const currentQuery = UI.elements.input.value;
+    if (currentQuery.trim()) {
+      const results = await Engine.search(currentQuery);
+      UI.renderRelated(results);
+    }
   }
-});
+}
 
-// Поиск с защитой от гонок
-let debounceTimer;
-elements.input.addEventListener('input', () => {
-  clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(async () => {
-    const results = await Engine.search(elements.input.value);
-    renderCards(results);
-    elements.statusText.textContent = results.length ? `Найдено: ${results.length}` : '';
-  }, 500);
-});
-
-// Сохранение заметки
-elements.saveBtn.addEventListener('click', async () => {
-  const text = elements.input.value.trim();
-  if (!text) return;
-  const note = { id: Date.now(), text, createdAt: new Date().toISOString() };
-  notes.push(note);
-  persistNotes();
-  try { await Engine.vectorize(note.id, note.text); }
-  catch (e) { console.warn('Векторизация новой заметки не удалась', e); }
-  elements.input.value = '';
-  renderCards([]);
-  elements.statusText.textContent = 'Мысль сохранена';
-  setTimeout(() => { elements.statusText.textContent = ''; }, 2000);
-});
-
-// Старт приложения
-(async () => {
+// --- Старт ---
+(async function() {
   Settings.load();
-  elements.modelSelect.value = Settings.modelName;
-  elements.statusText.textContent = 'Загрузка модели...';
-  try {
-    await Engine.init();
-    elements.statusText.textContent = 'Готово';
-    setTimeout(() => { elements.statusText.textContent = ''; }, 2000);
-  } catch (e) {
-    elements.statusText.textContent = 'Ошибка загрузки модели — проверьте интернет';
-    console.error(e);
+  Store.load();
+
+  UI.elements.modelSelect.value = Settings.modelName;
+  UI.elements.thresholdSlider.value = Settings.threshold;
+  UI.elements.thresholdValue.textContent = Settings.threshold.toFixed(2);
+  UI.elements.maxResultsSelect.value = Settings.maxResults;
+
+  // UI handlers
+  UI.elements.settingsToggle.onclick = () => UI.elements.settingsPanel.classList.toggle('open');
+  UI.elements.thresholdSlider.oninput = (e) => UI.elements.thresholdValue.textContent = parseFloat(e.target.value).toFixed(2);
+  UI.elements.thresholdSlider.onchange = () => applySettings(false);
+  UI.elements.maxResultsSelect.onchange = () => applySettings(false);
+  UI.elements.applySettingsBtn.onclick = () => applySettings(true);
+
+  await Engine.init();
+
+  let debounce;
+  UI.elements.input.oninput = (e) => {
+    clearTimeout(debounce);
+    debounce = setTimeout(async () => {
+      const results = await Engine.search(e.target.value);
+      UI.renderRelated(results);
+    }, 400);
+  };
+
+  async function saveNote() {
+    const text = UI.elements.input.value.trim();
+    if (!text) return;
+    const note = Store.add(text);
+    try { await Engine.vectorize(note.id, note.text); } catch(e) { console.warn(e); }
+    UI.renderArchive();
+    UI.elements.input.value = '';
+    UI.renderRelated([]);
+    UI.setStatus('Заметка сохранена', 'ok');
+    setTimeout(() => UI.setStatus('Система готова', 'ok'), 2000);
   }
+
+  UI.elements.saveBtn.onclick = saveNote;
+  UI.elements.input.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveNote(); }
+  });
+  UI.elements.clearBtn.onclick = () => {
+    if (confirm('Удалить все заметки?')) {
+      Store.clear();
+      Engine.vectorCache.clear();
+      UI.renderArchive();
+      UI.renderRelated([]);
+      UI.elements.input.value = '';
+    }
+  };
 })();
 </script>
 </body>
