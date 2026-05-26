@@ -3,247 +3,293 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Noosphere – коллективная память</title>
+  <title>Noosphere – мысли мира</title>
   <style>
     :root {
       --bg: #f8fafc; --surface: #ffffff; --text: #0f172a;
-      --text-secondary: #64748b; --border: #e2e8f0; --accent: #3b82f6;
-      --accent-hover: #2563eb; --danger: #ef4444; --success: #10b981;
-      --warning: #f59e0b; --shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.05);
-      --radius: 16px; --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      --text-secondary: #64748b; --border: #e2e8f0; --accent: #4f46e5;
+      --accent-hover: #4338ca; --shadow: 0 10px 25px -5px rgba(0,0,0,0.05), 0 8px 10px -6px rgba(0,0,0,0.02);
+      --radius: 20px;
     }
     @media (prefers-color-scheme: dark) {
       :root {
         --bg: #0f172a; --surface: #1e293b; --text: #f1f5f9;
-        --text-secondary: #94a3b8; --border: #334155; --accent: #3b82f6;
-        --shadow: 0 4px 6px -1px rgba(0,0,0,0.3);
+        --text-secondary: #94a3b8; --border: #334155; --accent: #818cf8;
+        --shadow: 0 10px 25px -5px rgba(0,0,0,0.4);
       }
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; -webkit-tap-highlight-color: transparent; }
-    .app { max-width: 800px; margin: 0 auto; padding: 1rem; }
-    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
-    .logo { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.025em; }
-    .btn { padding: 0.6rem 1.2rem; border-radius: 12px; font-weight: 500; border: none; cursor: pointer; transition: all var(--transition); background: var(--accent); color: white; }
-    .btn:hover:not(:disabled) { background: var(--accent-hover); transform: translateY(-1px); box-shadow: var(--shadow); }
-    .btn:active:not(:disabled) { transform: translateY(0); }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
-    .btn-ghost:hover { background: var(--surface); }
-    .btn-icon { width: 40px; height: 40px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
-    .status { padding: 0.75rem 1rem; border-radius: 12px; background: var(--surface); color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem; transition: all var(--transition); border: 1px solid var(--border); }
-    .status.error { background: #fef2f2; color: #b91c1c; }
-    .status.success { background: #ecfdf5; color: #065f46; }
-    .spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .input-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1.25rem; box-shadow: var(--shadow); }
-    textarea { width: 100%; border: none; resize: vertical; font-family: inherit; font-size: 1rem; padding: 0.75rem; background: var(--bg); border-radius: 12px; min-height: 100px; transition: all var(--transition); outline: none; color: var(--text); }
-    textarea:focus { box-shadow: 0 0 0 3px rgba(59,130,246,0.3); }
-    .input-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; }
-    .share-toggle { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; color: var(--text-secondary); cursor: pointer; user-select: none; }
-    .share-toggle input[type="checkbox"] { width: 1.1rem; height: 1.1rem; accent-color: var(--accent); }
+    body {
+      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg); color: var(--text); line-height: 1.5;
+      display: flex; justify-content: center; padding: 1rem;
+    }
+    .app {
+      width: 100%; max-width: 640px;
+      display: flex; flex-direction: column; gap: 1.25rem;
+    }
 
-    /* Offcanvas settings */
-    .overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.3); z-index: 10; display: none; }
-    .overlay.open { display: block; }
-    .panel { position: fixed; top: 0; right: 0; width: 100%; max-width: 380px; height: 100%; background: var(--surface); box-shadow: -4px 0 20px rgba(0,0,0,0.2); z-index: 11; padding: 1.5rem; overflow-y: auto; transform: translateX(100%); transition: transform var(--transition); }
-    .panel.open { transform: translateX(0); }
-    .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
-    .setting-group { margin-bottom: 1.25rem; }
-    .setting-label { font-size: 0.85rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 0.25rem; display: block; }
-    select, input[type="range"] { width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; background: var(--bg); color: var(--text); }
-    input[type="range"] { accent-color: var(--accent); }
-    .range-row { display: flex; align-items: center; gap: 0.75rem; }
-    .range-value { min-width: 3rem; font-size: 0.9rem; color: var(--accent); font-weight: 600; }
-    .section { margin-bottom: 1.5rem; }
-    .section-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: space-between; }
-    .cards-scroll { display: flex; overflow-x: auto; gap: 0.75rem; padding-bottom: 0.5rem; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; }
-    .cards-scroll::-webkit-scrollbar { height: 6px; }
-    .cards-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-    .card { min-width: 220px; max-width: 280px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1rem; box-shadow: var(--shadow); scroll-snap-align: start; transition: all var(--transition); }
-    .card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); }
-    .card-text { font-size: 0.9rem; line-height: 1.4; margin-bottom: 0.75rem; white-space: pre-wrap; word-break: break-word; }
-    .card-footer { display: flex; align-items: center; justify-content: space-between; font-size: 0.75rem; color: var(--text-secondary); }
-    .score { background: rgba(59,130,246,0.1); color: var(--accent); padding: 2px 8px; border-radius: 20px; font-weight: 600; font-size: 0.7rem; }
-    .votes { display: flex; align-items: center; gap: 0.2rem; }
-    .vote-btn { background: none; border: 1px solid var(--border); border-radius: 50%; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem; cursor: pointer; color: var(--text-secondary); transition: all var(--transition); }
+    /* Главный заголовок */
+    .logo {
+      font-size: 2rem; font-weight: 700; letter-spacing: -0.03em;
+      text-align: center; margin-bottom: 0.5rem;
+      background: linear-gradient(135deg, #4f46e5, #7c3aed);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+
+    /* Поле ввода – сердце приложения */
+    .thought-input {
+      background: var(--surface); border: 2px solid var(--border);
+      border-radius: var(--radius); padding: 1.25rem;
+      box-shadow: var(--shadow); transition: all 0.3s;
+    }
+    .thought-input:focus-within {
+      border-color: var(--accent); box-shadow: 0 0 0 4px rgba(79,70,229,0.15);
+    }
+    textarea {
+      width: 100%; border: none; background: transparent;
+      font-size: 1.15rem; font-family: inherit; resize: none;
+      outline: none; color: var(--text); min-height: 80px;
+    }
+    textarea::placeholder { color: var(--text-secondary); opacity: 0.7; }
+    .input-actions {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-top: 0.75rem;
+    }
+    .share-toggle {
+      display: flex; align-items: center; gap: 0.4rem;
+      font-size: 0.9rem; color: var(--text-secondary); cursor: pointer;
+      user-select: none;
+    }
+    .share-toggle input[type="checkbox"] {
+      width: 1.2rem; height: 1.2rem; accent-color: var(--accent);
+    }
+    .btn {
+      padding: 0.65rem 1.4rem; border-radius: 14px; font-weight: 600;
+      border: none; cursor: pointer; transition: all 0.2s;
+      background: var(--accent); color: white; font-size: 0.95rem;
+    }
+    .btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
+    .btn:active { transform: translateY(0); }
+    .btn:disabled { opacity: 0.4; pointer-events: none; }
+    .btn-ghost {
+      background: transparent; color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { background: var(--surface); }
+
+    /* Карточки мыслей – плавное появление */
+    .feed-section {
+      display: flex; flex-direction: column; gap: 0.75rem;
+    }
+    .section-label {
+      font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;
+      color: var(--text-secondary); padding-left: 0.25rem;
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .cards-row {
+      display: flex; overflow-x: auto; gap: 0.75rem;
+      padding-bottom: 0.5rem; scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch;
+    }
+    .cards-row::-webkit-scrollbar { height: 6px; }
+    .cards-row::-webkit-scrollbar-thumb {
+      background: var(--border); border-radius: 3px;
+    }
+    .card {
+      min-width: 220px; max-width: 280px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 1rem;
+      box-shadow: var(--shadow); scroll-snap-align: start;
+      transition: all 0.2s; animation: fadeInUp 0.4s ease both;
+    }
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .card:hover { transform: translateY(-3px); box-shadow: 0 15px 30px -10px rgba(0,0,0,0.1); }
+    .card-text {
+      font-size: 0.95rem; line-height: 1.5; margin-bottom: 0.75rem;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .card-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 0.75rem; color: var(--text-secondary);
+    }
+    .score-badge {
+      background: rgba(79,70,229,0.1); color: var(--accent);
+      padding: 2px 8px; border-radius: 12px; font-weight: 600;
+    }
+    .vote-group {
+      display: flex; align-items: center; gap: 0.3rem;
+    }
+    .vote-btn {
+      background: none; border: 1px solid var(--border);
+      border-radius: 50%; width: 28px; height: 28px;
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 0.85rem; cursor: pointer; color: var(--text-secondary);
+      transition: all 0.2s;
+    }
     .vote-btn:hover { background: var(--bg); color: var(--text); }
-    .vote-count { font-weight: 600; margin: 0 0.2rem; min-width: 1.8rem; text-align: center; }
-    .ad-tag { background: #fef3c7; color: #92400e; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 500; margin-left: 0.25rem; }
-    .empty-feed { color: var(--text-secondary); font-style: italic; padding: 1rem 0; text-align: center; width: 100%; }
-    .archive-item { padding: 0.75rem 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: baseline; }
+    .vote-count { font-weight: 600; min-width: 1.8rem; text-align: center; }
+    .empty-message {
+      text-align: center; color: var(--text-secondary);
+      font-style: italic; padding: 1rem; width: 100%;
+    }
+
+    /* Архив — скрытая секция */
+    .archive-section {
+      border-top: 1px solid var(--border); padding-top: 1rem;
+    }
+    .archive-item {
+      padding: 0.6rem 0; border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: baseline;
+    }
     .archive-item:last-child { border-bottom: none; }
-    @media (max-width: 640px) {
-      .app { padding: 0.75rem; }
-      .card { min-width: 180px; max-width: 240px; }
-      .header { margin-bottom: 1rem; }
+
+    /* Настройки – иконка в углу */
+    .settings-trigger {
+      position: fixed; top: 1rem; right: 1rem;
+      width: 44px; height: 44px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; box-shadow: var(--shadow); z-index: 5;
+    }
+    .settings-panel {
+      position: fixed; top: 0; right: 0; width: 320px; max-width: 85vw;
+      height: 100%; background: var(--surface); box-shadow: -5px 0 25px rgba(0,0,0,0.15);
+      z-index: 10; padding: 1.5rem; overflow-y: auto;
+      transform: translateX(100%); transition: transform 0.3s ease;
+    }
+    .settings-panel.open { transform: translateX(0); }
+    .overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.3);
+      z-index: 9; display: none;
+    }
+    .overlay.open { display: block; }
+
+    @media (max-width: 480px) {
+      .card { min-width: 170px; max-width: 220px; }
+      .logo { font-size: 1.6rem; }
     }
   </style>
 </head>
 <body>
 <div class="app">
-  <header class="header">
-    <div class="logo">🌐 Noosphere</div>
-    <button id="settingsOpenBtn" class="btn btn-icon" aria-label="Настройки">
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-    </button>
-  </header>
+  <h1 class="logo">🌐 Noosphere</h1>
 
-  <div id="status" class="status"><span class="spinner"></span> Загрузка MiniLM (25 МБ)...</div>
-
-  <div class="input-card">
-    <textarea id="noteInput" placeholder="Поделитесь мыслью..."></textarea>
+  <!-- Поле ввода мыслей -->
+  <div class="thought-input">
+    <textarea id="thoughtInput" placeholder="Поделитесь мыслью..."></textarea>
     <div class="input-actions">
       <label class="share-toggle">
-        <input type="checkbox" id="shareCheckbox"> Анонимно в мир
+        <input type="checkbox" id="shareCheckbox"> В общий поток
       </label>
-      <div style="display: flex; gap: 0.5rem;">
-        <button id="clearLocalBtn" class="btn btn-ghost">Очистить всё</button>
-        <button id="saveBtn" class="btn">Сохранить</button>
-      </div>
+      <button id="saveBtn" class="btn" disabled>Отправить</button>
     </div>
   </div>
 
-  <div class="section">
-    <div class="section-title">🧠 Мои связанные мысли</div>
-    <div id="relatedContainer" class="cards-scroll"></div>
+  <!-- Динамические ленты -->
+  <div id="personalFeed" class="feed-section" style="display:none;">
+    <div class="section-label">🧠 Мои похожие мысли</div>
+    <div id="personalCards" class="cards-row"></div>
+  </div>
+  <div id="relevantFeed" class="feed-section" style="display:none;">
+    <div class="section-label">🌍 Релевантные идеи мира</div>
+    <div id="relevantCards" class="cards-row"></div>
+  </div>
+  <div id="serendipityFeed" class="feed-section" style="display:none;">
+    <div class="section-label">🌀 Смежные (неожиданные)</div>
+    <div id="serendipityCards" class="cards-row"></div>
   </div>
 
-  <div class="section">
-    <div class="section-title">🌍 Релевантные идеи мира</div>
-    <div id="relevantContainer" class="cards-scroll"></div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">🌀 Смежные (неожиданные связи)</div>
-    <div id="serendipityContainer" class="cards-scroll"></div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">📚 Архив моих заметок</div>
-    <ul id="archiveList" style="list-style:none;"></ul>
+  <!-- Архив (появляется после сохранения) -->
+  <div id="archiveSection" class="archive-section" style="display:none;">
+    <div class="section-label">📚 Мои сохранённые мысли</div>
+    <div id="archiveList"></div>
   </div>
 </div>
 
-<!-- Settings -->
-<div id="overlay" class="overlay"></div>
-<div id="settingsPanel" class="panel">
-  <div class="panel-header">
-    <span style="font-weight:600;font-size:1.2rem;">Настройки</span>
-    <button id="settingsCloseBtn" class="btn-icon btn-ghost" style="width:32px;height:32px;">✕</button>
+<!-- Настройки -->
+<div class="settings-trigger" id="settingsTrigger">⚙️</div>
+<div class="overlay" id="overlay"></div>
+<div class="settings-panel" id="settingsPanel">
+  <h2 style="margin-bottom:1.5rem;">Настройки</h2>
+  <div style="margin-bottom:1rem;">
+    <label>Порог релевантности</label>
+    <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.15">
+    <span id="thresholdValue">0.15</span>
   </div>
-  <div class="setting-group">
-    <label class="setting-label">Порог релевантности</label>
-    <div class="range-row">
-      <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.15">
-      <span class="range-value" id="thresholdValue">0.15</span>
-    </div>
+  <div style="margin-bottom:1rem;">
+    <label>Дельта смежности</label>
+    <input type="range" id="serendipitySlider" min="0" max="0.5" step="0.01" value="0.10">
+    <span id="serendipityValue">0.10</span>
   </div>
-  <div class="setting-group">
-    <label class="setting-label">Дельта смежности</label>
-    <div class="range-row">
-      <input type="range" id="serendipitySlider" min="0" max="0.5" step="0.01" value="0.10">
-      <span class="range-value" id="serendipityValue">0.10</span>
-    </div>
-  </div>
-  <div class="setting-group">
-    <label class="setting-label">Мин. рейтинг</label>
+  <div style="margin-bottom:1rem;">
+    <label>Мин. рейтинг</label>
     <select id="minRatingSelect">
-      <option value="0">0 (всё)</option>
-      <option value="1" selected>1</option>
-      <option value="3">3</option>
-      <option value="5">5</option>
+      <option value="0">0</option><option value="1" selected>1</option>
+      <option value="3">3</option><option value="5">5</option>
     </select>
   </div>
-  <div class="setting-group">
-    <label class="setting-label">Макс. карточек</label>
+  <div style="margin-bottom:1rem;">
+    <label>Макс. карточек</label>
     <select id="maxResultsSelect">
-      <option value="3">3</option>
-      <option value="5" selected>5</option>
+      <option value="3">3</option><option value="5" selected>5</option>
       <option value="10">10</option>
     </select>
   </div>
-  <div class="setting-group">
-    <label class="setting-label">Глобальный поиск</label>
-    <input type="checkbox" id="globalSearchCheckbox" checked style="width:auto;">
-  </div>
-  <button id="applySettingsBtn" class="btn" style="width:100%">Применить</button>
-  <p style="font-size:0.75rem;color:var(--text-secondary);margin-top:1rem;">Модель: MiniLM (мультиязычная, 25 МБ)</p>
+  <button id="applySettingsBtn" class="btn" style="width:100%;">Применить</button>
+  <p style="font-size:0.75rem;margin-top:1rem;color:var(--text-secondary);">Модель: MiniLM (25 МБ)</p>
 </div>
 
 <script type="module">
 import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-// ---------- MODULES ----------
+// --- Простые настройки ---
 const Settings = {
-  threshold: 0.15, serendipityDelta: 0.10, minRating: 1, maxResults: 5, globalSearch: true,
-  load() { try { Object.assign(this, JSON.parse(localStorage.getItem('n_settings') || '{}')); } catch(e) {} },
-  save() { localStorage.setItem('n_settings', JSON.stringify(this)); }
+  threshold: 0.15, serendipityDelta: 0.10, minRating: 1, maxResults: 5,
+  load() { try { Object.assign(this, JSON.parse(localStorage.getItem('ns_settings')||'{}')); } catch(e) {} },
+  save() { localStorage.setItem('ns_settings', JSON.stringify(this)); }
 };
 
+// --- Математика векторов ---
 const Vec = {
   normalize(v) {
-    const mag = Math.sqrt(v.reduce((s,x) => s + x*x, 0));
-    return mag ? new Float32Array(v.map(x => x/mag)) : new Float32Array(v.length);
+    const mag = Math.sqrt(v.reduce((s,x)=>s+x*x,0));
+    return mag ? new Float32Array(v.map(x=>x/mag)) : new Float32Array(v.length);
   },
   cosine(a,b) { let d=0; for(let i=0;i<a.length;i++) d+=a[i]*b[i]; return d; }
 };
 
+// --- Хранилища ---
 const MyNotes = {
   data: [],
-  load() { try { this.data = JSON.parse(localStorage.getItem('n_local') || '[]'); } catch(e) { this.data = []; } },
-  save() { localStorage.setItem('n_local', JSON.stringify(this.data)); },
-  add(text) { const n = { id: 'l_'+Date.now(), text, date: new Date().toISOString() }; this.data.unshift(n); this.save(); return n; },
-  clear() { this.data = []; localStorage.removeItem('n_local'); }
+  load() { try { this.data = JSON.parse(localStorage.getItem('ns_mynotes')||'[]'); } catch(e) {} },
+  save() { localStorage.setItem('ns_mynotes', JSON.stringify(this.data)); },
+  add(text) { const n={id:'l_'+Date.now(), text, date:new Date().toISOString()}; this.data.unshift(n); this.save(); return n; },
+  clear() { this.data=[]; this.save(); }
 };
 
 const World = {
   notes: [],
-  load() { try { this.notes = JSON.parse(localStorage.getItem('n_global') || '[]'); } catch(e) { this.notes = []; } },
-  save() { localStorage.setItem('n_global', JSON.stringify(this.notes)); },
-  add(vectorArray, textExcerpt = '') {
-    // сохраняем текст (первые 150 символов) для показа в карточках
-    const excerpt = textExcerpt.slice(0, 150);
-    const note = { id: 'g_'+Date.now()+Math.random(), vec: vectorArray, up:0, down:0, isAd:false, excerpt };
-    this.notes.unshift(note);
-    this.save();
-    return note;
+  load() { try { this.notes = JSON.parse(localStorage.getItem('ns_world')||'[]'); } catch(e) {} },
+  save() { localStorage.setItem('ns_world', JSON.stringify(this.notes)); },
+  add(vectorArray, text) {
+    const excerpt = text.slice(0,150);
+    const n = { id:'g_'+Date.now()+Math.random(), vec:vectorArray, up:0, down:0, excerpt };
+    this.notes.unshift(n); this.save(); return n;
   },
-  vote(id, up) { const n = this.notes.find(n=>n.id===id); if(n) { up ? n.up++ : n.down++; this.save(); } }
+  vote(id, up) { const n=this.notes.find(n=>n.id===id); if(n) { up?n.up++:n.down++; this.save(); } }
 };
 
-// UI bindings
-const D = {
-  status: document.getElementById('status'), input: document.getElementById('noteInput'),
-  saveBtn: document.getElementById('saveBtn'), clearBtn: document.getElementById('clearLocalBtn'),
-  shareChk: document.getElementById('shareCheckbox'),
-  related: document.getElementById('relatedContainer'), relevant: document.getElementById('relevantContainer'),
-  serendipity: document.getElementById('serendipityContainer'), archive: document.getElementById('archiveList'),
-  overlay: document.getElementById('overlay'), panel: document.getElementById('settingsPanel'),
-  thresholdSl: document.getElementById('thresholdSlider'), thresholdVal: document.getElementById('thresholdValue'),
-  serendipitySl: document.getElementById('serendipitySlider'), serendipityVal: document.getElementById('serendipityValue'),
-  minRatingSel: document.getElementById('minRatingSelect'), maxResSel: document.getElementById('maxResultsSelect'),
-  globalChk: document.getElementById('globalSearchCheckbox'), applyBtn: document.getElementById('applySettingsBtn')
-};
-
-// Engine
+// --- Движок с единственной моделью ---
 const Engine = {
   model: null, cache: new Map(),
   async init() {
-    D.status.innerHTML = '<span class="spinner"></span> Загрузка MiniLM...';
-    try {
-      this.model = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', { quantized: true });
-      await this.reindex();
-      D.status.innerHTML = '✓ Готов';
-      D.status.className = 'status success';
-      this.uiReady(true);
-    } catch(e) {
-      D.status.innerHTML = '⚠ ' + e.message;
-      D.status.className = 'status error';
-      this.uiReady(false);
-    }
+    this.model = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', { quantized: true });
+    await this.reindex();
   },
-  uiReady(ok) { D.input.disabled = !ok; D.saveBtn.disabled = !ok; D.clearBtn.disabled = !ok; D.applyBtn.disabled = !ok; },
   async embed(text) {
     const out = await this.model([text]);
     const { data, dims } = out;
@@ -264,12 +310,11 @@ const Engine = {
     for (const n of MyNotes.data) {
       const v = this.cache.get(n.id); if (!v) continue;
       const s = Vec.cosine(qVec, v);
-      if (s > Settings.threshold) res.push({ ...n, score: s });
+      if (s > Settings.threshold) res.push({...n, score: s});
     }
     return res.sort((a,b)=>b.score-a.score).slice(0, Settings.maxResults);
   },
-  async searchGlobal(qVec) {
-    if (!Settings.globalSearch) return { rel:[], ser:[] };
+  async searchWorld(qVec) {
     const rel=[], ser=[], low = Settings.threshold - Settings.serendipityDelta;
     for (const n of World.notes) {
       if ((n.up - n.down) < Settings.minRating) continue;
@@ -285,103 +330,151 @@ const Engine = {
   }
 };
 
-// Render
+// --- UI-элементы ---
+const D = {
+  input: document.getElementById('thoughtInput'),
+  saveBtn: document.getElementById('saveBtn'),
+  shareChk: document.getElementById('shareCheckbox'),
+  personalFeed: document.getElementById('personalFeed'),
+  personalCards: document.getElementById('personalCards'),
+  relevantFeed: document.getElementById('relevantFeed'),
+  relevantCards: document.getElementById('relevantCards'),
+  serendipityFeed: document.getElementById('serendipityFeed'),
+  serendipityCards: document.getElementById('serendipityCards'),
+  archiveSection: document.getElementById('archiveSection'),
+  archiveList: document.getElementById('archiveList'),
+  settingsTrigger: document.getElementById('settingsTrigger'),
+  overlay: document.getElementById('overlay'),
+  panel: document.getElementById('settingsPanel'),
+  thresholdSl: document.getElementById('thresholdSlider'),
+  thresholdVal: document.getElementById('thresholdValue'),
+  serendipitySl: document.getElementById('serendipitySlider'),
+  serendipityVal: document.getElementById('serendipityValue'),
+  minRatingSel: document.getElementById('minRatingSelect'),
+  maxResSel: document.getElementById('maxResultsSelect'),
+  applyBtn: document.getElementById('applySettingsBtn')
+};
+
+// --- Рендеринг ---
 function esc(t) { const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
-function showCards(container, items, isGlobal=false) {
-  if (!items.length) { container.innerHTML = '<div class="empty-feed">Ничего не найдено</div>'; return; }
+function showCards(container, items, isWorld=false) {
+  if (!items.length) { container.innerHTML = '<div class="empty-message">Пока ничего нет</div>'; return; }
   container.innerHTML = items.map(item => {
-    const text = isGlobal ? (item.excerpt || 'мысль без текста') : item.text;
-    const rating = isGlobal ? (item.up - item.down) : null;
-    const footer = isGlobal
-      ? `<div class="votes">
+    const text = isWorld ? (item.excerpt || 'мысль') : item.text;
+    const footer = isWorld
+      ? `<div class="vote-group">
            <button class="vote-btn" data-id="${item.id}" data-vote="up">👍</button>
-           <span class="vote-count">${rating>0?'+'+rating:rating}</span>
+           <span class="vote-count">${item.up - item.down}</span>
            <button class="vote-btn" data-id="${item.id}" data-vote="down">👎</button>
          </div>`
       : `<span>${new Date(item.date).toLocaleDateString()}</span>`;
     return `<div class="card">
-      <div class="card-text">${esc(text)}${item.isAd ? ' <span class="ad-tag">реклама</span>' : ''}</div>
-      <div class="card-footer"><span class="score">${item.score.toFixed(2)}</span>${footer}</div>
+      <div class="card-text">${esc(text)}</div>
+      <div class="card-footer"><span class="score-badge">${item.score.toFixed(2)}</span>${footer}</div>
     </div>`;
   }).join('');
 }
-function showArchive() {
-  D.archive.innerHTML = MyNotes.data.map(n => `<li class="archive-item"><span>${esc(n.text)}</span><span style="color:var(--text-secondary);font-size:0.85rem;">${new Date(n.date).toLocaleDateString()}</span></li>`).join('');
+function renderArchive() {
+  D.archiveList.innerHTML = MyNotes.data.map(n => `<div class="archive-item"><span>${esc(n.text)}</span><span style="color:var(--text-secondary)">${new Date(n.date).toLocaleDateString()}</span></div>`).join('');
+  D.archiveSection.style.display = MyNotes.data.length ? 'block' : 'none';
 }
 
-// Search handler
-async function doSearch() {
+// --- Поиск при вводе ---
+async function handleInput() {
   const q = D.input.value.trim();
-  if (!q) { D.related.innerHTML=D.relevant.innerHTML=D.serendipity.innerHTML=''; return; }
-  try {
-    const qVec = await Engine.embed(q);
-    const [local, global] = await Promise.all([Engine.searchLocal(qVec), Engine.searchGlobal(qVec)]);
-    showCards(D.related, local, false);
-    showCards(D.relevant, global.rel, true);
-    showCards(D.serendipity, global.ser, true);
-  } catch(e) { console.error(e); }
+  if (!q) {
+    D.personalFeed.style.display = 'none';
+    D.relevantFeed.style.display = 'none';
+    D.serendipityFeed.style.display = 'none';
+    return;
+  }
+  const qVec = await Engine.embed(q);
+  const [local, world] = await Promise.all([Engine.searchLocal(qVec), Engine.searchWorld(qVec)]);
+
+  if (local.length) { D.personalFeed.style.display = 'flex'; showCards(D.personalCards, local); }
+  else D.personalFeed.style.display = 'none';
+
+  if (world.rel.length) { D.relevantFeed.style.display = 'flex'; showCards(D.relevantCards, world.rel, true); }
+  else D.relevantFeed.style.display = 'none';
+
+  if (world.ser.length) { D.serendipityFeed.style.display = 'flex'; showCards(D.serendipityCards, world.ser, true); }
+  else D.serendipityFeed.style.display = 'none';
 }
 
-// Save note
-async function save() {
+// --- Сохранение мысли ---
+async function saveThought() {
   const text = D.input.value.trim(); if (!text) return;
   const share = D.shareChk.checked;
   MyNotes.add(text);
   await Engine.cacheNote(MyNotes.data[0].id, text);
   if (share) {
     const vec = await Engine.embed(text);
-    World.add(Array.from(vec), text); // передаём excerpt
+    World.add(Array.from(vec), text);
   }
-  D.input.value = ''; D.shareChk.checked = false;
-  showArchive(); doSearch();
+  D.input.value = '';
+  D.shareChk.checked = false;
+  renderArchive();
+  handleInput(); // очистить ленты
 }
 
-// Settings
-function apply(reload = false) {
+// --- Настройки ---
+function applySettings() {
   Settings.threshold = +D.thresholdSl.value;
   Settings.serendipityDelta = +D.serendipitySl.value;
   Settings.minRating = +D.minRatingSel.value;
   Settings.maxResults = +D.maxResSel.value;
-  Settings.globalSearch = D.globalChk.checked;
   Settings.save();
   D.thresholdVal.textContent = Settings.threshold.toFixed(2);
   D.serendipityVal.textContent = Settings.serendipityDelta.toFixed(2);
-  if (reload) {
-    Engine.model = null; Engine.cache.clear();
-    D.status.innerHTML = '<span class="spinner"></span> Перезагрузка модели...';
-    D.status.className = 'status';
-    Engine.init().then(() => { showArchive(); doSearch(); });
-  } else doSearch();
+  handleInput();
 }
 
-// Init
+// --- Старт ---
 (async () => {
   Settings.load(); MyNotes.load(); World.load();
   D.thresholdSl.value = Settings.threshold; D.thresholdVal.textContent = Settings.threshold.toFixed(2);
   D.serendipitySl.value = Settings.serendipityDelta; D.serendipityVal.textContent = Settings.serendipityDelta.toFixed(2);
   D.minRatingSel.value = Settings.minRating; D.maxResSel.value = Settings.maxResults;
-  D.globalChk.checked = Settings.globalSearch;
 
-  document.getElementById('settingsOpenBtn').onclick = () => { D.overlay.classList.add('open'); D.panel.classList.add('open'); };
-  document.getElementById('settingsCloseBtn').onclick = D.overlay.onclick = () => { D.overlay.classList.remove('open'); D.panel.classList.remove('open'); };
-  D.thresholdSl.oninput = () => D.thresholdVal.textContent = parseFloat(D.thresholdSl.value).toFixed(2);
-  D.serendipitySl.oninput = () => D.serendipityVal.textContent = parseFloat(D.serendipitySl.value).toFixed(2);
-  D.applyBtn.onclick = () => apply(true);
-  D.thresholdSl.onchange = D.serendipitySl.onchange = D.minRatingSel.onchange = D.maxResSel.onchange = D.globalChk.onchange = () => apply(false);
-
-  D.input.oninput = debounce(doSearch, 400);
-  D.saveBtn.onclick = save;
-  D.clearBtn.onclick = () => { if (confirm('Удалить все мои заметки?')) { MyNotes.clear(); Engine.cache.clear(); showArchive(); doSearch(); } };
-  D.input.addEventListener('keydown', e => { if ((e.ctrlKey||e.metaKey) && e.key==='Enter') { e.preventDefault(); save(); } });
-
-  document.body.addEventListener('click', async (e) => {
-    const btn = e.target.closest('.vote-btn'); if (!btn) return;
-    World.vote(btn.dataset.id, btn.dataset.vote==='up');
-    await doSearch();
+  // Модель загружается асинхронно, но поле доступно сразу (будет включено после загрузки)
+  D.saveBtn.disabled = true;
+  Engine.init().then(() => {
+    D.saveBtn.disabled = false;
+    renderArchive();
+    // Если уже есть текст, выполнить поиск (маловероятно)
   });
 
-  await Engine.init();
-  showArchive();
+  // События
+  D.input.addEventListener('input', debounce(handleInput, 400));
+  D.saveBtn.addEventListener('click', saveThought);
+  D.input.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveThought(); }
+  });
+  D.settingsTrigger.addEventListener('click', () => {
+    D.overlay.classList.add('open'); D.panel.classList.add('open');
+  });
+  D.overlay.addEventListener('click', () => {
+    D.overlay.classList.remove('open'); D.panel.classList.remove('open');
+  });
+  D.applyBtn.addEventListener('click', () => {
+    applySettings();
+    D.overlay.classList.remove('open'); D.panel.classList.remove('open');
+  });
+  D.thresholdSl.addEventListener('input', () => D.thresholdVal.textContent = parseFloat(D.thresholdSl.value).toFixed(2));
+  D.serendipitySl.addEventListener('input', () => D.serendipityVal.textContent = parseFloat(D.serendipitySl.value).toFixed(2));
+  // Живое обновление при изменении ползунков (без кнопки Применить)
+  D.thresholdSl.addEventListener('change', applySettings);
+  D.serendipitySl.addEventListener('change', applySettings);
+  D.minRatingSel.addEventListener('change', applySettings);
+  D.maxResSel.addEventListener('change', applySettings);
+
+  // Голосование
+  document.body.addEventListener('click', e => {
+    const btn = e.target.closest('.vote-btn');
+    if (!btn) return;
+    World.vote(btn.dataset.id, btn.dataset.vote === 'up');
+    handleInput();
+  });
 })();
 
 function debounce(fn, ms) { let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); }; }
