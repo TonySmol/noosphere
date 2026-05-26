@@ -1,71 +1,48 @@
 <!DOCTYPE html>
 <html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Transformers.js на GitHub Pages</title>
-    <style>
-        body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
-        button { padding: 12px 24px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; font-weight: bold;}
-        button:hover { background: #0056b3; }
-        #status { margin: 20px 0; font-weight: bold; color: #333; }
-        pre { background: #f4f4f4; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 14px; border: 1px solid #ddd; white-space: pre-wrap; }
-    </style>
-</head>
+<head><meta charset="UTF-8"><title>Semantic Search (Transformers.js)</title></head>
 <body>
+<input id="q" placeholder="Запрос...">
+<button id="btn">Найти</button>
+<ul id="res"></ul>
 
-    <h2>Эмбеддинги в один HTML-файл</h2>
-    <p>Загрузка библиотеки и модели напрямую с серверов Hugging Face (без использования jsdelivr/unpkg).</p>
-    
-    <button id="run-btn">Сгенерировать вектор</button>
-    <div id="status">Статус: Ожидание нажатия кнопки...</div>
-    <pre id="output">Результат появится здесь...</pre>
+<script type="module">
+import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-    <!-- Используем тип модуля и загружаем библиотеку напрямую из официального репозитория Hugging Face на GitHub через специальный прокси cdn.jsdelivr (но без использования основного домена) или esm.sh. 
-    Поскольку у вас работает сам Hugging Face, мы берем стабильную сборку с зеркала hf.co -->
-    <script type="module">
-        // Загружаем саму библиотеку напрямую с серверов Hugging Face (через их официальное зеркало)
-        import { pipeline, env } from 'https://huggingface.co';
+env.allowLocalModels = false;
+env.useBrowserCache = true; // кеширует в IndexedDB, если поддерживается
 
-        // Принудительно разрешаем только удаленные запросы к моделям
-        env.allowRemoteModels = true; 
-        env.allowLocalModels = false;
+const docs = [
+  "Кошки любят молоко и спать на солнце.",
+  "JavaScript работает в браузере без сервера.",
+  "Трансформеры используют механизм внимания."
+];
 
-        const runBtn = document.getElementById('run-btn');
-        const statusDiv = document.getElementById('status');
-        const outputDiv = document.getElementById('output');
+let extractor;
+document.getElementById('btn').onclick = async () => {
+  if (!extractor) {
+    document.getElementById('res').innerHTML = '<li>Загрузка модели... (~20 МБ)</li>';
+    extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+      pooling: 'mean', normalize: true // упрощает пулинг и нормализацию
+    });
+  }
 
-        runBtn.addEventListener('click', async () => {
-            statusDiv.innerText = "Статус: Подключение к Hugging Face и скачивание модели... (~90МБ)";
-            statusDiv.style.color = "orange";
-            outputDiv.innerText = "";
+  const query = document.getElementById('q').value.trim();
+  if (!query) return;
 
-            try {
-                // Инициализируем пайплайн на CPU (wasm)
-                const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-                    device: 'wasm'
-                });
+  const [qEmb] = (await extractor([query])).data;
+  const sim = [];
 
-                statusDiv.innerText = "Статус: Модель успешно загружена в кэш браузера. Вычисляем вектор...";
-                
-                const result = await extractor('Тестовый текст для проверки работы нейросети', { 
-                    pooling: 'mean', 
-                    normalize: true 
-                });
+  for (const d of docs) {
+    const [dEmb] = (await extractor([d])).data;
+    let dot = 0;
+    for (let i = 0; i < qEmb.length; i++) dot += qEmb[i] * dEmb[i];
+    sim.push({ text: d, score: dot });
+  }
 
-                statusDiv.innerText = "Статус: Успешно выполнено!";
-                statusDiv.style.color = "green";
-
-                const vector = Array.from(result.data);
-                outputDiv.innerText = `Размерность вектора: ${vector.length} измерений.\n\nПервые 10 значений:\n${JSON.stringify(vector.slice(0, 10), null, 2)}`;
-
-            } catch (error) {
-                statusDiv.innerText = "Статус: Ошибка!";
-                statusDiv.style.color = "red";
-                outputDiv.innerText = `Критическое исключение: ${error.message}\n\nПроверьте вкладку Console (F12) для получения деталей.`;
-                console.error(error);
-            }
-        });
-    </script>
+  sim.sort((a, b) => b.score - a.score);
+  document.getElementById('res').innerHTML = sim.map(s => `<li>${s.score.toFixed(3)}: ${s.text}</li>`).join('');
+};
+</script>
 </body>
 </html>
