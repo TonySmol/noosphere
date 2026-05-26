@@ -41,7 +41,6 @@
     .score-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; background: #eff6ff; color: var(--accent); font-weight: 600; font-family: var(--font-mono); }
     .empty-state { text-align: center; color: var(--text-muted); padding: 2rem 0; font-style: italic; }
 
-    /* Анимация загрузки */
     .spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 6px; }
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
@@ -68,29 +67,17 @@
 </div>
 
 <script type="module">
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
 // --- 1. MATH MODULE (Vector Operations) ---
 const VectorMath = {
-  /**
-   * L2 Normalization of a vector
-   * @param {Float32Array|number[]} vec
-   * @returns {Float32Array}
-   */
   normalize(vec) {
     const magnitude = Math.sqrt(vec.reduce((sum, val) => sum + val * val, 0));
     if (magnitude === 0) return new Float32Array(vec.length);
     return new Float32Array(vec.map(val => val / magnitude));
   },
 
-  /**
-   * Cosine Similarity between two normalized vectors
-   * @param {Float32Array} a
-   * @param {Float32Array} b
-   * @returns {number}
-   */
   cosineSimilarity(a, b) {
-    // Assuming inputs are already normalized, dot product == cosine similarity
     let dot = 0;
     for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
     return dot;
@@ -145,7 +132,7 @@ const UI = {
 
   setStatus(msg, type = '') {
     const el = this.elements.status;
-    el.textContent = msg;
+    el.innerHTML = msg;            // allow HTML for spinner
     el.className = `status-bar ${type}`;
   },
 
@@ -190,21 +177,26 @@ const UI = {
   }
 };
 
+// --- 4. CORE LOGIC (Model & Search) ---
 const Engine = {
   model: null,
   vectorCache: new Map(),
 
   async init() {
     try {
-      UI.setStatus('Загрузка нейросети...');
+      UI.setStatus('<span class="spinner"></span> Загрузка нейросети (~25 МБ)...');
       this.model = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', {
         pooling: 'mean',
         quantized: true
       });
       
-      UI.setStatus('Индексация архива...');
+      UI.setStatus('<span class="spinner"></span> Индексация архива...');
       for (const note of Store.notes) {
-        await this.vectorize(String(note.id), note.text);
+        try {
+          await this.vectorize(note.id, note.text);
+        } catch (err) {
+          console.warn(`Skip indexing note ${note.id}`, err);
+        }
       }
 
       UI.setStatus('Система готова', 'ok');
@@ -212,15 +204,17 @@ const Engine = {
       UI.renderArchive();
     } catch (e) {
       UI.setStatus(`Ошибка: ${e.message}`, 'error');
+      UI.setLoading(false); // разблокируем интерфейс даже при ошибке
+      console.error(e);
     }
   },
 
   async vectorize(id, text) {
+    if (!this.model) return null;          // модель не готова
     if (this.vectorCache.has(id)) return this.vectorCache.get(id);
     
     const output = await this.model([text]);
-    // КРИТИЧНО: клонируем буфер, иначе WASM переиспользует память и вектора коллапсируют
-    const rawVec = new Float32Array(output.data); 
+    const rawVec = output.data;
     const normVec = VectorMath.normalize(rawVec);
     
     this.vectorCache.set(id, normVec);
@@ -230,15 +224,19 @@ const Engine = {
   async search(queryText) {
     if (!queryText.trim() || !this.model) return [];
 
-    const queryVec = await this.vectorize('_query', queryText);
-    const results = [];
+    // Вычисляем вектор запроса БЕЗ кэширования
+    const output = await this.model([queryText]);
+    const queryVec = VectorMath.normalize(output.data);
 
+    const results = [];
     for (const note of Store.notes) {
-      const noteVec = this.vectorCache.get(String(note.id));
+      const noteVec = this.vectorCache.get(note.id);
       if (!noteVec) continue;
 
       const score = VectorMath.cosineSimilarity(queryVec, noteVec);
-      if (score > 0.3) results.push({ ...note, score });
+      if (score > 0.3) {
+        results.push({ ...note, score });
+      }
     }
 
     return results.sort((a, b) => b.score - a.score).slice(0, 5);
@@ -257,18 +255,22 @@ const Engine = {
       const query = e.target.value;
       const results = await Engine.search(query);
       UI.renderRelated(results);
-    }, 500); // 500ms delay to prevent lag
+    }, 500);
   });
 
-  UI.elements.saveBtn.addEventListener('click', () => {
+  UI.elements.saveBtn.addEventListener('click', async () => {
     const text = UI.elements.input.value.trim();
     if (!text) return;
 
-    Store.add(text);
-    Engine.vectorize(Store.notes[0].id, text); // Cache vector immediately
+    const newNote = Store.add(text);
+    try {
+      await Engine.vectorize(newNote.id, newNote.text);
+    } catch (err) {
+      console.warn('Failed to vectorize new note', err);
+    }
     UI.renderArchive();
     UI.elements.input.value = '';
-    UI.renderRelated([]); // Clear related view
+    UI.renderRelated([]);
     UI.setStatus('Заметка сохранена', 'ok');
     setTimeout(() => UI.setStatus('Система готова', 'ok'), 2000);
   });
