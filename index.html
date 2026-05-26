@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Semantic Notebook Pro – fixed</title>
+  <title>Noosphere – коллективная память</title>
   <style>
     :root {
       --bg: #f4f6f8; --surface: #ffffff; --text: #1f2937;
@@ -24,11 +24,14 @@
     select, input[type="range"] { font-size: 0.9rem; padding: 0.25rem 0.5rem; border-radius: 4px; border: 1px solid var(--border); }
     input[type="range"] { width: 120px; }
     .range-value { font-size: 0.8rem; color: var(--text-muted); margin-left: 0.5rem; min-width: 2.5rem; display: inline-block; }
+
     .status-bar { padding: 0.75rem; background: #f3f4f6; border-radius: 6px; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; }
     .status-bar.error { background: #fef2f2; color: var(--danger); }
     .status-bar.ok { background: #ecfdf5; color: var(--success); }
     textarea { width: 100%; min-height: 120px; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; resize: vertical; font-family: inherit; box-sizing: border-box; transition: border-color 0.2s; }
     textarea:focus { outline: none; border-color: var(--accent); }
+
+    .share-option { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; font-size: 0.9rem; color: var(--text-muted); }
     .controls { display: flex; gap: 0.5rem; margin-top: 1rem; justify-content: flex-end; }
     button { padding: 0.6rem 1.2rem; border: none; border-radius: 6px; font-weight: 500; cursor: pointer; transition: opacity 0.2s; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -36,13 +39,19 @@
     .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
     .btn-ghost { background: transparent; color: var(--text-muted); }
     .btn-ghost:hover { background: #f3f4f6; }
+
     .section-title { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 2rem 0 1rem 0; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
     .note-list { list-style: none; padding: 0; margin: 0; }
     .note-item { padding: 1rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
     .note-item:last-child { border-bottom: none; }
     .note-content { flex: 1; white-space: pre-wrap; line-height: 1.5; }
-    .note-meta { font-size: 0.75rem; color: var(--text-muted); text-align: right; min-width: 60px; }
+    .note-meta { font-size: 0.75rem; color: var(--text-muted); text-align: right; min-width: 60px; white-space: nowrap; }
     .score-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; background: #eff6ff; color: var(--accent); font-weight: 600; font-family: var(--font-mono); }
+    .vote-buttons { display: flex; align-items: center; gap: 0.25rem; }
+    .vote-btn { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 0.15rem 0.4rem; cursor: pointer; font-size: 0.8rem; }
+    .vote-btn:hover { background: #f3f4f6; }
+    .vote-count { font-weight: 500; font-size: 0.8rem; min-width: 1.5rem; text-align: center; }
+    .ad-badge { background: #fef3c7; color: #92400e; font-size: 0.7rem; padding: 1px 5px; border-radius: 3px; margin-left: 0.5rem; }
     .empty-state { text-align: center; color: var(--text-muted); padding: 2rem 0; font-style: italic; }
     .hint { font-size: 0.75rem; color: var(--text-muted); font-weight: normal; margin-left: 0.5rem; }
     .spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 6px; }
@@ -52,16 +61,16 @@
 <body>
 <div class="app">
   <h1>
-    Semantic Notebook
-    <button id="settingsToggle" class="settings-toggle">⚙️ Настройки</button>
+    Noosphere
+    <button id="settingsToggle" class="settings-toggle">⚙️</button>
   </h1>
 
   <div id="settingsPanel" class="settings-panel">
     <div class="setting-row">
       <span class="setting-label">Модель:</span>
       <select id="modelSelect">
-        <option value="Xenova/paraphrase-multilingual-MiniLM-L12-v2" selected>MiniLM multilingual (быстрая, 25 МБ)</option>
-        <option value="Xenova/distiluse-base-multilingual-cased-v2">DistilUSE multilingual (точнее, 90 МБ)</option>
+        <option value="Xenova/paraphrase-multilingual-MiniLM-L12-v2" selected>MiniLM (быстрая, 25 МБ)</option>
+        <option value="Xenova/distiluse-base-multilingual-cased-v2">DistilUSE (точнее, 90 МБ)</option>
       </select>
     </div>
     <div class="setting-row">
@@ -79,21 +88,36 @@
         <option value="10">10</option>
       </select>
     </div>
+    <div class="setting-row">
+      <span class="setting-label">Глобальный поиск:</span>
+      <input type="checkbox" id="globalSearchCheckbox" checked>
+    </div>
     <button id="applySettingsBtn" class="btn-primary" style="width:100%; margin-top:0.5rem;">Применить и переиндексировать</button>
   </div>
 
   <div id="status" class="status-bar"><span class="spinner"></span> Инициализация...</div>
-  <textarea id="input" placeholder="Начните вводить заметку..." disabled></textarea>
+  <textarea id="input" placeholder="Поделитесь мыслью..." disabled></textarea>
+  <div class="share-option">
+    <input type="checkbox" id="shareCheckbox"> <label for="shareCheckbox">Поделиться с миром (анонимно)</label>
+  </div>
   <div class="controls">
     <button id="clearBtn" class="btn-ghost" disabled>Очистить всё</button>
     <button id="saveBtn" class="btn-primary" disabled>Сохранить (Ctrl+Enter)</button>
   </div>
+
   <div class="section-title">
-    Семантически связанные заметки
+    🧠 Мои заметки (связанные)
     <span id="thresholdInfo" class="hint"></span>
   </div>
   <ul id="relatedList" class="note-list"></ul>
-  <div class="section-title">Архив заметок</div>
+
+  <div class="section-title">
+    🌍 Коллективная память
+    <span id="globalInfo" class="hint"></span>
+  </div>
+  <ul id="globalList" class="note-list"></ul>
+
+  <div class="section-title">📚 Архив (все мои заметки)</div>
   <ul id="archiveList" class="note-list"></ul>
 </div>
 
@@ -105,20 +129,22 @@ const Settings = {
   modelName: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
   threshold: 0.15,
   maxResults: 5,
+  globalSearch: true,
   load() {
     try {
-      const saved = JSON.parse(localStorage.getItem('semantic_settings'));
+      const saved = JSON.parse(localStorage.getItem('noosphere_settings'));
       if (saved) Object.assign(this, saved);
     } catch(e) {}
   },
   save() {
-    localStorage.setItem('semantic_settings', JSON.stringify({
-      modelName: this.modelName, threshold: this.threshold, maxResults: this.maxResults
+    localStorage.setItem('noosphere_settings', JSON.stringify({
+      modelName: this.modelName, threshold: this.threshold,
+      maxResults: this.maxResults, globalSearch: this.globalSearch
     }));
   }
 };
 
-// --- Векторная математика ---
+// --- Математика ---
 const VectorMath = {
   normalize(vec) {
     const mag = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
@@ -132,21 +158,52 @@ const VectorMath = {
   }
 };
 
-// --- Хранилище заметок ---
-const Store = {
+// --- Локальное хранилище заметок (личное) ---
+const LocalStore = {
   notes: [],
   load() {
-    try { this.notes = JSON.parse(localStorage.getItem('semantic_notes') || '[]'); }
+    try { this.notes = JSON.parse(localStorage.getItem('noosphere_local_notes') || '[]'); }
     catch(e) { this.notes = []; }
   },
-  save() { localStorage.setItem('semantic_notes', JSON.stringify(this.notes)); },
+  save() { localStorage.setItem('noosphere_local_notes', JSON.stringify(this.notes)); },
   add(text) {
     const note = { id: Date.now(), text, createdAt: new Date().toISOString() };
     this.notes.unshift(note);
     this.save();
     return note;
   },
-  clear() { this.notes = []; localStorage.removeItem('semantic_notes'); }
+  clear() { this.notes = []; localStorage.removeItem('noosphere_local_notes'); }
+};
+
+// --- Глобальное хранилище (симуляция сервера) ---
+const GlobalStore = {
+  notes: [],   // { id, vector: number[], upvotes, downvotes, isAd }
+  load() {
+    try { this.notes = JSON.parse(localStorage.getItem('noosphere_global_notes') || '[]'); }
+    catch(e) { this.notes = []; }
+  },
+  save() { localStorage.setItem('noosphere_global_notes', JSON.stringify(this.notes)); },
+  add(vector, isAd = false) {
+    const id = 'g_' + Date.now() + Math.random();
+    const note = {
+      id,
+      vector: Array.from(vector),   // сериализуем Float32Array
+      upvotes: 0,
+      downvotes: 0,
+      isAd
+    };
+    this.notes.unshift(note);
+    this.save();
+    return note;
+  },
+  upvote(id) {
+    const note = this.notes.find(n => n.id === id);
+    if (note) { note.upvotes++; this.save(); }
+  },
+  downvote(id) {
+    const note = this.notes.find(n => n.id === id);
+    if (note) { note.downvotes++; this.save(); }
+  }
 };
 
 // --- UI ---
@@ -157,15 +214,19 @@ const UI = {
     saveBtn: document.getElementById('saveBtn'),
     clearBtn: document.getElementById('clearBtn'),
     relatedList: document.getElementById('relatedList'),
+    globalList: document.getElementById('globalList'),
     archiveList: document.getElementById('archiveList'),
     thresholdInfo: document.getElementById('thresholdInfo'),
+    globalInfo: document.getElementById('globalInfo'),
     settingsToggle: document.getElementById('settingsToggle'),
     settingsPanel: document.getElementById('settingsPanel'),
     modelSelect: document.getElementById('modelSelect'),
     thresholdSlider: document.getElementById('thresholdSlider'),
     thresholdValue: document.getElementById('thresholdValue'),
     maxResultsSelect: document.getElementById('maxResultsSelect'),
-    applySettingsBtn: document.getElementById('applySettingsBtn')
+    globalSearchCheckbox: document.getElementById('globalSearchCheckbox'),
+    applySettingsBtn: document.getElementById('applySettingsBtn'),
+    shareCheckbox: document.getElementById('shareCheckbox')
   },
   setStatus(msg, type = '') {
     this.elements.status.innerHTML = msg;
@@ -180,11 +241,11 @@ const UI = {
   },
   renderArchive() {
     const list = this.elements.archiveList;
-    if (!Store.notes.length) {
-      list.innerHTML = '<div class="empty-state">Нет сохраненных заметок</div>';
+    if (!LocalStore.notes.length) {
+      list.innerHTML = '<div class="empty-state">Нет сохранённых мыслей</div>';
       return;
     }
-    list.innerHTML = Store.notes.map(n => `
+    list.innerHTML = LocalStore.notes.map(n => `
       <li class="note-item">
         <div class="note-content">${this.escapeHtml(n.text)}</div>
         <div class="note-meta">${new Date(n.createdAt).toLocaleDateString()}</div>
@@ -195,7 +256,7 @@ const UI = {
     const list = this.elements.relatedList;
     const info = this.elements.thresholdInfo;
     if (!results || results.length === 0) {
-      list.innerHTML = '<div class="empty-state">Нет заметок с достаточным сходством</div>';
+      list.innerHTML = '<div class="empty-state">Нет похожих личных мыслей</div>';
       info.textContent = `(порог ${Settings.threshold.toFixed(2)})`;
       return;
     }
@@ -207,6 +268,40 @@ const UI = {
     `).join('');
     info.textContent = `найдено ${results.length} · макс. ${results[0].score.toFixed(2)}`;
   },
+  renderGlobal(results) {
+    const list = this.elements.globalList;
+    const info = this.elements.globalInfo;
+    if (!Settings.globalSearch) {
+      list.innerHTML = '<div class="empty-state">Глобальный поиск отключён</div>';
+      info.textContent = '';
+      return;
+    }
+    if (!results || results.length === 0) {
+      list.innerHTML = '<div class="empty-state">В коллективной памяти ничего не найдено</div>';
+      info.textContent = '';
+      return;
+    }
+    list.innerHTML = results.map(r => {
+      const net = r.upvotes - r.downvotes;
+      return `
+        <li class="note-item">
+          <div class="note-content">
+            ${r.isAd ? '<span class="ad-badge">Реклама</span> ' : ''}
+            <span class="score-badge">${r.score.toFixed(2)}</span>
+            (идея #${r.id.slice(-4)})
+          </div>
+          <div class="note-meta">
+            <div class="vote-buttons">
+              <button class="vote-btn" data-id="${r.id}" data-action="up">👍</button>
+              <span class="vote-count">${net > 0 ? '+' + net : net}</span>
+              <button class="vote-btn" data-id="${r.id}" data-action="down">👎</button>
+            </div>
+          </div>
+        </li>
+      `;
+    }).join('');
+    info.textContent = `найдено ${results.length}`;
+  },
   escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -214,24 +309,18 @@ const UI = {
   }
 };
 
-// --- Движок (исправлен!) ---
+// --- Движок (с mean pooling) ---
 const Engine = {
   model: null,
-  vectorCache: new Map(),
+  localCache: new Map(),   // id -> Float32Array
 
-  /** Получить эмбеддинг текста (правильный mean pooling) */
   async getEmbedding(text) {
     if (!this.model) throw new Error('Модель не загружена');
     const output = await this.model([text]);
-    // output: { data: Float32Array, dims: number[] }
-    // dims = [batch, tokens, hidden_size]
     const { data, dims } = output;
     const [batch, tokens, hidden] = dims;
-    if (!tokens || !hidden) {
-      // если уже одномерный (баг?), берем как есть
-      return VectorMath.normalize(data);
-    }
-    // Вычисляем среднее по токенам (mean pooling)
+    if (!tokens || !hidden) return VectorMath.normalize(data);
+    // Mean pooling
     const embedding = new Float32Array(hidden);
     for (let t = 0; t < tokens; t++) {
       const offset = t * hidden;
@@ -239,7 +328,6 @@ const Engine = {
         embedding[h] += data[offset + h];
       }
     }
-    // делим на количество токенов
     for (let h = 0; h < hidden; h++) {
       embedding[h] /= tokens;
     }
@@ -249,14 +337,13 @@ const Engine = {
   async init() {
     try {
       UI.setStatus('<span class="spinner"></span> Загрузка модели...');
-      this.model = await pipeline('feature-extraction', Settings.modelName, {
-        quantized: true
-      });
-      await this.reindexAll();
+      this.model = await pipeline('feature-extraction', Settings.modelName, { quantized: true });
+      await this.reindexLocal();
       UI.setStatus('Система готова', 'ok');
       UI.setLoading(false);
       UI.renderArchive();
       UI.renderRelated([]);
+      UI.renderGlobal([]);
     } catch(e) {
       UI.setStatus(`Ошибка: ${e.message}`, 'error');
       UI.setLoading(false);
@@ -264,46 +351,50 @@ const Engine = {
     }
   },
 
-  async reindexAll() {
+  async reindexLocal() {
     if (!this.model) return;
-    this.vectorCache.clear();
-    if (!Store.notes.length) return;
-    UI.setStatus('<span class="spinner"></span> Переиндексация архива...');
-    for (const note of Store.notes) {
-      try {
-        await this.vectorize(note.id, note.text);
-      } catch(e) { console.warn(`Пропущена заметка ${note.id}`, e); }
+    this.localCache.clear();
+    if (!LocalStore.notes.length) return;
+    UI.setStatus('<span class="spinner"></span> Индексация личных мыслей...');
+    for (const note of LocalStore.notes) {
+      try { await this.vectorizeLocal(note.id, note.text); } catch(e) { console.warn(e); }
     }
   },
 
-  async vectorize(id, text) {
+  async vectorizeLocal(id, text) {
     if (!this.model) return null;
-    if (this.vectorCache.has(id)) return this.vectorCache.get(id);
+    if (this.localCache.has(id)) return this.localCache.get(id);
     const vec = await this.getEmbedding(text);
-    this.vectorCache.set(id, vec);
+    this.localCache.set(id, vec);
     return vec;
   },
 
-  async search(queryText) {
-    if (!queryText.trim() || !this.model) return [];
-    const queryVec = await this.getEmbedding(queryText);
+  // Поиск по личным заметкам
+  async searchLocal(queryVec) {
     const results = [];
-    for (const note of Store.notes) {
-      const noteVec = this.vectorCache.get(note.id);
+    for (const note of LocalStore.notes) {
+      const noteVec = this.localCache.get(note.id);
       if (!noteVec) continue;
       const score = VectorMath.cosineSimilarity(queryVec, noteVec);
       if (score > Settings.threshold) {
         results.push({ ...note, score });
       }
     }
-    const sorted = results.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults);
-    console.log(`🔍 "${queryText}" → найдено ${sorted.length}`, sorted);
-    if (sorted.length === 0) {
-      UI.setStatus('🔍 Нет похожих заметок', '');
-    } else {
-      UI.setStatus(`🔍 Найдено ${sorted.length} (макс. ${sorted[0].score.toFixed(2)})`, 'ok');
+    return results.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults);
+  },
+
+  // Поиск по глобальным заметкам
+  async searchGlobal(queryVec) {
+    if (!Settings.globalSearch) return [];
+    const results = [];
+    for (const gnote of GlobalStore.notes) {
+      const vec = new Float32Array(gnote.vector);
+      const score = VectorMath.cosineSimilarity(queryVec, vec);
+      if (score > Settings.threshold) {
+        results.push({ ...gnote, score });
+      }
     }
-    return sorted;
+    return results.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults);
   }
 };
 
@@ -312,6 +403,7 @@ async function applySettings(needReindex = true) {
   Settings.modelName = UI.elements.modelSelect.value;
   Settings.threshold = parseFloat(UI.elements.thresholdSlider.value);
   Settings.maxResults = parseInt(UI.elements.maxResultsSelect.value);
+  Settings.globalSearch = UI.elements.globalSearchCheckbox.checked;
   Settings.save();
 
   UI.elements.thresholdValue.textContent = Settings.threshold.toFixed(2);
@@ -319,45 +411,54 @@ async function applySettings(needReindex = true) {
 
   if (needReindex) {
     UI.setLoading(true);
-    UI.setStatus('<span class="spinner"></span> Загрузка новой модели...');
+    UI.setStatus('<span class="spinner"></span> Загрузка модели...');
     try {
       Engine.model = null;
-      Engine.vectorCache.clear();
+      Engine.localCache.clear();
       Engine.model = await pipeline('feature-extraction', Settings.modelName, { quantized: true });
-      await Engine.reindexAll();
+      await Engine.reindexLocal();
       UI.setStatus('Настройки применены', 'ok');
       UI.setLoading(false);
       UI.renderArchive();
       UI.renderRelated([]);
+      UI.renderGlobal([]);
     } catch(e) {
       UI.setStatus(`Ошибка: ${e.message}`, 'error');
       UI.setLoading(false);
       console.error(e);
     }
   } else {
-    const currentQuery = UI.elements.input.value;
-    if (currentQuery.trim()) {
-      const results = await Engine.search(currentQuery);
-      UI.renderRelated(results);
+    // Просто пересчитать результаты поиска с новым порогом
+    const query = UI.elements.input.value.trim();
+    if (query) {
+      const qVec = await Engine.getEmbedding(query);
+      const localRes = await Engine.searchLocal(qVec);
+      const globalRes = await Engine.searchGlobal(qVec);
+      UI.renderRelated(localRes);
+      UI.renderGlobal(globalRes);
     }
   }
 }
 
-// --- Старт ---
+// --- Инициализация ---
 (async function() {
   Settings.load();
-  Store.load();
+  LocalStore.load();
+  GlobalStore.load();
 
+  // Синхронизация UI с настройками
   UI.elements.modelSelect.value = Settings.modelName;
   UI.elements.thresholdSlider.value = Settings.threshold;
   UI.elements.thresholdValue.textContent = Settings.threshold.toFixed(2);
   UI.elements.maxResultsSelect.value = Settings.maxResults;
+  UI.elements.globalSearchCheckbox.checked = Settings.globalSearch;
 
-  // UI handlers
+  // Обработчики
   UI.elements.settingsToggle.onclick = () => UI.elements.settingsPanel.classList.toggle('open');
   UI.elements.thresholdSlider.oninput = (e) => UI.elements.thresholdValue.textContent = parseFloat(e.target.value).toFixed(2);
   UI.elements.thresholdSlider.onchange = () => applySettings(false);
   UI.elements.maxResultsSelect.onchange = () => applySettings(false);
+  UI.elements.globalSearchCheckbox.onchange = () => applySettings(false);
   UI.elements.applySettingsBtn.onclick = () => applySettings(true);
 
   await Engine.init();
@@ -366,20 +467,46 @@ async function applySettings(needReindex = true) {
   UI.elements.input.oninput = (e) => {
     clearTimeout(debounce);
     debounce = setTimeout(async () => {
-      const results = await Engine.search(e.target.value);
-      UI.renderRelated(results);
+      const query = e.target.value.trim();
+      if (!query) {
+        UI.renderRelated([]);
+        UI.renderGlobal([]);
+        return;
+      }
+      const qVec = await Engine.getEmbedding(query);
+      const [localRes, globalRes] = await Promise.all([
+        Engine.searchLocal(qVec),
+        Engine.searchGlobal(qVec)
+      ]);
+      UI.renderRelated(localRes);
+      UI.renderGlobal(globalRes);
     }, 400);
   };
 
+  // Сохранение
   async function saveNote() {
     const text = UI.elements.input.value.trim();
     if (!text) return;
-    const note = Store.add(text);
-    try { await Engine.vectorize(note.id, note.text); } catch(e) { console.warn(e); }
+    const share = UI.elements.shareCheckbox.checked;
+
+    // 1. Локальное сохранение
+    const note = LocalStore.add(text);
+    try { await Engine.vectorizeLocal(note.id, note.text); } catch(e) { console.warn(e); }
+
+    // 2. Если поделиться – отправляем вектор в глобальное хранилище (без текста)
+    if (share) {
+      try {
+        const vec = await Engine.getEmbedding(text);
+        GlobalStore.add(vec, false);   // isAd = false (можно менять вручную)
+      } catch(e) { console.warn('Ошибка при публикации', e); }
+    }
+
     UI.renderArchive();
     UI.elements.input.value = '';
+    UI.elements.shareCheckbox.checked = false;
     UI.renderRelated([]);
-    UI.setStatus('Заметка сохранена', 'ok');
+    UI.renderGlobal([]);
+    UI.setStatus('Мысль сохранена' + (share ? ' и опубликована' : ''), 'ok');
     setTimeout(() => UI.setStatus('Система готова', 'ok'), 2000);
   }
 
@@ -387,15 +514,34 @@ async function applySettings(needReindex = true) {
   UI.elements.input.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveNote(); }
   });
+
   UI.elements.clearBtn.onclick = () => {
-    if (confirm('Удалить все заметки?')) {
-      Store.clear();
-      Engine.vectorCache.clear();
+    if (confirm('Удалить все ваши локальные мысли?')) {
+      LocalStore.clear();
+      Engine.localCache.clear();
       UI.renderArchive();
       UI.renderRelated([]);
       UI.elements.input.value = '';
     }
   };
+
+  // Обработка голосования (делегирование событий)
+  document.getElementById('globalList').addEventListener('click', (e) => {
+    const btn = e.target.closest('.vote-btn');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    const action = btn.dataset.action;
+    if (action === 'up') GlobalStore.upvote(id);
+    else if (action === 'down') GlobalStore.downvote(id);
+    // Перерисовать глобальный список, чтобы обновить счётчики
+    const currentQuery = UI.elements.input.value.trim();
+    if (currentQuery) {
+      // небольшой хак: перезапустить поиск глобально
+      Engine.getEmbedding(currentQuery).then(qVec => {
+        return Engine.searchGlobal(qVec);
+      }).then(globalRes => UI.renderGlobal(globalRes));
+    }
+  });
 })();
 </script>
 </body>
