@@ -2,613 +2,499 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Noosphere – коллективная память v2</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Noosphere – коллективная память</title>
   <style>
     :root {
-      --bg: #f4f6f8; --surface: #ffffff; --text: #1f2937;
-      --text-muted: #6b7280; --border: #e5e7eb; --accent: #2563eb;
-      --accent-hover: #1d4ed8; --danger: #ef4444; --success: #10b981;
-      --font-mono: 'SF Mono', 'Fira Code', monospace;
+      --bg: #f8fafc; --surface: #ffffff; --text: #0f172a;
+      --text-secondary: #64748b; --border: #e2e8f0; --accent: #3b82f6;
+      --accent-hover: #2563eb; --danger: #ef4444; --success: #10b981;
+      --warning: #f59e0b; --shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.05);
+      --radius: 16px; --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     }
-    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 2rem; display: flex; justify-content: center; }
-    .app { width: 100%; max-width: 750px; background: var(--surface); border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); padding: 2rem; }
-    h1 { margin: 0 0 0.75rem 0; font-size: 1.5rem; letter-spacing: -0.025em; display: flex; justify-content: space-between; align-items: center; }
-    .settings-toggle { background: none; border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.8rem; cursor: pointer; font-size: 0.85rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.25rem; }
-    .settings-toggle:hover { background: #f3f4f6; }
-    .settings-panel { margin: 1rem 0 1.5rem; padding: 1rem; background: #f9fafb; border-radius: 8px; border: 1px solid var(--border); display: none; }
-    .settings-panel.open { display: block; }
-    .setting-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; flex-wrap: wrap; }
-    .setting-row:last-child { margin-bottom: 0; }
-    .setting-label { font-size: 0.9rem; color: var(--text); min-width: 140px; }
-    select, input[type="range"] { font-size: 0.9rem; padding: 0.25rem 0.5rem; border-radius: 4px; border: 1px solid var(--border); }
-    input[type="range"] { width: 120px; }
-    .range-value { font-size: 0.8rem; color: var(--text-muted); margin-left: 0.5rem; min-width: 2.5rem; display: inline-block; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; -webkit-tap-highlight-color: transparent; }
+    .app { max-width: 800px; margin: 0 auto; padding: 1rem; }
 
-    .status-bar { padding: 0.75rem; background: #f3f4f6; border-radius: 6px; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; }
-    .status-bar.error { background: #fef2f2; color: var(--danger); }
-    .status-bar.ok { background: #ecfdf5; color: var(--success); }
-    textarea { width: 100%; min-height: 120px; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; resize: vertical; font-family: inherit; box-sizing: border-box; transition: border-color 0.2s; }
-    textarea:focus { outline: none; border-color: var(--accent); }
+    /* Header */
+    .app-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
+    .logo { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.025em; color: var(--text); }
+    .btn { padding: 0.6rem 1.2rem; border-radius: 12px; font-weight: 500; border: none; cursor: pointer; transition: all var(--transition); background: var(--accent); color: white; }
+    .btn:hover:not(:disabled) { background: var(--accent-hover); transform: translateY(-1px); box-shadow: var(--shadow); }
+    .btn:active:not(:disabled) { transform: translateY(0); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
+    .btn-ghost:hover { background: #f1f5f9; }
+    .btn-icon { width: 40px; height: 40px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
 
-    .share-option { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; font-size: 0.9rem; color: var(--text-muted); }
-    .controls { display: flex; gap: 0.5rem; margin-top: 1rem; justify-content: flex-end; }
-    button { padding: 0.6rem 1.2rem; border: none; border-radius: 6px; font-weight: 500; cursor: pointer; transition: opacity 0.2s; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-primary { background: var(--accent); color: white; }
-    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
-    .btn-ghost { background: transparent; color: var(--text-muted); }
-    .btn-ghost:hover { background: #f3f4f6; }
-
-    .section-title { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 2rem 0 1rem 0; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
-
-    /* Горизонтальные прокручиваемые списки */
-    .scroll-list { display: flex; overflow-x: auto; gap: 0.75rem; padding-bottom: 0.5rem; scroll-snap-type: x mandatory; }
-    .scroll-list::-webkit-scrollbar { height: 6px; }
-    .scroll-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-
-    .note-card { min-width: 220px; max-width: 280px; background: #f9fafb; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; scroll-snap-align: start; flex-shrink: 0; }
-    .note-card .card-content { font-size: 0.9rem; line-height: 1.4; white-space: pre-wrap; margin-bottom: 0.5rem; }
-    .note-card .card-meta { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; color: var(--text-muted); }
-    .score-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; background: #eff6ff; color: var(--accent); font-weight: 600; font-family: var(--font-mono); }
-    .vote-buttons { display: flex; align-items: center; gap: 0.25rem; }
-    .vote-btn { background: none; border: 1px solid var(--border); border-radius: 4px; padding: 0.15rem 0.4rem; cursor: pointer; font-size: 0.8rem; }
-    .vote-btn:hover { background: #f3f4f6; }
-    .vote-count { font-weight: 500; font-size: 0.8rem; min-width: 1.5rem; text-align: center; }
-    .ad-badge { background: #fef3c7; color: #92400e; font-size: 0.7rem; padding: 1px 5px; border-radius: 3px; margin-left: 0.5rem; }
-
-    .empty-state { text-align: center; color: var(--text-muted); padding: 2rem 0; font-style: italic; }
-    .hint { font-size: 0.75rem; color: var(--text-muted); font-weight: normal; margin-left: 0.5rem; }
-    .spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 6px; }
+    /* Status */
+    .status { padding: 0.75rem 1rem; border-radius: 12px; background: #f1f5f9; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem; transition: all var(--transition); }
+    .status.error { background: #fef2f2; color: #b91c1c; }
+    .status.success { background: #ecfdf5; color: #065f46; }
+    .spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Input area */
+    .input-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1.25rem; box-shadow: var(--shadow); }
+    textarea { width: 100%; border: none; resize: vertical; font-family: inherit; font-size: 1rem; padding: 0.75rem; background: #f8fafc; border-radius: 12px; min-height: 100px; transition: border-color var(--transition); outline: none; }
+    textarea:focus { box-shadow: 0 0 0 3px rgba(59,130,246,0.2); }
+    .input-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; }
+    .share-toggle { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; color: var(--text-secondary); cursor: pointer; user-select: none; }
+    .share-toggle input[type="checkbox"] { width: 1.1rem; height: 1.1rem; accent-color: var(--accent); }
+
+    /* Settings panel (offcanvas style) */
+    .settings-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.3); z-index: 10; display: none; }
+    .settings-overlay.open { display: block; }
+    .settings-panel { position: fixed; top: 0; right: 0; width: 100%; max-width: 380px; height: 100%; background: var(--surface); box-shadow: -4px 0 20px rgba(0,0,0,0.1); z-index: 11; padding: 1.5rem; overflow-y: auto; transform: translateX(100%); transition: transform var(--transition); }
+    .settings-panel.open { transform: translateX(0); }
+    .settings-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+    .settings-title { font-weight: 600; font-size: 1.2rem; }
+    .setting-group { margin-bottom: 1.25rem; }
+    .setting-label { font-size: 0.85rem; font-weight: 500; color: var(--text-secondary); margin-bottom: 0.25rem; display: block; }
+    select, input[type="range"] { width: 100%; padding: 0.5rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem; background: var(--surface); }
+    input[type="range"] { accent-color: var(--accent); }
+    .range-row { display: flex; align-items: center; gap: 0.75rem; }
+    .range-value { min-width: 3rem; font-size: 0.9rem; color: var(--accent); font-weight: 600; }
+
+    /* Sections */
+    .section { margin-bottom: 1.25rem; }
+    .section-title { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: space-between; }
+    .cards-scroll { display: flex; overflow-x: auto; gap: 0.75rem; padding-bottom: 0.5rem; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; }
+    .cards-scroll::-webkit-scrollbar { height: 6px; }
+    .cards-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    .card { min-width: 220px; max-width: 280px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1rem; box-shadow: var(--shadow); scroll-snap-align: start; transition: transform var(--transition); }
+    .card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05); }
+    .card-text { font-size: 0.9rem; line-height: 1.4; margin-bottom: 0.75rem; white-space: pre-wrap; }
+    .card-footer { display: flex; align-items: center; justify-content: space-between; font-size: 0.75rem; color: var(--text-secondary); }
+    .score { background: #eff6ff; color: var(--accent); padding: 2px 8px; border-radius: 20px; font-weight: 600; font-size: 0.7rem; }
+    .votes { display: flex; align-items: center; gap: 0.2rem; }
+    .vote-btn { background: none; border: 1px solid var(--border); border-radius: 50%; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.75rem; cursor: pointer; color: var(--text-secondary); transition: all var(--transition); }
+    .vote-btn:hover { background: #f1f5f9; color: var(--text); }
+    .vote-count { font-weight: 600; margin: 0 0.2rem; min-width: 1.8rem; text-align: center; }
+    .ad-tag { background: #fef3c7; color: #92400e; font-size: 0.65rem; padding: 1px 6px; border-radius: 4px; font-weight: 500; margin-left: 0.25rem; }
+
+    .empty-feed { color: var(--text-secondary); font-style: italic; padding: 1rem 0; text-align: center; width: 100%; }
+
+    /* Archive (my notes) */
+    .archive-list { list-style: none; }
+    .archive-item { padding: 0.75rem 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
+    .archive-item:last-child { border-bottom: none; }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .app { padding: 0.75rem; }
+      .card { min-width: 180px; max-width: 240px; }
+    }
   </style>
 </head>
 <body>
 <div class="app">
-  <h1>
-    Noosphere
-    <button id="settingsToggle" class="settings-toggle">⚙️</button>
-  </h1>
+  <header class="app-header">
+    <div class="logo">🌐 Noosphere</div>
+    <button id="settingsOpenBtn" class="btn btn-icon" aria-label="Настройки">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </header>
 
-  <div id="settingsPanel" class="settings-panel">
-    <div class="setting-row">
-      <span class="setting-label">Модель:</span>
-      <select id="modelSelect">
-        <option value="Xenova/paraphrase-multilingual-MiniLM-L12-v2" selected>MiniLM (быстрая, 25 МБ)</option>
-        <option value="Xenova/distiluse-base-multilingual-cased-v2">DistilUSE (точнее, 90 МБ)</option>
-      </select>
-    </div>
-    <div class="setting-row">
-      <span class="setting-label">Порог сходства (релевантность):</span>
-      <div style="display: flex; align-items: center;">
-        <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.15">
-        <span class="range-value" id="thresholdValue">0.15</span>
+  <div id="status" class="status"><span class="spinner"></span> Инициализация...</div>
+
+  <div class="input-card">
+    <textarea id="noteInput" placeholder="Поделитесь мыслью..."></textarea>
+    <div class="input-actions">
+      <label class="share-toggle">
+        <input type="checkbox" id="shareCheckbox"> Анонимно в мир
+      </label>
+      <div style="display: flex; gap: 0.5rem;">
+        <button id="clearLocalBtn" class="btn btn-ghost">Очистить всё</button>
+        <button id="saveBtn" class="btn">Сохранить</button>
       </div>
     </div>
-    <div class="setting-row">
-      <span class="setting-label">Дельта смежности:</span>
-      <div style="display: flex; align-items: center;">
-        <input type="range" id="serendipitySlider" min="0" max="0.5" step="0.01" value="0.10">
-        <span class="range-value" id="serendipityValue">0.10</span>
-      </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">🧠 Мои связанные мысли</div>
+    <div id="relatedContainer" class="cards-scroll"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">🌍 Релевантные идеи мира</div>
+    <div id="relevantContainer" class="cards-scroll"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">🌀 Смежные (неожиданные связи)</div>
+    <div id="serendipityContainer" class="cards-scroll"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">📚 Архив моих заметок</div>
+    <ul id="archiveList" class="archive-list"></ul>
+  </div>
+</div>
+
+<!-- Settings offcanvas -->
+<div id="settingsOverlay" class="settings-overlay"></div>
+<div id="settingsPanel" class="settings-panel">
+  <div class="settings-header">
+    <span class="settings-title">Настройки</span>
+    <button id="settingsCloseBtn" class="btn-icon btn-ghost" style="width:32px;height:32px;">✕</button>
+  </div>
+  <div class="setting-group">
+    <label class="setting-label">Модель</label>
+    <select id="modelSelect">
+      <option value="Xenova/paraphrase-multilingual-MiniLM-L12-v2">MiniLM (быстрая, ~25 МБ)</option>
+      <option value="Xenova/distiluse-base-multilingual-cased-v2">DistilUSE (точная, ~90 МБ)</option>
+    </select>
+  </div>
+  <div class="setting-group">
+    <label class="setting-label">Порог релевантности</label>
+    <div class="range-row">
+      <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.15">
+      <span class="range-value" id="thresholdValue">0.15</span>
     </div>
-    <div class="setting-row">
-      <span class="setting-label">Мин. рейтинг для показа:</span>
-      <select id="minRatingSelect">
-        <option value="0">0 (показывать всё)</option>
-        <option value="1" selected>1</option>
-        <option value="3">3</option>
-        <option value="5">5</option>
-      </select>
+  </div>
+  <div class="setting-group">
+    <label class="setting-label">Дельта смежности</label>
+    <div class="range-row">
+      <input type="range" id="serendipitySlider" min="0" max="0.5" step="0.01" value="0.10">
+      <span class="range-value" id="serendipityValue">0.10</span>
     </div>
-    <div class="setting-row">
-      <span class="setting-label">Максимум результатов:</span>
-      <select id="maxResultsSelect">
-        <option value="3">3</option>
-        <option value="5" selected>5</option>
-        <option value="10">10</option>
-      </select>
-    </div>
-    <div class="setting-row">
-      <span class="setting-label">Глобальный поиск:</span>
-      <input type="checkbox" id="globalSearchCheckbox" checked>
-    </div>
-    <button id="applySettingsBtn" class="btn-primary" style="width:100%; margin-top:0.5rem;">Применить и переиндексировать</button>
   </div>
-
-  <div id="status" class="status-bar"><span class="spinner"></span> Инициализация...</div>
-  <textarea id="input" placeholder="Поделитесь мыслью..." disabled></textarea>
-  <div class="share-option">
-    <input type="checkbox" id="shareCheckbox"> <label for="shareCheckbox">Поделиться с миром (анонимно)</label>
+  <div class="setting-group">
+    <label class="setting-label">Мин. рейтинг для показа</label>
+    <select id="minRatingSelect">
+      <option value="0">0 (всё)</option>
+      <option value="1" selected>1</option>
+      <option value="3">3</option>
+      <option value="5">5</option>
+    </select>
   </div>
-  <div class="controls">
-    <button id="clearBtn" class="btn-ghost" disabled>Очистить всё</button>
-    <button id="saveBtn" class="btn-primary" disabled>Сохранить (Ctrl+Enter)</button>
+  <div class="setting-group">
+    <label class="setting-label">Макс. результатов</label>
+    <select id="maxResultsSelect">
+      <option value="3">3</option>
+      <option value="5" selected>5</option>
+      <option value="10">10</option>
+    </select>
   </div>
-
-  <div class="section-title">
-    🧠 Мои связанные мысли
-    <span id="thresholdInfo" class="hint"></span>
+  <div class="setting-group">
+    <label class="setting-label">Глобальный поиск</label>
+    <input type="checkbox" id="globalSearchCheckbox" checked style="width: auto;">
   </div>
-  <div id="relatedScroll" class="scroll-list"></div>
-
-  <div class="section-title">
-    🌍 Коллективная память (релевантные)
-    <span id="globalInfo" class="hint"></span>
-  </div>
-  <div id="globalRelevantScroll" class="scroll-list"></div>
-
-  <div class="section-title">
-    🌀 Смежные идеи (неожиданные связи)
-    <span id="serendipityInfo" class="hint"></span>
-  </div>
-  <div id="globalSerendipityScroll" class="scroll-list"></div>
-
-  <div class="section-title">📚 Архив (все мои заметки)</div>
-  <ul id="archiveList" class="note-list"></ul>
+  <button id="applySettingsBtn" class="btn" style="width:100%">Применить и переиндексировать</button>
 </div>
 
 <script type="module">
 import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-// --- Настройки ---
+// ---------- MODULES ----------
+// 1. Settings
 const Settings = {
   modelName: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
   threshold: 0.15,
-  serendipityDelta: 0.10,   // окно для смежных идей: score от (threshold - delta) до threshold
+  serendipityDelta: 0.10,
   minRating: 1,
   maxResults: 5,
   globalSearch: true,
   load() {
-    try {
-      const saved = JSON.parse(localStorage.getItem('noosphere_settings'));
-      if (saved) Object.assign(this, saved);
-    } catch(e) {}
+    try { Object.assign(this, JSON.parse(localStorage.getItem('noosphere_settings') || '{}')); } catch(e) {}
   },
   save() {
     localStorage.setItem('noosphere_settings', JSON.stringify({
-      modelName: this.modelName, threshold: this.threshold,
-      serendipityDelta: this.serendipityDelta, minRating: this.minRating,
-      maxResults: this.maxResults, globalSearch: this.globalSearch
+      modelName: this.modelName, threshold: this.threshold, serendipityDelta: this.serendipityDelta,
+      minRating: this.minRating, maxResults: this.maxResults, globalSearch: this.globalSearch
     }));
   }
 };
 
-// --- Математика ---
-const VectorMath = {
-  normalize(vec) {
-    const mag = Math.sqrt(vec.reduce((s, v) => s + v * v, 0));
-    if (mag === 0) return new Float32Array(vec.length);
-    return new Float32Array(vec.map(v => v / mag));
+// 2. Vector utils
+const Vec = {
+  normalize(v) {
+    const mag = Math.sqrt(v.reduce((s, x) => s + x * x, 0));
+    if (mag === 0) return new Float32Array(v.length);
+    return new Float32Array(v.map(x => x / mag));
   },
-  cosineSimilarity(a, b) {
+  cosine(a, b) {
     let dot = 0;
     for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
     return dot;
   }
 };
 
-// --- Локальное хранилище (личное) ---
-const LocalStore = {
-  notes: [],
-  load() {
-    try { this.notes = JSON.parse(localStorage.getItem('noosphere_local_notes') || '[]'); }
-    catch(e) { this.notes = []; }
-  },
-  save() { localStorage.setItem('noosphere_local_notes', JSON.stringify(this.notes)); },
+// 3. Local store (my notes)
+const MyNotes = {
+  data: [],
+  load() { try { this.data = JSON.parse(localStorage.getItem('noosphere_local') || '[]'); } catch(e) { this.data = []; } },
+  save() { localStorage.setItem('noosphere_local', JSON.stringify(this.data)); },
   add(text) {
-    const note = { id: Date.now(), text, createdAt: new Date().toISOString() };
+    const note = { id: 'l_' + Date.now(), text, date: new Date().toISOString() };
+    this.data.unshift(note);
+    this.save();
+    return note;
+  },
+  clear() { this.data = []; localStorage.removeItem('noosphere_local'); }
+};
+
+// 4. Global store (simulated server)
+const World = {
+  notes: [],
+  load() { try { this.notes = JSON.parse(localStorage.getItem('noosphere_global') || '[]'); } catch(e) { this.notes = []; } },
+  save() { localStorage.setItem('noosphere_global', JSON.stringify(this.notes)); },
+  add(vectorArray) {
+    const note = {
+      id: 'g_' + Date.now() + Math.random(),
+      vec: vectorArray,
+      up: 0, down: 0, isAd: false
+    };
     this.notes.unshift(note);
     this.save();
     return note;
   },
-  clear() { this.notes = []; localStorage.removeItem('noosphere_local_notes'); }
-};
-
-// --- Глобальное хранилище (симуляция сервера) ---
-const GlobalStore = {
-  notes: [],   // { id, vector: number[], upvotes, downvotes, isAd }
-  load() {
-    try { this.notes = JSON.parse(localStorage.getItem('noosphere_global_notes') || '[]'); }
-    catch(e) { this.notes = []; }
-  },
-  save() { localStorage.setItem('noosphere_global_notes', JSON.stringify(this.notes)); },
-  add(vector, isAd = false) {
-    const id = 'g_' + Date.now() + Math.random();
-    const note = { id, vector: Array.from(vector), upvotes: 0, downvotes: 0, isAd };
-    this.notes.unshift(note);
-    this.save();
-    return note;
-  },
-  upvote(id) {
-    const note = this.notes.find(n => n.id === id);
-    if (note) { note.upvotes++; this.save(); }
-  },
-  downvote(id) {
-    const note = this.notes.find(n => n.id === id);
-    if (note) { note.downvotes++; this.save(); }
+  vote(id, up = true) {
+    const n = this.notes.find(n => n.id === id);
+    if (n) { up ? n.up++ : n.down++; this.save(); }
   }
 };
 
-// --- UI ---
-const UI = {
-  elements: {
-    status: document.getElementById('status'),
-    input: document.getElementById('input'),
-    saveBtn: document.getElementById('saveBtn'),
-    clearBtn: document.getElementById('clearBtn'),
-    relatedScroll: document.getElementById('relatedScroll'),
-    globalRelevantScroll: document.getElementById('globalRelevantScroll'),
-    globalSerendipityScroll: document.getElementById('globalSerendipityScroll'),
-    archiveList: document.getElementById('archiveList'),
-    thresholdInfo: document.getElementById('thresholdInfo'),
-    globalInfo: document.getElementById('globalInfo'),
-    serendipityInfo: document.getElementById('serendipityInfo'),
-    settingsToggle: document.getElementById('settingsToggle'),
-    settingsPanel: document.getElementById('settingsPanel'),
-    modelSelect: document.getElementById('modelSelect'),
-    thresholdSlider: document.getElementById('thresholdSlider'),
-    thresholdValue: document.getElementById('thresholdValue'),
-    serendipitySlider: document.getElementById('serendipitySlider'),
-    serendipityValue: document.getElementById('serendipityValue'),
-    minRatingSelect: document.getElementById('minRatingSelect'),
-    maxResultsSelect: document.getElementById('maxResultsSelect'),
-    globalSearchCheckbox: document.getElementById('globalSearchCheckbox'),
-    applySettingsBtn: document.getElementById('applySettingsBtn'),
-    shareCheckbox: document.getElementById('shareCheckbox')
-  },
-  setStatus(msg, type = '') {
-    this.elements.status.innerHTML = msg;
-    this.elements.status.className = `status-bar ${type}`;
-  },
-  setLoading(isLoading) {
-    this.elements.input.disabled = isLoading;
-    this.elements.saveBtn.disabled = isLoading;
-    this.elements.clearBtn.disabled = isLoading;
-    this.elements.applySettingsBtn.disabled = isLoading;
-    this.elements.modelSelect.disabled = isLoading;
-  },
-  renderArchive() {
-    const list = this.elements.archiveList;
-    if (!LocalStore.notes.length) {
-      list.innerHTML = '<div class="empty-state">Нет сохранённых мыслей</div>';
-      return;
-    }
-    list.innerHTML = LocalStore.notes.map(n => `
-      <li class="note-item">
-        <div class="note-content">${this.escapeHtml(n.text)}</div>
-        <div class="note-meta">${new Date(n.createdAt).toLocaleDateString()}</div>
-      </li>
-    `).join('');
-  },
-  renderRelated(results) {
-    const container = this.elements.relatedScroll;
-    const info = this.elements.thresholdInfo;
-    if (!results || results.length === 0) {
-      container.innerHTML = '<div class="empty-state" style="min-width:100%;">Нет похожих личных мыслей</div>';
-      info.textContent = `(порог ${Settings.threshold.toFixed(2)})`;
-      return;
-    }
-    container.innerHTML = results.map(r => `
-      <div class="note-card">
-        <div class="card-content">${this.escapeHtml(r.text)}</div>
-        <div class="card-meta">
-          <span class="score-badge">${r.score.toFixed(2)}</span>
-          <span>${new Date(r.createdAt).toLocaleDateString()}</span>
-        </div>
-      </div>
-    `).join('');
-    info.textContent = `найдено ${results.length}`;
-  },
-  renderGlobalRelevant(results) {
-    const container = this.elements.globalRelevantScroll;
-    const info = this.elements.globalInfo;
-    if (!Settings.globalSearch) {
-      container.innerHTML = '<div class="empty-state" style="min-width:100%;">Глобальный поиск отключён</div>';
-      info.textContent = '';
-      return;
-    }
-    if (!results || results.length === 0) {
-      container.innerHTML = '<div class="empty-state" style="min-width:100%;">Релевантных идей не найдено</div>';
-      info.textContent = '';
-      return;
-    }
-    container.innerHTML = results.map(r => this.globalCard(r)).join('');
-    info.textContent = `найдено ${results.length}`;
-  },
-  renderGlobalSerendipity(results) {
-    const container = this.elements.globalSerendipityScroll;
-    const info = this.elements.serendipityInfo;
-    if (!Settings.globalSearch) {
-      container.innerHTML = '<div class="empty-state" style="min-width:100%;">Отключено</div>';
-      info.textContent = '';
-      return;
-    }
-    if (!results || results.length === 0) {
-      container.innerHTML = '<div class="empty-state" style="min-width:100%;">Смежных идей не найдено</div>';
-      info.textContent = '';
-      return;
-    }
-    container.innerHTML = results.map(r => this.globalCard(r)).join('');
-    info.textContent = `найдено ${results.length}`;
-  },
-  globalCard(r) {
-    const net = r.upvotes - r.downvotes;
-    return `
-      <div class="note-card">
-        <div class="card-content">
-          ${r.isAd ? '<span class="ad-badge">Реклама</span> ' : ''}
-          <span class="score-badge">${r.score.toFixed(2)}</span>
-          (идея #${r.id.slice(-4)})
-        </div>
-        <div class="card-meta">
-          <div class="vote-buttons">
-            <button class="vote-btn" data-id="${r.id}" data-action="up">👍</button>
-            <span class="vote-count">${net > 0 ? '+' + net : net}</span>
-            <button class="vote-btn" data-id="${r.id}" data-action="down">👎</button>
-          </div>
-        </div>
-      </div>
-    `;
-  },
-  escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
+// 5. UI bindings
+const DOM = {
+  status: document.getElementById('status'),
+  input: document.getElementById('noteInput'),
+  saveBtn: document.getElementById('saveBtn'),
+  clearBtn: document.getElementById('clearLocalBtn'),
+  shareChk: document.getElementById('shareCheckbox'),
+  related: document.getElementById('relatedContainer'),
+  relevant: document.getElementById('relevantContainer'),
+  serendipity: document.getElementById('serendipityContainer'),
+  archive: document.getElementById('archiveList'),
+
+  settingsOpen: document.getElementById('settingsOpenBtn'),
+  settingsClose: document.getElementById('settingsCloseBtn'),
+  overlay: document.getElementById('settingsOverlay'),
+  panel: document.getElementById('settingsPanel'),
+  modelSel: document.getElementById('modelSelect'),
+  thresholdSl: document.getElementById('thresholdSlider'),
+  thresholdVal: document.getElementById('thresholdValue'),
+  serendipitySl: document.getElementById('serendipitySlider'),
+  serendipityVal: document.getElementById('serendipityValue'),
+  minRatingSel: document.getElementById('minRatingSelect'),
+  maxResSel: document.getElementById('maxResultsSelect'),
+  globalChk: document.getElementById('globalSearchCheckbox'),
+  applyBtn: document.getElementById('applySettingsBtn')
 };
 
-// --- Движок (с mean pooling) ---
+// 6. Engine (model & search)
 const Engine = {
   model: null,
   localCache: new Map(),
-
+  async init() {
+    DOM.status.innerHTML = '<span class="spinner"></span> Загрузка модели...';
+    try {
+      this.model = await pipeline('feature-extraction', Settings.modelName, { quantized: true });
+      await this.reindexLocal();
+      DOM.status.innerHTML = '✓ Готов к работе';
+      DOM.status.className = 'status success';
+      this.enableUI(true);
+    } catch (e) {
+      DOM.status.innerHTML = '⚠ ' + e.message;
+      DOM.status.className = 'status error';
+      this.enableUI(false);
+    }
+  },
+  enableUI(ok) {
+    DOM.input.disabled = !ok;
+    DOM.saveBtn.disabled = !ok;
+    DOM.clearBtn.disabled = !ok;
+    DOM.applyBtn.disabled = !ok;
+  },
   async getEmbedding(text) {
-    if (!this.model) throw new Error('Модель не загружена');
     const output = await this.model([text]);
     const { data, dims } = output;
     const [batch, tokens, hidden] = dims;
-    if (!tokens || !hidden) return VectorMath.normalize(data);
-    const embedding = new Float32Array(hidden);
+    if (!tokens || !hidden) return Vec.normalize(data);
+    const emb = new Float32Array(hidden);
     for (let t = 0; t < tokens; t++) {
-      const offset = t * hidden;
-      for (let h = 0; h < hidden; h++) {
-        embedding[h] += data[offset + h];
-      }
+      for (let h = 0; h < hidden; h++) emb[h] += data[t * hidden + h];
     }
-    for (let h = 0; h < hidden; h++) embedding[h] /= tokens;
-    return VectorMath.normalize(embedding);
+    for (let h = 0; h < hidden; h++) emb[h] /= tokens;
+    return Vec.normalize(emb);
   },
-
-  async init() {
-    try {
-      UI.setStatus('<span class="spinner"></span> Загрузка модели...');
-      this.model = await pipeline('feature-extraction', Settings.modelName, { quantized: true });
-      await this.reindexLocal();
-      UI.setStatus('Система готова', 'ok');
-      UI.setLoading(false);
-      UI.renderArchive();
-      UI.renderRelated([]);
-      UI.renderGlobalRelevant([]);
-      UI.renderGlobalSerendipity([]);
-    } catch(e) {
-      UI.setStatus(`Ошибка: ${e.message}`, 'error');
-      UI.setLoading(false);
-      console.error(e);
-    }
-  },
-
   async reindexLocal() {
-    if (!this.model) return;
     this.localCache.clear();
-    if (!LocalStore.notes.length) return;
-    UI.setStatus('<span class="spinner"></span> Индексация личных мыслей...');
-    for (const note of LocalStore.notes) {
-      try { await this.vectorizeLocal(note.id, note.text); } catch(e) { console.warn(e); }
+    for (const n of MyNotes.data) {
+      try { await this.cacheNote(n.id, n.text); } catch(e) {}
     }
   },
-
-  async vectorizeLocal(id, text) {
-    if (!this.model) return null;
-    if (this.localCache.has(id)) return this.localCache.get(id);
+  async cacheNote(id, text) {
+    if (this.localCache.has(id)) return;
     const vec = await this.getEmbedding(text);
     this.localCache.set(id, vec);
-    return vec;
   },
-
   async searchLocal(queryVec) {
-    const results = [];
-    for (const note of LocalStore.notes) {
-      const noteVec = this.localCache.get(note.id);
-      if (!noteVec) continue;
-      const score = VectorMath.cosineSimilarity(queryVec, noteVec);
-      if (score > Settings.threshold) {
-        results.push({ ...note, score });
-      }
+    const res = [];
+    for (const n of MyNotes.data) {
+      const v = this.localCache.get(n.id);
+      if (!v) continue;
+      const score = Vec.cosine(queryVec, v);
+      if (score > Settings.threshold) res.push({ ...n, score });
     }
-    return results.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults);
+    return res.sort((a,b) => b.score - a.score).slice(0, Settings.maxResults);
   },
-
-  // Возвращает два массива: релевантные (score >= threshold) и смежные (threshold-delta <= score < threshold)
   async searchGlobal(queryVec) {
-    if (!Settings.globalSearch) return { relevant: [], serendipity: [] };
-    const relevant = [];
-    const serendipity = [];
-    const lowThreshold = Settings.threshold - Settings.serendipityDelta;
-    for (const gnote of GlobalStore.notes) {
-      // Фильтр по рейтингу
-      if ((gnote.upvotes - gnote.downvotes) < Settings.minRating) continue;
-      const vec = new Float32Array(gnote.vector);
-      const score = VectorMath.cosineSimilarity(queryVec, vec);
-      if (score >= Settings.threshold) {
-        relevant.push({ ...gnote, score });
-      } else if (score >= lowThreshold) {
-        serendipity.push({ ...gnote, score });
-      }
+    if (!Settings.globalSearch) return { rel: [], ser: [] };
+    const rel = [], ser = [];
+    const low = Settings.threshold - Settings.serendipityDelta;
+    for (const n of World.notes) {
+      if ((n.up - n.down) < Settings.minRating) continue;
+      const v = new Float32Array(n.vec);
+      const score = Vec.cosine(queryVec, v);
+      if (score >= Settings.threshold) rel.push({ ...n, score });
+      else if (score >= low) ser.push({ ...n, score });
     }
     return {
-      relevant: relevant.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults),
-      serendipity: serendipity.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults)
+      rel: rel.sort((a,b) => b.score - a.score).slice(0, Settings.maxResults),
+      ser: ser.sort((a,b) => b.score - a.score).slice(0, Settings.maxResults)
     };
   }
 };
 
-// --- Применение настроек ---
-async function applySettings(needReindex = true) {
-  Settings.modelName = UI.elements.modelSelect.value;
-  Settings.threshold = parseFloat(UI.elements.thresholdSlider.value);
-  Settings.serendipityDelta = parseFloat(UI.elements.serendipitySlider.value);
-  Settings.minRating = parseInt(UI.elements.minRatingSelect.value);
-  Settings.maxResults = parseInt(UI.elements.maxResultsSelect.value);
-  Settings.globalSearch = UI.elements.globalSearchCheckbox.checked;
+// 7. Render functions
+function renderCards(container, items, isGlobal = false) {
+  if (!items.length) {
+    container.innerHTML = '<div class="empty-feed">Пока ничего нет</div>';
+    return;
+  }
+  container.innerHTML = items.map(item => {
+    if (isGlobal) {
+      const rating = item.up - item.down;
+      return `<div class="card">
+        <div class="card-text">${item.isAd ? '<span class="ad-tag">реклама</span> ' : ''}<span class="score">${item.score.toFixed(2)}</span> #${item.id.slice(-4)}</div>
+        <div class="card-footer">
+          <div class="votes">
+            <button class="vote-btn" data-id="${item.id}" data-vote="up">👍</button>
+            <span class="vote-count">${rating > 0 ? '+' + rating : rating}</span>
+            <button class="vote-btn" data-id="${item.id}" data-vote="down">👎</button>
+          </div>
+        </div>
+      </div>`;
+    } else {
+      return `<div class="card">
+        <div class="card-text">${escapeHtml(item.text)}</div>
+        <div class="card-footer"><span class="score">${item.score.toFixed(2)}</span><span>${new Date(item.date).toLocaleDateString()}</span></div>
+      </div>`;
+    }
+  }).join('');
+}
+
+function renderArchive() {
+  DOM.archive.innerHTML = MyNotes.data.map(n => `<li class="archive-item"><span>${escapeHtml(n.text)}</span><span style="color:var(--text-secondary)">${new Date(n.date).toLocaleDateString()}</span></li>`).join('');
+}
+
+function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+
+// 8. Event handling & wiring
+async function handleSearch() {
+  const query = DOM.input.value.trim();
+  if (!query) {
+    DOM.related.innerHTML = ''; DOM.relevant.innerHTML = ''; DOM.serendipity.innerHTML = '';
+    return;
+  }
+  try {
+    const qVec = await Engine.getEmbedding(query);
+    const [local, global] = await Promise.all([Engine.searchLocal(qVec), Engine.searchGlobal(qVec)]);
+    renderCards(DOM.related, local, false);
+    renderCards(DOM.relevant, global.rel, true);
+    renderCards(DOM.serendipity, global.ser, true);
+  } catch(e) { console.error(e); }
+}
+
+async function saveNote() {
+  const text = DOM.input.value.trim();
+  if (!text) return;
+  const share = DOM.shareChk.checked;
+  MyNotes.add(text);
+  await Engine.cacheNote(MyNotes.data[0].id, text);
+  if (share) {
+    const vec = await Engine.getEmbedding(text);
+    World.add(Array.from(vec));
+  }
+  DOM.input.value = '';
+  DOM.shareChk.checked = false;
+  renderArchive();
+  handleSearch();
+}
+
+function applySettings(reloadModel = true) {
+  Settings.modelName = DOM.modelSel.value;
+  Settings.threshold = +DOM.thresholdSl.value;
+  Settings.serendipityDelta = +DOM.serendipitySl.value;
+  Settings.minRating = +DOM.minRatingSel.value;
+  Settings.maxResults = +DOM.maxResSel.value;
+  Settings.globalSearch = DOM.globalChk.checked;
   Settings.save();
+  DOM.thresholdVal.textContent = Settings.threshold.toFixed(2);
+  DOM.serendipityVal.textContent = Settings.serendipityDelta.toFixed(2);
 
-  UI.elements.thresholdValue.textContent = Settings.threshold.toFixed(2);
-  UI.elements.serendipityValue.textContent = Settings.serendipityDelta.toFixed(2);
-  UI.elements.thresholdInfo.textContent = `(порог ${Settings.threshold.toFixed(2)})`;
-
-  if (needReindex) {
-    UI.setLoading(true);
-    UI.setStatus('<span class="spinner"></span> Загрузка модели...');
-    try {
-      Engine.model = null;
-      Engine.localCache.clear();
-      Engine.model = await pipeline('feature-extraction', Settings.modelName, { quantized: true });
-      await Engine.reindexLocal();
-      UI.setStatus('Настройки применены', 'ok');
-      UI.setLoading(false);
-      UI.renderArchive();
-      UI.renderRelated([]);
-      UI.renderGlobalRelevant([]);
-      UI.renderGlobalSerendipity([]);
-    } catch(e) {
-      UI.setStatus(`Ошибка: ${e.message}`, 'error');
-      UI.setLoading(false);
-      console.error(e);
-    }
+  if (reloadModel) {
+    Engine.model = null;
+    Engine.localCache.clear();
+    DOM.status.innerHTML = '<span class="spinner"></span> Переключение модели...';
+    DOM.status.className = 'status';
+    Engine.init().then(() => { renderArchive(); handleSearch(); });
   } else {
-    const query = UI.elements.input.value.trim();
-    if (query) {
-      const qVec = await Engine.getEmbedding(query);
-      const localRes = await Engine.searchLocal(qVec);
-      const { relevant, serendipity } = await Engine.searchGlobal(qVec);
-      UI.renderRelated(localRes);
-      UI.renderGlobalRelevant(relevant);
-      UI.renderGlobalSerendipity(serendipity);
-    }
+    handleSearch();
   }
 }
 
-// --- Инициализация ---
-(async function() {
+// Init
+(async () => {
   Settings.load();
-  LocalStore.load();
-  GlobalStore.load();
+  MyNotes.load();
+  World.load();
 
-  UI.elements.modelSelect.value = Settings.modelName;
-  UI.elements.thresholdSlider.value = Settings.threshold;
-  UI.elements.thresholdValue.textContent = Settings.threshold.toFixed(2);
-  UI.elements.serendipitySlider.value = Settings.serendipityDelta;
-  UI.elements.serendipityValue.textContent = Settings.serendipityDelta.toFixed(2);
-  UI.elements.minRatingSelect.value = Settings.minRating;
-  UI.elements.maxResultsSelect.value = Settings.maxResults;
-  UI.elements.globalSearchCheckbox.checked = Settings.globalSearch;
+  // Sync UI
+  DOM.modelSel.value = Settings.modelName;
+  DOM.thresholdSl.value = Settings.threshold;
+  DOM.thresholdVal.textContent = Settings.threshold.toFixed(2);
+  DOM.serendipitySl.value = Settings.serendipityDelta;
+  DOM.serendipityVal.textContent = Settings.serendipityDelta.toFixed(2);
+  DOM.minRatingSel.value = Settings.minRating;
+  DOM.maxResSel.value = Settings.maxResults;
+  DOM.globalChk.checked = Settings.globalSearch;
 
-  UI.elements.settingsToggle.onclick = () => UI.elements.settingsPanel.classList.toggle('open');
-  UI.elements.thresholdSlider.oninput = (e) => UI.elements.thresholdValue.textContent = parseFloat(e.target.value).toFixed(2);
-  UI.elements.serendipitySlider.oninput = (e) => UI.elements.serendipityValue.textContent = parseFloat(e.target.value).toFixed(2);
-  UI.elements.thresholdSlider.onchange = () => applySettings(false);
-  UI.elements.serendipitySlider.onchange = () => applySettings(false);
-  UI.elements.minRatingSelect.onchange = () => applySettings(false);
-  UI.elements.maxResultsSelect.onchange = () => applySettings(false);
-  UI.elements.globalSearchCheckbox.onchange = () => applySettings(false);
-  UI.elements.applySettingsBtn.onclick = () => applySettings(true);
+  // Event listeners
+  DOM.settingsOpen.onclick = () => { DOM.overlay.classList.add('open'); DOM.panel.classList.add('open'); };
+  DOM.settingsClose.onclick = DOM.overlay.onclick = () => { DOM.overlay.classList.remove('open'); DOM.panel.classList.remove('open'); };
+  DOM.thresholdSl.oninput = () => DOM.thresholdVal.textContent = parseFloat(DOM.thresholdSl.value).toFixed(2);
+  DOM.serendipitySl.oninput = () => DOM.serendipityVal.textContent = parseFloat(DOM.serendipitySl.value).toFixed(2);
+  DOM.applyBtn.onclick = () => applySettings(true);
+  DOM.thresholdSl.onchange = () => applySettings(false);
+  DOM.serendipitySl.onchange = () => applySettings(false);
+  DOM.minRatingSel.onchange = () => applySettings(false);
+  DOM.maxResSel.onchange = () => applySettings(false);
+  DOM.globalChk.onchange = () => applySettings(false);
 
-  await Engine.init();
+  DOM.input.oninput = debounce(handleSearch, 400);
+  DOM.saveBtn.onclick = saveNote;
+  DOM.clearBtn.onclick = () => { if (confirm('Удалить все мои заметки?')) { MyNotes.clear(); Engine.localCache.clear(); renderArchive(); handleSearch(); } };
+  DOM.input.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveNote(); } });
 
-  let debounce;
-  UI.elements.input.oninput = (e) => {
-    clearTimeout(debounce);
-    debounce = setTimeout(async () => {
-      const query = e.target.value.trim();
-      if (!query) {
-        UI.renderRelated([]);
-        UI.renderGlobalRelevant([]);
-        UI.renderGlobalSerendipity([]);
-        return;
-      }
-      const qVec = await Engine.getEmbedding(query);
-      const [localRes, globalRes] = await Promise.all([
-        Engine.searchLocal(qVec),
-        Engine.searchGlobal(qVec)
-      ]);
-      UI.renderRelated(localRes);
-      UI.renderGlobalRelevant(globalRes.relevant);
-      UI.renderGlobalSerendipity(globalRes.serendipity);
-    }, 400);
-  };
-
-  async function saveNote() {
-    const text = UI.elements.input.value.trim();
-    if (!text) return;
-    const share = UI.elements.shareCheckbox.checked;
-
-    const note = LocalStore.add(text);
-    try { await Engine.vectorizeLocal(note.id, note.text); } catch(e) { console.warn(e); }
-
-    if (share) {
-      try {
-        const vec = await Engine.getEmbedding(text);
-        GlobalStore.add(vec, false);
-      } catch(e) { console.warn('Ошибка при публикации', e); }
-    }
-
-    UI.renderArchive();
-    UI.elements.input.value = '';
-    UI.elements.shareCheckbox.checked = false;
-    UI.renderRelated([]);
-    UI.renderGlobalRelevant([]);
-    UI.renderGlobalSerendipity([]);
-    UI.setStatus('Мысль сохранена' + (share ? ' и опубликована' : ''), 'ok');
-    setTimeout(() => UI.setStatus('Система готова', 'ok'), 2000);
-  }
-
-  UI.elements.saveBtn.onclick = saveNote;
-  UI.elements.input.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveNote(); }
-  });
-
-  UI.elements.clearBtn.onclick = () => {
-    if (confirm('Удалить все ваши локальные мысли?')) {
-      LocalStore.clear();
-      Engine.localCache.clear();
-      UI.renderArchive();
-      UI.renderRelated([]);
-      UI.elements.input.value = '';
-    }
-  };
-
-  // Делегирование голосования в глобальных списках
-  const handleVote = async (e) => {
+  // Vote delegation
+  document.body.addEventListener('click', async (e) => {
     const btn = e.target.closest('.vote-btn');
     if (!btn) return;
-    const id = btn.dataset.id;
-    const action = btn.dataset.action;
-    if (action === 'up') GlobalStore.upvote(id);
-    else if (action === 'down') GlobalStore.downvote(id);
-    // Пересчитать и перерисовать глобальные секции
-    const query = UI.elements.input.value.trim();
-    if (query) {
-      const qVec = await Engine.getEmbedding(query);
-      const { relevant, serendipity } = await Engine.searchGlobal(qVec);
-      UI.renderGlobalRelevant(relevant);
-      UI.renderGlobalSerendipity(serendipity);
-    }
-  };
+    const id = btn.dataset.id, action = btn.dataset.vote;
+    World.vote(id, action === 'up');
+    await handleSearch();
+  });
 
-  document.getElementById('globalRelevantScroll').addEventListener('click', handleVote);
-  document.getElementById('globalSerendipityScroll').addEventListener('click', handleVote);
+  // Start
+  await Engine.init();
+  renderArchive();
 })();
+
+function debounce(fn, ms) { let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); }; }
 </script>
 </body>
 </html>
