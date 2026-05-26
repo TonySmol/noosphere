@@ -1,129 +1,115 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Умный поиск на GitHub Pages</title>
-    <style>
-        body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
-        input { width: 70%; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 4px; }
-        button { width: 25%; padding: 11px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; font-weight: bold; }
-        button:disabled { background: #cccccc; cursor: not-allowed; }
-        #status { margin: 15px 0; font-weight: bold; color: #555; }
-        ul { list-style-type: none; padding: 0; margin-top: 20px; }
-        li { padding: 12px; background: #f8f9fa; border: 1px solid #dfe2e5; margin-bottom: 8px; border-radius: 4px; }
-        .score { font-weight: bold; color: #28a745; margin-right: 10px; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Semantic Search</title>
+  <style>
+    :root { --bg: #0f172a; --card: #1e293b; --text: #e2e8f0; --ok: #22c55e; --err: #ef4444; --prim: #38bdf8; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 1rem; max-width: 600px; margin: 0 auto; }
+    .status { padding: 0.75rem; margin: 1rem 0; border-radius: 6px; background: var(--card); font-size: 0.9rem; text-align: center; }
+    .status.ok { border-left: 4px solid var(--ok); }
+    .status.err { border-left: 4px solid var(--err); }
+    .input-row { display: flex; gap: 0.5rem; margin: 1rem 0; }
+    input { flex: 1; padding: 0.75rem; border: 1px solid #334155; border-radius: 6px; background: var(--card); color: var(--text); font-size: 1rem; }
+    button { padding: 0.75rem 1.25rem; border: none; border-radius: 6px; background: var(--prim); color: #0f172a; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    ul { list-style: none; margin-top: 1rem; }
+    li { padding: 0.75rem; margin: 0.5rem 0; background: var(--card); border-radius: 6px; }
+    .sc { color: var(--prim); font-weight: 600; margin-right: 0.5rem; }
+    .bar { height: 4px; background: #334155; border-radius: 2px; margin-top: 0.5rem; overflow: hidden; }
+    .bar-fill { height: 100%; background: var(--prim); width: 0%; transition: width 0.3s; }
+  </style>
 </head>
 <body>
+  <h2>Семантический поиск</h2>
+  <div id="status" class="status">Проверка окружения...</div>
+  <div class="bar"><div id="bar" class="bar-fill"></div></div>
+  <div class="input-row">
+    <input id="q" type="text" placeholder="Запрос..." disabled>
+    <button id="btn" disabled>Найти</button>
+  </div>
+  <ul id="res"></ul>
 
-    <h2>Семантический поиск (Один файл на GitHub)</h2>
-    <div id="status">Инициализация...</div>
-    
-    <div style="display: flex; justify-content: space-between;">
-        <input id="q" placeholder="Введите поисковый запрос..." disabled>
-        <button id="btn" disabled>Найти</button>
-    </div>
-    
-    <ul id="res"></ul>
+<script type="module">
+import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@3.0.0';
 
-    <script type="module">
-        // Используем проверенную ветку v2, которая не блокируется CORS на GitHub Pages
-        import { pipeline, env } from 'https://jsdelivr.net';
+if (location.protocol === 'file:') {
+  document.getElementById('status').textContent = '❌ file:// не поддерживается. Запустите через http://localhost или HTTPS.';
+  document.getElementById('status').className = 'status err';
+  throw new Error('Protocol blocked');
+}
 
-        env.allowLocalModels = false;
-        env.useBrowserCache = true; // Кэширует модель в IndexedDB браузера
+env.allowLocalModels = false;
+env.useBrowserCache = true;
 
-        // Ваша база данных для поиска
-        const docs = [
-            "Кошки любят молоко, ловить мышей и спать на теплом солнце.",
-            "JavaScript отлично работает прямо в браузере без всякого сервера.",
-            "Трансформеры используют механизм внимания для обработки контекста текста.",
-            "Node.js позволяет запускать серверный JS код на бэкенде.",
-            "GitHub Pages — отличный бесплатный хостинг для статических сайтов."
-        ];
+const corpus = [
+  "Кошки предпочитают тепло и мягкие поверхности.",
+  "JavaScript выполняется в браузере без серверной части.",
+  "Векторный поиск использует косинусное сходство эмбеддингов.",
+  "Web Workers не работают по протоколу file://.",
+  "Трансформеры опираются на механизм self-attention."
+];
 
-        let extractor;
-        let docEmbeddings = []; // Массив для хранения заранее просчитанных векторов базы
+const statusEl = document.getElementById('status');
+const resEl = document.getElementById('res');
+const qEl = document.getElementById('q');
+const btnEl = document.getElementById('btn');
+const barEl = document.getElementById('bar');
 
-        const statusDiv = document.getElementById('status');
-        const inputField = document.getElementById('q');
-        const searchBtn = document.getElementById('btn');
-        const resultsList = document.getElementById('res');
+let extractor;
+let corpusVecs = [];
 
-        // Автоматический старт при загрузке страницы
-        async function init() {
-            statusDiv.innerText = 'Загрузка ИИ-модели с Hugging Face... (~20 МБ, подождите)';
-            try {
-                // Инициализируем пайплайн
-                extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
-                    pooling: 'mean', 
-                    normalize: true 
-                });
+const setStatus = (msg, type = '') => {
+  statusEl.textContent = msg;
+  statusEl.className = `status ${type}`;
+};
 
-                statusDiv.innerText = 'Индексация базы данных... Просчитываем векторы текстов...';
+async function init() {
+  try {
+    setStatus('Загрузка мультиязычной модели (~25 МБ)...');
+    extractor = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', {
+      pooling: 'mean', normalize: true, quantized: true,
+      progress_callback: s => {
+        if (s.status === 'progress') barEl.style.width = `${(s.progress || 0) * 100}%`;
+        else if (s.status === 'download') setStatus(`Загрузка: ${s.file || 'веса'}...`);
+      }
+    });
 
-                // ВАЖНО: Считаем эмбеддинги для всей базы документов ОДИН РАЗ на старте
-                for (const d of docs) {
-                    const output = await extractor([d]);
-                    docEmbeddings.push({
-                        text: d,
-                        vector: Array.from(output.data)
-                    });
-                }
+    setStatus('Кэширование корпуса...');
+    corpusVecs = await Promise.all(corpus.map(d => extractor([d]).then(o => o.data)));
 
-                statusDiv.innerText = 'ИИ готов к работе! Введите запрос.';
-                statusDiv.style.color = 'green';
-                inputField.disabled = false;
-                searchBtn.disabled = false;
+    setStatus('Готово.', 'ok');
+    qEl.disabled = false; btnEl.disabled = false; qEl.focus();
+  } catch (e) {
+    setStatus(`Ошибка инициализации: ${e.message}`, 'err');
+    console.error(e);
+  }
+}
 
-            } catch (err) {
-                statusDiv.innerText = 'Ошибка инициализации: ' + err.message;
-                statusDiv.style.color = 'red';
-                console.error(err);
-            }
-        }
+const dot = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; };
 
-        // Логика кнопки «Найти»
-        searchBtn.onclick = async () => {
-            const query = inputField.value.trim();
-            if (!query) return;
+async function search() {
+  const txt = qEl.value.trim();
+  if (!txt || !extractor) return;
 
-            statusDiv.innerText = 'Ищем похожие смыслы...';
-            resultsList.innerHTML = '';
+  btnEl.disabled = true; resEl.innerHTML = ''; setStatus('Вычисление...');
+  try {
+    const qVec = (await extractor([txt])).data;
+    const ranked = corpus.map((d, i) => ({ text: d, score: dot(qVec, corpusVecs[i]) }));
+    ranked.sort((a, b) => b.score - a.score);
+    resEl.innerHTML = ranked.map(r => `<li><span class="sc">${r.score.toFixed(3)}</span>${r.text}</li>`).join('');
+    setStatus('Найдено.', 'ok');
+  } catch (e) {
+    setStatus(`Ошибка инференса: ${e.message}`, 'err');
+  } finally { btnEl.disabled = false; }
+}
 
-            // 1. Получаем вектор только для поискового запроса пользователя
-            const queryOutput = await extractor([query]);
-            const qVector = Array.from(queryOutput.data);
+btnEl.onclick = search;
+qEl.onkeydown = e => e.key === 'Enter' && search();
 
-            const similarities = [];
-
-            // 2. Сравниваем готовый вектор запроса со всеми ранее сохраненными векторами документов
-            for (const doc of docEmbeddings) {
-                let dotProduct = 0;
-                // Считаем косинусное сходство (скалярное произведение)
-                for (let i = 0; i < qVector.length; i++) {
-                    dotProduct += qVector[i] * doc.vector[i];
-                }
-                similarities.push({ text: doc.text, score: dotProduct });
-            }
-
-            // 3. Сортируем результаты по релевантности (от большего к меньшему)
-            similarities.sort((a, b) => b.score - a.score);
-
-            statusDiv.innerText = `Результаты поиска для: "${query}"`;
-            
-            // 4. Выводим отсортированный результат на экран
-            resultsList.innerHTML = similarities.map(s => `
-                <li>
-                    <span class="score">${(s.score * 100).toFixed(1)}% совпадение</span>
-                    <span>${s.text}</span>
-                </li>
-            `).join('');
-        };
-
-        // Запуск системы
-        init();
-    </script>
+init();
+</script>
 </body>
 </html>
