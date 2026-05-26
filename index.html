@@ -3,18 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ноосфера v3.0 - Чистый Старт</title>
+    <title>Ноосфера v3.0 - Автоматический ИИ</title>
     
-    <!-- Стабильная рабочая библиотека v3 со 100% незаблокированного CDN зеркала -->
-    <script src="https://cloudflare.com"></script>
+    <!-- Подключаем библиотеку v3 через стабильный ESM-модуль -->
+    <script type="module">
+        import { pipeline, env } from 'https://jsdelivr.net';
 
-    <script>
+        // Настройка, чтобы ИИ автоматически качал модель напрямую из облака
+        env.allowLocalModels = false; 
+
         let pipe = null;
         const notesDatabase = []; 
-
-        document.addEventListener("DOMContentLoaded", () => {
-            initAI();
-        });
 
         function screenLog(message, isError = false) {
             const consoleDiv = document.getElementById('screenConsole');
@@ -27,39 +26,26 @@
 
         async function initAI() {
             screenLog("Старт Ноосферы v3...");
-            
-            if (typeof window.huggingface === 'undefined' || !window.huggingface.transformers) {
-                screenLog("КРИТ: Движок ИИ не подгрузился. Зеркало Cloud заблокировано.", true);
-                return;
-            }
-
-            const { pipeline, env } = window.huggingface.transformers;
-
-            // Настройка стабильности: заставляем ИИ качать файлы через быстрое зеркало hf-mirror
-            env.allowLocalModels = false; 
-            env.remoteModelsRegistered = false;
-            env.remoteObjectURL = 'https://hf-mirror.com';
-
-            screenLog("Запрос легкого ядра Arctic (22 МБ) через РФ-зеркало...");
+            screenLog("Запрос модели с Hugging Face...");
 
             try {
-                // Подключаем ту самую модель Arctic, которая весит всего 22 МБ
-                pipe = await pipeline('feature-extraction', 'Snowflake/snowflake-arctic-embed-xs', {
+                // Инициализируем легкую модель. Она сама скачается автоматически!
+                pipe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
                     progress_callback: (data) => {
                         if (data.status === 'progress') {
                             const percent = data.progress ? data.progress.toFixed(0) : 0;
                             document.getElementById('progressBar').style.width = `${percent}%`;
-                            document.getElementById('progressText').innerText = `Загрузка ядра: ${percent}%`;
+                            document.getElementById('progressText').innerText = `Авто-загрузка ИИ-ядра: ${percent}%`;
                         }
                     }
                 });
                 
-                screenLog("✓ СИНХРОНИЗАЦИЯ УСПЕШНА. Ноосфера готова к работе!");
+                screenLog("✓ УСПЕХ! Модель скачана и запущена локально в браузеры.");
                 document.getElementById('loader').style.display = 'none';
                 document.getElementById('app').style.display = 'block';
 
             } catch (error) {
-                screenLog(`Сбой WASM движка: ${error.message}`, true);
+                screenLog(`Критический сбой автозагрузки: ${error.message}`, true);
                 console.error(error);
             }
         }
@@ -70,20 +56,18 @@
         }
 
         function cosineSimilarity(vecA, vecB) {
-            let dotProduct = 0.0; let normA = 0.0; let normB = 0.0;
+            let dotProduct = 0.0;
             for (let i = 0; i < vecA.length; i++) {
                 dotProduct += vecA[i] * vecB[i];
-                normA += vecA[i] * vecA[i];
-                normB += vecB[i] * vecB[i];
             }
-            return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+            return dotProduct;
         }
 
         window.saveNote = async function() {
             const textInput = document.getElementById('noteText').value.trim();
             if (!textInput) return;
 
-            screenLog("Вычисление семантического вектора...");
+            screenLog("Анализ смысла...");
             try {
                 const vector = await getVector(textInput);
                 let bestMatch = null;
@@ -100,7 +84,7 @@
                 notesDatabase.push({ text: textInput, vector: vector });
 
                 const synergyDiv = document.getElementById('synergyResult');
-                if (bestMatch && highestScore > 0.45) { 
+                if (bestMatch && highestScore > 0.50) { 
                     synergyDiv.innerHTML = `
                         <div style="background: #e6f7ff; padding: 12px; border-left: 4px solid #1890ff; margin: 15px 0; border-radius: 4px; font-size: 14px;">
                             <strong>Синергия графа (${(highestScore * 100).toFixed(0)}%):</strong><br>
@@ -120,24 +104,27 @@
                 screenLog(`Ошибка: ${err.message}`, true);
             }
         }
+
+        // Запуск системы
+        initAI();
     </script>
 </head>
 <body style="font-family: sans-serif; max-width: 500px; margin: 20px auto; padding: 0 15px; color: #222; background: #fafafa;">
 
     <h2>Ноосфера v3.0</h2>
-    <p style="color: #666; margin-top: 0; font-size: 13px;">Облачный узел (Чистый запуск без VPN)</p>
+    <p style="color: #666; margin-top: 0; font-size: 13px;">Облачный узел с автоматической установкой ИИ</p>
     
     <div style="background: #1a1a1a; color: #00ff00; padding: 10px; border-radius: 6px; font-family: monospace; font-size: 11px; height: 110px; overflow-y: auto; margin-bottom: 15px;" id="screenConsole"></div>
     
     <div id="loader">
-        <div id="progressText" style="font-size: 14px; color: #555; margin-bottom: 5px;">Синхронизация...</div>
+        <div id="progressText" style="font-size: 14px; color: #555; margin-bottom: 5px;">Синхронизация контекста...</div>
         <div style="width: 100%; background-color: #ddd; border-radius: 4px; height: 8px;">
             <div id="progressBar" style="width: 0%; height: 100%; background-color: #00ff00; border-radius: 4px; transition: width 0.1s;"></div>
         </div>
     </div>
 
     <div id="app" style="display: none;">
-        <textarea id="noteText" style="width: 100%; height: 80px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 15px;" placeholder="Введи мысль на английском..."></textarea>
+        <textarea id="noteText" style="width: 100%; height: 80px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 15px;" placeholder="Введи концепт на английском (например: bank money)..."></textarea>
         <button onclick="saveNote()" style="margin-top: 10px; width: 100%; padding: 12px; background: #2b82c9; color: white; border: none; border-radius: 4px; font-weight: bold;">
             Сохранить мысль
         </button>
