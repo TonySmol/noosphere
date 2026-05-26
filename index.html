@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Transformers.js в 1 файл (Исправлено)</title>
+    <title>Transformers.js в 1 файл (Финальное решение)</title>
     <style>
         body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
         button { padding: 12px 24px; font-size: 16px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; font-weight: bold;}
@@ -11,24 +11,22 @@
         #status { margin: 20px 0; font-weight: bold; color: #333; }
         pre { background: #f4f4f4; padding: 15px; border-radius: 4px; overflow-x: auto; font-size: 14px; border: 1px solid #ddd; white-space: pre-wrap; }
     </style>
-
-    <!-- Подключаем готовую собранную библиотеку через cdnjs -->
-    <script src="https://cloudflare.com"></script>
 </head>
 <body>
 
     <h2>Эмбеддинги в один HTML-файл</h2>
-    <p>Исправленная версия. Библиотека инициализируется корректно.</p>
+    <p>Решение через ES-модули на зеркале UNPKG. Никаких конфликтов имён.</p>
     
     <button id="run-btn">Сгенерировать вектор</button>
     <div id="status">Статус: Ожидание нажатия кнопки...</div>
     <pre id="output">Результат появится здесь...</pre>
 
-    <script>
-        // ИСПРАВЛЕНО: В не-модульной версии объект называется строго `transformers`
-        const { pipeline, env } = transformers; 
+    <!-- Используем type="module", браузер сам поймет импорт без глобальных переменных -->
+    <script type="module">
+        // Импортируем напрямую через unpkg — это зеркало открывается без туннельных ошибок
+        import { pipeline, env } from 'https://unpkg.com';
 
-        // Настройки путей: разрешаем только удаленную загрузку с Hugging Face
+        // Настраиваем окружение: качаем напрямую с серверов Hugging Face
         env.allowRemoteModels = true; 
         env.allowLocalModels = false;
 
@@ -37,19 +35,18 @@
         const outputDiv = document.getElementById('output');
 
         runBtn.addEventListener('click', async () => {
-            statusDiv.innerText = "Статус: Загрузка модели из Hugging Face... (~90МБ, пожалуйста, подождите)";
+            statusDiv.innerText = "Статус: Подключение к Hugging Face и скачивание модели... (~90МБ, подождите)";
             statusDiv.style.color = "orange";
             outputDiv.innerText = "";
 
             try {
-                // Создаем пайплайн на процессоре (wasm)
+                // Запускаем через CPU (wasm) для максимальной совместимости на любых ПК/смартфонах
                 const extractor = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
                     device: 'wasm'
                 });
 
-                statusDiv.innerText = "Статус: Модель готова. Расчет вектора...";
+                statusDiv.innerText = "Статус: Модель успешно загружена. Считаем эмбеддинг...";
                 
-                // Генерируем эмбеддинг
                 const result = await extractor('Тестовый текст для проверки работы нейросети', { 
                     pooling: 'mean', 
                     normalize: true 
@@ -58,14 +55,13 @@
                 statusDiv.innerText = "Статус: Успешно выполнено!";
                 statusDiv.style.color = "green";
 
-                // Переводим Float32Array в обычный массив чисел для вывода
                 const vector = Array.from(result.data);
                 outputDiv.innerText = `Размерность вектора: ${vector.length} измерений.\n\nПервые 10 значений:\n${JSON.stringify(vector.slice(0, 10), null, 2)}`;
 
             } catch (error) {
                 statusDiv.innerText = "Статус: Ошибка!";
                 statusDiv.style.color = "red";
-                outputDiv.innerText = `Критическое исключение: ${error.message}\n\nПодробности в консоли F12.`;
+                outputDiv.innerText = `Критическое исключение: ${error.message}\n\nЕсли скачивание оборвалось, попробуйте обновить страницу.`;
                 console.error(error);
             }
         });
