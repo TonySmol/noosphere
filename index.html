@@ -33,11 +33,10 @@
   <ul id="res"></ul>
 
 <script type="module">
-// Версия 2.17.2 — последняя стабильная на 2024-06. 3.0.0 не существует.
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+import { pipeline, env } from 'https://jsdelivr.net';
 
 if (location.protocol === 'file:') {
-  throw new Error('GitHub Pages требует HTTPS. Запустите через https://yourname.github.io/repo/');
+  throw new Error('Запустите локальный сервер (например, live-server или python -m http.server). Из file:// работать не будет.');
 }
 
 env.allowLocalModels = false;
@@ -65,14 +64,17 @@ const setStatus = (msg, type = '') => {
   statusEl.className = `status ${type}`;
 };
 
+// Функция для получения нормализованного эмбеддинга одного предложения
+async function getEmbedding(text) {
+  const output = await extractor(text, { pooling: 'mean', normalize: true });
+  return output.data; 
+}
+
 async function init() {
   try {
     setStatus('Загрузка мультиязычной модели (~25 МБ)...');
     
     extractor = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', {
-      pooling: 'mean',
-      normalize: true,
-      quantized: true,
       progress_callback: s => {
         if (s.status === 'progress') {
           barEl.style.width = `${(s.progress || 0) * 100}%`;
@@ -84,7 +86,8 @@ async function init() {
     });
 
     setStatus('Кэширование корпуса...');
-    corpusVecs = await Promise.all(corpus.map(d => extractor([d]).then(o => o.data)));
+    // Извлечение эмбеддингов теперь идет поштучно и с правильными флагами пулинга
+    corpusVecs = await Promise.all(corpus.map(d => getEmbedding(d)));
 
     setStatus('Готово.', 'ok');
     qEl.disabled = false; btnEl.disabled = false; qEl.focus();
@@ -94,7 +97,12 @@ async function init() {
   }
 }
 
-const dot = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; };
+// Поскольку векторы нормализованы (длина = 1), скалярное произведение (dot product) равно косинусному сходству
+const dot = (a, b) => { 
+  let s = 0; 
+  for (let i = 0; i < a.length; i++) s += a[i] * b[i]; 
+  return s; 
+};
 
 async function search() {
   const txt = qEl.value.trim();
@@ -102,13 +110,16 @@ async function search() {
 
   btnEl.disabled = true; resEl.innerHTML = ''; setStatus('Вычисление...');
   try {
-    const qVec = (await extractor([txt])).data;
+    const qVec = await getEmbedding(txt);
     const ranked = corpus.map((d, i) => ({ text: d, score: dot(qVec, corpusVecs[i]) }));
+    
     ranked.sort((a, b) => b.score - a.score);
+    
     resEl.innerHTML = ranked.map(r => `<li><span class="sc">${r.score.toFixed(3)}</span>${r.text}</li>`).join('');
     setStatus(`Найдено: ${ranked.length}.`, 'ok');
   } catch (e) {
     setStatus(`Ошибка инференса:\n${e.message}`, 'err');
+    console.error('[Search Error]', e);
   } finally { btnEl.disabled = false; }
 }
 
