@@ -8,17 +8,17 @@
     :root {
       --bg: #0d0f12; --card: #161a1f; --border: #2d333b;
       --text: #adbac7; --accent: #539bf5; --dim: #768390;
-      --danger: #f85149; --radius: 12px;
+      --radius: 12px; --font: system-ui, -apple-system, sans-serif;
     }
     :root.light {
       --bg: #ffffff; --card: #f6f8fa; --border: #d0d7de;
       --text: #1f2328; --accent: #0969da; --dim: #656d76;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); height: 100dvh; display: flex; justify-content: center; overflow: hidden; }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100dvh; display: flex; justify-content: center; overflow: hidden; }
     #app { width: 100%; max-width: 600px; height: 100%; display: flex; flex-direction: column; padding: 16px; }
 
-    .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
     .logo { font-weight: 700; font-size: 1.2rem; color: var(--accent); }
     .actions { display: flex; gap: 8px; }
     .icon-btn { background: var(--card); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 1.2rem; }
@@ -40,7 +40,8 @@
     .carousel-btn.right { right: 8px; }
     .carousel-btn:active { background: var(--accent); }
 
-    .save-bar { display: flex; justify-content: flex-end; margin-top: 12px; }
+    .save-bar { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
+    .status-text { font-size: 0.85rem; color: var(--dim); }
     .save-btn { background: var(--accent); color: white; border: none; border-radius: var(--radius); padding: 12px 24px; font-weight: 600; cursor: pointer; }
 
     .settings-panel { display: none; position: fixed; top: 60px; right: 20px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; z-index: 100; flex-direction: column; gap: 12px; min-width: 200px; }
@@ -55,8 +56,8 @@
   <div class="top-bar">
     <span class="logo">🌀 Flow мысли</span>
     <div class="actions">
-      <button class="icon-btn" id="themeBtn">🌓</button>
-      <button class="icon-btn" id="settingsBtn">⚙️</button>
+      <button class="icon-btn" id="themeBtn" title="Сменить тему">🌓</button>
+      <button class="icon-btn" id="settingsBtn" title="Настройки модели">⚙️</button>
     </div>
   </div>
   <div class="settings-panel" id="settingsPanel">
@@ -65,7 +66,7 @@
       <option value="Xenova/paraphrase-multilingual-MiniLM-L12-v2">MiniLM (быстрая, 25МБ)</option>
       <option value="Xenova/multilingual-e5-small">E5 Small (точнее, 40МБ)</option>
     </select>
-    <button id="applyModelBtn">Применить</button>
+    <button id="applyModelBtn">Применить и переиндексировать</button>
   </div>
 
   <textarea id="thoughtInput" placeholder="О чём думаешь?"></textarea>
@@ -79,6 +80,7 @@
   </div>
 
   <div class="save-bar">
+    <span class="status-text" id="statusText"></span>
     <button class="save-btn" id="saveBtn">Сохранить мысль</button>
   </div>
 </div>
@@ -86,54 +88,75 @@
 <script type="module">
 import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-// ---------- Настройки ----------
+// ---------- Конфигурация ----------
 const Settings = {
   modelName: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
   load() { this.modelName = localStorage.getItem('flow_model') || this.modelName; },
   save() { localStorage.setItem('flow_model', this.modelName); }
 };
 
-// ---------- Хранилище ----------
+// ---------- Хранилище заметок ----------
 let notes = JSON.parse(localStorage.getItem('flow_notes') || '[]');
-function persist() { localStorage.setItem('flow_notes', JSON.stringify(notes)); }
+function persistNotes() { localStorage.setItem('flow_notes', JSON.stringify(notes)); }
 
-// ---------- Векторный движок (mean pooling) ----------
+// ---------- Векторный движок с защитой от гонок и mean pooling ----------
 const Engine = {
   model: null,
   cache: new Map(),
+  searchVersion: 0, // для отмены устаревших поисков
+
   async init() {
     this.model = await pipeline('feature-extraction', Settings.modelName, { quantized: true });
-    // индексация всех заметок
-    for (const note of notes) await this.vectorize(note.id, note.text);
+    // Индексация архива с пропуском ошибок
+    for (const note of notes) {
+      try { await this.vectorize(note.id, note.text); }
+      catch (e) { console.warn('Пропущена заметка при индексации', note.id, e); }
+    }
   },
+
   async getEmbedding(text, prefix = '') {
     const output = await this.model([prefix + text]);
     const { data, dims } = output;
     const [batch, tokens, hidden] = dims;
-    if (!tokens || !hidden) return norm(data);
+    // Если тензор одномерный (маловероятно, но бывает)
+    if (!tokens || !hidden) {
+      const mag = Math.sqrt(data.reduce((s,x)=>s+x*x,0));
+      return mag ? data.map(x=>x/mag) : data;
+    }
     const emb = new Float32Array(hidden);
     for (let t = 0; t < tokens; t++) {
       const offset = t * hidden;
       for (let h = 0; h < hidden; h++) emb[h] += data[offset + h];
     }
     for (let h = 0; h < hidden; h++) emb[h] /= tokens;
-    return norm(emb);
-    function norm(v) {
-      const mag = Math.sqrt(v.reduce((s,x) => s + x*x, 0));
-      if (mag === 0) return v;
-      return v.map(x => x / mag);
-    }
+    // L2-нормализация
+    const mag = Math.sqrt(emb.reduce((s,x)=>s+x*x,0));
+    return mag ? emb.map(x=>x/mag) : emb;
   },
+
   async vectorize(id, text) {
     if (this.cache.has(id)) return;
     const prefix = Settings.modelName.includes('e5') ? 'passage: ' : '';
     const vec = await this.getEmbedding(text, prefix);
     this.cache.set(id, vec);
   },
+
   async search(query) {
     if (!query.trim() || !this.model) return [];
+    const currentVersion = ++this.searchVersion; // увеличиваем версию
+
     const prefix = Settings.modelName.includes('e5') ? 'query: ' : '';
-    const qVec = await this.getEmbedding(query, prefix);
+    let qVec;
+    try {
+      qVec = await this.getEmbedding(query, prefix);
+    } catch (e) {
+      console.warn('Ошибка векторизации запроса', e);
+      return [];
+    }
+
+    // Если версия устарела (новый поиск уже запущен), игнорируем результат
+    if (currentVersion !== this.searchVersion) return [];
+
     const results = [];
     for (const note of notes) {
       const nVec = this.cache.get(note.id);
@@ -142,6 +165,10 @@ const Engine = {
       for (let i = 0; i < qVec.length; i++) dot += qVec[i] * nVec[i];
       if (dot > 0.15) results.push({ ...note, score: dot });
     }
+
+    // Ещё одна проверка версии после сортировки
+    if (currentVersion !== this.searchVersion) return [];
+
     return results.sort((a,b) => b.score - a.score).slice(0, 5);
   }
 };
@@ -158,7 +185,7 @@ const elements = {
   settingsPanel: document.getElementById('settingsPanel'),
   modelSelect: document.getElementById('modelSelect'),
   applyModelBtn: document.getElementById('applyModelBtn'),
-  emptyPlaceholder: document.getElementById('emptyPlaceholder')
+  statusText: document.getElementById('statusText')
 };
 
 function renderCards(results) {
@@ -167,8 +194,7 @@ function renderCards(results) {
     wrapper.innerHTML = '<div class="empty-state">Нет подходящих мыслей в архиве. Сохрани первую!</div>';
     return;
   }
-  // Сортируем так: высший скор, средний, низший (но не меньше порога)
-  const types = ['Прямое продолжение', 'Неочевидная связь', 'Альтернативный взгляд'];
+  const types = ['Продолжение', 'Неочевидно', 'Альтернатива'];
   wrapper.innerHTML = results.slice(0,3).map((r, i) => `
     <div class="card" data-text="${escapeHTML(r.text)}">
       <div class="card-type">${types[i] || 'Вариант'}</div>
@@ -176,11 +202,13 @@ function renderCards(results) {
       <div class="card-score">${r.score.toFixed(2)}</div>
     </div>
   `).join('');
-  // Добавляем клик для копирования в поле ввода
+
   wrapper.querySelectorAll('.card').forEach(card => {
     card.addEventListener('click', () => {
       elements.input.value = card.dataset.text;
       elements.input.focus();
+      // Автоматически запускаем поиск по новому тексту
+      elements.input.dispatchEvent(new Event('input'));
     });
   });
 }
@@ -191,61 +219,73 @@ function escapeHTML(str) {
   return d.innerHTML;
 }
 
-// Листание
-let scrollTimeout;
-function scrollToCard(index) {
+// Листание карточек
+elements.prevBtn.addEventListener('click', () => {
   const cards = elements.cardsWrapper.children;
   if (cards.length === 0) return;
-  const target = cards[Math.min(Math.max(index, 0), cards.length-1)];
-  target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-}
-
-elements.prevBtn.addEventListener('click', () => {
   const current = Math.round(elements.cardsWrapper.scrollLeft / elements.cardsWrapper.clientWidth);
-  scrollToCard(current - 1);
+  const target = cards[Math.min(Math.max(current - 1, 0), cards.length - 1)];
+  target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
 });
 elements.nextBtn.addEventListener('click', () => {
+  const cards = elements.cardsWrapper.children;
+  if (cards.length === 0) return;
   const current = Math.round(elements.cardsWrapper.scrollLeft / elements.cardsWrapper.clientWidth);
-  scrollToCard(current + 1);
+  const target = cards[Math.min(Math.max(current + 1, 0), cards.length - 1)];
+  target.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
 });
 
-// Темы
+// Тема
 elements.themeBtn.addEventListener('click', () => {
-  document.documentElement.classList.toggle('light');
-  const isLight = document.documentElement.classList.contains('light');
+  const isLight = document.documentElement.classList.toggle('light');
   localStorage.setItem('flow_theme', isLight ? 'light' : 'dark');
   elements.themeBtn.textContent = isLight ? '☀️' : '🌙';
 });
 (function initTheme() {
   const saved = localStorage.getItem('flow_theme');
-  if (saved === 'light') document.documentElement.classList.add('light');
-  elements.themeBtn.textContent = saved === 'light' ? '☀️' : '🌙';
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  if (saved === 'light' || (!saved && !prefersDark)) {
+    document.documentElement.classList.add('light');
+    elements.themeBtn.textContent = '☀️';
+  } else {
+    document.documentElement.classList.remove('light');
+    elements.themeBtn.textContent = '🌙';
+  }
 })();
 
 // Настройки модели
 elements.settingsBtn.addEventListener('click', () => elements.settingsPanel.classList.toggle('open'));
 elements.applyModelBtn.addEventListener('click', async () => {
   const newModel = elements.modelSelect.value;
-  if (newModel === Settings.modelName) return;
+  if (newModel === Settings.modelName) {
+    elements.settingsPanel.classList.remove('open');
+    return;
+  }
   Settings.modelName = newModel;
   Settings.save();
   elements.settingsPanel.classList.remove('open');
-  // перезагрузка модели
+
+  // Перезагрузка модели
   Engine.model = null;
   Engine.cache.clear();
+  elements.statusText.textContent = 'Загрузка новой модели...';
   try {
     await Engine.init();
-    alert('Модель обновлена!');
-  } catch(e) { alert('Ошибка загрузки модели: ' + e.message); }
+    elements.statusText.textContent = 'Модель обновлена';
+  } catch (e) {
+    elements.statusText.textContent = 'Ошибка загрузки модели';
+    console.error(e);
+  }
 });
 
-// Поиск при вводе
-let debounce;
+// Поиск с защитой от гонок
+let debounceTimer;
 elements.input.addEventListener('input', () => {
-  clearTimeout(debounce);
-  debounce = setTimeout(async () => {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(async () => {
     const results = await Engine.search(elements.input.value);
     renderCards(results);
+    elements.statusText.textContent = results.length ? `Найдено: ${results.length}` : '';
   }, 500);
 });
 
@@ -255,22 +295,27 @@ elements.saveBtn.addEventListener('click', async () => {
   if (!text) return;
   const note = { id: Date.now(), text, createdAt: new Date().toISOString() };
   notes.push(note);
-  persist();
-  await Engine.vectorize(note.id, note.text);
+  persistNotes();
+  try { await Engine.vectorize(note.id, note.text); }
+  catch (e) { console.warn('Векторизация новой заметки не удалась', e); }
   elements.input.value = '';
   renderCards([]);
+  elements.statusText.textContent = 'Мысль сохранена';
+  setTimeout(() => { elements.statusText.textContent = ''; }, 2000);
 });
 
-// Старт
+// Старт приложения
 (async () => {
   Settings.load();
   elements.modelSelect.value = Settings.modelName;
+  elements.statusText.textContent = 'Загрузка модели...';
   try {
     await Engine.init();
-    console.log('Модель готова');
-  } catch(e) {
+    elements.statusText.textContent = 'Готово';
+    setTimeout(() => { elements.statusText.textContent = ''; }, 2000);
+  } catch (e) {
+    elements.statusText.textContent = 'Ошибка загрузки модели — проверьте интернет';
     console.error(e);
-    alert('Не удалось загрузить модель. Проверьте интернет и попробуйте обновить страницу.');
   }
 })();
 </script>
