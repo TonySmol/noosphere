@@ -2,131 +2,296 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Semantic Search</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Semantic Notebook</title>
   <style>
-    :root { --bg: #0f172a; --card: #1e293b; --text: #e2e8f0; --ok: #22c55e; --err: #ef4444; --prim: #38bdf8; }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 1rem; max-width: 600px; margin: 0 auto; }
-    .status { padding: 0.75rem; margin: 1rem 0; border-radius: 6px; background: var(--card); font-size: 0.9rem; text-align: center; white-space: pre-wrap; }
-    .status.ok { border-left: 4px solid var(--ok); }
-    .status.err { border-left: 4px solid var(--err); }
-    .input-row { display: flex; gap: 0.5rem; margin: 1rem 0; }
-    input { flex: 1; padding: 0.75rem; border: 1px solid #334155; border-radius: 6px; background: var(--card); color: var(--text); font-size: 1rem; }
-    button { padding: 0.75rem 1.25rem; border: none; border-radius: 6px; background: var(--prim); color: #0f172a; font-weight: 600; cursor: pointer; }
-    button:disabled { opacity: 0.4; cursor: not-allowed; }
-    ul { list-style: none; margin-top: 1rem; }
-    li { padding: 0.75rem; margin: 0.5rem 0; background: var(--card); border-radius: 6px; }
-    .sc { color: var(--prim); font-weight: 600; margin-right: 0.5rem; }
-    .bar { height: 4px; background: #334155; border-radius: 2px; margin-top: 0.5rem; overflow: hidden; }
-    .bar-fill { height: 100%; background: var(--prim); width: 0%; transition: width 0.3s; }
+    :root {
+      --bg: #f4f6f8; --surface: #ffffff; --text: #1f2937;
+      --text-muted: #6b7280; --border: #e5e7eb; --accent: #2563eb;
+      --accent-hover: #1d4ed8; --danger: #ef4444; --success: #10b981;
+      --font-mono: 'SF Mono', 'Fira Code', monospace;
+    }
+    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 2rem; display: flex; justify-content: center; }
+    .app { width: 100%; max-width: 700px; background: var(--surface); border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); padding: 2rem; }
+    
+    h1 { margin: 0 0 1.5rem 0; font-size: 1.5rem; letter-spacing: -0.025em; }
+    
+    .status-bar { padding: 0.75rem; background: #f3f4f6; border-radius: 6px; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; }
+    .status-bar.error { background: #fef2f2; color: var(--danger); }
+    .status-bar.ok { background: #ecfdf5; color: var(--success); }
+
+    textarea { width: 100%; min-height: 120px; padding: 1rem; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; resize: vertical; font-family: inherit; box-sizing: border-box; transition: border-color 0.2s; }
+    textarea:focus { outline: none; border-color: var(--accent); }
+
+    .controls { display: flex; gap: 0.5rem; margin-top: 1rem; justify-content: flex-end; }
+    button { padding: 0.6rem 1.2rem; border: none; border-radius: 6px; font-weight: 500; cursor: pointer; transition: opacity 0.2s; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-ghost { background: transparent; color: var(--text-muted); }
+    .btn-ghost:hover { background: #f3f4f6; }
+
+    .section-title { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 2rem 0 1rem 0; font-weight: 600; }
+    
+    .note-list { list-style: none; padding: 0; margin: 0; }
+    .note-item { padding: 1rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+    .note-item:last-child { border-bottom: none; }
+    .note-content { flex: 1; white-space: pre-wrap; line-height: 1.5; }
+    .note-meta { font-size: 0.75rem; color: var(--text-muted); text-align: right; min-width: 60px; }
+    .score-badge { display: inline-block; padding: 2px 6px; border-radius: 4px; background: #eff6ff; color: var(--accent); font-weight: 600; font-family: var(--font-mono); }
+    .empty-state { text-align: center; color: var(--text-muted); padding: 2rem 0; font-style: italic; }
+
+    /* Анимация загрузки */
+    .spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; margin-right: 6px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <h2>Семантический поиск</h2>
-  <div id="status" class="status">Проверка окружения...</div>
-  <div class="bar"><div id="bar" class="bar-fill"></div></div>
-  <div class="input-row">
-    <input id="q" type="text" placeholder="Запрос..." disabled>
-    <button id="btn" disabled>Найти</button>
+
+<div class="app">
+  <h1>Semantic Notebook</h1>
+  
+  <div id="status" class="status-bar">Инициализация системы...</div>
+
+  <textarea id="input" placeholder="Начните вводить заметку..." disabled></textarea>
+  
+  <div class="controls">
+    <button id="clearBtn" class="btn-ghost" disabled>Очистить всё</button>
+    <button id="saveBtn" class="btn-primary" disabled>Сохранить</button>
   </div>
-  <ul id="res"></ul>
+
+  <div class="section-title">Семантически связанные заметки</div>
+  <ul id="relatedList" class="note-list"></ul>
+
+  <div class="section-title">Архив заметок</div>
+  <ul id="archiveList" class="note-list"></ul>
+</div>
 
 <script type="module">
-import { pipeline, env } from 'https://jsdelivr.net';
+import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-if (location.protocol === 'file:') {
-  throw new Error('Запустите локальный сервер (например, live-server или python -m http.server). Из file:// работать не будет.');
-}
+// --- 1. MATH MODULE (Vector Operations) ---
+const VectorMath = {
+  /**
+   * L2 Normalization of a vector
+   * @param {Float32Array|number[]} vec
+   * @returns {Float32Array}
+   */
+  normalize(vec) {
+    const magnitude = Math.sqrt(vec.reduce((sum, val) => sum + val * val, 0));
+    if (magnitude === 0) return new Float32Array(vec.length);
+    return new Float32Array(vec.map(val => val / magnitude));
+  },
 
-env.allowLocalModels = false;
-env.useBrowserCache = true;
-
-const corpus = [
-  "Кошки предпочитают тепло и мягкие поверхности.",
-  "JavaScript выполняется в браузере без серверной части.",
-  "Векторный поиск использует косинусное сходство эмбеддингов.",
-  "Web Workers не работают по протоколу file://.",
-  "Трансформеры опираются на механизм self-attention."
-];
-
-const statusEl = document.getElementById('status');
-const resEl = document.getElementById('res');
-const qEl = document.getElementById('q');
-const btnEl = document.getElementById('btn');
-const barEl = document.getElementById('bar');
-
-let extractor;
-let corpusVecs = [];
-
-const setStatus = (msg, type = '') => {
-  statusEl.textContent = msg;
-  statusEl.className = `status ${type}`;
-};
-
-// Функция для получения нормализованного эмбеддинга одного предложения
-async function getEmbedding(text) {
-  const output = await extractor(text, { pooling: 'mean', normalize: true });
-  return output.data; 
-}
-
-async function init() {
-  try {
-    setStatus('Загрузка мультиязычной модели (~25 МБ)...');
-    
-    extractor = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', {
-      progress_callback: s => {
-        if (s.status === 'progress') {
-          barEl.style.width = `${(s.progress || 0) * 100}%`;
-          setStatus(`Загрузка: ${s.file || 'веса'}... ${(s.progress * 100).toFixed(0)}%`);
-        } else if (s.status === 'download') {
-          setStatus(`Скачивание: ${s.file || 'файл'}...`);
-        }
-      }
-    });
-
-    setStatus('Кэширование корпуса...');
-    // Извлечение эмбеддингов теперь идет поштучно и с правильными флагами пулинга
-    corpusVecs = await Promise.all(corpus.map(d => getEmbedding(d)));
-
-    setStatus('Готово.', 'ok');
-    qEl.disabled = false; btnEl.disabled = false; qEl.focus();
-  } catch (e) {
-    setStatus(`Ошибка инициализации:\n${e.message}`, 'err');
-    console.error('[Init Error]', e);
+  /**
+   * Cosine Similarity between two normalized vectors
+   * @param {Float32Array} a
+   * @param {Float32Array} b
+   * @returns {number}
+   */
+  cosineSimilarity(a, b) {
+    // Assuming inputs are already normalized, dot product == cosine similarity
+    let dot = 0;
+    for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
+    return dot;
   }
-}
-
-// Поскольку векторы нормализованы (длина = 1), скалярное произведение (dot product) равно косинусному сходству
-const dot = (a, b) => { 
-  let s = 0; 
-  for (let i = 0; i < a.length; i++) s += a[i] * b[i]; 
-  return s; 
 };
 
-async function search() {
-  const txt = qEl.value.trim();
-  if (!txt || !extractor) return;
+// --- 2. DATA LAYER (Storage & State) ---
+const Store = {
+  notes: [],
+  
+  load() {
+    try {
+      const raw = localStorage.getItem('semantic_notes');
+      this.notes = raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      console.error('Storage access failed', e);
+      this.notes = [];
+    }
+  },
 
-  btnEl.disabled = true; resEl.innerHTML = ''; setStatus('Вычисление...');
-  try {
-    const qVec = await getEmbedding(txt);
-    const ranked = corpus.map((d, i) => ({ text: d, score: dot(qVec, corpusVecs[i]) }));
+  save() {
+    try {
+      localStorage.setItem('semantic_notes', JSON.stringify(this.notes));
+    } catch (e) {
+      console.error('Storage write failed', e);
+    }
+  },
+
+  add(text) {
+    const note = { id: Date.now(), text, createdAt: new Date().toISOString() };
+    this.notes.unshift(note);
+    this.save();
+    return note;
+  },
+
+  clear() {
+    this.notes = [];
+    localStorage.removeItem('semantic_notes');
+  }
+};
+
+// --- 3. UI CONTROLLER ---
+const UI = {
+  elements: {
+    status: document.getElementById('status'),
+    input: document.getElementById('input'),
+    saveBtn: document.getElementById('saveBtn'),
+    clearBtn: document.getElementById('clearBtn'),
+    relatedList: document.getElementById('relatedList'),
+    archiveList: document.getElementById('archiveList')
+  },
+
+  setStatus(msg, type = '') {
+    const el = this.elements.status;
+    el.textContent = msg;
+    el.className = `status-bar ${type}`;
+  },
+
+  setLoading(isLoading) {
+    this.elements.input.disabled = isLoading;
+    this.elements.saveBtn.disabled = isLoading;
+    this.elements.clearBtn.disabled = isLoading;
+  },
+
+  renderArchive() {
+    const list = this.elements.archiveList;
+    if (Store.notes.length === 0) {
+      list.innerHTML = '<div class="empty-state">Нет сохраненных заметок</div>';
+      return;
+    }
+    list.innerHTML = Store.notes.map(n => `
+      <li class="note-item">
+        <div class="note-content">${this.escapeHtml(n.text)}</div>
+        <div class="note-meta">${new Date(n.createdAt).toLocaleDateString()}</div>
+      </li>
+    `).join('');
+  },
+
+  renderRelated(results) {
+    const list = this.elements.relatedList;
+    if (!results || results.length === 0) {
+      list.innerHTML = '<div class="empty-state">Нет похожих заметок</div>';
+      return;
+    }
+    list.innerHTML = results.map(r => `
+      <li class="note-item">
+        <div class="note-content">${this.escapeHtml(r.text)}</div>
+        <div class="note-meta"><span class="score-badge">${r.score.toFixed(2)}</span></div>
+      </li>
+    `).join('');
+  },
+
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+};
+
+// --- 4. CORE LOGIC (Model & Search) ---
+const Engine = {
+  model: null,
+  // Cache for vectors: Map<NoteId, Vector>
+  vectorCache: new Map(),
+
+  async init() {
+    try {
+      UI.setStatus('Загрузка нейросети (~25 МБ)...');
+      this.model = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', {
+        pooling: 'mean',
+        quantized: true
+      });
+      
+      // Pre-calculate vectors for existing notes
+      UI.setStatus('Индексация архива...');
+      for (const note of Store.notes) {
+        await this.vectorize(note.id, note.text);
+      }
+
+      UI.setStatus('Система готова', 'ok');
+      UI.setLoading(false);
+      UI.renderArchive();
+    } catch (e) {
+      UI.setStatus(`Ошибка: ${e.message}`, 'error');
+      console.error(e);
+    }
+  },
+
+  async vectorize(id, text) {
+    if (this.vectorCache.has(id)) return this.vectorCache.get(id);
     
-    ranked.sort((a, b) => b.score - a.score);
+    // Model returns Tensor. We take .data (Float32Array) and Normalize.
+    const output = await this.model([text]);
+    const rawVec = output.data; 
+    const normVec = VectorMath.normalize(rawVec);
     
-    resEl.innerHTML = ranked.map(r => `<li><span class="sc">${r.score.toFixed(3)}</span>${r.text}</li>`).join('');
-    setStatus(`Найдено: ${ranked.length}.`, 'ok');
-  } catch (e) {
-    setStatus(`Ошибка инференса:\n${e.message}`, 'err');
-    console.error('[Search Error]', e);
-  } finally { btnEl.disabled = false; }
-}
+    this.vectorCache.set(id, normVec);
+    return normVec;
+  },
 
-btnEl.onclick = search;
-qEl.onkeydown = e => e.key === 'Enter' && search();
+  async search(queryText) {
+    if (!queryText.trim() || !this.model) return [];
 
-init();
+    // Get vector for query
+    const queryVec = await this.vectorize('query_temp', queryText);
+    
+    const results = [];
+    for (const note of Store.notes) {
+      const noteVec = this.vectorCache.get(note.id);
+      if (!noteVec) continue; // Should not happen if cache is synced
+
+      const score = VectorMath.cosineSimilarity(queryVec, noteVec);
+      // Filter low relevance
+      if (score > 0.3) { 
+        results.push({ ...note, score });
+      }
+    }
+
+    // Sort by score descending
+    return results.sort((a, b) => b.score - a.score).slice(0, 5);
+  }
+};
+
+// --- 5. INITIALIZATION & EVENTS ---
+(async function bootstrap() {
+  Store.load();
+  await Engine.init();
+
+  let debounceTimer;
+  UI.elements.input.addEventListener('input', (e) => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => {
+      const query = e.target.value;
+      const results = await Engine.search(query);
+      UI.renderRelated(results);
+    }, 500); // 500ms delay to prevent lag
+  });
+
+  UI.elements.saveBtn.addEventListener('click', () => {
+    const text = UI.elements.input.value.trim();
+    if (!text) return;
+
+    Store.add(text);
+    Engine.vectorize(Store.notes[0].id, text); // Cache vector immediately
+    UI.renderArchive();
+    UI.elements.input.value = '';
+    UI.renderRelated([]); // Clear related view
+    UI.setStatus('Заметка сохранена', 'ok');
+    setTimeout(() => UI.setStatus('Система готова', 'ok'), 2000);
+  });
+
+  UI.elements.clearBtn.addEventListener('click', () => {
+    if (confirm('Удалить все заметки?')) {
+      Store.clear();
+      Engine.vectorCache.clear();
+      UI.renderArchive();
+      UI.renderRelated([]);
+      UI.elements.input.value = '';
+    }
+  });
+})();
 </script>
 </body>
 </html>
