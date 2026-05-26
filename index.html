@@ -8,7 +8,7 @@
     :root { --bg: #0f172a; --card: #1e293b; --text: #e2e8f0; --ok: #22c55e; --err: #ef4444; --prim: #38bdf8; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); padding: 1rem; max-width: 600px; margin: 0 auto; }
-    .status { padding: 0.75rem; margin: 1rem 0; border-radius: 6px; background: var(--card); font-size: 0.9rem; text-align: center; }
+    .status { padding: 0.75rem; margin: 1rem 0; border-radius: 6px; background: var(--card); font-size: 0.9rem; text-align: center; white-space: pre-wrap; }
     .status.ok { border-left: 4px solid var(--ok); }
     .status.err { border-left: 4px solid var(--err); }
     .input-row { display: flex; gap: 0.5rem; margin: 1rem 0; }
@@ -33,12 +33,11 @@
   <ul id="res"></ul>
 
 <script type="module">
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@3.0.0';
+// Версия 2.17.2 — последняя стабильная на 2024-06. 3.0.0 не существует.
+import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
 if (location.protocol === 'file:') {
-  document.getElementById('status').textContent = '❌ file:// не поддерживается. Запустите через http://localhost или HTTPS.';
-  document.getElementById('status').className = 'status err';
-  throw new Error('Protocol blocked');
+  throw new Error('GitHub Pages требует HTTPS. Запустите через https://yourname.github.io/repo/');
 }
 
 env.allowLocalModels = false;
@@ -69,11 +68,18 @@ const setStatus = (msg, type = '') => {
 async function init() {
   try {
     setStatus('Загрузка мультиязычной модели (~25 МБ)...');
+    
     extractor = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', {
-      pooling: 'mean', normalize: true, quantized: true,
+      pooling: 'mean',
+      normalize: true,
+      quantized: true,
       progress_callback: s => {
-        if (s.status === 'progress') barEl.style.width = `${(s.progress || 0) * 100}%`;
-        else if (s.status === 'download') setStatus(`Загрузка: ${s.file || 'веса'}...`);
+        if (s.status === 'progress') {
+          barEl.style.width = `${(s.progress || 0) * 100}%`;
+          setStatus(`Загрузка: ${s.file || 'веса'}... ${(s.progress * 100).toFixed(0)}%`);
+        } else if (s.status === 'download') {
+          setStatus(`Скачивание: ${s.file || 'файл'}...`);
+        }
       }
     });
 
@@ -83,8 +89,8 @@ async function init() {
     setStatus('Готово.', 'ok');
     qEl.disabled = false; btnEl.disabled = false; qEl.focus();
   } catch (e) {
-    setStatus(`Ошибка инициализации: ${e.message}`, 'err');
-    console.error(e);
+    setStatus(`Ошибка инициализации:\n${e.message}`, 'err');
+    console.error('[Init Error]', e);
   }
 }
 
@@ -100,9 +106,9 @@ async function search() {
     const ranked = corpus.map((d, i) => ({ text: d, score: dot(qVec, corpusVecs[i]) }));
     ranked.sort((a, b) => b.score - a.score);
     resEl.innerHTML = ranked.map(r => `<li><span class="sc">${r.score.toFixed(3)}</span>${r.text}</li>`).join('');
-    setStatus('Найдено.', 'ok');
+    setStatus(`Найдено: ${ranked.length}.`, 'ok');
   } catch (e) {
-    setStatus(`Ошибка инференса: ${e.message}`, 'err');
+    setStatus(`Ошибка инференса:\n${e.message}`, 'err');
   } finally { btnEl.disabled = false; }
 }
 
