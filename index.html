@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ноосфера v3.0 - Чистый Фикс</title>
+    <title>Ноосфера v3.0 - Чистый Релиз</title>
     
-    <!-- ПОЛНОСТЬЮ УБРАЛИ JSDELIVR. Подключаем Transformers.js v3 через unpkg -->
-    <script src="https://unpkg.com"></script>
+    <!-- Подключаем ИИ-скрипт прямо из твоего репозитория без CDN -->
+    <script src="transformers.js"></script>
 
     <script>
         let pipe = null;
@@ -28,34 +28,39 @@
         async function initAI() {
             screenLog("Старт Ноосферы v3...");
             
-            // Проверяем объект библиотеки в глобальном окне v3
+            // Проверяем, подгрузился ли локальный файл скрипта
             if (typeof window.huggingface === 'undefined' || !window.huggingface.transformers) {
-                screenLog("КРИТ: Библиотека ИИ не загрузилась с сервера unpkg!", true);
+                screenLog("КРИТ: Файл transformers.js не найден в корне сайта! Выполни Шаг 2.", true);
                 return;
             }
 
             const { pipeline, env } = window.huggingface.transformers;
-            env.allowLocalModels = false; 
 
-            screenLog("Скачивание ядра ИИ (MiniLM 45МБ)...");
+            // Настройки стабильности для РФ: качаем через зеркало без блокировок
+            env.allowLocalModels = false; 
+            env.remoteModelsRegistered = false;
+            env.remoteObjectURL = 'https://hf-mirror.com';
+
+            screenLog("Запрос мультиязычного ядра через CDN-зеркало...");
 
             try {
+                // Инициализируем легкую стабильную модель all-MiniLM
                 pipe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
                     progress_callback: (data) => {
                         if (data.status === 'progress') {
                             const percent = data.progress ? data.progress.toFixed(0) : 0;
                             document.getElementById('progressBar').style.width = `${percent}%`;
-                            document.getElementById('progressText').innerText = `Загрузка: ${percent}%`;
+                            document.getElementById('progressText').innerText = `Синхронизация: ${percent}%`;
                         }
                     }
                 });
                 
-                screenLog("✓ Ноосфера готова к работе!");
+                screenLog("✓ СИНХРОНИЗАЦИЯ УСПЕШНА. Ноосфера готова к работе!");
                 document.getElementById('loader').style.display = 'none';
                 document.getElementById('app').style.display = 'block';
 
             } catch (error) {
-                screenLog(`Ошибка WASM движка: ${error.message}`, true);
+                screenLog(`Сбой WASM движка: ${error.message}`, true);
             }
         }
 
@@ -95,17 +100,19 @@
                 notesDatabase.push({ text: textInput, vector: vector });
 
                 const synergyDiv = document.getElementById('synergyResult');
-                if (bestMatch && highestScore > 0.45) { 
+                if (bestMatch && highestScore > 0.50) { 
                     synergyDiv.innerHTML = `
                         <div style="background: #e6f7ff; padding: 12px; border-left: 4px solid #1890ff; margin: 15px 0; border-radius: 4px; font-size: 14px;">
-                            <strong>Синергия смыслов (${(highestScore * 100).toFixed(0)}%):</strong><br>
+                            <strong>Синергия графа (${(highestScore * 100).toFixed(0)}%):</strong><br>
                             "${bestMatch.text}"
                         </div>
                     `;
+                } else {
+                    synergyDiv.innerHTML = `<p style="color: #888; font-size: 13px;">Сохранено в память.</p>`;
                 }
 
                 document.getElementById('notesList').innerHTML = notesDatabase.map(n => `
-                    <li style="background: #f5f5f5; padding: 10px; margin-bottom: 6px; border-radius: 4px; list-style-type: none;">${n.text}</li>
+                    <li style="background: #f5f5f5; padding: 10px; margin-bottom: 6px; border-radius: 4px; list-style-type: none; font-size: 14px;">${n.text}</li>
                 `).reverse().join('');
                 
                 document.getElementById('noteText').value = '';
@@ -122,14 +129,14 @@
     <div style="background: #1a1a1a; color: #00ff00; padding: 10px; border-radius: 6px; font-family: monospace; font-size: 11px; height: 110px; overflow-y: auto; margin-bottom: 15px;" id="screenConsole"></div>
     
     <div id="loader">
-        <div id="progressText" style="font-size: 14px; color: #555; margin-bottom: 5px;">Синхронизация...</div>
+        <div id="progressText" style="font-size: 14px; color: #555; margin-bottom: 5px;">Проверка окружения...</div>
         <div style="width: 100%; background-color: #ddd; border-radius: 4px; height: 8px;">
-            <div id="progressBar" style="width: 0%; height: 100%; background-color: #00ff00; border-radius: 4px;"></div>
+            <div id="progressBar" style="width: 0%; height: 100%; background-color: #00ff00; border-radius: 4px; transition: width 0.1s;"></div>
         </div>
     </div>
 
     <div id="app" style="display: none;">
-        <textarea id="noteText" style="width: 100%; height: 80px; padding: 10px; border: 1px solid #ccc; border-radius: 4px;" placeholder="Введи мысль..."></textarea>
+        <textarea id="noteText" style="width: 100%; height: 80px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 15px;" placeholder="Введи мысль или теги..."></textarea>
         <button onclick="saveNote()" style="margin-top: 10px; width: 100%; padding: 12px; background: #2b82c9; color: white; border: none; border-radius: 4px; font-weight: bold;">
             Сохранить мысль
         </button>
