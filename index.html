@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Semantic Notebook Pro</title>
+  <title>Semantic Notebook Pro – fixed</title>
   <style>
     :root {
       --bg: #f4f6f8; --surface: #ffffff; --text: #1f2937;
@@ -24,7 +24,6 @@
     select, input[type="range"] { font-size: 0.9rem; padding: 0.25rem 0.5rem; border-radius: 4px; border: 1px solid var(--border); }
     input[type="range"] { width: 120px; }
     .range-value { font-size: 0.8rem; color: var(--text-muted); margin-left: 0.5rem; min-width: 2.5rem; display: inline-block; }
-
     .status-bar { padding: 0.75rem; background: #f3f4f6; border-radius: 6px; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: center; }
     .status-bar.error { background: #fef2f2; color: var(--danger); }
     .status-bar.ok { background: #ecfdf5; color: var(--success); }
@@ -57,13 +56,12 @@
     <button id="settingsToggle" class="settings-toggle">⚙️ Настройки</button>
   </h1>
 
-  <!-- Панель настроек -->
   <div id="settingsPanel" class="settings-panel">
     <div class="setting-row">
       <span class="setting-label">Модель:</span>
       <select id="modelSelect">
-        <option value="Xenova/paraphrase-multilingual-MiniLM-L12-v2" selected>paraphrase-multilingual-MiniLM (быстрая, ~25 МБ)</option>
-        <option value="Xenova/LaBSE">LaBSE (точнее, ~70 МБ)</option>
+        <option value="Xenova/paraphrase-multilingual-MiniLM-L12-v2" selected>MiniLM multilingual (быстрая, 25 МБ)</option>
+        <option value="Xenova/distiluse-base-multilingual-cased-v2">DistilUSE multilingual (точнее, 90 МБ)</option>
       </select>
     </div>
     <div class="setting-row">
@@ -84,7 +82,7 @@
     <button id="applySettingsBtn" class="btn-primary" style="width:100%; margin-top:0.5rem;">Применить и переиндексировать</button>
   </div>
 
-  <div id="status" class="status-bar"><span class="spinner"></span> Инициализация системы...</div>
+  <div id="status" class="status-bar"><span class="spinner"></span> Инициализация...</div>
   <textarea id="input" placeholder="Начните вводить заметку..." disabled></textarea>
   <div class="controls">
     <button id="clearBtn" class="btn-ghost" disabled>Очистить всё</button>
@@ -102,7 +100,7 @@
 <script type="module">
 import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-// --- Глобальные настройки ---
+// --- Настройки ---
 const Settings = {
   modelName: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
   threshold: 0.15,
@@ -115,9 +113,7 @@ const Settings = {
   },
   save() {
     localStorage.setItem('semantic_settings', JSON.stringify({
-      modelName: this.modelName,
-      threshold: this.threshold,
-      maxResults: this.maxResults
+      modelName: this.modelName, threshold: this.threshold, maxResults: this.maxResults
     }));
   }
 };
@@ -172,9 +168,8 @@ const UI = {
     applySettingsBtn: document.getElementById('applySettingsBtn')
   },
   setStatus(msg, type = '') {
-    const el = this.elements.status;
-    el.innerHTML = msg;
-    el.className = `status-bar ${type}`;
+    this.elements.status.innerHTML = msg;
+    this.elements.status.className = `status-bar ${type}`;
   },
   setLoading(isLoading) {
     this.elements.input.disabled = isLoading;
@@ -219,15 +214,42 @@ const UI = {
   }
 };
 
-// --- Движок ---
+// --- Движок (исправлен!) ---
 const Engine = {
   model: null,
   vectorCache: new Map(),
+
+  /** Получить эмбеддинг текста (правильный mean pooling) */
+  async getEmbedding(text) {
+    if (!this.model) throw new Error('Модель не загружена');
+    const output = await this.model([text]);
+    // output: { data: Float32Array, dims: number[] }
+    // dims = [batch, tokens, hidden_size]
+    const { data, dims } = output;
+    const [batch, tokens, hidden] = dims;
+    if (!tokens || !hidden) {
+      // если уже одномерный (баг?), берем как есть
+      return VectorMath.normalize(data);
+    }
+    // Вычисляем среднее по токенам (mean pooling)
+    const embedding = new Float32Array(hidden);
+    for (let t = 0; t < tokens; t++) {
+      const offset = t * hidden;
+      for (let h = 0; h < hidden; h++) {
+        embedding[h] += data[offset + h];
+      }
+    }
+    // делим на количество токенов
+    for (let h = 0; h < hidden; h++) {
+      embedding[h] /= tokens;
+    }
+    return VectorMath.normalize(embedding);
+  },
+
   async init() {
     try {
       UI.setStatus('<span class="spinner"></span> Загрузка модели...');
       this.model = await pipeline('feature-extraction', Settings.modelName, {
-        pooling: 'mean',
         quantized: true
       });
       await this.reindexAll();
@@ -241,6 +263,7 @@ const Engine = {
       console.error(e);
     }
   },
+
   async reindexAll() {
     if (!this.model) return;
     this.vectorCache.clear();
@@ -249,23 +272,21 @@ const Engine = {
     for (const note of Store.notes) {
       try {
         await this.vectorize(note.id, note.text);
-      } catch(e) {
-        console.warn(`Пропущена заметка ${note.id}`, e);
-      }
+      } catch(e) { console.warn(`Пропущена заметка ${note.id}`, e); }
     }
   },
+
   async vectorize(id, text) {
     if (!this.model) return null;
     if (this.vectorCache.has(id)) return this.vectorCache.get(id);
-    const output = await this.model([text]);
-    const normVec = VectorMath.normalize(output.data);
-    this.vectorCache.set(id, normVec);
-    return normVec;
+    const vec = await this.getEmbedding(text);
+    this.vectorCache.set(id, vec);
+    return vec;
   },
+
   async search(queryText) {
     if (!queryText.trim() || !this.model) return [];
-    const output = await this.model([queryText]);
-    const queryVec = VectorMath.normalize(output.data);
+    const queryVec = await this.getEmbedding(queryText);
     const results = [];
     for (const note of Store.notes) {
       const noteVec = this.vectorCache.get(note.id);
@@ -298,26 +319,22 @@ async function applySettings(needReindex = true) {
 
   if (needReindex) {
     UI.setLoading(true);
-    UI.setStatus('<span class="spinner"></span> Загрузка новой модели и индексация...');
+    UI.setStatus('<span class="spinner"></span> Загрузка новой модели...');
     try {
-      // выгружаем старую модель (просто пересоздадим)
       Engine.model = null;
       Engine.vectorCache.clear();
-      Engine.model = await pipeline('feature-extraction', Settings.modelName, {
-        pooling: 'mean',
-        quantized: true
-      });
+      Engine.model = await pipeline('feature-extraction', Settings.modelName, { quantized: true });
       await Engine.reindexAll();
       UI.setStatus('Настройки применены', 'ok');
       UI.setLoading(false);
       UI.renderArchive();
       UI.renderRelated([]);
     } catch(e) {
-      UI.setStatus(`Ошибка загрузки модели: ${e.message}`, 'error');
+      UI.setStatus(`Ошибка: ${e.message}`, 'error');
       UI.setLoading(false);
+      console.error(e);
     }
   } else {
-    // Если только порог изменился, просто обновим поиск
     const currentQuery = UI.elements.input.value;
     if (currentQuery.trim()) {
       const results = await Engine.search(currentQuery);
@@ -326,55 +343,33 @@ async function applySettings(needReindex = true) {
   }
 }
 
-// --- Инициализация ---
+// --- Старт ---
 (async function() {
   Settings.load();
   Store.load();
 
-  // Синхронизация UI с настройками
   UI.elements.modelSelect.value = Settings.modelName;
   UI.elements.thresholdSlider.value = Settings.threshold;
   UI.elements.thresholdValue.textContent = Settings.threshold.toFixed(2);
   UI.elements.maxResultsSelect.value = Settings.maxResults;
 
-  // Обработчики панели настроек
-  UI.elements.settingsToggle.addEventListener('click', () => {
-    UI.elements.settingsPanel.classList.toggle('open');
-  });
+  // UI handlers
+  UI.elements.settingsToggle.onclick = () => UI.elements.settingsPanel.classList.toggle('open');
+  UI.elements.thresholdSlider.oninput = (e) => UI.elements.thresholdValue.textContent = parseFloat(e.target.value).toFixed(2);
+  UI.elements.thresholdSlider.onchange = () => applySettings(false);
+  UI.elements.maxResultsSelect.onchange = () => applySettings(false);
+  UI.elements.applySettingsBtn.onclick = () => applySettings(true);
 
-  UI.elements.thresholdSlider.addEventListener('input', (e) => {
-    UI.elements.thresholdValue.textContent = parseFloat(e.target.value).toFixed(2);
-  });
-
-  // При изменении порога/количества без смены модели — применять на лету (без переиндексации)
-  UI.elements.thresholdSlider.addEventListener('change', async () => {
-    await applySettings(false);
-  });
-  UI.elements.maxResultsSelect.addEventListener('change', async () => {
-    await applySettings(false);
-  });
-
-  // Кнопка "Применить" с переиндексацией (если модель изменилась)
-  UI.elements.applySettingsBtn.addEventListener('click', async () => {
-    await applySettings(true);
-  });
-
-  // Запуск движка
   await Engine.init();
 
   let debounce;
-  UI.elements.input.addEventListener('input', (e) => {
+  UI.elements.input.oninput = (e) => {
     clearTimeout(debounce);
     debounce = setTimeout(async () => {
       const results = await Engine.search(e.target.value);
       UI.renderRelated(results);
     }, 400);
-  });
-
-  UI.elements.saveBtn.addEventListener('click', saveNote);
-  UI.elements.input.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveNote(); }
-  });
+  };
 
   async function saveNote() {
     const text = UI.elements.input.value.trim();
@@ -388,7 +383,11 @@ async function applySettings(needReindex = true) {
     setTimeout(() => UI.setStatus('Система готова', 'ok'), 2000);
   }
 
-  UI.elements.clearBtn.addEventListener('click', () => {
+  UI.elements.saveBtn.onclick = saveNote;
+  UI.elements.input.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); saveNote(); }
+  });
+  UI.elements.clearBtn.onclick = () => {
     if (confirm('Удалить все заметки?')) {
       Store.clear();
       Engine.vectorCache.clear();
@@ -396,7 +395,7 @@ async function applySettings(needReindex = true) {
       UI.renderRelated([]);
       UI.elements.input.value = '';
     }
-  });
+  };
 })();
 </script>
 </body>
