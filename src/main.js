@@ -1,90 +1,69 @@
-import { pipeline } from '@xenova/transformers';
+import { initEmbedder, embed } from './adapters/transformers.js';
+import { upsert, search } from './adapters/qdrant.js';
+import { setStatus, setSendEnabled, renderResults } from './ui/renderer.js';
 
-// ⚠️ ВСТАВЬ СВОЙ QDRANT KEY И URL НИЖЕ
-const QDRANT_URL = 'https://515693ca-83f2-4a67-ba52-d44d507d8cc0.europe-west3-0.gcp.cloud.qdrant.io';
-const QDRANT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIiwic3ViamVjdCI6ImFwaS1rZXk6OGY1ZGI4Y2ItNWNkYi00MWZlLThjMjgtNGRmM2JkY2U1YzUxIn0.Vv4Xi9L_YrcFcHGcPB4EclGXGXzO1XtUzjl4AYutiPc';
-const COLLECTION = 'noosphere';
+// DOM
+const input = document.getElementById('thought-input');
+const sendBtn = document.getElementById('send-btn');
+const statusEl = document.getElementById('status');
+const resultsEl = document.getElementById('results');
 
-const $ = id => document.getElementById(id);
-const status = msg => $('status').textContent = msg;
-
-// 1. Инициализация модели
-status('Загрузка модели...');
-const embedder = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', { quantized: true });
-status('Готов');
-
-// 2. Векторизация + отправка в Qdrant
-async function sendToWorld(text) {
-  const output = await embedder(text);
-  const vector = Array.from(output.data); // 384 числа
-  
-  const payload = {
-    text: text.slice(0, 200),
-    timestamp: Date.now(),
-    waves: 0
-  };
-
-  const res = await fetch(`${QDRANT_URL}/collections/${COLLECTION}/points`, {
-    method: 'PUT',
-    headers: { 'api-key': QDRANT_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      points: [{ id: crypto.randomUUID(), vector, payload }]
-    })
-  });
-  
-  if (!res.ok) throw new Error(`Qdrant error: ${res.status}`);
+// Инициализация
+async function init() {
+  try {
+    await initEmbedder((progress) => {
+      if (progress.status === 'loading') {
+        setStatus(`Загрузка модели... ${Math.round(progress.progress * 100)}%`);
+      } else if (progress.status === 'done') {
+        setStatus('✅ Готов');
+        setSendEnabled(true);
+      }
+    });
+  } catch (e) {
+    setStatus('❌ Ошибка модели: ' + e.message);
+    console.error(e);
+  }
 }
+init();
 
-// 3. Поиск похожих в мире
-async function searchWorld(text) {
-  const output = await embedder(text);
-  const vector = Array.from(output.data);
-  
-  const res = await fetch(`${QDRANT_URL}/collections/${COLLECTION}/points/search`, {
-    method: 'POST',
-    headers: { 'api-key': QDRANT_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      vector,
-      limit: 5,
-      score_threshold: 0.3,
-      with_payload: true
-    })
-  });
-  
-  if (!res.ok) throw new Error(`Search error: ${res.status}`);
-  const data = await res.json();
-  return data.result;
-}
-
-// 4. UI-логика
-$('sendBtn').addEventListener('click', async () => {
-  const text = $('input').value.trim();
+// Отправка
+sendBtn.addEventListener('click', async () => {
+  const text = input.value.trim();
   if (!text) return;
   
-  status('Отправка...');
+  setStatus('⏳ Векторизация...');
+  setSendEnabled(false);
+  
   try {
-    await sendToWorld(text);
-    $('input').value = '';
-    status('✅ Отправлено');
-    await renderResults(text);
+    const vector = await embed(text);
+    setStatus('📤 Отправка...');
+    await upsert(vector, text);
+    setStatus('✅ В мире!');
+    input.value = '';
+    const results = await search(vector);
+    renderResults(results, resultsEl);
   } catch (e) {
-    status('❌ Ошибка: ' + e.message);
+    setStatus('❌ ' + e.message.slice(0, 80));
     console.error(e);
+  } finally {
+    setSendEnabled(true);
   }
 });
 
-async function renderResults(query) {
-  const results = await searchWorld(query);
-  $('results').innerHTML = results.map(r => 
-    `<div class="card"><strong>(${r.score.toFixed(2)})</strong> ${r.payload.text}</div>`
-  ).join('') || '<div class="card">Ничего не найдено</div>';
-}
-
-// Автопоиск при вводе (с задержкой)
-let t;
-$('input').addEventListener('input', (e) => {
-  clearTimeout(t);
-  t = setTimeout(() => {
-    if (e.target.value.length > 10) renderResults(e.target.value);
+// Живой поиск
+let searchTimeout;
+input.addEventListener('input', (e) => {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(async () => {
+    const text = e.target.value.trim();
+    if (text.length < 10) return;
+    
+    try {
+      const vector = await embed(text);
+      const results = await search(vector);
+      renderResults(results, resultsEl);
+    } catch (e) {
+      // Тихо игнорируем ошибки поиска при вводе
+    }
   }, 500);
 });
