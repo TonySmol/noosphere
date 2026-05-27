@@ -9,11 +9,20 @@ let cachedWorld = null;
 export async function loadWorld() {
   try {
     const res = await fetch(CONFIG.worldRawUrl + '?t=' + Date.now());
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!res.ok) {
+      if (res.status === 404) {
+        console.info('world.json ещё не создан — начинаем с пустого мира');
+      } else {
+        console.warn('Не удалось загрузить world.json: HTTP ' + res.status);
+      }
+      cachedWorld = { notes: [] };
+      return [];
+    }
     cachedWorld = await res.json();
     return cachedWorld.notes || [];
   } catch (e) {
-    console.warn('Не удалось загрузить world.json:', e);
+    console.warn('Ошибка сети при загрузке world.json:', e.message);
+    cachedWorld = { notes: [] };
     return [];
   }
 }
