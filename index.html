@@ -466,15 +466,39 @@ NS.Store.Local = (() => {
 /* ========================================================================== */
 /* NS.Store.File — TiddlyWiki-style self-save, JSON export/import              */
 /* ========================================================================== */
-NS.Store.File = (() => {
-  let fileHandle = null;
+NS.Store.File = (function() {
+  var fileHandle = null;
+
+  // Безопасные паттерны для regex, собранные через new RegExp
+  var STATE_PATTERN = new RegExp(
+    '<script id="state" type="application/json">[\\s\\S]*?</script>\\s*',
+    'i'
+  );
+  var LESS_THAN = new RegExp('<', 'g');
+  var SCRIPT_OPEN = '<script id="state" type="application/json">';
+  var SCRIPT_CLOSE = '</script>\n</body>';
+  var BODY_CLOSE = '</body>';
+
+  function escapeForScript(s) {
+    // Заменяем < на безопасный вариант, чтобы payload не ломал HTML
+    return s.replace(LESS_THAN, '\\u003c');
+  }
+
+  function buildSelfSaveHtml(state) {
+    var payload = escapeForScript(JSON.stringify(state));
+    var html = document.documentElement.outerHTML;
+    // Удаляем старый state-блок если есть
+    html = html.replace(STATE_PATTERN, '');
+    // Вшиваем новый state перед </body>
+    var idx = html.lastIndexOf(BODY_CLOSE);
+    if (idx === -1) throw new Error('Cannot find </body> tag');
+    return html.slice(0, idx) + SCRIPT_OPEN + payload + SCRIPT_CLOSE + html.slice(idx + BODY_CLOSE.length);
+  }
 
   async function selfSave(state) {
-    const payload = JSON.stringify(state).replace(/</g, '\\u003c');
-    const html = document.documentElement.outerHTML
-      .replace(/<script id="state" type="application\/json">[\s\S]*?<\/script>\s*/i, '')
-      .replace('</body>', '<script id="state" type="application/json">' + payload + '</script>\n</body>');
-    const blob = new Blob([html], { type: 'text/html' });
+    var finalHtml = buildSelfSaveHtml(state);
+    var blob = new Blob([finalHtml], { type: 'text/html' });
+
     if ('showSaveFilePicker' in window) {
       try {
         if (!fileHandle) {
@@ -483,51 +507,71 @@ NS.Store.File = (() => {
             types: [{ description: 'HTML', accept: { 'text/html': ['.html'] } }]
           });
         }
-        const w = await fileHandle.createWritable();
+        var w = await fileHandle.createWritable();
         await w.write(blob);
         await w.close();
         return { ok: true, mode: 'overwrite' };
       } catch (e) {
-        if (e.name === 'AbortError') return { ok: false };
+        if (e && e.name === 'AbortError') return { ok: false };
         throw e;
       }
     }
-    const a = document.createElement('a');
+    // Fallback: download
+    var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'noosphere.html';
     a.click();
+    setTimeout(function() { URL.revokeObjectURL(a.href); }, 1000);
     return { ok: true, mode: 'download' };
   }
 
   function loadEmbedded() {
-    const el = document.getElementById('state');
+    var el = document.getElementById('state');
     if (!el) return null;
-    try { return JSON.parse(el.textContent); }
-    catch { return null; }
+    try {
+      return JSON.parse(el.textContent);
+    } catch (e) {
+      console.warn('[Store.File] embedded state parse error', e);
+      return null;
+    }
   }
 
-  async function exportJSON(state) {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
+  function exportJSON(state) {
+    var blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'noosphere-' + Date.now() + '.json';
+    document.body.appendChild(a);
     a.click();
+    setTimeout(function() {
+      URL.revokeObjectURL(a.href);
+      a.remove();
+    }, 1000);
+    return Promise.resolve();
   }
 
   function importJSON() {
-    return new Promise((resolve, reject) => {
-      const inp = document.createElement('input');
+    return new Promise(function(resolve, reject) {
+      var inp = document.createElement('input');
       inp.type = 'file';
       inp.accept = 'application/json,.json';
-      inp.onchange = async () => {
-        try { resolve(JSON.parse(await inp.files[0].text())); }
-        catch (e) { reject(e); }
+      inp.onchange = async function() {
+        if (!inp.files || !inp.files[0]) {
+          reject(new Error('No file selected'));
+          return;
+        }
+        try {
+          var text = await inp.files[0].text();
+          resolve(JSON.parse(text));
+        } catch (e) {
+          reject(e);
+        }
       };
       inp.click();
     });
   }
 
-  return { selfSave, loadEmbedded, exportJSON, importJSON };
+  return { selfSave: selfSave, loadEmbedded: loadEmbedded, exportJSON: exportJSON, importJSON: importJSON };
 })();
 
 /* ========================================================================== */
