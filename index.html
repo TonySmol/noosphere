@@ -19,17 +19,17 @@
     .tabs { display: flex; gap: 0.5rem; justify-content: center; margin-bottom: 0.25rem; }
     .tab-btn { padding: 0.5rem 1.5rem; border-radius: 12px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer; font-weight: 500; transition: all 0.2s; }
     .tab-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
-    .thought-input { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; box-shadow: var(--shadow); transition: box-shadow 0.3s; }
+    .thought-input { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; box-shadow: var(--shadow); transition: box-shadow 0.3s, border-color 0.3s; }
+    .thought-input.swipe-up { border-color: var(--world); box-shadow: 0 0 0 2px rgba(56,189,248,0.3); }
+    .thought-input.swipe-down { border-color: var(--personal); box-shadow: 0 0 0 2px rgba(167,139,250,0.3); }
     textarea { width: 100%; border: none; background: transparent; font-size: 1.1rem; font-family: inherit; resize: none; outline: none; color: var(--text); min-height: 90px; }
     textarea::placeholder { color: var(--text-secondary); opacity: 0.7; }
-    .input-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; }
-    .btn { padding: 0.6rem 1.4rem; border-radius: 12px; font-weight: 600; border: none; cursor: pointer; background: var(--accent); color: white; font-size: 0.9rem; transition: all 0.2s; }
-    .btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
-    .btn:disabled { opacity: 0.4; pointer-events: none; }
-    .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
+    .input-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; gap: 1rem; }
     .status-line { font-size: 0.8rem; color: var(--text-secondary); }
-    .swipe-hint { font-size: 0.8rem; color: var(--text-secondary); display: none; align-items: center; gap: 0.3rem; }
-    .swipe-hint.visible { display: flex; }
+    .swipe-hints { display: none; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; color: var(--text-secondary); }
+    .swipe-hints.visible { display: flex; }
+    .swipe-hints .hint-up { color: var(--world); }
+    .swipe-hints .hint-down { color: var(--personal); }
     .view { display: none; }
     .view.active { display: block; }
     .feed-section { margin-top: 0.5rem; }
@@ -70,7 +70,8 @@
     .range-display { display: flex; align-items: center; gap: 0.5rem; }
     .range-display span { min-width: 3rem; font-weight: 600; color: var(--accent); }
     .settings-actions { display: flex; flex-direction: column; gap: 0.75rem; margin: 1.5rem 0; }
-    .settings-actions .btn { width: 100%; justify-content: center; }
+    .settings-actions .btn { padding: 0.6rem 1.4rem; border-radius: 12px; font-weight: 600; border: none; cursor: pointer; background: var(--accent); color: white; font-size: 0.9rem; width: 100%; }
+    .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
     .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--text-secondary); border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.4rem; vertical-align: middle; }
@@ -92,8 +93,10 @@
       <textarea id="thoughtInput" placeholder="Поделитесь мыслью..."></textarea>
       <div class="input-actions">
         <div class="status-line" id="statusMsg"></div>
-        <div class="swipe-hint" id="swipeHint"><span>↑</span> <span id="swipeHintText">смахните вверх для публикации</span></div>
-        <button id="saveBtn" class="btn" disabled>Отправить</button>
+        <div class="swipe-hints" id="swipeHints">
+          <span class="hint-up">↑ в мир + себе</span>
+          <span class="hint-down">↓ только себе</span>
+        </div>
       </div>
     </div>
     <div id="personalSection" class="feed-section" style="display:none;">
@@ -149,14 +152,14 @@
     <input type="url" id="proxyUrlInput" placeholder="https://...workers.dev">
   </div>
   <div class="settings-actions">
-    <button id="exportCapsuleBtn" class="btn btn-ghost">Скачать капсулу</button>
-    <button id="importCapsuleBtn" class="btn btn-ghost">Импортировать капсулу</button>
+    <button id="exportCapsuleBtn" class="btn-ghost" style="padding:0.6rem 1.4rem; border-radius:12px; font-weight:600; cursor:pointer; font-size:0.9rem;">Скачать капсулу</button>
+    <button id="importCapsuleBtn" class="btn-ghost" style="padding:0.6rem 1.4rem; border-radius:12px; font-weight:600; cursor:pointer; font-size:0.9rem;">Импортировать капсулу</button>
     <input type="file" id="importFileInput" accept=".capsule,.json" style="display:none;">
-    <button id="rebuildVectorsBtn" class="btn btn-ghost">Пересоздать векторы</button>
+    <button id="rebuildVectorsBtn" class="btn-ghost" style="padding:0.6rem 1.4rem; border-radius:12px; font-weight:600; cursor:pointer; font-size:0.9rem;">Пересоздать векторы</button>
   </div>
   <div style="display:flex; gap:0.5rem; margin:1rem 0;">
-    <button id="resetSettingsBtn" class="btn btn-ghost" style="flex:1;">Сбросить всё</button>
-    <button id="applySettingsBtn" class="btn" style="flex:1;">Применить</button>
+    <button id="resetSettingsBtn" class="btn-ghost" style="flex:1; padding:0.6rem 1.4rem; border-radius:12px; font-weight:600; cursor:pointer; font-size:0.9rem;">Сбросить всё</button>
+    <button id="applySettingsBtn" style="flex:1; padding:0.6rem 1.4rem; border-radius:12px; font-weight:600; border:none; cursor:pointer; background:var(--accent); color:white; font-size:0.9rem;">Применить</button>
   </div>
   <p style="font-size:0.75rem;color:var(--text-secondary);">Модель: MiniLM (25 МБ)</p>
 </div>
@@ -173,8 +176,8 @@ const CONFIG = {
   MODEL: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
   DEFAULT_PROXY: 'https://hidden-unit-1b90.as1994g.workers.dev',
   REQUEST_TIMEOUT_MS: 15000,
-  MAX_RETRIES: 2,
-  RETRY_DELAYS: [1000, 3000],
+  MAX_RETRIES: 1,
+  RETRY_DELAYS: [1500],
   STORAGE_KEYS: {
     myNotes: 'noosphere_mynotes_v2',
     world: 'noosphere_world_v2',
@@ -188,7 +191,7 @@ const CONFIG = {
 // ========================================================================
 const tKeys = {
   ru: {
-    inputPlaceholder: 'Поделитесь мыслью...', saveBtn: 'Отправить',
+    inputPlaceholder: 'Поделитесь мыслью...',
     personalTitle: 'Мои мысли', worldTitle: 'Мир', serendipityTitle: 'Смежные',
     emptyPersonal: 'Нет похожих мыслей', emptyWorld: 'Ничего не найдено',
     edit: 'ред.', save: 'сохр.', cancel: 'отм.', delete: 'удал.',
@@ -199,21 +202,17 @@ const tKeys = {
     resetConfirm: 'Сбросить все заметки и настройки?',
     modelLoading: 'Загрузка модели...', ready: 'Готов',
     settingsTitle: 'Настройки', language: 'Язык / Language',
-    theme: 'Тема', themeAuto: 'Авто', themeLight: 'День', themeDark: 'Ночь',
-    threshold: 'Порог релевантности', serendipity: 'Дельта смежности',
-    minWaves: 'Мин. волн', maxCards: 'Макс. карточек',
+    theme: 'Тема', threshold: 'Порог релевантности', serendipity: 'Дельта смежности',
     exportCapsule: 'Скачать капсулу', importCapsule: 'Импортировать капсулу',
     rebuildVectors: 'Пересоздать векторы', resetAll: 'Сбросить всё', apply: 'Применить',
-    modelInfo: 'Модель: MiniLM (25 МБ)',
     historyPlaceholder: 'Поиск по истории...', emptyHistory: 'Нет заметок',
-    swipeHint: 'смахните вверх для публикации в мир',
     tabFlow: 'Поток', tabHistory: 'История',
-    worldOnline: 'Мир: подключен', worldOffline: 'Мир: офлайн',
+    hintUp: '↑ в мир + себе', hintDown: '↓ только себе',
     publishedOnline: '✦ Опубликовано в мире',
-    publishedLocal: '✓ Сохранено локально (свайп вверх для публикации)'
+    publishedLocal: '✓ Сохранено у себя'
   },
   en: {
-    inputPlaceholder: 'Share a thought...', saveBtn: 'Send',
+    inputPlaceholder: 'Share a thought...',
     personalTitle: 'My thoughts', worldTitle: 'World', serendipityTitle: 'Serendipity',
     emptyPersonal: 'No similar thoughts', emptyWorld: 'Nothing found',
     edit: 'edit', save: 'save', cancel: 'cancel', delete: 'delete',
@@ -223,18 +222,14 @@ const tKeys = {
     resetConfirm: 'Reset all notes and settings?',
     modelLoading: 'Loading model...', ready: 'Ready',
     settingsTitle: 'Settings', language: 'Language',
-    theme: 'Theme', themeAuto: 'Auto', themeLight: 'Light', themeDark: 'Dark',
-    threshold: 'Relevance threshold', serendipity: 'Serendipity delta',
-    minWaves: 'Min waves', maxCards: 'Max cards',
+    theme: 'Theme', threshold: 'Relevance threshold', serendipity: 'Serendipity delta',
     exportCapsule: 'Download capsule', importCapsule: 'Import capsule',
     rebuildVectors: 'Rebuild vectors', resetAll: 'Reset all', apply: 'Apply',
-    modelInfo: 'Model: MiniLM (25 MB)',
     historyPlaceholder: 'Search history...', emptyHistory: 'No notes',
-    swipeHint: 'swipe up to publish to world',
     tabFlow: 'Flow', tabHistory: 'History',
-    worldOnline: 'World: online', worldOffline: 'World: offline',
+    hintUp: '↑ to world + local', hintDown: '↓ local only',
     publishedOnline: '✦ Published to world',
-    publishedLocal: '✓ Saved locally (swipe up to publish)'
+    publishedLocal: '✓ Saved locally'
   }
 };
 let lang = 'ru';
@@ -246,12 +241,12 @@ function updateUI() {
   document.getElementById('personalTitle').textContent = t('personalTitle');
   document.getElementById('relevantTitle').textContent = t('worldTitle');
   document.getElementById('serendipityTitle').textContent = t('serendipityTitle');
-  document.getElementById('saveBtn').textContent = t('saveBtn');
-  document.getElementById('swipeHintText').textContent = t('swipeHint');
   document.getElementById('historySearchInput').placeholder = t('historyPlaceholder');
   if (els.statusMsg && els.statusMsg.textContent !== '') els.statusMsg.textContent = t('ready');
   document.querySelector('.tab-btn[data-view="flow"]').textContent = t('tabFlow');
   document.querySelector('.tab-btn[data-view="history"]').textContent = t('tabHistory');
+  document.querySelector('.hint-up').textContent = t('hintUp');
+  document.querySelector('.hint-down').textContent = t('hintDown');
   if (document.getElementById('historyView').classList.contains('active')) renderHistory();
 }
 
@@ -307,14 +302,21 @@ const MyNotes = {
 };
 
 // ========================================================================
-// 7. QDRANT АДАПТЕР
+// 7. QDRANT АДАПТЕР (с защитой от множественных запросов)
 // ========================================================================
 const Qdrant = {
   online: null,
+  activeController: null,  // для отмены предыдущих поисковых запросов
 
-  async _fetch(path, method = 'GET', body = null) {
-    const url = Settings.getProxyUrl().replace(/\/$/, '') + path;
+  async _fetch(path, method = 'GET', body = null, useAbort = false) {
+    // Если useAbort — отменяем предыдущий запрос
+    if (useAbort && this.activeController) {
+      try { this.activeController.abort(); } catch {}
+    }
     const controller = new AbortController();
+    if (useAbort) this.activeController = controller;
+    
+    const url = Settings.getProxyUrl().replace(/\/$/, '') + path;
     const timeoutId = setTimeout(() => controller.abort(), CONFIG.REQUEST_TIMEOUT_MS);
     try {
       const res = await fetch(url, {
@@ -331,6 +333,9 @@ const Qdrant = {
       return await res.json();
     } finally {
       clearTimeout(timeoutId);
+      if (useAbort && this.activeController === controller) {
+        this.activeController = null;
+      }
     }
   },
 
@@ -341,6 +346,8 @@ const Qdrant = {
         return await fn();
       } catch (e) {
         lastError = e;
+        // Не повторяем если это отмена запроса (новый ввод)
+        if (e.name === 'AbortError') throw e;
         if (i < CONFIG.MAX_RETRIES) {
           await new Promise(r => setTimeout(r, CONFIG.RETRY_DELAYS[i] || 1000));
         }
@@ -383,9 +390,10 @@ const Qdrant = {
       const filter = minWaves > 0
         ? { must: [{ key: 'waves', range: { gte: minWaves } }] }
         : undefined;
+      // useAbort=true — отменяем предыдущий поисковый запрос
       const data = await this._fetch(`/collections/${CONFIG.COLLECTION}/points/search`, 'POST', {
         vector, limit, score_threshold: minScore, with_payload: true, filter
-      });
+      }, true);
       return (data.result || []).map(r => ({
         id: String(r.id),
         score: r.score,
@@ -506,6 +514,8 @@ const World = {
         const ser = results.filter(r => r.score >= low && r.score < Settings.threshold).slice(0, Settings.maxResults);
         return { rel, ser, source: 'online' };
       } catch (e) {
+        // Если запрос отменён (новый ввод) — просто выходим без фоллбэка
+        if (e.name === 'AbortError') return { rel: [], ser: [], source: 'cancelled' };
         console.warn('Qdrant search failed, falling back to local:', e.message);
         Qdrant.online = false;
         updateStatusDot(false);
@@ -532,7 +542,7 @@ const World = {
 };
 
 // ========================================================================
-// 9. ДВИЖОК (векторизация + локальный поиск) — ВЗЯТО ИЗ РАБОЧЕГО ПРОТОТИПА
+// 9. ДВИЖОК
 // ========================================================================
 const Vec = {
   normalize(v) {
@@ -586,21 +596,6 @@ const Engine = {
       if (s > Settings.threshold) res.push({ ...n, score: s });
     }
     return res.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults);
-  },
-  
-  async searchWorld(qVec) {
-    const rel = [], ser = [], low = Settings.threshold - Settings.serendipityDelta;
-    for (const n of World.notes) {
-      if (n.waves < Settings.minWaves) continue;
-      const v = new Float32Array(n.vec);
-      const s = Vec.cosine(qVec, v);
-      if (s >= Settings.threshold) rel.push({ ...n, score: s });
-      else if (s >= low) ser.push({ ...n, score: s });
-    }
-    return {
-      rel: rel.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults),
-      ser: ser.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults)
-    };
   }
 };
 
@@ -609,8 +604,8 @@ const Engine = {
 // ========================================================================
 const $ = s => document.querySelector(s);
 const els = {
-  input: $('#thoughtInput'), saveBtn: $('#saveBtn'), statusMsg: $('#statusMsg'),
-  swipeHint: $('#swipeHint'), swipeHintText: $('#swipeHintText'),
+  input: $('#thoughtInput'), statusMsg: $('#statusMsg'),
+  swipeHints: $('#swipeHints'), thoughtContainer: $('#thoughtContainer'),
   personalSection: $('#personalSection'), personalCards: $('#personalCards'),
   relevantSection: $('#relevantSection'), relevantCards: $('#relevantCards'),
   serendipitySection: $('#serendipitySection'), serendipityCards: $('#serendipityCards'),
@@ -711,6 +706,8 @@ async function searchFlow() {
   }
   const qVec = await Engine.embed(q);
   const [local, world] = await Promise.all([Engine.searchLocal(qVec), World.search(qVec)]);
+  // Если запрос был отменён (новый ввод) — не рисуем
+  if (world.source === 'cancelled') return;
   els.personalSection.style.display = local.length ? 'block' : 'none';
   renderCarousel(els.personalCards, local);
   els.relevantSection.style.display = world.rel.length ? 'block' : 'none';
@@ -730,8 +727,7 @@ async function saveNote(share = false) {
     const result = await World.add(Array.from(vec), text, note.id);
     
     // Анимация звёздочки
-    const container = document.getElementById('thoughtContainer');
-    const rect = container.getBoundingClientRect();
+    const rect = els.thoughtContainer.getBoundingClientRect();
     const star = document.createElement('div');
     star.textContent = '✦';
     star.style.cssText = `position:fixed; left:${rect.left + rect.width / 2}px; top:${rect.top + rect.height / 2}px; font-size:24px; color:var(--star); transition: all 1s cubic-bezier(0.25,0.1,0.25,1); z-index:999; pointer-events:none;`;
@@ -749,28 +745,66 @@ async function saveNote(share = false) {
 }
 
 // ========================================================================
-// 12. ЖЕСТЫ И ВКЛАДКИ
+// 12. ЖЕСТЫ (свайпы) И ВКЛАДКИ
 // ========================================================================
 els.input.addEventListener('input', () => {
-  els.swipeHint.classList.toggle('visible', els.input.value.trim().length > 0);
+  els.swipeHints.classList.toggle('visible', els.input.value.trim().length > 0);
 });
 
-let touchY = 0;
-els.input.addEventListener('touchstart', e => touchY = e.touches[0].clientY);
+// Отслеживание свайпов: вверх = облако+локал, вниз = только локал
+let touchStartY = 0;
+let touchStartX = 0;
+let touchStartTime = 0;
+
+els.input.addEventListener('touchstart', e => {
+  touchStartY = e.touches[0].clientY;
+  touchStartX = e.touches[0].clientX;
+  touchStartTime = Date.now();
+}, { passive: true });
+
+els.input.addEventListener('touchmove', e => {
+  const deltaY = touchStartY - e.touches[0].clientY;
+  const deltaX = Math.abs(touchStartX - e.touches[0].clientX);
+  // Визуальная обратная связь: подсвечиваем контейнер в зависимости от направления
+  if (deltaX < 40) {  // только вертикальные свайпы
+    if (deltaY > 30 && els.input.value.trim()) {
+      els.thoughtContainer.classList.add('swipe-up');
+      els.thoughtContainer.classList.remove('swipe-down');
+    } else if (deltaY < -30 && els.input.value.trim()) {
+      els.thoughtContainer.classList.add('swipe-down');
+      els.thoughtContainer.classList.remove('swipe-up');
+    } else {
+      els.thoughtContainer.classList.remove('swipe-up', 'swipe-down');
+    }
+  }
+}, { passive: true });
+
 els.input.addEventListener('touchend', e => {
-  if (touchY - e.changedTouches[0].clientY > 60 && els.input.value.trim()) {
-    e.preventDefault();
-    saveNote(true);  // Свайп вверх = публикация в мир
+  const deltaY = touchStartY - e.changedTouches[0].clientY;
+  const deltaTime = Date.now() - touchStartTime;
+  const text = els.input.value.trim();
+  
+  els.thoughtContainer.classList.remove('swipe-up', 'swipe-down');
+  
+  // Свайп должен быть быстрым (<500мс) и достаточно длинным (>60px)
+  if (text && deltaTime < 500) {
+    if (deltaY > 60) {
+      // Свайп ВВЕРХ → в мир + локал
+      e.preventDefault();
+      saveNote(true);
+    } else if (deltaY < -60) {
+      // Свайп ВНИЗ → только локал
+      e.preventDefault();
+      saveNote(false);
+    }
   }
 });
 
-// Кнопка "Отправить" всегда сохраняет только локально (без share)
-els.saveBtn.addEventListener('click', e => saveNote(false));
-
+// Ctrl+Enter / Cmd+Enter → только локал
 els.input.addEventListener('keydown', e => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
     e.preventDefault();
-    saveNote(false);  // Ctrl+Enter = только локально
+    saveNote(false);
   }
 });
 
@@ -935,19 +969,19 @@ async function rebuildVectors() {
   syncSettingsUI();
 
   els.statusMsg.innerHTML = `<span class="spinner"></span> ${t('modelLoading')}`;
-  els.saveBtn.disabled = true;
 
   try {
     await Engine.init();
     els.statusMsg.textContent = t('ready');
-    els.saveBtn.disabled = false;
     Qdrant.checkHealth();
   } catch (e) {
     els.statusMsg.textContent = 'Ошибка загрузки модели';
     console.error(e);
   }
 
-  els.input.addEventListener('input', debounce(searchFlow, 300));
+  // Увеличенный debounce (800мс) — меньше запросов к Qdrant
+  els.input.addEventListener('input', debounce(searchFlow, 800));
+  
   els.settingsTrigger.addEventListener('click', () => { els.overlay.classList.add('open'); els.panel.classList.add('open'); });
   els.overlay.addEventListener('click', () => { els.overlay.classList.remove('open'); els.panel.classList.remove('open'); });
   els.thresholdSl.addEventListener('input', () => els.thresholdVal.textContent = parseFloat(els.thresholdSl.value).toFixed(2));
@@ -964,7 +998,7 @@ async function rebuildVectors() {
   els.maxResSel.addEventListener('change', () => applySettings(false));
   els.langSelect.addEventListener('change', applySettings);
   els.themeSelect.addEventListener('change', applySettings);
-  els.historySearch.addEventListener('input', debounce(searchHistory, 300));
+  els.historySearch.addEventListener('input', debounce(searchHistory, 800));
 })();
 
 function debounce(fn, ms) {
