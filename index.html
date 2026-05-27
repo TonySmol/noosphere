@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Noosphere Core (IDB Local + Gun World SET)</title>
+  <title>Noosphere Core (IDB Local + Gun World SET link-resolve)</title>
 
   <style>
     :root{
@@ -192,7 +192,6 @@
   <script type="module">
     import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-    // Utils
     const Utils = (() => {
       const $ = (s, r=document) => r.querySelector(s);
       const esc = (s) => { const d=document.createElement('div'); d.textContent=String(s??''); return d.innerHTML; };
@@ -208,7 +207,6 @@
       return { $, esc, debounce, clamp, uuid, safeJSON, Emitter };
     })();
 
-    // IDB local (KV + notes)
     const IDB = (() => {
       const DB = 'noosphere_idb_local_v1';
       const STO_KV = 'kv';
@@ -281,7 +279,6 @@
       return { kvGet, kvSet, notesPut, notesDelete, notesGetAll, ok:()=>ok };
     })();
 
-    // Settings (built-in relay)
     const Settings = (() => {
       const KEY='settings';
       const DEFAULT = {
@@ -317,7 +314,6 @@
       return { DEFAULT, sanitize, parsePeers, load, save };
     })();
 
-    // Theme
     const Theme = (() => {
       function apply(mode) {
         const dark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -326,7 +322,6 @@
       return { apply };
     })();
 
-    // Vectors
     const Vectors = (() => {
       const dot = (a,b)=>{ let d=0; for(let i=0;i<a.length;i++) d += a[i]*b[i]; return d; };
       const norm = (v)=>{ let s=0; for(let i=0;i<v.length;i++) s+=v[i]*v[i]; const m=Math.sqrt(s)||1; for(let i=0;i<v.length;i++) v[i]/=m; return v; };
@@ -337,7 +332,6 @@
       return { dot, packI8, unpackI8 };
     })();
 
-    // Embedder
     const Embedder = (() => {
       let model=null;
       async function init() { model = await pipeline('feature-extraction','Xenova/paraphrase-multilingual-MiniLM-L12-v2',{ quantized:true }); }
@@ -360,7 +354,6 @@
       return { init, ready, embed };
     })();
 
-    // Local notes (offline)
     const LocalNotes = (() => {
       function create() {
         const ee = new Utils.Emitter();
@@ -404,58 +397,70 @@
       return { create };
     })();
 
-    // ===================== Gun World via SET (correct) =====================
+    // ===== World via SET with link resolving (FIX) =====
     const World = (() => {
-      // new root so both devices must use same file
-      const ROOT = 'noosphere_world_v4';
+      const ROOT = 'noosphere_world_v5'; // bump to avoid old garbage
 
       function create(gun) {
         const ee = new Utils.Emitter();
+        const feed = gun.get(ROOT).get('world').get('feed');     // SET
+        const noteRoot = gun.get(ROOT).get('world').get('note'); // notes by id
 
-        // feed is a SET (contains links)
-        const feed = gun.get(ROOT).get('world').get('feed');
-        // notes are stored at /note/<id>
-        const noteRoot = gun.get(ROOT).get('world').get('note');
+        const byId = new Map();         // id -> note
+        const subSouls = new Set();     // soul -> subscribed
+        const subIds = new Set();       // id -> subscribed
 
-        const map = new Map(); // id -> note
-
-        function list() { return Array.from(map.values()).sort((a,b)=>b.createdAt-a.createdAt); }
+        function list() { return Array.from(byId.values()).sort((a,b)=>b.createdAt-a.createdAt); }
         function emit() { ee.emit('change', list()); }
 
-        // Subscribe to feed set
-        feed.map().on((note) => {
-          const x = note && typeof note === 'object' ? note : null;
-          if (!x) return;
-          if (!x.id) return;
-          if (x.deleted) { map.delete(x.id); emit(); return; }
-          if (typeof x.text !== 'string') return;
-
-          map.set(String(x.id), {
-            id: String(x.id),
+        function normalize(id, raw) {
+          const x = raw && typeof raw === 'object' ? raw : {};
+          if (x.deleted) return null;
+          if (typeof x.text !== 'string') return null;
+          return {
+            id,
             text: String(x.text),
             vPacked: typeof x.vPacked === 'string' ? x.vPacked : null,
             author: String(x.author ?? ''),
             createdAt: Number(x.createdAt) || Date.now()
+          };
+        }
+
+        // resolve link -> subscribe to note soul
+        feed.map().on((val) => {
+          // val is often link: { '#': soul }
+          const soul = val && typeof val === 'object' && typeof val['#'] === 'string' ? val['#'] : null;
+          if (!soul) return;
+          if (subSouls.has(soul)) return;
+          subSouls.add(soul);
+
+          gun.get(soul).on((raw) => {
+            // get id from raw.id (best) or parse from soul
+            const rid = raw && typeof raw === 'object' && typeof raw.id === 'string' ? raw.id : soul.split('/').pop();
+            if (!rid) return;
+
+            const n = normalize(rid, raw);
+            if (!n) { byId.delete(rid); emit(); return; }
+
+            byId.set(rid, n);
+            emit();
           });
-          emit();
         });
 
         function publish({ id, text, vPacked, author }) {
           const now = Date.now();
           const ref = noteRoot.get(id);
           ref.put({ id, text, vPacked, author, createdAt: now, deleted:false });
-          // THIS is the critical part:
-          feed.set(ref);
+          feed.set(ref); // makes it discoverable
           return id;
         }
 
-        return { list, onChange:(fn)=>ee.on('change', fn), publish, ROOT };
+        return { ROOT, list, onChange:(fn)=>ee.on('change', fn), publish };
       }
 
       return { create };
     })();
 
-    // Indexer
     const Indexer = (() => {
       function create({ local }) {
         let running = false;
@@ -477,7 +482,6 @@
       return { create };
     })();
 
-    // Publisher
     const Publisher = (() => {
       function create({ local, world, deviceId }) {
         let running = false;
@@ -496,9 +500,7 @@
                 v = Vectors.packI8(vec);
                 await local.update(n.id, { vPacked: v });
               }
-              // publish to world set
               world.publish({ id: n.id, text: n.text, vPacked: v, author: deviceId });
-              // mark published (set ensures discoverability for others)
               await local.update(n.id, { publishState:'published', worldId: n.id });
             }
           } finally { running = false; }
@@ -514,17 +516,14 @@
       return { create };
     })();
 
-    // Search (filters out own world notes)
     const Search = (() => {
       function create({ local, world, settings, deviceId }) {
         const cache = new Map(); // id -> Float32Array
-
         function vecFromPacked(id, packed) {
           if (!packed) return null;
           if (cache.has(id)) return cache.get(id);
           try { const v = Vectors.unpackI8(packed); cache.set(id, v); return v; } catch { return null; }
         }
-
         function clear() { cache.clear(); }
 
         async function searchAll(queryText) {
@@ -551,9 +550,7 @@
           const worldHits = [];
           const serHits = [];
           for (const w of world.list()) {
-            // IMPORTANT: do not show own published notes in World
-            if (w.author === deviceId) continue;
-
+            if (w.author === deviceId) continue; // hide own in world results
             const v = vecFromPacked(w.id, w.vPacked);
             if (!v) continue;
             const score = Vectors.dot(qVec, v);
@@ -578,13 +575,11 @@
       return { create };
     })();
 
-    // UI
     const UI = (() => {
       function pill(label, state='neutral') {
         const dot = state === 'ok' ? 'ok' : state === 'warn' ? 'warn' : state === 'bad' ? 'bad' : '';
         return `<span class="pill"><span class="dot ${dot}"></span>${Utils.esc(label)}</span>`;
       }
-
       function renderItems(container, items, { emptyText, kind }) {
         if (!items.length) { container.innerHTML = `<div class="empty">${Utils.esc(emptyText)}</div>`; return; }
         container.innerHTML = items.map(it => {
@@ -602,7 +597,6 @@
           `;
         }).join('');
       }
-
       function renderHistory(container, notes) {
         if (!notes.length) { container.innerHTML = `<div class="empty">Нет заметок</div>`; return; }
         container.innerHTML = notes.map(n => {
@@ -624,11 +618,9 @@
           `;
         }).join('');
       }
-
       return { pill, renderItems, renderHistory };
     })();
 
-    // Capsule
     const Capsule = (() => {
       function exportNotes(notes) {
         const cap = { version: 1, kind: 'noosphere', createdAt: Date.now(), notes };
@@ -639,18 +631,15 @@
         a.click();
         URL.revokeObjectURL(a.href);
       }
-
       async function importNotes(file) {
         const txt = await file.text();
         const cap = Utils.safeJSON(txt, null);
         if (!cap || !Array.isArray(cap.notes)) throw new Error('bad capsule');
         return cap.notes;
       }
-
       return { exportNotes, importNotes };
     })();
 
-    // App
     const App = (() => {
       const els = {
         tabFlow: Utils.$('#tabFlow'),
@@ -946,10 +935,8 @@
           }
         })();
 
-        // retry pending periodically
         setInterval(() => publisher.run(), 4000);
 
-        // UI events
         els.tabFlow.addEventListener('click', () => setTab('flow'));
         els.tabHistory.addEventListener('click', () => setTab('history'));
 
