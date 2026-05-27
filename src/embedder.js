@@ -13,14 +13,12 @@ export async function init(onProgress) {
 export async function embed(text) {
   if (!model) throw new Error('Модель не готова');
   const out = await model(text);
-  const raw = Array.from(out.data);
-  return normalize(raw);
+  return normalize(Array.from(out.data));
 }
 
 export function normalize(vec) {
-  const magnitude = Math.sqrt(vec.reduce((sum, x) => sum + x * x, 0));
-  if (magnitude === 0) return vec;
-  return vec.map(x => x / magnitude);
+  const m = Math.sqrt(vec.reduce((s, x) => s + x * x, 0));
+  return m === 0 ? vec : vec.map(x => x / m);
 }
 
 export function vecToBase64(arr) {
