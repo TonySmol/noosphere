@@ -3,235 +3,187 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Noosphere – коллективная память</title>
+  <title>Noosphere</title>
   <style>
     :root {
       --bg: #f8fafc; --surface: #ffffff; --text: #0f172a;
       --text-secondary: #64748b; --border: #e2e8f0; --accent: #4f46e5;
-      --accent-hover: #4338ca; --shadow: 0 10px 25px -5px rgba(0,0,0,0.05);
-      --radius: 20px; --danger: #ef4444;
+      --accent-hover: #4338ca; --shadow: 0 1px 3px rgba(0,0,0,0.05);
+      --radius: 16px; --wave: #0ea5e9; --star: #fbbf24;
+      --personal: #a78bfa; --world: #38bdf8; --serendipity: #fbbf24;
     }
-    .dark { --bg: #0f172a; --surface: #1e293b; --text: #f1f5f9; --text-secondary: #94a3b8; --border: #334155; --accent: #818cf8; --shadow: 0 10px 25px -5px rgba(0,0,0,0.4); }
+    .dark { --bg: #0f172a; --surface: #1e293b; --text: #f1f5f9; --text-secondary: #94a3b8; --border: #334155; --accent: #818cf8; --shadow: 0 1px 3px rgba(0,0,0,0.3); }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
       background: var(--bg); color: var(--text); line-height: 1.5;
-      display: flex; justify-content: center; padding: 1rem;
+      display: flex; justify-content: center; padding: 0.5rem;
+      overflow-x: hidden;
     }
-    .app { width: 100%; max-width: 680px; display: flex; flex-direction: column; gap: 1.25rem; }
+    .app { width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 0.75rem; margin-top: 0.5rem; }
 
-    .logo {
-      font-size: 2rem; font-weight: 700; letter-spacing: -0.03em;
-      background: linear-gradient(135deg, #4f46e5, #7c3aed);
-      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-      text-align: center; margin-bottom: 0.25rem;
-    }
-
-    .tabs { display: flex; gap: 0.5rem; justify-content: center; }
+    .tabs { display: flex; gap: 0.5rem; justify-content: center; margin-bottom: 0.5rem; }
     .tab-btn {
       padding: 0.5rem 1.5rem; border-radius: 12px; border: 1px solid var(--border);
       background: transparent; color: var(--text-secondary); cursor: pointer;
-      font-weight: 500; transition: 0.2s;
+      font-weight: 500; transition: all 0.2s;
     }
     .tab-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
 
-    .view { display: none; }
-    .view.active { display: block; }
-
     .thought-input {
-      background: var(--surface); border: 2px solid var(--border);
-      border-radius: var(--radius); padding: 1.25rem;
-      box-shadow: var(--shadow); transition: 0.3s;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1rem;
+      box-shadow: var(--shadow); transition: box-shadow 0.3s;
     }
-    .thought-input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(79,70,229,0.15); }
     textarea {
       width: 100%; border: none; background: transparent;
-      font-size: 1.15rem; font-family: inherit; resize: none;
-      outline: none; color: var(--text); min-height: 80px;
+      font-size: 1.1rem; font-family: inherit; resize: none;
+      outline: none; color: var(--text); min-height: 90px;
     }
     textarea::placeholder { color: var(--text-secondary); opacity: 0.7; }
-    .input-actions {
-      display: flex; justify-content: space-between; align-items: center;
-      margin-top: 0.75rem; gap: 0.5rem; flex-wrap: wrap;
-    }
-    .share-toggle {
-      display: flex; align-items: center; gap: 0.4rem;
-      font-size: 0.9rem; color: var(--text-secondary); cursor: pointer;
-      user-select: none;
-    }
-    .share-toggle input[type="checkbox"] { width: 1.2rem; height: 1.2rem; accent-color: var(--accent); }
+    .input-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; }
     .btn {
-      padding: 0.6rem 1.2rem; border-radius: 14px; font-weight: 600;
-      border: none; cursor: pointer; transition: 0.2s;
-      background: var(--accent); color: white; font-size: 0.9rem;
-      display: inline-flex; align-items: center; gap: 0.3rem;
+      padding: 0.6rem 1.4rem; border-radius: 12px; font-weight: 600;
+      border: none; cursor: pointer; background: var(--accent); color: white;
+      font-size: 0.9rem; transition: all 0.2s;
     }
     .btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
-    .btn:active { transform: translateY(0); }
     .btn:disabled { opacity: 0.4; pointer-events: none; }
     .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
-    .btn-ghost:hover { background: var(--surface); }
 
-    .feed-section { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.25rem; }
-    .section-header {
-      display: flex; align-items: center; justify-content: space-between;
-      cursor: pointer; user-select: none;
-    }
-    .section-label {
-      font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;
-      color: var(--text-secondary);
-    }
-    .collapse-icon { font-size: 1.2rem; color: var(--text-secondary); transition: 0.2s; }
-    .section-body { overflow: hidden; transition: max-height 0.3s ease; }
-    .section-body.collapsed { max-height: 0; }
+    .status-line { font-size: 0.8rem; color: var(--text-secondary); }
+    .swipe-hint { font-size: 0.8rem; color: var(--text-secondary); display: none; align-items: center; gap: 0.3rem; }
+    .swipe-hint.visible { display: flex; }
 
-    .cards-row {
-      display: flex; overflow-x: auto; gap: 0.75rem;
-      padding-bottom: 0.5rem; scroll-snap-type: x mandatory;
-      -webkit-overflow-scrolling: touch;
+    .feed-section { margin-top: 0.5rem; }
+    .section-title {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);
+      text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;
     }
-    .cards-row::-webkit-scrollbar { height: 6px; }
-    .cards-row::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .section-title::before {
+      content: ''; display: block; width: 8px; height: 8px;
+      border-radius: 50%; background: currentColor;
+    }
+    #personalSection .section-title { color: var(--personal); }
+    #relevantSection .section-title { color: var(--world); }
+    #serendipitySection .section-title { color: var(--serendipity); }
+
+    .carousel {
+      display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
+      -webkit-overflow-scrolling: touch; gap: 0.75rem;
+      padding-bottom: 0.5rem;
+    }
+    .carousel::-webkit-scrollbar { height: 4px; }
+    .carousel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
     .card {
-      min-width: 240px; max-width: 300px;
+      flex: 0 0 calc(100% - 1.5rem);
+      scroll-snap-align: start;
       background: var(--surface); border: 1px solid var(--border);
-      border-radius: 16px; padding: 1rem;
-      box-shadow: var(--shadow); scroll-snap-align: start;
-      transition: 0.2s; animation: fadeInUp 0.4s ease both;
-      display: flex; flex-direction: column;
+      border-radius: var(--radius); padding: 1rem;
+      box-shadow: var(--shadow); transition: transform 0.3s, box-shadow 0.3s;
+      animation: fadeInUp 0.4s ease both;
     }
     @keyframes fadeInUp {
-      from { opacity: 0; transform: translateY(12px); }
+      from { opacity: 0; transform: translateY(10px); }
       to { opacity: 1; transform: translateY(0); }
     }
-    .card:hover { transform: translateY(-3px); box-shadow: 0 15px 30px -10px rgba(0,0,0,0.1); }
-    .card-text { font-size: 0.95rem; line-height: 1.5; margin-bottom: 0.75rem; white-space: pre-wrap; word-break: break-word; flex: 1; }
-    .card-footer {
-      display: flex; align-items: center; justify-content: space-between;
-      font-size: 0.75rem; color: var(--text-secondary); gap: 0.5rem;
-    }
-    .score-badge {
-      background: rgba(79,70,229,0.1); color: var(--accent);
-      padding: 2px 8px; border-radius: 12px; font-weight: 600;
-    }
-    .vote-group { display: flex; align-items: center; gap: 0.2rem; }
-    .vote-btn {
-      background: none; border: 1px solid var(--border);
-      border-radius: 50%; width: 28px; height: 28px;
-      display: inline-flex; align-items: center; justify-content: center;
+    .card.charged { border-color: var(--wave); box-shadow: 0 0 0 1px var(--wave); }
+    .card-text { font-size: 0.95rem; line-height: 1.5; margin-bottom: 0.5rem; white-space: pre-wrap; word-break: break-word; }
+    .card-footer { display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; color: var(--text-secondary); }
+    .score-badge { background: rgba(79,70,229,0.1); color: var(--accent); padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+    .wave-group { display: flex; align-items: center; gap: 0.3rem; }
+    .wave-btn {
+      background: none; border: 1px solid var(--border); border-radius: 50%;
+      width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
       font-size: 0.85rem; cursor: pointer; color: var(--text-secondary);
-      transition: 0.2s;
+      transition: all 0.2s;
     }
-    .vote-btn:hover { background: var(--bg); color: var(--text); }
-    .vote-count { font-weight: 600; min-width: 1.8rem; text-align: center; }
-    .empty-message { text-align: center; color: var(--text-secondary); font-style: italic; padding: 1rem; width: 100%; }
+    .wave-btn:hover { background: var(--wave); color: white; border-color: var(--wave); }
+    .empty-message { text-align: center; color: var(--text-secondary); padding: 2rem 1rem; font-style: italic; }
 
     .history-input { margin-bottom: 1rem; }
     .day-group { margin-bottom: 1.5rem; }
-    .day-title {
-      font-size: 0.85rem; font-weight: 600; color: var(--text-secondary);
-      margin-bottom: 0.5rem; padding-left: 0.25rem;
-    }
+    .day-title { font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.5rem; }
     .archive-item {
       background: var(--surface); border: 1px solid var(--border);
-      border-radius: 12px; padding: 0.75rem 1rem; box-shadow: var(--shadow);
-      margin-bottom: 0.5rem; transition: 0.2s;
+      border-radius: 12px; padding: 0.75rem 1rem; margin-bottom: 0.5rem;
     }
-    .archive-item:hover { border-color: var(--accent); }
-    .archive-item .meta {
-      display: flex; align-items: center; gap: 0.75rem;
-      font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.3rem;
-    }
+    .archive-item .meta { font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.25rem; display: flex; gap: 0.75rem; }
     .archive-item .text { font-size: 0.95rem; white-space: pre-wrap; word-break: break-word; }
-    .archive-item .actions { display: flex; gap: 0.3rem; margin-top: 0.5rem; }
+    .archive-item .actions { margin-top: 0.5rem; display: flex; gap: 0.5rem; }
     .archive-item .actions button {
       background: none; border: 1px solid var(--border); border-radius: 8px;
-      padding: 0.3rem 0.7rem; font-size: 0.8rem; cursor: pointer; color: var(--text-secondary);
+      padding: 0.25rem 0.7rem; font-size: 0.8rem; cursor: pointer; color: var(--text-secondary);
     }
-    .archive-item .actions button:hover { background: var(--bg); }
 
     .burger-btn {
       position: fixed; top: 1rem; right: 1rem;
       width: 44px; height: 44px; background: var(--surface);
       border: 1px solid var(--border); border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
-      cursor: pointer; box-shadow: var(--shadow); z-index: 5;
-      font-size: 1.5rem; color: var(--text);
+      cursor: pointer; z-index: 5; font-size: 1.4rem; box-shadow: var(--shadow);
     }
     .settings-panel {
       position: fixed; top: 0; right: 0; width: 340px; max-width: 85vw;
       height: 100%; background: var(--surface); box-shadow: -5px 0 25px rgba(0,0,0,0.15);
       z-index: 10; padding: 1.5rem; overflow-y: auto;
-      transform: translateX(100%); transition: transform 0.3s ease;
+      transform: translateX(100%); transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     }
     .settings-panel.open { transform: translateX(0); }
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 9; display: none; }
     .overlay.open { display: block; }
 
-    .setting-row {
-      display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 1rem;
-    }
+    .setting-row { margin-bottom: 1rem; display: flex; flex-direction: column; gap: 0.2rem; }
     .setting-row label { font-size: 0.85rem; color: var(--text-secondary); }
     .range-display { display: flex; align-items: center; gap: 0.5rem; }
     .range-display span { min-width: 3rem; font-weight: 600; color: var(--accent); }
-    .settings-actions { display: flex; flex-direction: column; gap: 0.75rem; margin: 1rem 0; }
+    .settings-actions { display: flex; flex-direction: column; gap: 0.75rem; margin: 1.5rem 0; }
     .settings-actions .btn { width: 100%; justify-content: center; }
+
+    .spinner {
+      display: inline-block; width: 16px; height: 16px;
+      border: 2px solid var(--text-secondary); border-right-color: transparent;
+      border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
 <div class="app">
-  <h1 class="logo">🌐 Noosphere</h1>
-
   <div class="tabs">
     <button class="tab-btn active" data-view="flow">Поток</button>
     <button class="tab-btn" data-view="history">История</button>
   </div>
 
-  <!-- Поток -->
-  <div class="view active" id="flowView">
-    <div class="thought-input">
-      <textarea id="thoughtInput" placeholder="Поделитесь мыслью..."></textarea>
-      <div class="input-actions">
-        <label class="share-toggle">
-          <input type="checkbox" id="shareCheckbox"> <span id="shareToggleText">В общий поток</span>
-        </label>
-        <button id="saveBtn" class="btn" disabled>Отправить</button>
+  <div class="thought-input" id="thoughtContainer">
+    <textarea id="thoughtInput" placeholder="Поделитесь мыслью..."></textarea>
+    <div class="input-actions">
+      <div class="status-line" id="statusMsg"></div>
+      <div class="swipe-hint" id="swipeHint">
+        <span>↑</span> <span id="swipeHintText">смахните вверх для публикации</span>
       </div>
-    </div>
-
-    <div id="personalSection" class="feed-section" style="display:none;">
-      <div class="section-header" data-section="personalBody">
-        <span class="section-label" id="personalFeedLabel">🧠 Мои похожие мысли</span>
-        <span class="collapse-icon">▼</span>
-      </div>
-      <div class="section-body" id="personalBody">
-        <div id="personalCards" class="cards-row"></div>
-      </div>
-    </div>
-
-    <div id="relevantSection" class="feed-section" style="display:none;">
-      <div class="section-header" data-section="relevantBody">
-        <span class="section-label" id="relevantFeedLabel">🌍 Релевантные идеи мира</span>
-        <span class="collapse-icon">▼</span>
-      </div>
-      <div class="section-body" id="relevantBody">
-        <div id="relevantCards" class="cards-row"></div>
-      </div>
-    </div>
-
-    <div id="serendipitySection" class="feed-section" style="display:none;">
-      <div class="section-header" data-section="serendipityBody">
-        <span class="section-label" id="serendipityFeedLabel">🌀 Смежные (неожиданные)</span>
-        <span class="collapse-icon">▼</span>
-      </div>
-      <div class="section-body" id="serendipityBody">
-        <div id="serendipityCards" class="cards-row"></div>
-      </div>
+      <button id="saveBtn" class="btn" disabled>Отправить</button>
     </div>
   </div>
 
-  <!-- История -->
-  <div class="view" id="historyView">
+  <div id="personalSection" class="feed-section" style="display:none;">
+    <div class="section-title" id="personalTitle">Мои мысли</div>
+    <div id="personalCards" class="carousel"></div>
+  </div>
+
+  <div id="relevantSection" class="feed-section" style="display:none;">
+    <div class="section-title" id="relevantTitle">Мир</div>
+    <div id="relevantCards" class="carousel"></div>
+  </div>
+
+  <div id="serendipitySection" class="feed-section" style="display:none;">
+    <div class="section-title" id="serendipityTitle">Смежные</div>
+    <div id="serendipityCards" class="carousel"></div>
+  </div>
+
+  <div class="view" id="historyView" style="display:none;">
     <div class="history-input">
       <input type="text" id="historySearchInput" placeholder="Поиск по истории..." style="width:100%; padding:0.75rem; border:1px solid var(--border); border-radius:14px; background:var(--surface); color:var(--text);">
     </div>
@@ -239,7 +191,6 @@
   </div>
 </div>
 
-<!-- Настройки (бургер) -->
 <div class="burger-btn" id="settingsTrigger">☰</div>
 <div class="overlay" id="overlay"></div>
 <div class="settings-panel" id="settingsPanel">
@@ -257,20 +208,20 @@
   <div class="setting-row">
     <label>Порог релевантности</label>
     <div class="range-display">
-      <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.15">
-      <span id="thresholdValue">0.15</span>
+      <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.25">
+      <span id="thresholdValue">0.25</span>
     </div>
   </div>
   <div class="setting-row">
     <label>Дельта смежности</label>
     <div class="range-display">
-      <input type="range" id="serendipitySlider" min="0" max="0.5" step="0.01" value="0.10">
-      <span id="serendipityValue">0.10</span>
+      <input type="range" id="serendipitySlider" min="0" max="0.5" step="0.01" value="0.15">
+      <span id="serendipityValue">0.15</span>
     </div>
   </div>
   <div class="setting-row">
-    <label>Мин. рейтинг</label>
-    <select id="minRatingSelect"><option value="0">0</option><option value="1" selected>1</option><option value="3">3</option><option value="5">5</option></select>
+    <label>Мин. волн</label>
+    <select id="minWavesSelect"><option value="0">0</option><option value="1" selected>1</option><option value="3">3</option><option value="5">5</option></select>
   </div>
   <div class="setting-row">
     <label>Макс. карточек</label>
@@ -292,118 +243,134 @@
 <script type="module">
 import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-// ---------- Локализация ----------
-const translations = {
+// ========== 1. ЛОКАЛИЗАЦИЯ ==========
+const tKeys = {
   ru: {
-    personalFeed: '🧠 Мои похожие мысли',
-    relevantFeed: '🌍 Релевантные идеи мира',
-    serendipityFeed: '🌀 Смежные (неожиданные)',
-    emptyPersonal: 'Нет похожих мыслей',
-    emptyWorld: 'Ничего не найдено',
+    inputPlaceholder: 'Поделитесь мыслью...',
+    saveBtn: 'Отправить',
+    personalTitle: 'Мои мысли', worldTitle: 'Мир', serendipityTitle: 'Смежные',
+    emptyPersonal: 'Нет похожих мыслей', emptyWorld: 'Ничего не найдено',
     edit: 'ред.', save: 'сохр.', cancel: 'отм.', delete: 'удал.',
     noteEdited: '(изм.)', today: 'Сегодня', yesterday: 'Вчера',
     confirmDelete: 'Удалить заметку?',
-    shareToggle: 'В общий поток',
-    saveBtn: 'Отправить'
+    importSuccess: 'Импортировано {n} заметок.',
+    rebuildDone: 'Векторы пересозданы',
+    resetConfirm: 'Сбросить все заметки и настройки?',
+    modelLoading: 'Загрузка модели...', ready: 'Готов',
+    settingsTitle: 'Настройки', language: 'Язык / Language',
+    theme: 'Тема', themeAuto: 'Авто', themeLight: 'День', themeDark: 'Ночь',
+    threshold: 'Порог релевантности', serendipity: 'Дельта смежности',
+    minWaves: 'Мин. волн', maxCards: 'Макс. карточек',
+    exportCapsule: 'Скачать капсулу', importCapsule: 'Импортировать капсулу',
+    rebuildVectors: 'Пересоздать векторы', resetAll: 'Сбросить всё', apply: 'Применить',
+    modelInfo: 'Модель: MiniLM (25 МБ)',
+    historyPlaceholder: 'Поиск по истории...',
+    emptyHistory: 'Нет заметок',
+    swipeHint: 'смахните вверх для публикации',
+    tabFlow: 'Поток', tabHistory: 'История'
   },
   en: {
-    personalFeed: '🧠 My related thoughts',
-    relevantFeed: '🌍 Relevant world ideas',
-    serendipityFeed: '🌀 Serendipity',
-    emptyPersonal: 'No related thoughts',
-    emptyWorld: 'Nothing found',
+    inputPlaceholder: 'Share a thought...',
+    saveBtn: 'Send',
+    personalTitle: 'My thoughts', worldTitle: 'World', serendipityTitle: 'Serendipity',
+    emptyPersonal: 'No similar thoughts', emptyWorld: 'Nothing found',
     edit: 'edit', save: 'save', cancel: 'cancel', delete: 'delete',
     noteEdited: '(edited)', today: 'Today', yesterday: 'Yesterday',
     confirmDelete: 'Delete note?',
-    shareToggle: 'Share to world',
-    saveBtn: 'Send'
+    importSuccess: 'Imported {n} notes.',
+    rebuildDone: 'Vectors rebuilt',
+    resetConfirm: 'Reset all notes and settings?',
+    modelLoading: 'Loading model...', ready: 'Ready',
+    settingsTitle: 'Settings', language: 'Language',
+    theme: 'Theme', themeAuto: 'Auto', themeLight: 'Light', themeDark: 'Dark',
+    threshold: 'Relevance threshold', serendipity: 'Serendipity delta',
+    minWaves: 'Min waves', maxCards: 'Max cards',
+    exportCapsule: 'Download capsule', importCapsule: 'Import capsule',
+    rebuildVectors: 'Rebuild vectors', resetAll: 'Reset all', apply: 'Apply',
+    modelInfo: 'Model: MiniLM (25 MB)',
+    historyPlaceholder: 'Search history...',
+    emptyHistory: 'No notes',
+    swipeHint: 'swipe up to publish',
+    tabFlow: 'Flow', tabHistory: 'History'
   }
 };
 
-let currentLang = 'ru';
-function t(key) { return translations[currentLang]?.[key] || translations['ru'][key] || key; }
+let lang = 'ru';
+function t(key, replace) {
+  const str = tKeys[lang]?.[key] ?? tKeys['ru'][key] ?? key;
+  return replace ? str.replace(/\{(\w+)\}/g, (_, k) => replace[k] ?? '') : str;
+}
 
-// Обновление всех видимых текстов на странице
-function updateUILanguage() {
-  // Заголовки секций
-  document.getElementById('personalFeedLabel').textContent = t('personalFeed');
-  document.getElementById('relevantFeedLabel').textContent = t('relevantFeed');
-  document.getElementById('serendipityFeedLabel').textContent = t('serendipityFeed');
-  document.getElementById('shareToggleText').textContent = t('shareToggle');
+function updateUI() {
+  document.querySelectorAll('[data-i18n]').forEach(el => el.textContent = t(el.dataset.i18n));
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => el.placeholder = t(el.dataset.i18nPlaceholder));
+  document.getElementById('personalTitle').textContent = t('personalTitle');
+  document.getElementById('relevantTitle').textContent = t('worldTitle');
+  document.getElementById('serendipityTitle').textContent = t('serendipityTitle');
   document.getElementById('saveBtn').textContent = t('saveBtn');
-  // Кнопки в настройках (если нужно, но они обычно статичны)
-  // Кнопки в истории перерисовываются при renderHistory()
-  // Перерисовать историю, чтобы кнопки «ред.» и «удал.» обновились
-  if (document.getElementById('historyView').classList.contains('active')) {
-    renderHistory();
+  document.getElementById('swipeHintText').textContent = t('swipeHint');
+  document.getElementById('historySearchInput').placeholder = t('historyPlaceholder');
+  if (els.statusMsg && els.statusMsg.textContent !== '') {
+    els.statusMsg.textContent = t('ready');
   }
+  document.querySelector('.tab-btn[data-view="flow"]').textContent = t('tabFlow');
+  document.querySelector('.tab-btn[data-view="history"]').textContent = t('tabHistory');
+  if (document.getElementById('historyView').style.display !== 'none') renderHistory();
 }
 
-// ---------- Тема ----------
+// ========== 2. ТЕМА ==========
 function applyTheme(mode) {
-  document.body.classList.remove('dark');
-  if (mode === 'dark' || (mode === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-    document.body.classList.add('dark');
-  }
+  document.body.classList.toggle('dark', mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches));
 }
 
-// ---------- Настройки ----------
-const DEFAULT_SETTINGS = {
-  threshold: 0.15, serendipityDelta: 0.10, minRating: 1,
-  maxResults: 5, theme: 'auto', lang: 'ru'
+// ========== 3. НАСТРОЙКИ ==========
+const DEFAULT = { threshold: 0.25, serendipityDelta: 0.15, minWaves: 1, maxResults: 5, theme: 'auto', lang: 'ru' };
+const Settings = { ...DEFAULT };
+Settings.load = () => {
+  try { Object.assign(Settings, DEFAULT, JSON.parse(localStorage.getItem('noosphere_settings')||'{}')); } catch { Object.assign(Settings, DEFAULT); }
 };
+Settings.save = () => localStorage.setItem('noosphere_settings', JSON.stringify(Settings));
 
-const Settings = { ...DEFAULT_SETTINGS };
-Settings.load = function() {
-  try { Object.assign(this, DEFAULT_SETTINGS, JSON.parse(localStorage.getItem('noosphere_settings') || '{}')); }
-  catch(e) { Object.assign(this, DEFAULT_SETTINGS); }
-};
-Settings.save = function() {
-  localStorage.setItem('noosphere_settings', JSON.stringify({
-    threshold: this.threshold, serendipityDelta: this.serendipityDelta,
-    minRating: this.minRating, maxResults: this.maxResults,
-    theme: this.theme, lang: this.lang
-  }));
-};
-
-// ---------- Векторы ----------
-const Vec = {
-  normalize(v) {
-    const mag = Math.sqrt(v.reduce((s,x)=>s+x*x,0));
-    return mag ? new Float32Array(v.map(x=>x/mag)) : new Float32Array(v.length);
-  },
-  cosine(a, b) { let d=0; for(let i=0;i<a.length;i++) d+=a[i]*b[i]; return d; }
-};
-
-// ---------- Хранилища ----------
+// ========== 4. ХРАНИЛИЩА ==========
 const MyNotes = {
   data: [],
-  load() { try { this.data = JSON.parse(localStorage.getItem('noosphere_mynotes')||'[]'); } catch(e) {} },
+  load() { try { this.data = JSON.parse(localStorage.getItem('noosphere_mynotes')||'[]'); } catch { this.data = []; } },
   save() { localStorage.setItem('noosphere_mynotes', JSON.stringify(this.data)); },
   add(text, id, date, editedAt) {
     const note = { id: id || 'l_'+crypto.randomUUID(), text, date: date || new Date().toISOString(), editedAt: editedAt || null };
     this.data.unshift(note); this.save(); return note;
   },
   update(id, newText) {
-    const note = this.data.find(n=>n.id===id);
+    const note = this.data.find(n => n.id === id);
     if (note) { note.text = newText; note.editedAt = new Date().toISOString(); this.save(); }
   },
-  remove(id) { this.data = this.data.filter(n=>n.id!==id); this.save(); },
+  remove(id) { this.data = this.data.filter(n => n.id !== id); this.save(); },
   clear() { this.data = []; this.save(); }
 };
 
 const World = {
   notes: [],
-  load() { try { this.notes = JSON.parse(localStorage.getItem('noosphere_world')||'[]'); } catch(e) {} },
-  save() { localStorage.setItem('noosphere_world', JSON.stringify(this.notes)); },
-  add(vectorArray, text) {
-    const note = { id:'g_'+crypto.randomUUID(), vec:vectorArray, up:0, down:0, excerpt:text.slice(0,150) };
-    this.notes.unshift(note); this.save();
+  load() {
+    try { this.notes = JSON.parse(localStorage.getItem('noosphere_world')||'[]'); } catch { this.notes = []; }
+    this.notes.forEach(n => { if (typeof n.waves !== 'number') n.waves = 0; });
   },
-  vote(id, up) { const n=this.notes.find(n=>n.id===id); if(n) { up?n.up++:n.down++; this.save(); } }
+  save() { localStorage.setItem('noosphere_world', JSON.stringify(this.notes)); },
+  add(vectorArray, text, localId = null) {
+    const note = { id: 'g_'+crypto.randomUUID(), vec: vectorArray, waves: 0, excerpt: text.slice(0, 150), localId };
+    this.notes.unshift(note); this.save(); return note;
+  },
+  removeByLocalId(localId) { this.notes = this.notes.filter(n => n.localId !== localId); this.save(); },
+  waveUp(id) { const n = this.notes.find(n => n.id === id); if (n) { n.waves++; this.save(); } },
+  waveDown(id) { const n = this.notes.find(n => n.id === id); if (n && n.waves > 0) { n.waves--; this.save(); } },
+  clear() { this.notes = []; this.save(); }
 };
 
-// ---------- Движок ----------
+// ========== 5. ДВИЖОК ==========
+const Vec = {
+  normalize(v) { const m = Math.sqrt(v.reduce((s,x)=>s+x*x,0)); return m ? new Float32Array(v.map(x=>x/m)) : new Float32Array(v.length); },
+  cosine(a,b) { let d=0; for(let i=0;i<a.length;i++) d+=a[i]*b[i]; return d; }
+};
+
 const Engine = {
   model: null, cache: new Map(),
   async init() {
@@ -420,10 +387,7 @@ const Engine = {
     for (let h=0; h<hidden; h++) emb[h] /= tokens;
     return Vec.normalize(emb);
   },
-  async reindex() {
-    this.cache.clear();
-    for (const n of MyNotes.data) try { await this.cacheNote(n.id, n.text); } catch(e) {}
-  },
+  async reindex() { this.cache.clear(); for (const n of MyNotes.data) try { await this.cacheNote(n.id, n.text); } catch{} },
   async cacheNote(id, text) { if (!this.cache.has(id)) this.cache.set(id, await this.embed(text)); },
   async searchLocal(qVec) {
     const res = [];
@@ -437,7 +401,7 @@ const Engine = {
   async searchWorld(qVec) {
     const rel=[], ser=[], low=Settings.threshold - Settings.serendipityDelta;
     for (const n of World.notes) {
-      if ((n.up - n.down) < Settings.minRating) continue;
+      if (n.waves < Settings.minWaves) continue;
       const v = new Float32Array(n.vec);
       const s = Vec.cosine(qVec, v);
       if (s >= Settings.threshold) rel.push({...n, score:s});
@@ -450,89 +414,64 @@ const Engine = {
   }
 };
 
-// ---------- UI-элементы ----------
-const D = {
-  input: document.getElementById('thoughtInput'),
-  saveBtn: document.getElementById('saveBtn'),
-  shareChk: document.getElementById('shareCheckbox'),
-  personalSection: document.getElementById('personalSection'),
-  personalCards: document.getElementById('personalCards'),
-  relevantSection: document.getElementById('relevantSection'),
-  relevantCards: document.getElementById('relevantCards'),
-  serendipitySection: document.getElementById('serendipitySection'),
-  serendipityCards: document.getElementById('serendipityCards'),
-  historySearch: document.getElementById('historySearchInput'),
-  historyContent: document.getElementById('historyContent'),
-  settingsTrigger: document.getElementById('settingsTrigger'),
-  overlay: document.getElementById('overlay'),
-  panel: document.getElementById('settingsPanel'),
-  thresholdSl: document.getElementById('thresholdSlider'),
-  thresholdVal: document.getElementById('thresholdValue'),
-  serendipitySl: document.getElementById('serendipitySlider'),
-  serendipityVal: document.getElementById('serendipityValue'),
-  minRatingSel: document.getElementById('minRatingSelect'),
-  maxResSel: document.getElementById('maxResultsSelect'),
-  langSelect: document.getElementById('langSelect'),
-  themeSelect: document.getElementById('themeSelect'),
-  applyBtn: document.getElementById('applySettingsBtn'),
-  resetBtn: document.getElementById('resetSettingsBtn'),
-  rebuildBtn: document.getElementById('rebuildVectorsBtn'),
-  exportBtn: document.getElementById('exportCapsuleBtn'),
-  importBtn: document.getElementById('importCapsuleBtn'),
-  importFile: document.getElementById('importFileInput')
+// ========== 6. UI ==========
+const $ = s => document.querySelector(s);
+const els = {
+  input: $('#thoughtInput'), saveBtn: $('#saveBtn'), statusMsg: $('#statusMsg'),
+  swipeHint: $('#swipeHint'), swipeHintText: $('#swipeHintText'),
+  personalSection: $('#personalSection'), personalCards: $('#personalCards'),
+  relevantSection: $('#relevantSection'), relevantCards: $('#relevantCards'),
+  serendipitySection: $('#serendipitySection'), serendipityCards: $('#serendipityCards'),
+  historySearch: $('#historySearchInput'), historyContent: $('#historyContent'),
+  settingsTrigger: $('#settingsTrigger'), overlay: $('#overlay'), panel: $('#settingsPanel'),
+  thresholdSl: $('#thresholdSlider'), thresholdVal: $('#thresholdValue'),
+  serendipitySl: $('#serendipitySlider'), serendipityVal: $('#serendipityValue'),
+  minWavesSel: $('#minWavesSelect'), maxResSel: $('#maxResultsSelect'),
+  langSelect: $('#langSelect'), themeSelect: $('#themeSelect'),
+  applyBtn: $('#applySettingsBtn'), resetBtn: $('#resetSettingsBtn'),
+  rebuildBtn: $('#rebuildVectorsBtn'), exportBtn: $('#exportCapsuleBtn'),
+  importBtn: $('#importCapsuleBtn'), importFile: $('#importFileInput')
 };
 
-// ---------- Вкладки ----------
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    document.getElementById(btn.dataset.view + 'View').classList.add('active');
-    if (btn.dataset.view === 'history') renderHistory();
-  });
-});
+function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 
-// ---------- Сворачивание секций ----------
-document.querySelectorAll('.section-header').forEach(header => {
-  header.addEventListener('click', () => {
-    const body = document.getElementById(header.dataset.section);
-    const icon = header.querySelector('.collapse-icon');
-    body.classList.toggle('collapsed');
-    icon.textContent = body.classList.contains('collapsed') ? '▶' : '▼';
-  });
-});
-
-// ---------- Рендеринг карточек ----------
-function esc(t) { const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
-function showCards(container, items, isWorld=false) {
+function renderCarousel(container, items, isWorld=false) {
   if (!items.length) {
     container.innerHTML = `<div class="empty-message">${isWorld ? t('emptyWorld') : t('emptyPersonal')}</div>`;
     return;
   }
   container.innerHTML = items.map(item => {
     const text = isWorld ? (item.excerpt || 'мысль') : item.text;
+    const charged = isWorld && item.waves > 0 ? 'charged' : '';
     const footer = isWorld
-      ? `<div class="vote-group"><button class="vote-btn" data-id="${item.id}" data-vote="up">👍</button><span class="vote-count">${item.up - item.down}</span><button class="vote-btn" data-id="${item.id}" data-vote="down">👎</button></div>`
-      : `<span>${new Date(item.date).toLocaleDateString()}</span>`;
-    return `<div class="card"><div class="card-text">${esc(text)}</div><div class="card-footer"><span class="score-badge">${item.score.toFixed(2)}</span>${footer}</div></div>`;
+      ? `<span class="score-badge">${item.score.toFixed(2)}</span>
+         <div class="wave-group">
+           <button class="wave-btn" data-id="${item.id}" data-action="down">−</button>
+           <span>${item.waves}</span>
+           <button class="wave-btn" data-id="${item.id}" data-action="up">+</button>
+         </div>`
+      : `<span class="score-badge">${item.score.toFixed(2)}</span>
+         <span>${new Date(item.date).toLocaleDateString()}</span>`;
+    return `<div class="card ${charged}">
+      <div class="card-text">${esc(text)}</div>
+      <div class="card-footer">${footer}</div>
+    </div>`;
   }).join('');
 }
 
-// ---------- История ----------
 function formatDate(iso) {
   const d = new Date(iso);
-  const today = new Date(); today.setHours(0,0,0,0);
-  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate()-1);
-  if (d >= today) return t('today');
-  if (d >= yesterday) return t('yesterday');
+  const now = new Date(); now.setHours(0,0,0,0);
+  const yest = new Date(now); yest.setDate(yest.getDate()-1);
+  if (d >= now) return t('today');
+  if (d >= yest) return t('yesterday');
   return d.toLocaleDateString();
 }
 
-function renderHistory(filteredNotes = null) {
-  const notes = filteredNotes || MyNotes.data;
+function renderHistory(filtered = null) {
+  const notes = filtered || MyNotes.data;
   if (!notes.length) {
-    D.historyContent.innerHTML = '<div class="empty-message">Нет заметок</div>';
+    els.historyContent.innerHTML = `<div class="empty-message">${t('emptyHistory')}</div>`;
     return;
   }
   const groups = new Map();
@@ -542,7 +481,7 @@ function renderHistory(filteredNotes = null) {
     groups.get(day).push(n);
   });
   let html = '';
-  for (const [day, dayNotes] of groups) {
+  for (const [_, dayNotes] of groups) {
     html += `<div class="day-group"><div class="day-title">${formatDate(dayNotes[0].date)}</div>`;
     dayNotes.forEach(note => {
       const time = new Date(note.date).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
@@ -558,223 +497,268 @@ function renderHistory(filteredNotes = null) {
     });
     html += '</div>';
   }
-  D.historyContent.innerHTML = html;
+  els.historyContent.innerHTML = html;
 }
 
 async function searchHistory() {
-  const query = D.historySearch.value.trim();
-  if (!query) { renderHistory(); return; }
-  const qVec = await Engine.embed(query);
+  const q = els.historySearch.value.trim();
+  if (!q) { renderHistory(); return; }
+  const qVec = await Engine.embed(q);
   const scored = MyNotes.data.map(note => {
     const v = Engine.cache.get(note.id);
-    if (!v) return null;
-    return { ...note, score: Vec.cosine(qVec, v) };
-  }).filter(n => n && n.score > Settings.threshold)
-    .sort((a,b) => b.score - a.score);
+    return v ? { ...note, score: Vec.cosine(qVec, v) } : null;
+  }).filter(n => n && n.score > Settings.threshold).sort((a,b) => b.score - a.score);
   renderHistory(scored);
 }
 
-// ---------- Редактирование в истории ----------
-function enableEditMode(itemDiv) {
-  const noteId = itemDiv.dataset.id;
-  const note = MyNotes.data.find(n => n.id === noteId);
-  if (!note) return;
-  const textDiv = itemDiv.querySelector('.text');
-  textDiv.innerHTML = `<textarea class="edit-textarea" style="width:100%;min-height:60px;border:1px solid var(--border);border-radius:8px;padding:0.5rem;background:var(--bg);color:var(--text);">${esc(note.text)}</textarea>`;
-  const actions = itemDiv.querySelector('.actions');
-  actions.innerHTML = `<button class="save-edit-btn" data-id="${noteId}">${t('save')}</button><button class="cancel-edit-btn" data-id="${noteId}">${t('cancel')}</button>`;
-}
-function disableEditMode(itemDiv) {
-  const noteId = itemDiv.dataset.id;
-  const note = MyNotes.data.find(n => n.id === noteId);
-  if (note) {
-    itemDiv.querySelector('.text').textContent = note.text;
-    const actions = itemDiv.querySelector('.actions');
-    actions.innerHTML = `<button class="edit-btn" data-id="${noteId}">${t('edit')}</button><button class="delete-btn" data-id="${noteId}">${t('delete')}</button>`;
-  }
-}
-
-document.addEventListener('click', async (e) => {
-  const editBtn = e.target.closest('.edit-btn');
-  const saveBtn = e.target.closest('.save-edit-btn');
-  const cancelBtn = e.target.closest('.cancel-edit-btn');
-  const deleteBtn = e.target.closest('.delete-btn');
-  if (editBtn) { enableEditMode(editBtn.closest('.archive-item')); return; }
-  if (saveBtn) {
-    const itemDiv = saveBtn.closest('.archive-item');
-    const textarea = itemDiv.querySelector('.edit-textarea');
-    if (textarea && textarea.value.trim()) {
-      MyNotes.update(saveBtn.dataset.id, textarea.value.trim());
-      Engine.cache.set(saveBtn.dataset.id, await Engine.embed(textarea.value.trim()));
-    }
-    disableEditMode(itemDiv);
-    renderHistory();
-    return;
-  }
-  if (cancelBtn) { disableEditMode(cancelBtn.closest('.archive-item')); return; }
-  if (deleteBtn) {
-    if (confirm(t('confirmDelete'))) {
-      MyNotes.remove(deleteBtn.dataset.id);
-      Engine.cache.delete(deleteBtn.dataset.id);
-      renderHistory();
-      handleInput();
-    }
-    return;
-  }
-});
-
-// ---------- Поиск в потоке ----------
-async function handleInput() {
-  const q = D.input.value.trim();
+// ========== 7. ЛОГИКА ПОТОКА ==========
+async function searchFlow() {
+  const q = els.input.value.trim();
   if (!q) {
-    D.personalSection.style.display = 'none';
-    D.relevantSection.style.display = 'none';
-    D.serendipitySection.style.display = 'none';
+    els.personalSection.style.display = 'none';
+    els.relevantSection.style.display = 'none';
+    els.serendipitySection.style.display = 'none';
     return;
   }
   const qVec = await Engine.embed(q);
   const [local, world] = await Promise.all([Engine.searchLocal(qVec), Engine.searchWorld(qVec)]);
 
-  D.personalSection.style.display = local.length ? 'flex' : 'none';
-  showCards(D.personalCards, local);
+  els.personalSection.style.display = local.length ? 'block' : 'none';
+  renderCarousel(els.personalCards, local);
 
-  D.relevantSection.style.display = world.rel.length ? 'flex' : 'none';
-  showCards(D.relevantCards, world.rel, true);
+  els.relevantSection.style.display = world.rel.length ? 'block' : 'none';
+  renderCarousel(els.relevantCards, world.rel, true);
 
-  D.serendipitySection.style.display = world.ser.length ? 'flex' : 'none';
-  showCards(D.serendipityCards, world.ser, true);
+  els.serendipitySection.style.display = world.ser.length ? 'block' : 'none';
+  renderCarousel(els.serendipityCards, world.ser, true);
 }
 
-async function saveThought() {
-  const text = D.input.value.trim(); if (!text) return;
-  const share = D.shareChk.checked;
+async function saveNote(share=false) {
+  const text = els.input.value.trim();
+  if (!text) return;
   const note = MyNotes.add(text);
   await Engine.cacheNote(note.id, text);
-  if (share) { const vec = await Engine.embed(text); World.add(Array.from(vec), text); }
-  D.input.value = ''; D.shareChk.checked = false;
-  handleInput();
+  if (share) {
+    const vec = await Engine.embed(text);
+    World.add(Array.from(vec), text, note.id);
+    const container = document.getElementById('thoughtContainer');
+    const rect = container.getBoundingClientRect();
+    const star = document.createElement('div');
+    star.textContent = '✦';
+    star.style.cssText = `position:fixed; left:${rect.left+rect.width/2}px; top:${rect.top+rect.height/2}px; font-size:24px; color:var(--star); transition: all 1s cubic-bezier(0.25,0.1,0.25,1); z-index:999; pointer-events:none;`;
+    document.body.appendChild(star);
+    requestAnimationFrame(() => { star.style.transform='translateY(-200px) scale(0)'; star.style.opacity='0'; });
+    setTimeout(() => star.remove(), 1000);
+  }
+  els.input.value = '';
+  searchFlow();
 }
 
-// ---------- Капсулы ----------
+// ========== 8. ЖЕСТЫ И ВКЛАДКИ ==========
+els.input.addEventListener('input', () => {
+  els.swipeHint.classList.toggle('visible', els.input.value.trim().length > 0);
+});
+
+let touchY = 0;
+els.input.addEventListener('touchstart', e => touchY = e.touches[0].clientY);
+els.input.addEventListener('touchend', e => {
+  if (touchY - e.changedTouches[0].clientY > 60 && els.input.value.trim()) {
+    e.preventDefault();
+    saveNote(true);
+  }
+});
+
+els.saveBtn.addEventListener('click', e => saveNote(e.shiftKey));
+els.input.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && (e.ctrlKey||e.metaKey)) {
+    e.preventDefault();
+    saveNote(e.shiftKey);
+  }
+});
+
+// Вкладки
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const view = btn.dataset.view;
+    document.getElementById('historyView').style.display = view === 'history' ? 'block' : 'none';
+    if (view === 'history') {
+      renderHistory();
+    } else {
+      // Показываем поле ввода и секции (они уже видимы, если есть текст)
+    }
+  });
+});
+
+// ========== 9. КЛИКИ (волны, редактирование) ==========
+document.addEventListener('click', e => {
+  const waveBtn = e.target.closest('.wave-btn');
+  if (waveBtn) {
+    const id = waveBtn.dataset.id;
+    const action = waveBtn.dataset.action;
+    if (action === 'up') World.waveUp(id);
+    else if (action === 'down') World.waveDown(id);
+    searchFlow();
+    return;
+  }
+
+  const editBtn = e.target.closest('.edit-btn');
+  const saveEditBtn = e.target.closest('.save-edit-btn');
+  const cancelBtn = e.target.closest('.cancel-edit-btn');
+  const deleteBtn = e.target.closest('.delete-btn');
+
+  if (editBtn) {
+    const item = editBtn.closest('.archive-item');
+    const note = MyNotes.data.find(n => n.id === item.dataset.id);
+    if (note) {
+      item.querySelector('.text').innerHTML = `<textarea class="edit-textarea" style="width:100%;min-height:60px;">${esc(note.text)}</textarea>`;
+      item.querySelector('.actions').innerHTML = `<button class="save-edit-btn" data-id="${note.id}">${t('save')}</button><button class="cancel-edit-btn" data-id="${note.id}">${t('cancel')}</button>`;
+    }
+    return;
+  }
+  if (saveEditBtn) {
+    const item = saveEditBtn.closest('.archive-item');
+    const textarea = item.querySelector('.edit-textarea');
+    if (textarea && textarea.value.trim()) {
+      MyNotes.update(saveEditBtn.dataset.id, textarea.value.trim());
+      Engine.embed(textarea.value.trim()).then(vec => Engine.cache.set(saveEditBtn.dataset.id, vec));
+    }
+    renderHistory();
+    return;
+  }
+  if (cancelBtn) { renderHistory(); return; }
+  if (deleteBtn) {
+    if (confirm(t('confirmDelete'))) {
+      const id = deleteBtn.dataset.id;
+      MyNotes.remove(id);
+      World.removeByLocalId(id);
+      Engine.cache.delete(id);
+      renderHistory();
+      searchFlow();
+    }
+    return;
+  }
+});
+
+// ========== 10. КАПСУЛЫ ==========
 function exportCapsule() {
-  const capsule = { version:1, notes: MyNotes.data.map(n=>({id:n.id,text:n.text,date:n.date,editedAt:n.editedAt})) };
+  const capsule = { version:1, notes: MyNotes.data.map(n => ({ id:n.id, text:n.text, date:n.date, editedAt:n.editedAt })) };
   const blob = new Blob([JSON.stringify(capsule)], {type:'application/json'});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'noosphere.capsule'; a.click();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'noosphere.capsule';
+  a.click();
 }
 async function importCapsule(file) {
   try {
     const text = await file.text();
     const capsule = JSON.parse(text);
-    const existingIds = new Set(MyNotes.data.map(n=>n.id));
-    const newNotes = capsule.notes.filter(n=>!existingIds.has(n.id));
+    const existing = new Set(MyNotes.data.map(n => n.id));
+    const newNotes = capsule.notes.filter(n => !existing.has(n.id));
     for (const n of newNotes) MyNotes.add(n.text, n.id, n.date, n.editedAt);
     for (const n of newNotes) await Engine.cacheNote(n.id, n.text);
-    renderHistory(); handleInput();
-    alert(`Импортировано ${newNotes.length} заметок.`);
+    renderHistory(); searchFlow();
+    alert(t('importSuccess', { n: newNotes.length }));
   } catch(e) { alert('Ошибка: '+e.message); }
 }
 
-// ---------- Настройки ----------
-function applySettings(skipReindex=true) {
-  Settings.threshold = +D.thresholdSl.value;
-  Settings.serendipityDelta = +D.serendipitySl.value;
-  Settings.minRating = +D.minRatingSel.value;
-  Settings.maxResults = +D.maxResSel.value;
-  Settings.theme = D.themeSelect.value;
-  Settings.lang = D.langSelect.value;
-  Settings.save();
-  D.thresholdVal.textContent = Settings.threshold.toFixed(2);
-  D.serendipityVal.textContent = Settings.serendipityDelta.toFixed(2);
-  if (currentLang !== Settings.lang) {
-    currentLang = Settings.lang;
-    updateUILanguage();
-  }
-  applyTheme(Settings.theme);
-  if (!skipReindex) handleInput();
+// ========== 11. НАСТРОЙКИ ==========
+function syncSettingsUI() {
+  els.thresholdSl.value = Settings.threshold;
+  els.thresholdVal.textContent = Settings.threshold.toFixed(2);
+  els.serendipitySl.value = Settings.serendipityDelta;
+  els.serendipityVal.textContent = Settings.serendipityDelta.toFixed(2);
+  els.minWavesSel.value = Settings.minWaves;
+  els.maxResSel.value = Settings.maxResults;
+  els.langSelect.value = Settings.lang;
+  els.themeSelect.value = Settings.theme;
 }
 
-function resetAllData() {
-  // Сброс заметок
-  MyNotes.clear();
-  Engine.cache.clear();
-  // Сброс настроек
-  Object.assign(Settings, DEFAULT_SETTINGS);
+function applySettings(skipSearch=true) {
+  Settings.threshold = +els.thresholdSl.value;
+  Settings.serendipityDelta = +els.serendipitySl.value;
+  Settings.minWaves = +els.minWavesSel.value;
+  Settings.maxResults = +els.maxResSel.value;
+  Settings.theme = els.themeSelect.value;
+  Settings.lang = els.langSelect.value;
   Settings.save();
-  // Обновить UI
-  D.thresholdSl.value = Settings.threshold; D.thresholdVal.textContent = Settings.threshold.toFixed(2);
-  D.serendipitySl.value = Settings.serendipityDelta; D.serendipityVal.textContent = Settings.serendipityDelta.toFixed(2);
-  D.minRatingSel.value = Settings.minRating; D.maxResSel.value = Settings.maxResults;
-  D.langSelect.value = Settings.lang; D.themeSelect.value = Settings.theme;
-  currentLang = Settings.lang;
-  updateUILanguage();
+  if (lang !== Settings.lang) { lang = Settings.lang; updateUI(); }
   applyTheme(Settings.theme);
-  // Очистить поле ввода и скрыть секции
-  D.input.value = '';
-  handleInput();
+  if (!skipSearch) searchFlow();
+}
+
+function resetAll() {
+  if (!confirm(t('resetConfirm'))) return;
+  MyNotes.clear();
+  World.clear();
+  Engine.cache.clear();
+  Object.assign(Settings, DEFAULT);
+  Settings.save();
+  syncSettingsUI();
+  lang = Settings.lang;
+  updateUI();
+  applyTheme(Settings.theme);
+  els.input.value = '';
+  searchFlow();
   renderHistory();
+  els.overlay.classList.remove('open');
+  els.panel.classList.remove('open');
 }
 
 async function rebuildVectors() {
-  D.rebuildBtn.disabled = true; D.rebuildBtn.textContent = '⏳';
+  els.rebuildBtn.disabled = true;
+  els.rebuildBtn.textContent = '...';
   await Engine.reindex();
-  D.rebuildBtn.textContent = 'Пересоздать векторы';
-  D.rebuildBtn.disabled = false;
-  D.overlay.classList.remove('open'); D.panel.classList.remove('open');
-  alert('Векторы пересозданы');
+  els.rebuildBtn.textContent = t('rebuildVectors');
+  els.rebuildBtn.disabled = false;
+  els.overlay.classList.remove('open');
+  els.panel.classList.remove('open');
+  alert(t('rebuildDone'));
 }
 
-// ---------- Старт ----------
+// ========== 12. СТАРТ ==========
 (async () => {
   Settings.load(); MyNotes.load(); World.load();
-  currentLang = Settings.lang;
-  updateUILanguage();
+  lang = Settings.lang;
+  updateUI();
   applyTheme(Settings.theme);
-  D.thresholdSl.value = Settings.threshold; D.thresholdVal.textContent = Settings.threshold.toFixed(2);
-  D.serendipitySl.value = Settings.serendipityDelta; D.serendipityVal.textContent = Settings.serendipityDelta.toFixed(2);
-  D.minRatingSel.value = Settings.minRating; D.maxResSel.value = Settings.maxResults;
-  D.langSelect.value = Settings.lang; D.themeSelect.value = Settings.theme;
+  syncSettingsUI();
 
-  D.saveBtn.disabled = true;
-  try { await Engine.init(); D.saveBtn.disabled = false; } catch(e) {}
+  els.statusMsg.innerHTML = `<span class="spinner"></span> ${t('modelLoading')}`;
+  els.saveBtn.disabled = true;
+  try {
+    await Engine.init();
+    els.statusMsg.textContent = t('ready');
+    els.saveBtn.disabled = false;
+  } catch(e) {
+    els.statusMsg.textContent = 'Ошибка загрузки модели';
+    console.error(e);
+  }
 
-  D.input.addEventListener('input', debounce(handleInput, 400));
-  D.saveBtn.addEventListener('click', saveThought);
-  D.input.addEventListener('keydown', e => { if ((e.ctrlKey||e.metaKey) && e.key==='Enter') { e.preventDefault(); saveThought(); } });
+  els.input.addEventListener('input', debounce(searchFlow, 300));
 
-  D.settingsTrigger.addEventListener('click', () => { D.overlay.classList.add('open'); D.panel.classList.add('open'); });
-  D.overlay.addEventListener('click', () => { D.overlay.classList.remove('open'); D.panel.classList.remove('open'); });
+  els.settingsTrigger.addEventListener('click', () => { els.overlay.classList.add('open'); els.panel.classList.add('open'); });
+  els.overlay.addEventListener('click', () => { els.overlay.classList.remove('open'); els.panel.classList.remove('open'); });
 
-  D.thresholdSl.addEventListener('input', () => D.thresholdVal.textContent = parseFloat(D.thresholdSl.value).toFixed(2));
-  D.serendipitySl.addEventListener('input', () => D.serendipityVal.textContent = parseFloat(D.serendipitySl.value).toFixed(2));
+  els.thresholdSl.addEventListener('input', () => els.thresholdVal.textContent = parseFloat(els.thresholdSl.value).toFixed(2));
+  els.serendipitySl.addEventListener('input', () => els.serendipityVal.textContent = parseFloat(els.serendipitySl.value).toFixed(2));
 
-  D.applyBtn.addEventListener('click', () => { applySettings(false); D.overlay.classList.remove('open'); D.panel.classList.remove('open'); });
-  D.resetBtn.addEventListener('click', () => {
-    if (confirm('Сбросить все заметки и настройки?')) {
-      resetAllData();
-      D.overlay.classList.remove('open');
-      D.panel.classList.remove('open');
-    }
-  });
-  D.rebuildBtn.addEventListener('click', rebuildVectors);
-  D.exportBtn.addEventListener('click', exportCapsule);
-  D.importBtn.addEventListener('click', () => D.importFile.click());
-  D.importFile.addEventListener('change', (e) => { if (e.target.files[0]) { importCapsule(e.target.files[0]); e.target.value = ''; } });
+  els.applyBtn.addEventListener('click', () => { applySettings(false); els.overlay.classList.remove('open'); els.panel.classList.remove('open'); });
+  els.resetBtn.addEventListener('click', resetAll);
+  els.rebuildBtn.addEventListener('click', rebuildVectors);
+  els.exportBtn.addEventListener('click', exportCapsule);
+  els.importBtn.addEventListener('click', () => els.importFile.click());
+  els.importFile.addEventListener('change', e => { if (e.target.files[0]) { importCapsule(e.target.files[0]); e.target.value = ''; } });
 
-  D.thresholdSl.addEventListener('change', () => applySettings(false));
-  D.serendipitySl.addEventListener('change', () => applySettings(false));
-  D.minRatingSel.addEventListener('change', () => applySettings(false));
-  D.maxResSel.addEventListener('change', () => applySettings(false));
-  D.langSelect.addEventListener('change', () => applySettings(false));
-  D.themeSelect.addEventListener('change', () => applySettings(false));
+  els.thresholdSl.addEventListener('change', applySettings);
+  els.serendipitySl.addEventListener('change', applySettings);
+  els.minWavesSel.addEventListener('change', () => applySettings(false));
+  els.maxResSel.addEventListener('change', () => applySettings(false));
+  els.langSelect.addEventListener('change', applySettings);
+  els.themeSelect.addEventListener('change', applySettings);
 
-  D.historySearch.addEventListener('input', debounce(searchHistory, 300));
-
-  document.body.addEventListener('click', e => {
-    const btn = e.target.closest('.vote-btn');
-    if (!btn) return;
-    World.vote(btn.dataset.id, btn.dataset.vote==='up');
-    handleInput();
-  });
+  els.historySearch.addEventListener('input', debounce(searchHistory, 300));
 })();
 
 function debounce(fn, ms) { let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); }; }
