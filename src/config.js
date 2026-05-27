@@ -1,5 +1,5 @@
 export const CONFIG = {
-  workerUrl: 'https://hidden-unit-1b90.as1994g.workers.dev',
+  workerUrl: '/api/proxy',
   collection: 'noosphere',
   search: {
     threshold: 0.3,
