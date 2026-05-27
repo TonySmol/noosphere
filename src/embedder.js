@@ -1,5 +1,3 @@
-// Обёртка над transformers.js — одна модель на всё приложение
-
 const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
 
 let model = null;
@@ -15,10 +13,17 @@ export async function init(onProgress) {
 export async function embed(text) {
   if (!model) throw new Error('Модель не готова');
   const out = await model(text);
-  return Array.from(out.data);
+  const raw = Array.from(out.data);
+  return normalize(raw);  // ← НОРМАЛИЗАЦИЯ
 }
 
-// Float32 ↔ Base64 (компактное хранение векторов)
+// Нормализация вектора (L2 norm)
+export function normalize(vec) {
+  const magnitude = Math.sqrt(vec.reduce((sum, x) => sum + x * x, 0));
+  if (magnitude === 0) return vec;
+  return vec.map(x => x / magnitude);
+}
+
 export function vecToBase64(arr) {
   const bytes = new Uint8Array(new Float32Array(arr).buffer);
   let bin = '';
