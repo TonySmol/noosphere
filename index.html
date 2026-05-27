@@ -22,7 +22,7 @@
     }
     .app { width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 0.75rem; margin-top: 0.5rem; }
 
-    .tabs { display: flex; gap: 0.5rem; justify-content: center; margin-bottom: 0.5rem; }
+    .tabs { display: flex; gap: 0.5rem; justify-content: center; margin-bottom: 0.25rem; }
     .tab-btn {
       padding: 0.5rem 1.5rem; border-radius: 12px; border: 1px solid var(--border);
       background: transparent; color: var(--text-secondary); cursor: pointer;
@@ -54,6 +54,9 @@
     .status-line { font-size: 0.8rem; color: var(--text-secondary); }
     .swipe-hint { font-size: 0.8rem; color: var(--text-secondary); display: none; align-items: center; gap: 0.3rem; }
     .swipe-hint.visible { display: flex; }
+
+    .view { display: none; }
+    .view.active { display: block; }
 
     .feed-section { margin-top: 0.5rem; }
     .section-title {
@@ -157,33 +160,37 @@
     <button class="tab-btn" data-view="history">История</button>
   </div>
 
-  <div class="thought-input" id="thoughtContainer">
-    <textarea id="thoughtInput" placeholder="Поделитесь мыслью..."></textarea>
-    <div class="input-actions">
-      <div class="status-line" id="statusMsg"></div>
-      <div class="swipe-hint" id="swipeHint">
-        <span>↑</span> <span id="swipeHintText">смахните вверх для публикации</span>
+  <!-- Обёртка потока -->
+  <div class="view active" id="flowView">
+    <div class="thought-input" id="thoughtContainer">
+      <textarea id="thoughtInput" placeholder="Поделитесь мыслью..."></textarea>
+      <div class="input-actions">
+        <div class="status-line" id="statusMsg"></div>
+        <div class="swipe-hint" id="swipeHint">
+          <span>↑</span> <span id="swipeHintText">смахните вверх для публикации</span>
+        </div>
+        <button id="saveBtn" class="btn" disabled>Отправить</button>
       </div>
-      <button id="saveBtn" class="btn" disabled>Отправить</button>
+    </div>
+
+    <div id="personalSection" class="feed-section" style="display:none;">
+      <div class="section-title" id="personalTitle">Мои мысли</div>
+      <div id="personalCards" class="carousel"></div>
+    </div>
+
+    <div id="relevantSection" class="feed-section" style="display:none;">
+      <div class="section-title" id="relevantTitle">Мир</div>
+      <div id="relevantCards" class="carousel"></div>
+    </div>
+
+    <div id="serendipitySection" class="feed-section" style="display:none;">
+      <div class="section-title" id="serendipityTitle">Смежные</div>
+      <div id="serendipityCards" class="carousel"></div>
     </div>
   </div>
 
-  <div id="personalSection" class="feed-section" style="display:none;">
-    <div class="section-title" id="personalTitle">Мои мысли</div>
-    <div id="personalCards" class="carousel"></div>
-  </div>
-
-  <div id="relevantSection" class="feed-section" style="display:none;">
-    <div class="section-title" id="relevantTitle">Мир</div>
-    <div id="relevantCards" class="carousel"></div>
-  </div>
-
-  <div id="serendipitySection" class="feed-section" style="display:none;">
-    <div class="section-title" id="serendipityTitle">Смежные</div>
-    <div id="serendipityCards" class="carousel"></div>
-  </div>
-
-  <div class="view" id="historyView" style="display:none;">
+  <!-- Обёртка истории -->
+  <div class="view" id="historyView">
     <div class="history-input">
       <input type="text" id="historySearchInput" placeholder="Поиск по истории..." style="width:100%; padding:0.75rem; border:1px solid var(--border); border-radius:14px; background:var(--surface); color:var(--text);">
     </div>
@@ -302,8 +309,6 @@ function t(key, replace) {
 }
 
 function updateUI() {
-  document.querySelectorAll('[data-i18n]').forEach(el => el.textContent = t(el.dataset.i18n));
-  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => el.placeholder = t(el.dataset.i18nPlaceholder));
   document.getElementById('personalTitle').textContent = t('personalTitle');
   document.getElementById('relevantTitle').textContent = t('worldTitle');
   document.getElementById('serendipityTitle').textContent = t('serendipityTitle');
@@ -315,7 +320,7 @@ function updateUI() {
   }
   document.querySelector('.tab-btn[data-view="flow"]').textContent = t('tabFlow');
   document.querySelector('.tab-btn[data-view="history"]').textContent = t('tabHistory');
-  if (document.getElementById('historyView').style.display !== 'none') renderHistory();
+  if (document.getElementById('historyView').classList.contains('active')) renderHistory();
 }
 
 // ========== 2. ТЕМА ==========
@@ -541,6 +546,7 @@ async function saveNote(share=false) {
   if (share) {
     const vec = await Engine.embed(text);
     World.add(Array.from(vec), text, note.id);
+    // маленькая анимация
     const container = document.getElementById('thoughtContainer');
     const rect = container.getBoundingClientRect();
     const star = document.createElement('div');
@@ -576,17 +582,19 @@ els.input.addEventListener('keydown', e => {
   }
 });
 
-// Вкладки
+// Переключение вкладок
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     const view = btn.dataset.view;
-    document.getElementById('historyView').style.display = view === 'history' ? 'block' : 'none';
     if (view === 'history') {
+      document.getElementById('flowView').classList.remove('active');
+      document.getElementById('historyView').classList.add('active');
       renderHistory();
     } else {
-      // Показываем поле ввода и секции (они уже видимы, если есть текст)
+      document.getElementById('historyView').classList.remove('active');
+      document.getElementById('flowView').classList.add('active');
     }
   });
 });
