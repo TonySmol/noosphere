@@ -1,1023 +1,1296 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Noosphere</title>
-  <style>
-    :root {
-      --bg: #f8fafc; --surface: #ffffff; --text: #0f172a;
-      --text-secondary: #64748b; --border: #e2e8f0; --accent: #4f46e5;
-      --accent-hover: #4338ca; --shadow: 0 1px 3px rgba(0,0,0,0.05);
-      --radius: 16px; --wave: #0ea5e9; --star: #fbbf24;
-      --personal: #a78bfa; --world: #38bdf8; --serendipity: #fbbf24;
-    }
-    .dark { --bg: #0f172a; --surface: #1e293b; --text: #f1f5f9; --text-secondary: #94a3b8; --border: #334155; --accent: #818cf8; --shadow: 0 1px 3px rgba(0,0,0,0.3); }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; display: flex; justify-content: center; padding: 0.5rem; overflow-x: hidden; }
-    .app { width: 100%; max-width: 600px; display: flex; flex-direction: column; gap: 0.75rem; margin-top: 0.5rem; }
-    .tabs { display: flex; gap: 0.5rem; justify-content: center; margin-bottom: 0.25rem; }
-    .tab-btn { padding: 0.5rem 1.5rem; border-radius: 12px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer; font-weight: 500; transition: all 0.2s; }
-    .tab-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
-    .thought-input { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; box-shadow: var(--shadow); transition: box-shadow 0.3s, border-color 0.3s; }
-    .thought-input.swipe-up { border-color: var(--world); box-shadow: 0 0 0 2px rgba(56,189,248,0.3); }
-    .thought-input.swipe-down { border-color: var(--personal); box-shadow: 0 0 0 2px rgba(167,139,250,0.3); }
-    textarea { width: 100%; border: none; background: transparent; font-size: 1.1rem; font-family: inherit; resize: none; outline: none; color: var(--text); min-height: 90px; }
-    textarea::placeholder { color: var(--text-secondary); opacity: 0.7; }
-    .input-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; gap: 1rem; }
-    .status-line { font-size: 0.8rem; color: var(--text-secondary); }
-    .swipe-hints { display: none; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; color: var(--text-secondary); }
-    .swipe-hints.visible { display: flex; }
-    .swipe-hints .hint-up { color: var(--world); }
-    .swipe-hints .hint-down { color: var(--personal); }
-    .view { display: none; }
-    .view.active { display: block; }
-    .feed-section { margin-top: 0.5rem; }
-    .section-title { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
-    .section-title::before { content: ''; display: block; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-    #personalSection .section-title { color: var(--personal); }
-    #relevantSection .section-title { color: var(--world); }
-    #serendipitySection .section-title { color: var(--serendipity); }
-    .carousel { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; gap: 0.75rem; padding-bottom: 0.5rem; }
-    .carousel::-webkit-scrollbar { height: 4px; }
-    .carousel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-    .card { flex: 0 0 calc(100% - 1.5rem); scroll-snap-align: start; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; box-shadow: var(--shadow); transition: transform 0.3s, box-shadow 0.3s; animation: fadeInUp 0.4s ease both; }
-    @keyframes fadeInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-    .card.charged { border-color: var(--wave); box-shadow: 0 0 0 1px var(--wave); }
-    .card-text { font-size: 0.95rem; line-height: 1.5; margin-bottom: 0.5rem; white-space: pre-wrap; word-break: break-word; }
-    .card-footer { display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; color: var(--text-secondary); }
-    .score-badge { background: rgba(79,70,229,0.1); color: var(--accent); padding: 2px 8px; border-radius: 10px; font-weight: 600; }
-    .wave-group { display: flex; align-items: center; gap: 0.3rem; }
-    .wave-btn { background: none; border: 1px solid var(--border); border-radius: 50%; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.85rem; cursor: pointer; color: var(--text-secondary); transition: all 0.2s; }
-    .wave-btn:hover { background: var(--wave); color: white; border-color: var(--wave); }
-    .empty-message { text-align: center; color: var(--text-secondary); padding: 2rem 1rem; font-style: italic; }
-    .history-input { margin-bottom: 1rem; }
-    .day-group { margin-bottom: 1.5rem; }
-    .day-title { font-size: 0.85rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.5rem; }
-    .archive-item { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 0.75rem 1rem; margin-bottom: 0.5rem; }
-    .archive-item .meta { font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.25rem; display: flex; gap: 0.75rem; }
-    .archive-item .text { font-size: 0.95rem; white-space: pre-wrap; word-break: break-word; }
-    .archive-item .actions { margin-top: 0.5rem; display: flex; gap: 0.5rem; }
-    .archive-item .actions button { background: none; border: 1px solid var(--border); border-radius: 8px; padding: 0.25rem 0.7rem; font-size: 0.8rem; cursor: pointer; color: var(--text-secondary); }
-    .burger-btn { position: fixed; top: 1rem; right: 1rem; width: 44px; height: 44px; background: var(--surface); border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 5; font-size: 1.4rem; box-shadow: var(--shadow); }
-    .settings-panel { position: fixed; top: 0; right: 0; width: 340px; max-width: 85vw; height: 100%; background: var(--surface); box-shadow: -5px 0 25px rgba(0,0,0,0.15); z-index: 10; padding: 1.5rem; overflow-y: auto; transform: translateX(100%); transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
-    .settings-panel.open { transform: translateX(0); }
-    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 9; display: none; }
-    .overlay.open { display: block; }
-    .setting-row { margin-bottom: 1rem; display: flex; flex-direction: column; gap: 0.2rem; }
-    .setting-row label { font-size: 0.85rem; color: var(--text-secondary); }
-    .setting-row input[type="text"], .setting-row input[type="url"] { padding: 0.5rem; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text); font-size: 0.85rem; font-family: monospace; }
-    .range-display { display: flex; align-items: center; gap: 0.5rem; }
-    .range-display span { min-width: 3rem; font-weight: 600; color: var(--accent); }
-    .settings-actions { display: flex; flex-direction: column; gap: 0.75rem; margin: 1.5rem 0; }
-    .settings-actions .btn { padding: 0.6rem 1.4rem; border-radius: 12px; font-weight: 600; border: none; cursor: pointer; background: var(--accent); color: white; font-size: 0.9rem; width: 100%; }
-    .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
-    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--text-secondary); border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.4rem; vertical-align: middle; }
-    .status-dot.online { background: #10b981; box-shadow: 0 0 4px #10b981; }
-    .status-dot.offline { background: #ef4444; }
-    .status-dot.unknown { background: #94a3b8; }
-    .toast { position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%); background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 0.75rem 1.25rem; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 100; font-size: 0.9rem; opacity: 0; transition: opacity 0.3s, transform 0.3s; pointer-events: none; }
-    .toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Noosphere</title>
+<style>
+:root{--bg:#f8fafc;--surface:#fff;--text:#0f172a;--muted:#64748b;--border:#e2e8f0;--accent:#4f46e5;--radius:12px}
+.dark{--bg:#0f172a;--surface:#1e293b;--text:#f1f5f9;--muted:#94a3b8;--border:#334155;--accent:#818cf8}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;padding:1rem}
+.app{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:1rem}
+.row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.row-between{display:flex;justify-content:space-between;align-items:center;gap:.5rem}
+textarea{width:100%;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:var(--radius);padding:.75rem;font:inherit;resize:vertical;min-height:80px;outline:none}
+button{padding:.5rem 1rem;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;font:inherit;font-weight:500}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:.75rem;margin-bottom:.5rem}
+.card .meta{font-size:.75rem;color:var(--muted);margin-bottom:.25rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.score{background:rgba(79,70,229,.1);color:var(--accent);padding:2px 6px;border-radius:6px;font-weight:600}
+.section-title{font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;margin:.75rem 0 .25rem}
+.tabs{display:flex;gap:.5rem;border-bottom:1px solid var(--border);padding-bottom:.5rem}
+.tab{padding:.4rem .8rem;border-radius:8px;border:none;background:transparent}
+.tab.active{background:var(--accent);color:#fff}
+.carousel{display:flex;overflow-x:auto;gap:.5rem;padding:.25rem 0}
+.carousel .card{min-width:260px;flex:0 0 auto}
+.wave-btns{display:flex;align-items:center;gap:.25rem}
+.wave-btns button{padding:2px 6px;font-size:.8rem}
+.charged{border-color:#0ea5e9}
+.status{font-size:.75rem;color:var(--muted);padding:.25rem .5rem}
+.hidden{display:none!important}
+input[type=text],select{padding:.4rem;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:6px;font:inherit}
+details{border:1px solid var(--border);border-radius:var(--radius);padding:.5rem .75rem;background:var(--surface);margin-bottom:.5rem}
+details>summary{cursor:pointer;font-weight:500}
+.field{margin:.5rem 0;display:flex;flex-direction:column;gap:.25rem}
+.field label{font-size:.8rem;color:var(--muted)}
+</style>
 </head>
 <body>
-<div class="app">
-  <div class="tabs">
-    <button class="tab-btn active" data-view="flow">Поток</button>
-    <button class="tab-btn" data-view="history">История</button>
-  </div>
-  <div class="view active" id="flowView">
-    <div class="thought-input" id="thoughtContainer">
-      <textarea id="thoughtInput" placeholder="Поделитесь мыслью..."></textarea>
-      <div class="input-actions">
-        <div class="status-line" id="statusMsg"></div>
-        <div class="swipe-hints" id="swipeHints">
-          <span class="hint-up">↑ в мир + себе</span>
-          <span class="hint-down">↓ только себе</span>
-        </div>
-      </div>
-    </div>
-    <div id="personalSection" class="feed-section" style="display:none;">
-      <div class="section-title" id="personalTitle">Мои мысли</div>
-      <div id="personalCards" class="carousel"></div>
-    </div>
-    <div id="relevantSection" class="feed-section" style="display:none;">
-      <div class="section-title" id="relevantTitle">Мир</div>
-      <div id="relevantCards" class="carousel"></div>
-    </div>
-    <div id="serendipitySection" class="feed-section" style="display:none;">
-      <div class="section-title" id="serendipityTitle">Смежные</div>
-      <div id="serendipityCards" class="carousel"></div>
-    </div>
-  </div>
-  <div class="view" id="historyView">
-    <div class="history-input">
-      <input type="text" id="historySearchInput" placeholder="Поиск по истории..." style="width:100%; padding:0.75rem; border:1px solid var(--border); border-radius:14px; background:var(--surface); color:var(--text);">
-    </div>
-    <div id="historyContent"></div>
-  </div>
-</div>
-<div class="burger-btn" id="settingsTrigger">☰</div>
-<div class="overlay" id="overlay"></div>
-<div class="settings-panel" id="settingsPanel">
-  <h2 style="margin-bottom:1.5rem;">Настройки</h2>
-  <div class="setting-row">
-    <label>Язык / Language</label>
-    <select id="langSelect"><option value="ru">Русский</option><option value="en">English</option></select>
-  </div>
-  <div class="setting-row">
-    <label>Тема</label>
-    <select id="themeSelect"><option value="auto">Авто</option><option value="light">День</option><option value="dark">Ночь</option></select>
-  </div>
-  <div class="setting-row">
-    <label>Порог релевантности</label>
-    <div class="range-display"><input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.25"><span id="thresholdValue">0.25</span></div>
-  </div>
-  <div class="setting-row">
-    <label>Дельта смежности</label>
-    <div class="range-display"><input type="range" id="serendipitySlider" min="0" max="0.5" step="0.01" value="0.15"><span id="serendipityValue">0.15</span></div>
-  </div>
-  <div class="setting-row">
-    <label>Мин. волн</label>
-    <select id="minWavesSelect"><option value="0">0</option><option value="1" selected>1</option><option value="3">3</option><option value="5">5</option></select>
-  </div>
-  <div class="setting-row">
-    <label>Макс. карточек</label>
-    <select id="maxResultsSelect"><option value="3">3</option><option value="5" selected>5</option><option value="10">10</option></select>
-  </div>
-  <div class="setting-row">
-    <label><span id="statusDot" class="status-dot unknown"></span> Прокси Qdrant</label>
-    <input type="url" id="proxyUrlInput" placeholder="https://...workers.dev">
-  </div>
-  <div class="settings-actions">
-    <button id="exportCapsuleBtn" class="btn-ghost" style="padding:0.6rem 1.4rem; border-radius:12px; font-weight:600; cursor:pointer; font-size:0.9rem;">Скачать капсулу</button>
-    <button id="importCapsuleBtn" class="btn-ghost" style="padding:0.6rem 1.4rem; border-radius:12px; font-weight:600; cursor:pointer; font-size:0.9rem;">Импортировать капсулу</button>
-    <input type="file" id="importFileInput" accept=".capsule,.json" style="display:none;">
-    <button id="rebuildVectorsBtn" class="btn-ghost" style="padding:0.6rem 1.4rem; border-radius:12px; font-weight:600; cursor:pointer; font-size:0.9rem;">Пересоздать векторы</button>
-  </div>
-  <div style="display:flex; gap:0.5rem; margin:1rem 0;">
-    <button id="resetSettingsBtn" class="btn-ghost" style="flex:1; padding:0.6rem 1.4rem; border-radius:12px; font-weight:600; cursor:pointer; font-size:0.9rem;">Сбросить всё</button>
-    <button id="applySettingsBtn" style="flex:1; padding:0.6rem 1.4rem; border-radius:12px; font-weight:600; border:none; cursor:pointer; background:var(--accent); color:white; font-size:0.9rem;">Применить</button>
-  </div>
-  <p style="font-size:0.75rem;color:var(--text-secondary);">Модель: MiniLM (25 МБ)</p>
-</div>
-<div class="toast" id="toast"></div>
+<div class="app" id="app"><div class="status">Loading...</div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/sea.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/axe.js"></script>
 
 <script type="module">
-import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+'use strict';
 
-// ========================================================================
-// 1. КОНФИГУРАЦИЯ
-// ========================================================================
-const CONFIG = {
-  COLLECTION: 'noosphere',
-  MODEL: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
-  DEFAULT_PROXY: 'https://hidden-unit-1b90.as1994g.workers.dev',
-  REQUEST_TIMEOUT_MS: 15000,
-  MAX_RETRIES: 1,
-  RETRY_DELAYS: [1500],
+// ============================================================================
+// Config - константы
+// ============================================================================
+const Config = Object.freeze({
+  APP_VERSION: '1.0.0',
+  DEFAULTS: {
+    theme: 'auto',
+    lang: 'ru',
+    threshold: 0.25,
+    serendipityDelta: 0.15,
+    minWaves: 1,
+    maxResults: 5,
+    gunRelays: ['https://gun-manhattan.herokuapp.com/gun.js']
+  },
   STORAGE_KEYS: {
-    myNotes: 'noosphere_mynotes_v2',
-    world: 'noosphere_world_v2',
-    settings: 'noosphere_settings_v2',
-    proxyUrl: 'noosphere_proxy_url'
+    settings: 'ns_settings',
+    myNotes: 'ns_mynotes',
+    worldLocal: 'ns_world_local',
+    gunIdentity: 'ns_gun_identity'
+  },
+  GUN: {
+    PUBLIC_PREFIX: 'noosphere/public/v1',
+    USER_WAVES: 'waves'
+  },
+  MODEL: {
+    name: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+    quantized: true
   }
-};
+});
 
-// ========================================================================
-// 2. ЛОКАЛИЗАЦИЯ
-// ========================================================================
-const tKeys = {
-  ru: {
-    inputPlaceholder: 'Поделитесь мыслью...',
-    personalTitle: 'Мои мысли', worldTitle: 'Мир', serendipityTitle: 'Смежные',
-    emptyPersonal: 'Нет похожих мыслей', emptyWorld: 'Ничего не найдено',
-    edit: 'ред.', save: 'сохр.', cancel: 'отм.', delete: 'удал.',
-    noteEdited: '(изм.)', today: 'Сегодня', yesterday: 'Вчера',
-    confirmDelete: 'Удалить заметку?',
-    importSuccess: 'Импортировано {n} заметок.',
-    rebuildDone: 'Векторы пересозданы',
-    resetConfirm: 'Сбросить все заметки и настройки?',
-    modelLoading: 'Загрузка модели...', ready: 'Готов',
-    settingsTitle: 'Настройки', language: 'Язык / Language',
-    theme: 'Тема', threshold: 'Порог релевантности', serendipity: 'Дельта смежности',
-    exportCapsule: 'Скачать капсулу', importCapsule: 'Импортировать капсулу',
-    rebuildVectors: 'Пересоздать векторы', resetAll: 'Сбросить всё', apply: 'Применить',
-    historyPlaceholder: 'Поиск по истории...', emptyHistory: 'Нет заметок',
-    tabFlow: 'Поток', tabHistory: 'История',
-    hintUp: '↑ в мир + себе', hintDown: '↓ только себе',
-    publishedOnline: '✦ Опубликовано в мире',
-    publishedLocal: '✓ Сохранено у себя'
-  },
-  en: {
-    inputPlaceholder: 'Share a thought...',
-    personalTitle: 'My thoughts', worldTitle: 'World', serendipityTitle: 'Serendipity',
-    emptyPersonal: 'No similar thoughts', emptyWorld: 'Nothing found',
-    edit: 'edit', save: 'save', cancel: 'cancel', delete: 'delete',
-    noteEdited: '(edited)', today: 'Today', yesterday: 'Yesterday',
-    confirmDelete: 'Delete note?',
-    importSuccess: 'Imported {n} notes.', rebuildDone: 'Vectors rebuilt',
-    resetConfirm: 'Reset all notes and settings?',
-    modelLoading: 'Loading model...', ready: 'Ready',
-    settingsTitle: 'Settings', language: 'Language',
-    theme: 'Theme', threshold: 'Relevance threshold', serendipity: 'Serendipity delta',
-    exportCapsule: 'Download capsule', importCapsule: 'Import capsule',
-    rebuildVectors: 'Rebuild vectors', resetAll: 'Reset all', apply: 'Apply',
-    historyPlaceholder: 'Search history...', emptyHistory: 'No notes',
-    tabFlow: 'Flow', tabHistory: 'History',
-    hintUp: '↑ to world + local', hintDown: '↓ local only',
-    publishedOnline: '✦ Published to world',
-    publishedLocal: '✓ Saved locally'
-  }
-};
-let lang = 'ru';
-function t(key, replace) {
-  const str = tKeys[lang]?.[key] ?? tKeys['ru'][key] ?? key;
-  return replace ? str.replace(/\{(\w+)\}/g, (_, k) => replace[k] ?? '') : str;
-}
-function updateUI() {
-  document.getElementById('personalTitle').textContent = t('personalTitle');
-  document.getElementById('relevantTitle').textContent = t('worldTitle');
-  document.getElementById('serendipityTitle').textContent = t('serendipityTitle');
-  document.getElementById('historySearchInput').placeholder = t('historyPlaceholder');
-  if (els.statusMsg && els.statusMsg.textContent !== '') els.statusMsg.textContent = t('ready');
-  document.querySelector('.tab-btn[data-view="flow"]').textContent = t('tabFlow');
-  document.querySelector('.tab-btn[data-view="history"]').textContent = t('tabHistory');
-  document.querySelector('.hint-up').textContent = t('hintUp');
-  document.querySelector('.hint-down').textContent = t('hintDown');
-  if (document.getElementById('historyView').classList.contains('active')) renderHistory();
-}
-
-// ========================================================================
-// 3. ТЕМА
-// ========================================================================
-function applyTheme(mode) {
-  document.body.classList.toggle('dark', mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches));
-}
-
-// ========================================================================
-// 4. TOAST
-// ========================================================================
-let toastTimer;
-function toast(msg, duration = 2500) {
-  const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), duration);
-}
-
-// ========================================================================
-// 5. НАСТРОЙКИ
-// ========================================================================
-const DEFAULT = { threshold: 0.25, serendipityDelta: 0.15, minWaves: 1, maxResults: 5, theme: 'auto', lang: 'ru' };
-const Settings = { ...DEFAULT };
-Settings.load = () => {
-  try { Object.assign(Settings, DEFAULT, JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.settings) || '{}')); }
-  catch { Object.assign(Settings, DEFAULT); }
-};
-Settings.save = () => localStorage.setItem(CONFIG.STORAGE_KEYS.settings, JSON.stringify(Settings));
-Settings.getProxyUrl = () => localStorage.getItem(CONFIG.STORAGE_KEYS.proxyUrl) || CONFIG.DEFAULT_PROXY;
-Settings.setProxyUrl = (url) => localStorage.setItem(CONFIG.STORAGE_KEYS.proxyUrl, url);
-
-// ========================================================================
-// 6. ХРАНИЛИЩЕ ЛОКАЛЬНЫХ ЗАМЕТОК
-// ========================================================================
-const MyNotes = {
-  data: [],
-  load() { try { this.data = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.myNotes) || '[]'); } catch { this.data = []; } },
-  save() { localStorage.setItem(CONFIG.STORAGE_KEYS.myNotes, JSON.stringify(this.data)); },
-  add(text, id, date, editedAt) {
-    const note = { id: id || 'l_' + crypto.randomUUID(), text, date: date || new Date().toISOString(), editedAt: editedAt || null };
-    this.data.unshift(note); this.save(); return note;
-  },
-  update(id, newText) {
-    const note = this.data.find(n => n.id === id);
-    if (note) { note.text = newText; note.editedAt = new Date().toISOString(); this.save(); }
-  },
-  remove(id) { this.data = this.data.filter(n => n.id !== id); this.save(); },
-  clear() { this.data = []; this.save(); }
-};
-
-// ========================================================================
-// 7. QDRANT АДАПТЕР (с защитой от множественных запросов)
-// ========================================================================
-const Qdrant = {
-  online: null,
-  activeController: null,  // для отмены предыдущих поисковых запросов
-
-  async _fetch(path, method = 'GET', body = null, useAbort = false) {
-    // Если useAbort — отменяем предыдущий запрос
-    if (useAbort && this.activeController) {
-      try { this.activeController.abort(); } catch {}
-    }
-    const controller = new AbortController();
-    if (useAbort) this.activeController = controller;
+// ============================================================================
+// EventBus - pub/sub для развязки слоёв
+// ============================================================================
+const EventBus = (() => {
+  const subscribers = new Map();
+  
+  return {
+    on(event, callback) {
+      if (!subscribers.has(event)) {
+        subscribers.set(event, new Set());
+      }
+      subscribers.get(event).add(callback);
+      return () => subscribers.get(event)?.delete(callback);
+    },
     
-    const url = Settings.getProxyUrl().replace(/\/$/, '') + path;
-    const timeoutId = setTimeout(() => controller.abort(), CONFIG.REQUEST_TIMEOUT_MS);
-    try {
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: body ? JSON.stringify(body) : undefined,
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`HTTP ${res.status}: ${text.slice(0, 100)}`);
-      }
-      return await res.json();
-    } finally {
-      clearTimeout(timeoutId);
-      if (useAbort && this.activeController === controller) {
-        this.activeController = null;
-      }
-    }
-  },
-
-  async _withRetry(fn) {
-    let lastError;
-    for (let i = 0; i <= CONFIG.MAX_RETRIES; i++) {
-      try {
-        return await fn();
-      } catch (e) {
-        lastError = e;
-        // Не повторяем если это отмена запроса (новый ввод)
-        if (e.name === 'AbortError') throw e;
-        if (i < CONFIG.MAX_RETRIES) {
-          await new Promise(r => setTimeout(r, CONFIG.RETRY_DELAYS[i] || 1000));
+    emit(event, payload) {
+      subscribers.get(event)?.forEach(callback => {
+        try {
+          callback(payload);
+        } catch (error) {
+          console.error('[EventBus]', event, error);
         }
-      }
-    }
-    throw lastError;
-  },
-
-  async checkHealth() {
-    try {
-      await this._fetch(`/collections/${CONFIG.COLLECTION}`);
-      this.online = true;
-      updateStatusDot(true);
-      return true;
-    } catch (e) {
-      console.warn('Qdrant health check failed:', e.message);
-      this.online = false;
-      updateStatusDot(false);
-      return false;
-    }
-  },
-
-  async upsert(vector, text, localId) {
-    if (this.online === false) throw new Error('offline');
-    return this._withRetry(async () => {
-      const id = crypto.randomUUID();
-      await this._fetch(`/collections/${CONFIG.COLLECTION}/points`, 'PUT', {
-        points: [{
-          id, vector,
-          payload: { excerpt: text.slice(0, 300), waves: 0, timestamp: Date.now(), localId }
-        }]
       });
-      return id;
-    });
-  },
-
-  async search(vector, limit, minScore, minWaves = 0) {
-    if (this.online === false) throw new Error('offline');
-    return this._withRetry(async () => {
-      const filter = minWaves > 0
-        ? { must: [{ key: 'waves', range: { gte: minWaves } }] }
-        : undefined;
-      // useAbort=true — отменяем предыдущий поисковый запрос
-      const data = await this._fetch(`/collections/${CONFIG.COLLECTION}/points/search`, 'POST', {
-        vector, limit, score_threshold: minScore, with_payload: true, filter
-      }, true);
-      return (data.result || []).map(r => ({
-        id: String(r.id),
-        score: r.score,
-        waves: r.payload?.waves ?? 0,
-        excerpt: r.payload?.excerpt || '',
-        localId: r.payload?.localId || null
-      }));
-    });
-  },
-
-  async waveUp(id) {
-    if (this.online === false) return;
-    try {
-      await this._fetch(`/collections/${CONFIG.COLLECTION}/points/payload`, 'POST', {
-        payload: { waves: { '+=': 1 } }, points: [id]
-      });
-    } catch (e) { console.warn('waveUp failed:', e.message); }
-  },
-
-  async waveDown(id) {
-    if (this.online === false) return;
-    try {
-      await this._fetch(`/collections/${CONFIG.COLLECTION}/points/payload`, 'POST', {
-        payload: { waves: { '+=': -1 } }, points: [id]
-      });
-    } catch (e) { console.warn('waveDown failed:', e.message); }
-  },
-
-  async removeByLocalId(localId) {
-    if (this.online === false) return;
-    try {
-      await this._fetch(`/collections/${CONFIG.COLLECTION}/points/delete`, 'POST', {
-        filter: { must: [{ key: 'localId', match: { value: localId } }] }
-      });
-    } catch (e) { console.warn('removeByLocalId failed:', e.message); }
-  }
-};
-
-function updateStatusDot(online) {
-  const dot = document.getElementById('statusDot');
-  if (!dot) return;
-  dot.classList.remove('online', 'offline', 'unknown');
-  dot.classList.add(online ? 'online' : 'offline');
-}
-
-// ========================================================================
-// 8. ГИБРИДНОЕ ХРАНИЛИЩЕ МИРА
-// ========================================================================
-const World = {
-  notes: [],
-  load() {
-    try { this.notes = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.world) || '[]'); }
-    catch { this.notes = []; }
-    this.notes.forEach(n => { if (typeof n.waves !== 'number') n.waves = 0; });
-  },
-  save() { localStorage.setItem(CONFIG.STORAGE_KEYS.world, JSON.stringify(this.notes)); },
-
-  async add(vectorArray, text, localId = null) {
-    const localNote = {
-      id: 'g_' + crypto.randomUUID(),
-      vec: vectorArray, waves: 0,
-      excerpt: text.slice(0, 150),
-      localId, timestamp: Date.now()
-    };
-    this.notes.unshift(localNote);
-    this.save();
-
-    let publishedOnline = false;
-    if (Qdrant.online !== false) {
-      try {
-        const qdrantId = await Qdrant.upsert(vectorArray, text, localId);
-        localNote.id = qdrantId;
-        this.save();
-        publishedOnline = true;
-        Qdrant.online = true;
-        updateStatusDot(true);
-      } catch (e) {
-        console.warn('Qdrant upsert failed:', e.message);
-        Qdrant.online = false;
-        updateStatusDot(false);
-      }
-    }
-    return { publishedOnline };
-  },
-
-  async removeByLocalId(localId) {
-    this.notes = this.notes.filter(n => n.localId !== localId);
-    this.save();
-    if (Qdrant.online !== false) await Qdrant.removeByLocalId(localId);
-  },
-
-  async waveUp(id) {
-    const n = this.notes.find(x => x.id === id);
-    if (n) { n.waves++; this.save(); }
-    if (Qdrant.online !== false) await Qdrant.waveUp(id);
-  },
-
-  async waveDown(id) {
-    const n = this.notes.find(x => x.id === id);
-    if (n && n.waves > 0) { n.waves--; this.save(); }
-    if (Qdrant.online !== false) await Qdrant.waveDown(id);
-  },
-
-  async search(qVec) {
-    const low = Settings.threshold - Settings.serendipityDelta;
-
-    if (Qdrant.online !== false) {
-      try {
-        const results = await Qdrant.search(
-          Array.from(qVec),
-          Settings.maxResults * 2,
-          low,
-          Settings.minWaves
-        );
-        Qdrant.online = true;
-        updateStatusDot(true);
-        const rel = results.filter(r => r.score >= Settings.threshold).slice(0, Settings.maxResults);
-        const ser = results.filter(r => r.score >= low && r.score < Settings.threshold).slice(0, Settings.maxResults);
-        return { rel, ser, source: 'online' };
-      } catch (e) {
-        // Если запрос отменён (новый ввод) — просто выходим без фоллбэка
-        if (e.name === 'AbortError') return { rel: [], ser: [], source: 'cancelled' };
-        console.warn('Qdrant search failed, falling back to local:', e.message);
-        Qdrant.online = false;
-        updateStatusDot(false);
-      }
-    }
-
-    const rel = [], ser = [];
-    for (const n of this.notes) {
-      if (n.waves < Settings.minWaves) continue;
-      const v = new Float32Array(n.vec);
-      let s = 0;
-      for (let i = 0; i < qVec.length; i++) s += qVec[i] * v[i];
-      if (s >= Settings.threshold) rel.push({ ...n, score: s });
-      else if (s >= low) ser.push({ ...n, score: s });
-    }
-    return {
-      rel: rel.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults),
-      ser: ser.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults),
-      source: 'local'
-    };
-  },
-
-  clear() { this.notes = []; this.save(); }
-};
-
-// ========================================================================
-// 9. ДВИЖОК
-// ========================================================================
-const Vec = {
-  normalize(v) {
-    const m = Math.sqrt(v.reduce((s, x) => s + x * x, 0));
-    return m ? new Float32Array(v.map(x => x / m)) : new Float32Array(v.length);
-  },
-  cosine(a, b) {
-    let d = 0;
-    for (let i = 0; i < a.length; i++) d += a[i] * b[i];
-    return d;
-  }
-};
-
-onst Engine = {
-  model: null,
-  cache: new Map(),
-  
-  async init() {
-    // Принудительно указываем CDN + отключаем локальный кэш модели
-    this.model = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', { 
-      quantized: true,
-      progress_callback: (p) => console.log('Model:', p.status, p.file, Math.round(p.progress || 0) + '%'),
-      // Эти параметры заставляют грузить с CDN
-      cache_dir: null,
-      local_files_only: false
-    });
-    console.log('✅ Модель загружена, размерность:', (await this.embed('test')).length);
-    await this.reindex();
-  },
-  
-  async embed(text) {
-    const out = await this.model([text]);
-    const { data, dims } = out;
-    const [_, tokens, hidden] = dims;
-    if (!tokens || !hidden) return Vec.normalize(data);
-    const emb = new Float32Array(hidden);
-    for (let t = 0; t < tokens; t++) for (let h = 0; h < hidden; h++) emb[h] += data[t * hidden + h];
-    for (let h = 0; h < hidden; h++) emb[h] /= tokens;
-    return Vec.normalize(emb);
-  },
-  
-  async reindex() {
-    this.cache.clear();
-    for (const n of MyNotes.data) {
-      try { await this.cacheNote(n.id, n.text); } catch {}
-    }
-  },
-  
-  async cacheNote(id, text) {
-    if (!this.cache.has(id)) this.cache.set(id, await this.embed(text));
-  },
-  
-  async searchLocal(qVec) {
-    const res = [];
-    for (const n of MyNotes.data) {
-      const v = this.cache.get(n.id);
-      if (!v) continue;
-      const s = Vec.cosine(qVec, v);
-      if (s > Settings.threshold) res.push({ ...n, score: s });
-    }
-    return res.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults);
-  }
-};
-
-// ========================================================================
-// 10. UI
-// ========================================================================
-const $ = s => document.querySelector(s);
-const els = {
-  input: $('#thoughtInput'), statusMsg: $('#statusMsg'),
-  swipeHints: $('#swipeHints'), thoughtContainer: $('#thoughtContainer'),
-  personalSection: $('#personalSection'), personalCards: $('#personalCards'),
-  relevantSection: $('#relevantSection'), relevantCards: $('#relevantCards'),
-  serendipitySection: $('#serendipitySection'), serendipityCards: $('#serendipityCards'),
-  historySearch: $('#historySearchInput'), historyContent: $('#historyContent'),
-  settingsTrigger: $('#settingsTrigger'), overlay: $('#overlay'), panel: $('#settingsPanel'),
-  thresholdSl: $('#thresholdSlider'), thresholdVal: $('#thresholdValue'),
-  serendipitySl: $('#serendipitySlider'), serendipityVal: $('#serendipityValue'),
-  minWavesSel: $('#minWavesSelect'), maxResSel: $('#maxResultsSelect'),
-  langSelect: $('#langSelect'), themeSelect: $('#themeSelect'),
-  proxyUrlInput: $('#proxyUrlInput'),
-  applyBtn: $('#applySettingsBtn'), resetBtn: $('#resetSettingsBtn'),
-  rebuildBtn: $('#rebuildVectorsBtn'),
-  exportBtn: $('#exportCapsuleBtn'), importBtn: $('#importCapsuleBtn'), importFile: $('#importFileInput')
-};
-
-function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-
-function renderCarousel(container, items, isWorld = false) {
-  if (!items.length) {
-    container.innerHTML = `<div class="empty-message">${isWorld ? t('emptyWorld') : t('emptyPersonal')}</div>`;
-    return;
-  }
-  container.innerHTML = items.map(item => {
-    const text = isWorld ? (item.excerpt || 'мысль') : item.text;
-    const charged = isWorld && item.waves > 0 ? 'charged' : '';
-    const footer = isWorld
-      ? `<span class="score-badge">${item.score.toFixed(2)}</span>
-         <div class="wave-group">
-           <button class="wave-btn" data-id="${item.id}" data-action="down">−</button>
-           <span>${item.waves}</span>
-           <button class="wave-btn" data-id="${item.id}" data-action="up">+</button>
-         </div>`
-      : `<span class="score-badge">${item.score.toFixed(2)}</span>
-         <span>${new Date(item.date).toLocaleDateString()}</span>`;
-    return `<div class="card ${charged}"><div class="card-text">${esc(text)}</div><div class="card-footer">${footer}</div></div>`;
-  }).join('');
-}
-
-function formatDate(iso) {
-  const d = new Date(iso);
-  const now = new Date(); now.setHours(0, 0, 0, 0);
-  const yest = new Date(now); yest.setDate(yest.getDate() - 1);
-  if (d >= now) return t('today');
-  if (d >= yest) return t('yesterday');
-  return d.toLocaleDateString();
-}
-
-function renderHistory(filtered = null) {
-  const notes = filtered || MyNotes.data;
-  if (!notes.length) { els.historyContent.innerHTML = `<div class="empty-message">${t('emptyHistory')}</div>`; return; }
-  const groups = new Map();
-  notes.forEach(n => {
-    const day = new Date(n.date).toLocaleDateString();
-    if (!groups.has(day)) groups.set(day, []);
-    groups.get(day).push(n);
-  });
-  let html = '';
-  for (const [_, dayNotes] of groups) {
-    html += `<div class="day-group"><div class="day-title">${formatDate(dayNotes[0].date)}</div>`;
-    dayNotes.forEach(note => {
-      const time = new Date(note.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const edited = note.editedAt ? `<span>${t('noteEdited')} ${new Date(note.editedAt).toLocaleString()}</span>` : '';
-      html += `<div class="archive-item" data-id="${note.id}">
-        <div class="meta"><span>${time}</span>${edited}</div>
-        <div class="text">${esc(note.text)}</div>
-        <div class="actions">
-          <button class="edit-btn" data-id="${note.id}">${t('edit')}</button>
-          <button class="delete-btn" data-id="${note.id}">${t('delete')}</button>
-        </div>
-      </div>`;
-    });
-    html += '</div>';
-  }
-  els.historyContent.innerHTML = html;
-}
-
-async function searchHistory() {
-  const q = els.historySearch.value.trim();
-  if (!q) { renderHistory(); return; }
-  const qVec = await Engine.embed(q);
-  const scored = MyNotes.data.map(note => {
-    const v = Engine.cache.get(note.id);
-    return v ? { ...note, score: Vec.cosine(qVec, v) } : null;
-  }).filter(n => n && n.score > Settings.threshold).sort((a, b) => b.score - a.score);
-  renderHistory(scored);
-}
-
-// ========================================================================
-// 11. ЛОГИКА ПОТОКА
-// ========================================================================
-async function searchFlow() {
-  const q = els.input.value.trim();
-  if (!q) {
-    els.personalSection.style.display = 'none';
-    els.relevantSection.style.display = 'none';
-    els.serendipitySection.style.display = 'none';
-    return;
-  }
-  const qVec = await Engine.embed(q);
-  const [local, world] = await Promise.all([Engine.searchLocal(qVec), World.search(qVec)]);
-  // Если запрос был отменён (новый ввод) — не рисуем
-  if (world.source === 'cancelled') return;
-  els.personalSection.style.display = local.length ? 'block' : 'none';
-  renderCarousel(els.personalCards, local);
-  els.relevantSection.style.display = world.rel.length ? 'block' : 'none';
-  renderCarousel(els.relevantCards, world.rel, true);
-  els.serendipitySection.style.display = world.ser.length ? 'block' : 'none';
-  renderCarousel(els.serendipityCards, world.ser, true);
-}
-
-async function saveNote(share = false) {
-  const text = els.input.value.trim();
-  if (!text) return;
-  const note = MyNotes.add(text);
-  await Engine.cacheNote(note.id, text);
-
-  if (share) {
-    const vec = await Engine.embed(text);
-    const result = await World.add(Array.from(vec), text, note.id);
+    },
     
-    // Анимация звёздочки
-    const rect = els.thoughtContainer.getBoundingClientRect();
-    const star = document.createElement('div');
-    star.textContent = '✦';
-    star.style.cssText = `position:fixed; left:${rect.left + rect.width / 2}px; top:${rect.top + rect.height / 2}px; font-size:24px; color:var(--star); transition: all 1s cubic-bezier(0.25,0.1,0.25,1); z-index:999; pointer-events:none;`;
-    document.body.appendChild(star);
-    requestAnimationFrame(() => { star.style.transform = 'translateY(-200px) scale(0)'; star.style.opacity = '0'; });
-    setTimeout(() => star.remove(), 1000);
-    
-    toast(result.publishedOnline ? t('publishedOnline') : t('publishedLocal'));
-  } else {
-    toast(t('publishedLocal'));
-  }
-
-  els.input.value = '';
-  await searchFlow();
-}
-
-// ========================================================================
-// 12. ЖЕСТЫ (свайпы) И ВКЛАДКИ
-// ========================================================================
-els.input.addEventListener('input', () => {
-  els.swipeHints.classList.toggle('visible', els.input.value.trim().length > 0);
-});
-
-// Отслеживание свайпов: вверх = облако+локал, вниз = только локал
-let touchStartY = 0;
-let touchStartX = 0;
-let touchStartTime = 0;
-
-els.input.addEventListener('touchstart', e => {
-  touchStartY = e.touches[0].clientY;
-  touchStartX = e.touches[0].clientX;
-  touchStartTime = Date.now();
-}, { passive: true });
-
-els.input.addEventListener('touchmove', e => {
-  const deltaY = touchStartY - e.touches[0].clientY;
-  const deltaX = Math.abs(touchStartX - e.touches[0].clientX);
-  // Визуальная обратная связь: подсвечиваем контейнер в зависимости от направления
-  if (deltaX < 40) {  // только вертикальные свайпы
-    if (deltaY > 30 && els.input.value.trim()) {
-      els.thoughtContainer.classList.add('swipe-up');
-      els.thoughtContainer.classList.remove('swipe-down');
-    } else if (deltaY < -30 && els.input.value.trim()) {
-      els.thoughtContainer.classList.add('swipe-down');
-      els.thoughtContainer.classList.remove('swipe-up');
-    } else {
-      els.thoughtContainer.classList.remove('swipe-up', 'swipe-down');
+    EVENTS: {
+      MODEL_LOADED: 'model:loaded',
+      MODEL_ERROR: 'model:error',
+      MY_NOTES_CHANGED: 'mynotes:changed',
+      WORLD_CHANGED: 'world:changed',
+      SETTINGS_CHANGED: 'settings:changed',
+      VIEW_CHANGED: 'view:changed',
+      NETWORK_PEER: 'network:peer',
+      NETWORK_ERROR: 'network:error'
     }
-  }
-}, { passive: true });
-
-els.input.addEventListener('touchend', e => {
-  const deltaY = touchStartY - e.changedTouches[0].clientY;
-  const deltaTime = Date.now() - touchStartTime;
-  const text = els.input.value.trim();
-  
-  els.thoughtContainer.classList.remove('swipe-up', 'swipe-down');
-  
-  // Свайп должен быть быстрым (<500мс) и достаточно длинным (>60px)
-  if (text && deltaTime < 500) {
-    if (deltaY > 60) {
-      // Свайп ВВЕРХ → в мир + локал
-      e.preventDefault();
-      saveNote(true);
-    } else if (deltaY < -60) {
-      // Свайп ВНИЗ → только локал
-      e.preventDefault();
-      saveNote(false);
-    }
-  }
-});
-
-// Ctrl+Enter / Cmd+Enter → только локал
-els.input.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-    e.preventDefault();
-    saveNote(false);
-  }
-});
-
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    const view = btn.dataset.view;
-    if (view === 'history') {
-      document.getElementById('flowView').classList.remove('active');
-      document.getElementById('historyView').classList.add('active');
-      renderHistory();
-    } else {
-      document.getElementById('historyView').classList.remove('active');
-      document.getElementById('flowView').classList.add('active');
-    }
-  });
-});
-
-// ========================================================================
-// 13. КЛИКИ (волны, редактирование, удаление)
-// ========================================================================
-document.addEventListener('click', async e => {
-  const waveBtn = e.target.closest('.wave-btn');
-  if (waveBtn) {
-    const id = waveBtn.dataset.id;
-    const action = waveBtn.dataset.action;
-    if (action === 'up') await World.waveUp(id);
-    else if (action === 'down') await World.waveDown(id);
-    searchFlow();
-    return;
-  }
-
-  const editBtn = e.target.closest('.edit-btn');
-  const saveEditBtn = e.target.closest('.save-edit-btn');
-  const cancelBtn = e.target.closest('.cancel-edit-btn');
-  const deleteBtn = e.target.closest('.delete-btn');
-
-  if (editBtn) {
-    const item = editBtn.closest('.archive-item');
-    const note = MyNotes.data.find(n => n.id === item.dataset.id);
-    if (note) {
-      item.querySelector('.text').innerHTML = `<textarea class="edit-textarea" style="width:100%;min-height:60px;">${esc(note.text)}</textarea>`;
-      item.querySelector('.actions').innerHTML = `<button class="save-edit-btn" data-id="${note.id}">${t('save')}</button><button class="cancel-edit-btn" data-id="${note.id}">${t('cancel')}</button>`;
-    }
-    return;
-  }
-  if (saveEditBtn) {
-    const item = saveEditBtn.closest('.archive-item');
-    const textarea = item.querySelector('.edit-textarea');
-    if (textarea && textarea.value.trim()) {
-      MyNotes.update(saveEditBtn.dataset.id, textarea.value.trim());
-      Engine.embed(textarea.value.trim()).then(vec => Engine.cache.set(saveEditBtn.dataset.id, vec));
-    }
-    renderHistory();
-    return;
-  }
-  if (cancelBtn) { renderHistory(); return; }
-  if (deleteBtn) {
-    if (confirm(t('confirmDelete'))) {
-      const id = deleteBtn.dataset.id;
-      MyNotes.remove(id);
-      await World.removeByLocalId(id);
-      Engine.cache.delete(id);
-      renderHistory();
-      searchFlow();
-    }
-    return;
-  }
-});
-
-// ========================================================================
-// 14. КАПСУЛЫ
-// ========================================================================
-function exportCapsule() {
-  const capsule = { version: 1, notes: MyNotes.data.map(n => ({ id: n.id, text: n.text, date: n.date, editedAt: n.editedAt })) };
-  const blob = new Blob([JSON.stringify(capsule)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'noosphere.capsule';
-  a.click();
-}
-async function importCapsule(file) {
-  try {
-    const text = await file.text();
-    const capsule = JSON.parse(text);
-    const existing = new Set(MyNotes.data.map(n => n.id));
-    const newNotes = capsule.notes.filter(n => !existing.has(n.id));
-    for (const n of newNotes) MyNotes.add(n.text, n.id, n.date, n.editedAt);
-    for (const n of newNotes) await Engine.cacheNote(n.id, n.text);
-    renderHistory(); searchFlow();
-    toast(t('importSuccess', { n: newNotes.length }));
-  } catch (e) { toast('Ошибка: ' + e.message); }
-}
-
-// ========================================================================
-// 15. НАСТРОЙКИ UI
-// ========================================================================
-function syncSettingsUI() {
-  els.thresholdSl.value = Settings.threshold;
-  els.thresholdVal.textContent = Settings.threshold.toFixed(2);
-  els.serendipitySl.value = Settings.serendipityDelta;
-  els.serendipityVal.textContent = Settings.serendipityDelta.toFixed(2);
-  els.minWavesSel.value = Settings.minWaves;
-  els.maxResSel.value = Settings.maxResults;
-  els.langSelect.value = Settings.lang;
-  els.themeSelect.value = Settings.theme;
-  els.proxyUrlInput.value = Settings.getProxyUrl();
-}
-
-function applySettings(skipSearch = true) {
-  Settings.threshold = +els.thresholdSl.value;
-  Settings.serendipityDelta = +els.serendipitySl.value;
-  Settings.minWaves = +els.minWavesSel.value;
-  Settings.maxResults = +els.maxResSel.value;
-  Settings.theme = els.themeSelect.value;
-  Settings.lang = els.langSelect.value;
-  const newProxy = els.proxyUrlInput.value.trim();
-  if (newProxy && newProxy !== Settings.getProxyUrl()) {
-    Settings.setProxyUrl(newProxy);
-    Qdrant.online = null;
-    Qdrant.checkHealth();
-  }
-  Settings.save();
-  if (lang !== Settings.lang) { lang = Settings.lang; updateUI(); }
-  applyTheme(Settings.theme);
-  if (!skipSearch) searchFlow();
-}
-
-function resetAll() {
-  if (!confirm(t('resetConfirm'))) return;
-  MyNotes.clear(); World.clear(); Engine.cache.clear();
-  Object.assign(Settings, DEFAULT);
-  Settings.save();
-  syncSettingsUI();
-  lang = Settings.lang;
-  updateUI();
-  applyTheme(Settings.theme);
-  els.input.value = '';
-  searchFlow(); renderHistory();
-  els.overlay.classList.remove('open'); els.panel.classList.remove('open');
-}
-
-async function rebuildVectors() {
-  els.rebuildBtn.disabled = true;
-  els.rebuildBtn.textContent = '...';
-  await Engine.reindex();
-  els.rebuildBtn.textContent = t('rebuildVectors');
-  els.rebuildBtn.disabled = false;
-  els.overlay.classList.remove('open'); els.panel.classList.remove('open');
-  toast(t('rebuildDone'));
-}
-
-// ========================================================================
-// 16. СТАРТ
-// ========================================================================
-(async () => {
-  Settings.load(); MyNotes.load(); World.load();
-  lang = Settings.lang;
-  updateUI();
-  applyTheme(Settings.theme);
-  syncSettingsUI();
-
-  els.statusMsg.innerHTML = `<span class="spinner"></span> ${t('modelLoading')}`;
-
-  try {
-  console.log('Начинаем загрузку модели...');
-  await Engine.init();
-  console.log('Модель готова');
-  els.statusMsg.textContent = t('ready');
-  Qdrant.checkHealth().then(ok => console.log('Qdrant:', ok ? 'online' : 'offline'));
-} catch (e) {
-  console.error('❌ Ошибка модели:', e);
-  els.statusMsg.textContent = 'Ошибка: ' + e.message;
-}
-
-  // Увеличенный debounce (800мс) — меньше запросов к Qdrant
-  els.input.addEventListener('input', debounce(searchFlow, 800));
-  
-  els.settingsTrigger.addEventListener('click', () => { els.overlay.classList.add('open'); els.panel.classList.add('open'); });
-  els.overlay.addEventListener('click', () => { els.overlay.classList.remove('open'); els.panel.classList.remove('open'); });
-  els.thresholdSl.addEventListener('input', () => els.thresholdVal.textContent = parseFloat(els.thresholdSl.value).toFixed(2));
-  els.serendipitySl.addEventListener('input', () => els.serendipityVal.textContent = parseFloat(els.serendipitySl.value).toFixed(2));
-  els.applyBtn.addEventListener('click', () => { applySettings(false); els.overlay.classList.remove('open'); els.panel.classList.remove('open'); });
-  els.resetBtn.addEventListener('click', resetAll);
-  els.rebuildBtn.addEventListener('click', rebuildVectors);
-  els.exportBtn.addEventListener('click', exportCapsule);
-  els.importBtn.addEventListener('click', () => els.importFile.click());
-  els.importFile.addEventListener('change', e => { if (e.target.files[0]) { importCapsule(e.target.files[0]); e.target.value = ''; } });
-  els.thresholdSl.addEventListener('change', applySettings);
-  els.serendipitySl.addEventListener('change', applySettings);
-  els.minWavesSel.addEventListener('change', () => applySettings(false));
-  els.maxResSel.addEventListener('change', () => applySettings(false));
-  els.langSelect.addEventListener('change', applySettings);
-  els.themeSelect.addEventListener('change', applySettings);
-  els.historySearch.addEventListener('input', debounce(searchHistory, 800));
+  };
 })();
 
-function debounce(fn, ms) {
-  let t;
-  return (...args) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), ms);
+// ============================================================================
+// I18n - локализация
+// ============================================================================
+const I18n = (() => {
+  const dictionary = {
+    ru: {
+      tabFlow: 'Поток',
+      tabHistory: 'История',
+      placeholder: 'Поделитесь мыслью…',
+      send: 'Отправить',
+      sendShare: 'Опубликовать',
+      myThoughts: 'Мои',
+      world: 'Мир',
+      serendipity: 'Смежные',
+      empty: '—',
+      settings: 'Настройки',
+      ready: 'Готово',
+      loadingModel: 'Загрузка модели…',
+      networkSync: 'P2P…',
+      exportCapsule: 'Экспорт',
+      importCapsule: 'Импорт',
+      selfSave: 'Записать в HTML',
+      threshold: 'Порог релевантности',
+      serendipityDelta: 'Дельта смежности',
+      minWaves: 'Мин. волн',
+      maxResults: 'Макс. карточек',
+      theme: 'Тема',
+      themeAuto: 'Авто',
+      themeLight: 'День',
+      themeDark: 'Ночь',
+      relayList: 'Gun relay',
+      rebuildVectors: 'Перестроить векторы',
+      resetAll: 'Сбросить всё',
+      waves: 'волн',
+      delete: 'удал.',
+      edit: 'ред.',
+      save: 'сохр.',
+      cancel: 'отм.',
+      confirmDelete: 'Удалить заметку?',
+      today: 'Сегодня',
+      yesterday: 'Вчера',
+      peers: 'Пиры',
+      histSearch: 'Поиск…',
+      lang: 'Язык',
+      modelError: 'Модель не загружена',
+      netError: 'Сеть недоступна',
+      edited: '(изм.)'
+    },
+    en: {
+      tabFlow: 'Flow',
+      tabHistory: 'History',
+      placeholder: 'Share a thought…',
+      send: 'Send',
+      sendShare: 'Publish',
+      myThoughts: 'Mine',
+      world: 'World',
+      serendipity: 'Serendipity',
+      empty: '—',
+      settings: 'Settings',
+      ready: 'Ready',
+      loadingModel: 'Loading model…',
+      networkSync: 'P2P…',
+      exportCapsule: 'Export',
+      importCapsule: 'Import',
+      selfSave: 'Embed in HTML',
+      threshold: 'Relevance threshold',
+      serendipityDelta: 'Serendipity delta',
+      minWaves: 'Min waves',
+      maxResults: 'Max cards',
+      theme: 'Theme',
+      themeAuto: 'Auto',
+      themeLight: 'Light',
+      themeDark: 'Dark',
+      relayList: 'Gun relays',
+      rebuildVectors: 'Rebuild vectors',
+      resetAll: 'Reset all',
+      waves: 'waves',
+      delete: 'del',
+      edit: 'edit',
+      save: 'save',
+      cancel: 'cancel',
+      confirmDelete: 'Delete note?',
+      today: 'Today',
+      yesterday: 'Yesterday',
+      peers: 'Peers',
+      histSearch: 'Search…',
+      lang: 'Language',
+      modelError: 'Model not loaded',
+      netError: 'Network down',
+      edited: '(edited)'
+    }
   };
-}
+  
+  let currentLang = 'ru';
+  
+  return {
+    setLang(lang) {
+      currentLang = dictionary[lang] ? lang : 'ru';
+    },
+    
+    get lang() {
+      return currentLang;
+    },
+    
+    t(key, params) {
+      let str = dictionary[currentLang]?.[key] ?? dictionary.ru[key] ?? key;
+      if (params) {
+        for (const [paramKey, paramValue] of Object.entries(params)) {
+          str = str.replaceAll(`{${paramKey}}`, paramValue);
+        }
+      }
+      return str;
+    }
+  };
+})();
+
+// ============================================================================
+// Util - утилиты
+// ============================================================================
+const Util = {
+  uid() {
+    return 'id_' + crypto.randomUUID();
+  },
+  
+  now() {
+    return new Date().toISOString();
+  },
+  
+  esc(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  },
+  
+  debounce(fn, ms) {
+    let timeout;
+    return (...args) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => fn(...args), ms);
+    };
+  },
+  
+  async hash(str) {
+    const buffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buffer))
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('')
+      .slice(0, 16);
+  }
+};
+
+// ============================================================================
+// LocalStore - localStorage обёртка
+// ============================================================================
+const LocalStore = (() => {
+  function read(key, fallback) {
+    try {
+      const value = localStorage.getItem(key);
+      return value ? JSON.parse(value) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  
+  function write(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (error) {
+      console.error('[LocalStore] write error:', error);
+    }
+  }
+  
+  return {
+    get settings() {
+      return { ...Config.DEFAULTS, ...read(Config.STORAGE_KEYS.settings, {}) };
+    },
+    
+    set settings(value) {
+      write(Config.STORAGE_KEYS.settings, value);
+    },
+    
+    get myNotes() {
+      return read(Config.STORAGE_KEYS.myNotes, []);
+    },
+    
+    set myNotes(value) {
+      write(Config.STORAGE_KEYS.myNotes, value);
+    },
+    
+    get worldLocal() {
+      return read(Config.STORAGE_KEYS.worldLocal, []);
+    },
+    
+    set worldLocal(value) {
+      write(Config.STORAGE_KEYS.worldLocal, value);
+    },
+    
+    get gunIdentity() {
+      return read(Config.STORAGE_KEYS.gunIdentity, null);
+    },
+    
+    set gunIdentity(value) {
+      if (value === null) {
+        localStorage.removeItem(Config.STORAGE_KEYS.gunIdentity);
+      } else {
+        write(Config.STORAGE_KEYS.gunIdentity, value);
+      }
+    }
+  };
+})();
+
+// ============================================================================
+// FileStore - self-save в HTML (TiddlyWiki-style)
+// ============================================================================
+const FileStore = (() => {
+  let fileHandle = null;
+  
+  async function selfSave(state) {
+    const payload = JSON.stringify(state).replace(/</g, '\\u003c');
+    const html = document.documentElement.outerHTML
+      .replace(/<script id="state" type="application\/json">[\s\S]*?<\/script>\s*/i, '')
+      .replace('</body>', `<script id="state" type="application/json">${payload}</script>\n</body>`);
+    
+    const blob = new Blob([html], { type: 'text/html' });
+    
+    if ('showSaveFilePicker' in window) {
+      try {
+        if (!fileHandle) {
+          fileHandle = await window.showSaveFilePicker({
+            suggestedName: 'noosphere.html',
+            types: [{ description: 'HTML', accept: { 'text/html': ['.html'] } }]
+          });
+        }
+        const writable = await fileHandle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        return { ok: true, mode: 'overwrite' };
+      } catch (error) {
+        if (error.name === 'AbortError') return { ok: false };
+        throw error;
+      }
+    }
+    
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'noosphere.html';
+    link.click();
+    return { ok: true, mode: 'download' };
+  }
+  
+  function loadEmbeddedState() {
+    const element = document.getElementById('state');
+    if (!element) return null;
+    try {
+      return JSON.parse(element.textContent);
+    } catch {
+      return null;
+    }
+  }
+  
+  async function exportJSON(state) {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `noosphere-${Date.now()}.json`;
+    link.click();
+  }
+  
+  function importJSON() {
+    return new Promise((resolve, reject) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/json,.json';
+      input.onchange = async () => {
+        try {
+          const text = await input.files[0].text();
+          resolve(JSON.parse(text));
+        } catch (error) {
+          reject(error);
+        }
+      };
+      input.click();
+    });
+  }
+  
+  return { selfSave, loadEmbeddedState, exportJSON, importJSON };
+})();
+
+// ============================================================================
+// Model - интерфейс для embedding моделей
+// ============================================================================
+const Model = (() => {
+  let extractor = null;
+  let dims = 384;
+  let loaded = false;
+  
+  async function load() {
+    if (loaded) return;
+    const { pipeline } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
+    extractor = await pipeline('feature-extraction', Config.MODEL.name, {
+      quantized: Config.MODEL.quantized
+    });
+    loaded = true;
+    EventBus.emit(EventBus.EVENTS.MODEL_LOADED);
+  }
+  
+  async function embed(text) {
+    if (!loaded) throw new Error('Model not loaded');
+    const output = await extractor([text], { pooling: 'mean', normalize: true });
+    if (output.data.length !== dims) {
+      const { data, dims: d } = output;
+      const [, tokens, hidden] = d;
+      const emb = new Float32Array(hidden);
+      for (let t = 0; t < tokens; t++) {
+        for (let h = 0; h < hidden; h++) {
+          emb[h] += data[t * hidden + h];
+        }
+      }
+      for (let h = 0; h < hidden; h++) {
+        emb[h] /= tokens;
+      }
+      const magnitude = Math.sqrt(emb.reduce((sum, x) => sum + x * x, 0)) || 1;
+      return new Float32Array(emb.map(x => x / magnitude));
+    }
+    return new Float32Array(output.data);
+  }
+  
+  function cosine(a, b) {
+    let dot = 0;
+    for (let i = 0; i < a.length; i++) {
+      dot += a[i] * b[i];
+    }
+    return dot;
+  }
+  
+  return {
+    load,
+    embed,
+    cosine,
+    get dims() { return dims; },
+    get loaded() { return loaded; },
+    serialize: (vec) => Array.from(vec),
+    deserialize: (arr) => new Float32Array(arr)
+  };
+})();
+
+// ============================================================================
+// Engine - векторный поиск
+// ============================================================================
+const Engine = (() => {
+  const cache = new Map();
+  
+  async function ensureEmbed(text, id) {
+    if (cache.has(id)) return cache.get(id);
+    if (!Model.loaded) return null;
+    const vector = await Model.embed(text);
+    cache.set(id, vector);
+    return vector;
+  }
+  
+  function invalidate(id) {
+    cache.delete(id);
+  }
+  
+  function clear() {
+    cache.clear();
+  }
+  
+  async function rebuildCache(notes) {
+    cache.clear();
+    if (!Model.loaded) return;
+    for (const note of notes) {
+      try {
+        await ensureEmbed(note.text, note.id);
+      } catch (error) {
+        console.warn('[Engine] rebuild skip', note.id, error);
+      }
+    }
+  }
+  
+  async function searchLocal(query, settings) {
+    if (!Model.loaded) return [];
+    const queryVector = await Model.embed(query);
+    const results = [];
+    for (const note of LocalStore.myNotes) {
+      const vector = cache.get(note.id);
+      if (!vector) continue;
+      const score = Model.cosine(queryVector, vector);
+      if (score >= settings.threshold) {
+        results.push({ ...note, score });
+      }
+    }
+    return results.sort((a, b) => b.score - a.score).slice(0, settings.maxResults);
+  }
+  
+  async function searchWorld(query, settings) {
+    if (!Model.loaded) return { rel: [], ser: [] };
+    const queryVector = await Model.embed(query);
+    const relevant = [];
+    const serendipity = [];
+    const lowThreshold = settings.threshold - settings.serendipityDelta;
+    
+    for (const note of LocalStore.worldLocal) {
+      if (note.waves < settings.minWaves) continue;
+      const vector = Model.deserialize(note.vec);
+      const score = Model.cosine(queryVector, vector);
+      if (score >= settings.threshold) {
+        relevant.push({ ...note, score });
+      } else if (score >= lowThreshold) {
+        serendipity.push({ ...note, score });
+      }
+    }
+    
+    return {
+      rel: relevant.sort((a, b) => b.score - a.score).slice(0, settings.maxResults),
+      ser: serendipity.sort((a, b) => b.score - a.score).slice(0, settings.maxResults)
+    };
+  }
+  
+  return { ensureEmbed, invalidate, clear, rebuildCache, searchLocal, searchWorld };
+})();
+
+// ============================================================================
+// MyNotes - доменный слой личных заметок
+// ============================================================================
+const MyNotes = (() => {
+  function all() {
+    return LocalStore.myNotes.slice();
+  }
+  
+  async function add(text) {
+    if (!text.trim()) return null;
+    const note = {
+      id: Util.uid(),
+      text: text.trim(),
+      date: Util.now(),
+      editedAt: null
+    };
+    LocalStore.myNotes = [note, ...LocalStore.myNotes];
+    if (Model.loaded) {
+      await Engine.ensureEmbed(note.text, note.id);
+    }
+    EventBus.emit(EventBus.EVENTS.MY_NOTES_CHANGED, { action: 'add', note });
+    return note;
+  }
+  
+  async function update(id, text) {
+    const list = LocalStore.myNotes;
+    const note = list.find(n => n.id === id);
+    if (!note) return;
+    note.text = text.trim();
+    note.editedAt = Util.now();
+    LocalStore.myNotes = list;
+    Engine.invalidate(id);
+    if (Model.loaded) {
+      await Engine.ensureEmbed(note.text, id);
+    }
+    EventBus.emit(EventBus.EVENTS.MY_NOTES_CHANGED, { action: 'update', note });
+  }
+  
+  function remove(id) {
+    LocalStore.myNotes = LocalStore.myNotes.filter(n => n.id !== id);
+    Engine.invalidate(id);
+    EventBus.emit(EventBus.EVENTS.MY_NOTES_CHANGED, { action: 'remove', id });
+  }
+  
+  function clear() {
+    LocalStore.myNotes = [];
+    Engine.clear();
+    EventBus.emit(EventBus.EVENTS.MY_NOTES_CHANGED, { action: 'clear' });
+  }
+  
+  return { all, add, update, remove, clear };
+})();
+
+// ============================================================================
+// World - доменный слой мировых заметок
+// ============================================================================
+const World = (() => {
+  function all() {
+    return LocalStore.worldLocal.slice();
+  }
+  
+  function upsert(note) {
+    const list = LocalStore.worldLocal;
+    const index = list.findIndex(n => n.id === note.id);
+    if (index >= 0) {
+      list[index] = { ...list[index], ...note, waves: list[index].waves ?? 0 };
+    } else {
+      list.unshift({ ...note, waves: note.waves ?? 0 });
+    }
+    LocalStore.worldLocal = list;
+    EventBus.emit(EventBus.EVENTS.WORLD_CHANGED, { action: 'upsert', note });
+  }
+  
+  function wave(id, delta) {
+    const list = LocalStore.worldLocal;
+    const note = list.find(n => n.id === id);
+    if (!note) return;
+    note.waves = Math.max(0, (note.waves || 0) + delta);
+    LocalStore.worldLocal = list;
+    EventBus.emit(EventBus.EVENTS.WORLD_CHANGED, { action: 'wave', id, waves: note.waves });
+  }
+  
+  function clear() {
+    LocalStore.worldLocal = [];
+    EventBus.emit(EventBus.EVENTS.WORLD_CHANGED, { action: 'clear' });
+  }
+  
+  return { all, upsert, wave, clear };
+})();
+
+// ============================================================================
+// Settings - runtime настройки
+// ============================================================================
+const Settings = (() => {
+  let current = LocalStore.settings;
+  
+  function get() {
+    return { ...current };
+  }
+  
+  function set(patch) {
+    current = { ...current, ...patch };
+    LocalStore.settings = current;
+    EventBus.emit(EventBus.EVENTS.SETTINGS_CHANGED, current);
+  }
+  
+  function reset() {
+    current = { ...Config.DEFAULTS };
+    LocalStore.settings = current;
+    EventBus.emit(EventBus.EVENTS.SETTINGS_CHANGED, current);
+  }
+  
+  return { get, set, reset };
+})();
+
+// ============================================================================
+// Network - P2P слой (GunDB)
+// ============================================================================
+const Network = (() => {
+  let gun = null;
+  let user = null;
+  let publicNode = null;
+  let peers = new Set();
+  let enabled = false;
+  
+  function init(relays) {
+    if (typeof Gun === 'undefined') {
+      console.warn('[Network] Gun not loaded');
+      EventBus.emit(EventBus.EVENTS.NETWORK_ERROR, 'Gun undefined');
+      return;
+    }
+    
+    try {
+      gun = Gun({ peers: relays, localStorage: false });
+      user = gun.user();
+      publicNode = gun.get(Config.GUN.PUBLIC_PREFIX);
+      
+      const savedIdentity = LocalStore.gunIdentity;
+      if (savedIdentity) {
+        user.auth(savedIdentity.alias, savedIdentity.pass, ack => {
+          if (ack.err) console.warn('[Network] auth failed:', ack.err);
+        });
+      } else {
+        const alias = 'ns_' + Math.random().toString(36).slice(2, 10);
+        const pass = crypto.getRandomValues(new Uint8Array(16)).join('');
+        user.create(alias, pass, ack => {
+          if (ack.err) {
+            console.warn('[Network] create failed:', ack.err);
+            return;
+          }
+          user.auth(alias, pass);
+          LocalStore.gunIdentity = { alias, pass };
+        });
+      }
+      
+      gun.on('hi', peer => {
+        peers.add(peer.id || 'x');
+        EventBus.emit(EventBus.EVENTS.NETWORK_PEER, { type: 'hi', count: peers.size });
+      });
+      
+      gun.on('bye', peer => {
+        peers.delete(peer.id || 'x');
+        EventBus.emit(EventBus.EVENTS.NETWORK_PEER, { type: 'bye', count: peers.size });
+      });
+      
+      publicNode.map().on((data) => {
+        if (!data || !data.id || !data.vec || !data.excerpt) return;
+        World.upsert({
+          id: data.id,
+          author: data.author || 'anon',
+          excerpt: data.excerpt,
+          vec: data.vec,
+          ts: data.ts,
+          hash: data.hash
+        });
+      });
+      
+      enabled = true;
+    } catch (error) {
+      console.error('[Network] init failed:', error);
+      EventBus.emit(EventBus.EVENTS.NETWORK_ERROR, error.message);
+    }
+  }
+  
+  async function publish(note, vector) {
+    if (!publicNode) return;
+    const hash = await Util.hash(note.text);
+    publicNode.get(note.id).put({
+      id: note.id,
+      author: user?.is?.alias || 'anon',
+      excerpt: note.text.slice(0, 150),
+      vec: Model.serialize(vector),
+      ts: note.date,
+      hash
+    });
+  }
+  
+  async function sendWave(id, delta) {
+    if (!user || !user.is) return;
+    user.get(Config.GUN.USER_WAVES).get(id).put({
+      delta,
+      ts: Util.now()
+    });
+  }
+  
+  function setRelays(relays) {
+    if (gun) {
+      try { gun.off(); } catch {}
+    }
+    gun = null;
+    user = null;
+    publicNode = null;
+    peers.clear();
+    enabled = false;
+    init(relays);
+  }
+  
+  return {
+    init,
+    publish,
+    sendWave,
+    setRelays,
+    get peers() { return peers.size; },
+    get enabled() { return enabled; }
+  };
+})();
+
+// ============================================================================
+// Theme - управление темой
+// ============================================================================
+const Theme = {
+  apply(mode) {
+    const isDark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+    document.body.classList.toggle('dark', isDark);
+  }
+};
+
+// ============================================================================
+// UI - рендеринг интерфейса
+// ============================================================================
+const UI = (() => {
+  const root = document.getElementById('app');
+  let currentView = 'flow';
+  let lastQuery = '';
+  let lastFlowResults = { local: [], rel: [], ser: [] };
+  let publishMode = false;
+  
+  function render() {
+    root.innerHTML = `
+      <header class="row-between">
+        <div class="row">
+          <strong>Noosphere</strong>
+          <span class="status" id="statusText"></span>
+        </div>
+        <div class="row">
+          <span class="status" id="peerStatus"></span>
+          <button id="settingsBtn">${I18n.t('settings')}</button>
+        </div>
+      </header>
+      <nav class="tabs">
+        <button class="tab ${currentView === 'flow' ? 'active' : ''}" data-view="flow">${I18n.t('tabFlow')}</button>
+        <button class="tab ${currentView === 'history' ? 'active' : ''}" data-view="history">${I18n.t('tabHistory')}</button>
+      </nav>
+      <main id="viewContainer"></main>
+      <section id="settingsPanel" class="hidden"></section>
+    `;
+    
+    root.querySelectorAll('.tab').forEach(button => {
+      button.addEventListener('click', () => {
+        root.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+        button.classList.add('active');
+        currentView = button.dataset.view;
+        renderView();
+      });
+    });
+    
+    root.querySelector('#settingsBtn').addEventListener('click', openSettings);
+    renderView();
+  }
+  
+  function status(message) {
+    const element = document.getElementById('statusText');
+    if (element) element.textContent = message || '';
+  }
+  
+  function peerStatus(count) {
+    const element = document.getElementById('peerStatus');
+    if (element) {
+      element.textContent = count > 0 ? `${I18n.t('peers')}: ${count}` : '';
+    }
+  }
+  
+  function renderView() {
+    const container = document.getElementById('viewContainer');
+    if (!container) return;
+    if (currentView === 'flow') {
+      renderFlow(container);
+    } else {
+      renderHistory(container);
+    }
+  }
+  
+  function renderFlow(container) {
+    container.innerHTML = `
+      <div class="card">
+        <textarea id="flowInput" placeholder="${I18n.t('placeholder')}">${Util.esc(lastQuery)}</textarea>
+        <div class="row-between" style="margin-top:.5rem;">
+          <label class="row" style="font-size:.8rem; color:var(--muted);">
+            <input type="checkbox" id="publishToggle" ${publishMode ? 'checked' : ''}> ${I18n.t('sendShare')}
+          </label>
+          <button id="flowSend" ${!Model.loaded ? 'disabled' : ''}>${I18n.t('send')}</button>
+        </div>
+      </div>
+      <div id="flowResults"></div>
+    `;
+    
+    const input = container.querySelector('#flowInput');
+    const sendButton = container.querySelector('#flowSend');
+    const publishToggle = container.querySelector('#publishToggle');
+    
+    publishToggle.addEventListener('change', () => {
+      publishMode = publishToggle.checked;
+    });
+    
+    const search = Util.debounce(async () => {
+      lastQuery = input.value.trim();
+      if (!lastQuery) {
+        lastFlowResults = { local: [], rel: [], ser: [] };
+        drawFlowResults();
+        return;
+      }
+      if (!Model.loaded) {
+        status(I18n.t('modelError'));
+        return;
+      }
+      status('…');
+      try {
+        const settings = Settings.get();
+        const [local, world] = await Promise.all([
+          Engine.searchLocal(lastQuery, settings),
+          Engine.searchWorld(lastQuery, settings)
+        ]);
+        lastFlowResults = { local, rel: world.rel, ser: world.ser };
+        drawFlowResults();
+        status('');
+      } catch (error) {
+        status('!');
+        console.error('[UI] search error:', error);
+      }
+    }, 300);
+    
+    input.addEventListener('input', search);
+    
+    sendButton.addEventListener('click', () => doSend(publishMode));
+    
+    async function doSend(share) {
+      const text = input.value.trim();
+      if (!text) return;
+      const note = await MyNotes.add(text);
+      if (share && note && Model.loaded) {
+        const vector = await Model.embed(text);
+        Network.publish(note, vector);
+      }
+      input.value = '';
+      lastQuery = '';
+      publishMode = false;
+      lastFlowResults = { local: [], rel: [], ser: [] };
+      drawFlowResults();
+    }
+    
+    drawFlowResults();
+  }
+  
+  function drawFlowResults() {
+    const host = document.getElementById('flowResults');
+    if (!host) return;
+    host.innerHTML = '';
+    
+    const { local, rel, ser } = lastFlowResults;
+    const sections = [
+      { title: I18n.t('myThoughts'), items: local, isWorld: false },
+      { title: I18n.t('world'), items: rel, isWorld: true },
+      { title: I18n.t('serendipity'), items: ser, isWorld: true }
+    ];
+    
+    for (const section of sections) {
+      if (!section.items.length) continue;
+      const block = document.createElement('div');
+      block.innerHTML = `<div class="section-title">${section.title}</div><div class="carousel"></div>`;
+      const carousel = block.querySelector('.carousel');
+      for (const item of section.items) {
+        carousel.appendChild(createCard(item, section.isWorld));
+      }
+      host.appendChild(block);
+    }
+    
+    if (!host.children.length && lastQuery) {
+      host.innerHTML = `<div class="status">${I18n.t('empty')}</div>`;
+    }
+  }
+  
+  function createCard(item, isWorld) {
+    const card = document.createElement('div');
+    card.className = 'card' + (isWorld && item.waves > 0 ? ' charged' : '');
+    const text = isWorld ? (item.excerpt || '') : item.text;
+    
+    card.innerHTML = `
+      <div class="meta">
+        <span class="score">${item.score.toFixed(2)}</span>
+        ${isWorld
+          ? `<div class="wave-btns">
+               <button data-action="wave-down">−</button>
+               <span>${item.waves} ${I18n.t('waves')}</span>
+               <button data-action="wave-up">+</button>
+             </div>`
+          : `<span>${new Date(item.date).toLocaleDateString()}</span>`}
+      </div>
+      <div>${Util.esc(text)}</div>
+    `;
+    
+    if (isWorld) {
+      card.querySelector('[data-action="wave-up"]').addEventListener('click', () => {
+        World.wave(item.id, +1);
+        Network.sendWave(item.id, +1);
+      });
+      card.querySelector('[data-action="wave-down"]').addEventListener('click', () => {
+        World.wave(item.id, -1);
+        Network.sendWave(item.id, -1);
+      });
+    }
+    
+    return card;
+  }
+  
+  function renderHistory(container) {
+    container.innerHTML = `
+      <div class="card">
+        <input type="text" id="historySearch" placeholder="${I18n.t('histSearch')}" style="width:100%;">
+      </div>
+      <div id="historyList"></div>
+    `;
+    
+    const searchInput = container.querySelector('#historySearch');
+    const listContainer = container.querySelector('#historyList');
+    
+    const draw = Util.debounce(async () => {
+      const query = searchInput.value.trim();
+      if (!query) {
+        drawHistoryList(listContainer, MyNotes.all(), false);
+        return;
+      }
+      if (!Model.loaded) {
+        drawHistoryList(listContainer, MyNotes.all(), false);
+        return;
+      }
+      const settings = Settings.get();
+      const queryVector = await Model.embed(query);
+      const scored = [];
+      
+      for (const note of MyNotes.all()) {
+        const vector = await Engine.ensureEmbed(note.text, note.id);
+        if (!vector) continue;
+        const score = Model.cosine(queryVector, vector);
+        if (score >= settings.threshold) {
+          scored.push({ ...note, score });
+        }
+      }
+      
+      scored.sort((a, b) => b.score - a.score);
+      drawHistoryList(listContainer, scored, true);
+    }, 300);
+    
+    searchInput.addEventListener('input', draw);
+    drawHistoryList(listContainer, MyNotes.all(), false);
+  }
+  
+  function drawHistoryList(host, notes, withScore) {
+    host.innerHTML = '';
+    if (!notes.length) {
+      host.innerHTML = `<div class="status">${I18n.t('empty')}</div>`;
+      return;
+    }
+    
+    const groups = new Map();
+    for (const note of notes) {
+      const day = new Date(note.date).toDateString();
+      if (!groups.has(day)) groups.set(day, []);
+      groups.get(day).push(note);
+    }
+    
+    for (const [day, items] of groups) {
+      const date = new Date(items[0].date);
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      
+      const title = date >= now ? I18n.t('today') : date >= yesterday ? I18n.t('yesterday') : date.toLocaleDateString();
+      const section = document.createElement('div');
+      section.innerHTML = `<div class="section-title">${title}</div>`;
+      
+      for (const note of items) {
+        section.appendChild(createHistoryItem(note, withScore));
+      }
+      
+      host.appendChild(section);
+    }
+  }
+  
+  function createHistoryItem(note, withScore) {
+    const item = document.createElement('div');
+    item.className = 'card';
+    const time = new Date(note.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    
+    item.innerHTML = `
+      <div class="meta">
+        ${withScore ? `<span class="score">${note.score.toFixed(2)}</span>` : ''}
+        <span>${time}</span>
+        ${note.editedAt ? `<span>${I18n.t('edited')}</span>` : ''}
+      </div>
+      <div class="history-text">${Util.esc(note.text)}</div>
+      <div class="row" style="margin-top:.25rem;">
+        <button data-action="edit">${I18n.t('edit')}</button>
+        <button data-action="delete">${I18n.t('delete')}</button>
+      </div>
+    `;
+    
+    item.querySelector('[data-action="delete"]').addEventListener('click', () => {
+      if (confirm(I18n.t('confirmDelete'))) {
+        MyNotes.remove(note.id);
+      }
+    });
+    
+    item.querySelector('[data-action="edit"]').addEventListener('click', () => {
+      const textDiv = item.querySelector('.history-text');
+      const textarea = document.createElement('textarea');
+      textarea.value = note.text;
+      textDiv.replaceWith(textarea);
+      
+      const actions = item.querySelector('.row');
+      actions.innerHTML = `
+        <button data-action="save">${I18n.t('save')}</button>
+        <button data-action="cancel">${I18n.t('cancel')}</button>
+      `;
+      
+      actions.querySelector('[data-action="save"]').addEventListener('click', () => {
+        MyNotes.update(note.id, textarea.value);
+      });
+      
+      actions.querySelector('[data-action="cancel"]').addEventListener('click', () => {
+        renderView();
+      });
+    });
+    
+    return item;
+  }
+  
+  function openSettings() {
+    const panel = document.getElementById('settingsPanel');
+    panel.classList.remove('hidden');
+    
+    const settings = Settings.get();
+    
+    panel.innerHTML = `
+      <details open>
+        <summary>${I18n.t('settings')}</summary>
+        <div class="field">
+          <label>${I18n.t('lang')}</label>
+          <select id="s_lang">
+            <option value="ru" ${settings.lang === 'ru' ? 'selected' : ''}>Русский</option>
+            <option value="en" ${settings.lang === 'en' ? 'selected' : ''}>English</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>${I18n.t('theme')}</label>
+          <select id="s_theme">
+            <option value="auto" ${settings.theme === 'auto' ? 'selected' : ''}>${I18n.t('themeAuto')}</option>
+            <option value="light" ${settings.theme === 'light' ? 'selected' : ''}>${I18n.t('themeLight')}</option>
+            <option value="dark" ${settings.theme === 'dark' ? 'selected' : ''}>${I18n.t('themeDark')}</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>${I18n.t('threshold')} <b id="v_thr">${settings.threshold.toFixed(2)}</b></label>
+          <input type="range" id="s_thr" min="0" max="1" step="0.01" value="${settings.threshold}">
+        </div>
+        <div class="field">
+          <label>${I18n.t('serendipityDelta')} <b id="v_ser">${settings.serendipityDelta.toFixed(2)}</b></label>
+          <input type="range" id="s_ser" min="0" max="0.5" step="0.01" value="${settings.serendipityDelta}">
+        </div>
+        <div class="field">
+          <label>${I18n.t('minWaves')}</label>
+          <select id="s_mw">
+            ${[0, 1, 3, 5].map(v => `<option value="${v}" ${settings.minWaves === v ? 'selected' : ''}>${v}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>${I18n.t('maxResults')}</label>
+          <select id="s_mr">
+            ${[3, 5, 10, 20].map(v => `<option value="${v}" ${settings.maxResults === v ? 'selected' : ''}>${v}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>${I18n.t('relayList')}</label>
+          <textarea id="s_rel" style="min-height:60px;">${settings.gunRelays.join('\n')}</textarea>
+        </div>
+        <div class="row">
+          <button id="s_export">${I18n.t('exportCapsule')}</button>
+          <button id="s_import">${I18n.t('importCapsule')}</button>
+          <button id="s_ss">${I18n.t('selfSave')}</button>
+          <button id="s_rb">${I18n.t('rebuildVectors')}</button>
+          <button id="s_rst">${I18n.t('resetAll')}</button>
+          <button class="primary" id="s_ok">${I18n.t('save')}</button>
+          <button id="s_no">${I18n.t('cancel')}</button>
+        </div>
+      </details>
+    `;
+    
+    const $ = id => panel.querySelector('#' + id);
+    
+    $('s_thr').addEventListener('input', e => {
+      $('v_thr').textContent = (+e.target.value).toFixed(2);
+    });
+    
+    $('s_ser').addEventListener('input', e => {
+      $('v_ser').textContent = (+e.target.value).toFixed(2);
+    });
+    
+    $('s_ok').addEventListener('click', () => {
+      const relays = $('s_rel').value.split('\n').map(x => x.trim()).filter(Boolean);
+      const newLang = $('s_lang').value;
+      
+      Settings.set({
+        lang: newLang,
+        theme: $('s_theme').value,
+        threshold: +$('s_thr').value,
+        serendipityDelta: +$('s_ser').value,
+        minWaves: +$('s_mw').value,
+        maxResults: +$('s_mr').value,
+        gunRelays: relays.length ? relays : Config.DEFAULTS.gunRelays
+      });
+      
+      Theme.apply($('s_theme').value);
+      
+      if (newLang !== I18n.lang) {
+        I18n.setLang(newLang);
+        render();
+      }
+      
+      Network.setRelays(relays);
+      panel.classList.add('hidden');
+    });
+    
+    $('s_no').addEventListener('click', () => {
+      panel.classList.add('hidden');
+    });
+    
+    $('s_export').addEventListener('click', () => {
+      FileStore.exportJSON({
+        version: 1,
+        myNotes: MyNotes.all(),
+        worldLocal: World.all(),
+        settings: Settings.get()
+      });
+    });
+    
+    $('s_import').addEventListener('click', async () => {
+      try {
+        const data = await FileStore.importJSON();
+        if (data.myNotes) LocalStore.myNotes = data.myNotes;
+        if (data.worldLocal) LocalStore.worldLocal = data.worldLocal;
+        if (Model.loaded) await Engine.rebuildCache(MyNotes.all());
+        EventBus.emit(EventBus.EVENTS.MY_NOTES_CHANGED, { action: 'bulk' });
+        EventBus.emit(EventBus.EVENTS.WORLD_CHANGED, { action: 'bulk' });
+      } catch (error) {
+        alert('Import error: ' + error.message);
+      }
+    });
+    
+    $('s_ss').addEventListener('click', async () => {
+      const result = await FileStore.selfSave({
+        version: 1,
+        myNotes: MyNotes.all(),
+        worldLocal: World.all(),
+        settings: Settings.get()
+      });
+      if (result?.ok) status('Saved: ' + result.mode);
+    });
+    
+    $('s_rb').addEventListener('click', async () => {
+      if (!Model.loaded) {
+        status(I18n.t('modelError'));
+        return;
+      }
+      status('…');
+      await Engine.rebuildCache(MyNotes.all());
+      status(I18n.t('ready'));
+    });
+    
+    $('s_rst').addEventListener('click', () => {
+      if (!confirm('Reset ALL data?')) return;
+      MyNotes.clear();
+      World.clear();
+      Settings.reset();
+      Theme.apply(Settings.get().theme);
+      panel.classList.add('hidden');
+      render();
+    });
+  }
+  
+  return { render, renderView, status, peerStatus };
+})();
+
+// ============================================================================
+// App - точка входа
+// ============================================================================
+(async () => {
+  const settings = Settings.get();
+  I18n.setLang(settings.lang);
+  Theme.apply(settings.theme);
+  
+  const embeddedState = FileStore.loadEmbeddedState();
+  if (embeddedState && !LocalStore.myNotes.length) {
+    if (embeddedState.myNotes) LocalStore.myNotes = embeddedState.myNotes;
+    if (embeddedState.worldLocal) LocalStore.worldLocal = embeddedState.worldLocal;
+    if (embeddedState.settings) Settings.set(embeddedState.settings);
+  }
+  
+  UI.render();
+  UI.status(I18n.t('loadingModel'));
+  
+  EventBus.on(EventBus.EVENTS.MY_NOTES_CHANGED, () => UI.renderView());
+  EventBus.on(EventBus.EVENTS.WORLD_CHANGED, () => UI.renderView());
+  EventBus.on(EventBus.EVENTS.NETWORK_PEER, ({ count }) => UI.peerStatus(count));
+  EventBus.on(EventBus.EVENTS.NETWORK_ERROR, () => UI.status(I18n.t('netError')));
+  EventBus.on(EventBus.EVENTS.MODEL_ERROR, () => UI.status(I18n.t('modelError')));
+  EventBus.on(EventBus.EVENTS.MODEL_LOADED, () => {
+    UI.status(I18n.t('ready'));
+    const sendButton = document.getElementById('flowSend');
+    if (sendButton) sendButton.disabled = false;
+  });
+  
+  Model.load()
+    .then(() => Engine.rebuildCache(MyNotes.all()))
+    .catch(error => {
+      console.error('[Model] load error:', error);
+      EventBus.emit(EventBus.EVENTS.MODEL_ERROR, error.message);
+    });
+  
+  try {
+    Network.init(Settings.get().gunRelays);
+  } catch (error) {
+    console.warn('[Network] init error:', error);
+  }
+})();
 </script>
 </body>
 </html>
