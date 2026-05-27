@@ -1,1486 +1,1679 @@
+```html
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Noosphere</title>
-<style>
-:root {
-  --bg:#f8fafc; --surface:#fff; --text:#0f172a; --text2:#64748b;
-  --border:#e2e8f0; --accent:#4f46e5; --accent-hover:#4338ca;
-  --shadow:0 1px 3px rgba(0,0,0,.05); --radius:16px;
-  --wave:#0ea5e9; --star:#fbbf24; --personal:#a78bfa;
-  --world:#38bdf8; --serendipity:#fbbf24;
-}
-.dark {
-  --bg:#0f172a; --surface:#1e293b; --text:#f1f5f9; --text2:#94a3b8;
-  --border:#334155; --accent:#818cf8; --shadow:0 1px 3px rgba(0,0,0,.3);
-}
-* { box-sizing:border-box; margin:0; padding:0 }
-body {
-  font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
-  background:var(--bg); color:var(--text); line-height:1.5;
-  display:flex; justify-content:center; padding:.5rem; overflow-x:hidden;
-}
-.app { width:100%; max-width:600px; display:flex; flex-direction:column; gap:.75rem; margin-top:.5rem }
-.tabs { display:flex; gap:.5rem; justify-content:center; margin-bottom:.25rem }
-.tab-btn {
-  padding:.5rem 1.5rem; border-radius:12px; border:1px solid var(--border);
-  background:transparent; color:var(--text2); cursor:pointer; font-weight:500; transition:all .2s;
-}
-.tab-btn.active { background:var(--accent); color:#fff; border-color:var(--accent) }
-.thought-input {
-  background:var(--surface); border:1px solid var(--border);
-  border-radius:var(--radius); padding:1rem; box-shadow:var(--shadow);
-}
-textarea {
-  width:100%; border:none; background:transparent;
-  font-size:1.1rem; font-family:inherit; resize:none;
-  outline:none; color:var(--text); min-height:90px;
-}
-textarea::placeholder { color:var(--text2); opacity:.7 }
-.input-actions { display:flex; justify-content:space-between; align-items:center; margin-top:.75rem }
-.btn {
-  padding:.6rem 1.4rem; border-radius:12px; font-weight:600;
-  border:none; cursor:pointer; background:var(--accent); color:#fff;
-  font-size:.9rem; transition:all .2s;
-}
-.btn:hover { background:var(--accent-hover); transform:translateY(-1px) }
-.btn:disabled { opacity:.4; pointer-events:none }
-.btn-ghost { background:transparent; color:var(--text2); border:1px solid var(--border) }
-.status-line { font-size:.8rem; color:var(--text2) }
-.swipe-hint { font-size:.8rem; color:var(--text2); display:none; align-items:center; gap:.3rem }
-.swipe-hint.visible { display:flex }
-.view { display:none }
-.view.active { display:block }
-.feed-section { margin-top:.5rem }
-.section-title {
-  display:flex; align-items:center; gap:.5rem;
-  font-size:.8rem; font-weight:600; color:var(--text2);
-  text-transform:uppercase; letter-spacing:.05em; margin-bottom:.5rem;
-}
-.section-title::before {
-  content:''; display:block; width:8px; height:8px;
-  border-radius:50%; background:currentColor;
-}
-#personalSection .section-title { color:var(--personal) }
-#relevantSection .section-title { color:var(--world) }
-#serendipitySection .section-title { color:var(--serendipity) }
-.carousel {
-  display:flex; overflow-x:auto; scroll-snap-type:x mandatory;
-  -webkit-overflow-scrolling:touch; gap:.75rem; padding-bottom:.5rem;
-}
-.carousel::-webkit-scrollbar { height:4px }
-.carousel::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px }
-.card {
-  flex:0 0 calc(100% - 1.5rem); scroll-snap-align:start;
-  background:var(--surface); border:1px solid var(--border);
-  border-radius:var(--radius); padding:1rem;
-  box-shadow:var(--shadow); animation:fadeInUp .4s ease both;
-}
-@keyframes fadeInUp { from { opacity:0; transform:translateY(10px) } to { opacity:1; transform:translateY(0) } }
-.card.charged { border-color:var(--wave); box-shadow:0 0 0 1px var(--wave) }
-.card-text { font-size:.95rem; line-height:1.5; margin-bottom:.5rem; white-space:pre-wrap; word-break:break-word }
-.card-footer { display:flex; align-items:center; justify-content:space-between; font-size:.8rem; color:var(--text2) }
-.score-badge { background:rgba(79,70,229,.1); color:var(--accent); padding:2px 8px; border-radius:10px; font-weight:600 }
-.wave-group { display:flex; align-items:center; gap:.3rem }
-.wave-btn {
-  background:none; border:1px solid var(--border); border-radius:50%;
-  width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center;
-  font-size:.85rem; cursor:pointer; color:var(--text2); transition:all .2s;
-}
-.wave-btn:hover { background:var(--wave); color:#fff; border-color:var(--wave) }
-.empty-message { text-align:center; color:var(--text2); padding:2rem 1rem; font-style:italic }
-.history-input { margin-bottom:1rem }
-.day-group { margin-bottom:1.5rem }
-.day-title { font-size:.85rem; font-weight:600; color:var(--text2); margin-bottom:.5rem }
-.archive-item {
-  background:var(--surface); border:1px solid var(--border);
-  border-radius:12px; padding:.75rem 1rem; margin-bottom:.5rem;
-}
-.archive-item .meta { font-size:.75rem; color:var(--text2); margin-bottom:.25rem; display:flex; gap:.75rem }
-.archive-item .text { font-size:.95rem; white-space:pre-wrap; word-break:break-word }
-.archive-item .actions { margin-top:.5rem; display:flex; gap:.5rem }
-.archive-item .actions button {
-  background:none; border:1px solid var(--border); border-radius:8px;
-  padding:.25rem .7rem; font-size:.8rem; cursor:pointer; color:var(--text2);
-}
-.burger-btn {
-  position:fixed; top:1rem; right:1rem; width:44px; height:44px;
-  background:var(--surface); border:1px solid var(--border); border-radius:50%;
-  display:flex; align-items:center; justify-content:center;
-  cursor:pointer; z-index:5; font-size:1.4rem; box-shadow:var(--shadow);
-}
-.settings-panel {
-  position:fixed; top:0; right:0; width:340px; max-width:85vw;
-  height:100%; background:var(--surface); box-shadow:-5px 0 25px rgba(0,0,0,.15);
-  z-index:10; padding:1.5rem; overflow-y:auto;
-  transform:translateX(100%); transition:transform .4s cubic-bezier(.4,0,.2,1);
-}
-.settings-panel.open { transform:translateX(0) }
-.overlay { position:fixed; inset:0; background:rgba(0,0,0,.3); z-index:9; display:none }
-.overlay.open { display:block }
-.setting-row { margin-bottom:1rem; display:flex; flex-direction:column; gap:.2rem }
-.setting-row label { font-size:.85rem; color:var(--text2) }
-.setting-row select, .setting-row input[type=text] {
-  padding:.5rem; border:1px solid var(--border); border-radius:8px;
-  background:var(--surface); color:var(--text); font:inherit;
-}
-.setting-row textarea {
-  min-height:60px; font-size:.85rem;
-  border:1px solid var(--border); border-radius:8px; padding:.5rem;
-  background:var(--surface); color:var(--text);
-}
-.range-display { display:flex; align-items:center; gap:.5rem }
-.range-display span { min-width:3rem; font-weight:600; color:var(--accent) }
-.settings-actions { display:flex; flex-direction:column; gap:.75rem; margin:1.5rem 0 }
-.settings-actions .btn { width:100%; justify-content:center }
-.spinner {
-  display:inline-block; width:16px; height:16px;
-  border:2px solid var(--text2); border-right-color:transparent;
-  border-radius:50%; animation:spin .8s linear infinite; vertical-align:middle;
-}
-@keyframes spin { to { transform:rotate(360deg) } }
-.diag {
-  font-size:.7rem; color:var(--text2); padding:.4rem .6rem;
-  background:var(--surface); border:1px solid var(--border);
-  border-radius:8px; margin-top:.5rem;
-}
-.diag b { color:var(--text) }
-.diag.warn { border-color:var(--star); color:#92400e }
-.dark .diag.warn { color:#fcd34d }
-</style>
-</head>
-<body>
-<div class="app">
-  <div class="tabs">
-    <button class="tab-btn active" data-view="flow">Поток</button>
-    <button class="tab-btn" data-view="history">История</button>
-  </div>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Noosphere (GunDB)</title>
 
-  <div class="view active" id="flowView">
-    <div class="thought-input" id="thoughtContainer">
-      <textarea id="thoughtInput" placeholder="Поделитесь мыслью..."></textarea>
-      <div class="input-actions">
-        <div class="status-line" id="statusMsg"></div>
-        <div class="swipe-hint" id="swipeHint">
-          <span>↑</span> <span id="swipeHintText">смахните вверх для публикации</span>
+  <!-- =============== Module: Styles (UI only) =============== -->
+  <style>
+    :root{
+      --bg:#f8fafc; --surface:#ffffff; --text:#0f172a; --text2:#64748b;
+      --border:#e2e8f0; --accent:#4f46e5; --accent2:#4338ca;
+      --shadow:0 1px 3px rgba(0,0,0,0.05); --radius:16px;
+      --wave:#0ea5e9; --star:#fbbf24;
+      --personal:#a78bfa; --world:#38bdf8; --ser:#fbbf24;
+      --danger:#ef4444;
+    }
+    body.dark{
+      --bg:#0f172a; --surface:#1e293b; --text:#f1f5f9; --text2:#94a3b8;
+      --border:#334155; --accent:#818cf8; --accent2:#6366f1;
+      --shadow:0 1px 3px rgba(0,0,0,0.3);
+    }
+    *{ box-sizing:border-box; margin:0; padding:0; }
+    body{
+      font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+      background:var(--bg); color:var(--text); line-height:1.5;
+      display:flex; justify-content:center; padding:0.5rem; overflow-x:hidden;
+    }
+    .app{ width:100%; max-width:640px; display:flex; flex-direction:column; gap:0.75rem; margin-top:0.5rem; }
+
+    .tabs{ display:flex; gap:0.5rem; justify-content:center; }
+    .tab-btn{
+      padding:0.5rem 1.2rem; border-radius:12px; border:1px solid var(--border);
+      background:transparent; color:var(--text2); cursor:pointer; font-weight:600;
+      transition:all .2s;
+    }
+    .tab-btn.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+
+    .view{ display:none; }
+    .view.active{ display:block; }
+
+    .thought-input{
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:var(--radius); padding:1rem; box-shadow:var(--shadow);
+    }
+    textarea{
+      width:100%; border:none; background:transparent; outline:none;
+      font-size:1.05rem; font-family:inherit; resize:none; color:var(--text);
+      min-height:90px;
+    }
+    textarea::placeholder{ color:var(--text2); opacity:0.7; }
+    .input-actions{
+      display:flex; justify-content:space-between; gap:0.75rem; align-items:center; margin-top:0.75rem;
+      flex-wrap:wrap;
+    }
+    .status-line{ font-size:0.8rem; color:var(--text2); display:flex; gap:0.5rem; align-items:center; }
+    .btn-row{ display:flex; gap:0.5rem; align-items:center; margin-left:auto; }
+    .btn{
+      padding:0.6rem 1rem; border-radius:12px; font-weight:700;
+      border:none; cursor:pointer; background:var(--accent); color:#fff;
+      font-size:0.9rem; transition:all .2s;
+      display:inline-flex; align-items:center; justify-content:center; gap:0.5rem;
+    }
+    .btn:hover{ background:var(--accent2); transform:translateY(-1px); }
+    .btn:disabled{ opacity:0.45; pointer-events:none; transform:none; }
+    .btn-ghost{
+      background:transparent; color:var(--text2); border:1px solid var(--border);
+    }
+    .btn-danger{
+      background:var(--danger);
+    }
+    .btn-danger:hover{ filter:brightness(0.95); }
+
+    .swipe-hint{ font-size:0.8rem; color:var(--text2); display:none; align-items:center; gap:0.35rem; }
+    .swipe-hint.visible{ display:flex; }
+
+    .feed-section{ margin-top:0.25rem; }
+    .section-title{
+      display:flex; align-items:center; gap:0.5rem;
+      font-size:0.8rem; font-weight:800; color:var(--text2);
+      text-transform:uppercase; letter-spacing:0.06em; margin-bottom:0.5rem;
+    }
+    .section-title::before{
+      content:''; display:block; width:8px; height:8px; border-radius:50%;
+      background:currentColor;
+    }
+    #personalSection .section-title{ color:var(--personal); }
+    #relevantSection .section-title{ color:var(--world); }
+    #serendipitySection .section-title{ color:var(--ser); }
+
+    .carousel{
+      display:flex; overflow-x:auto; scroll-snap-type:x mandatory;
+      -webkit-overflow-scrolling:touch; gap:0.75rem; padding-bottom:0.5rem;
+    }
+    .carousel::-webkit-scrollbar{ height:4px; }
+    .carousel::-webkit-scrollbar-thumb{ background:var(--border); border-radius:2px; }
+
+    .card{
+      flex:0 0 calc(100% - 1.5rem);
+      scroll-snap-align:start;
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:var(--radius); padding:1rem; box-shadow:var(--shadow);
+      animation:fadeInUp .35s ease both;
+    }
+    .card.charged{ border-color:var(--wave); box-shadow:0 0 0 1px var(--wave); }
+    @keyframes fadeInUp{ from{ opacity:0; transform:translateY(10px);} to{opacity:1; transform:translateY(0);} }
+    .card-text{ font-size:0.95rem; line-height:1.5; margin-bottom:0.6rem; white-space:pre-wrap; word-break:break-word; }
+    .card-footer{ display:flex; align-items:center; justify-content:space-between; gap:0.5rem; font-size:0.8rem; color:var(--text2); }
+    .badge{ background:rgba(79,70,229,0.12); color:var(--accent); padding:2px 8px; border-radius:999px; font-weight:800; }
+    .wave-group{ display:flex; align-items:center; gap:0.35rem; }
+    .wave-btn{
+      background:none; border:1px solid var(--border); border-radius:50%;
+      width:30px; height:30px; display:inline-flex; align-items:center; justify-content:center;
+      font-size:0.95rem; cursor:pointer; color:var(--text2); transition:all .2s;
+    }
+    .wave-btn:hover{ background:var(--wave); color:#fff; border-color:var(--wave); }
+    .wave-btn.active{ background:var(--wave); color:#fff; border-color:var(--wave); }
+    .empty{ text-align:center; color:var(--text2); padding:2rem 1rem; font-style:italic; }
+
+    .history-input{ margin-bottom:1rem; }
+    .history-input input{
+      width:100%; padding:0.75rem; border:1px solid var(--border); border-radius:14px;
+      background:var(--surface); color:var(--text); outline:none;
+    }
+    .day-group{ margin-bottom:1.25rem; }
+    .day-title{ font-size:0.85rem; font-weight:900; color:var(--text2); margin-bottom:0.5rem; }
+    .archive-item{
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:12px; padding:0.75rem 1rem; margin-bottom:0.5rem;
+    }
+    .archive-item .meta{ font-size:0.75rem; color:var(--text2); margin-bottom:0.25rem; display:flex; gap:0.75rem; flex-wrap:wrap;}
+    .archive-item .text{ font-size:0.95rem; white-space:pre-wrap; word-break:break-word; }
+    .archive-item .actions{ margin-top:0.6rem; display:flex; gap:0.5rem; flex-wrap:wrap; }
+    .archive-item .actions button{
+      background:none; border:1px solid var(--border); border-radius:10px;
+      padding:0.28rem 0.75rem; font-size:0.82rem; cursor:pointer; color:var(--text2);
+    }
+    .archive-item .actions button.danger{ border-color:rgba(239,68,68,0.4); color:var(--danger); }
+
+    .burger-btn{
+      position:fixed; top:1rem; right:1rem; width:46px; height:46px;
+      background:var(--surface); border:1px solid var(--border); border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      cursor:pointer; z-index:5; font-size:1.4rem; box-shadow:var(--shadow);
+    }
+    .overlay{ position:fixed; inset:0; background:rgba(0,0,0,0.3); z-index:9; display:none; }
+    .overlay.open{ display:block; }
+    .settings-panel{
+      position:fixed; top:0; right:0; width:360px; max-width:88vw; height:100%;
+      background:var(--surface); box-shadow:-5px 0 25px rgba(0,0,0,0.15);
+      z-index:10; padding:1.25rem; overflow-y:auto;
+      transform:translateX(100%); transition:transform .35s cubic-bezier(0.4,0,0.2,1);
+    }
+    .settings-panel.open{ transform:translateX(0); }
+    .setting-row{ margin-bottom:1rem; display:flex; flex-direction:column; gap:0.35rem; }
+    .setting-row label{ font-size:0.85rem; color:var(--text2); font-weight:800; }
+    .setting-row select, .setting-row textarea{
+      width:100%; border:1px solid var(--border); border-radius:12px;
+      padding:0.6rem 0.7rem; background:var(--surface); color:var(--text); outline:none;
+      font-family:inherit;
+    }
+    .setting-row textarea{ min-height:68px; resize:vertical; }
+    .range-display{ display:flex; align-items:center; gap:0.6rem; }
+    .range-display input[type="range"]{ flex:1; }
+    .range-display span{ min-width:3rem; font-weight:900; color:var(--accent); text-align:right; }
+
+    .settings-actions{ display:flex; flex-direction:column; gap:0.6rem; margin:1.25rem 0; }
+    .settings-actions .btn{ width:100%; }
+
+    .spinner{
+      display:inline-block; width:16px; height:16px;
+      border:2px solid var(--text2); border-right-color:transparent;
+      border-radius:50%; animation:spin .8s linear infinite; vertical-align:middle;
+    }
+    @keyframes spin{ to{ transform:rotate(360deg);} }
+
+    .tiny{ font-size:0.75rem; color:var(--text2); }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  </style>
+
+  <!-- =============== Module: GunDB libs (network/storage only) =============== -->
+  <!-- Gun is NOT ESM: it exports global Gun -->
+  <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gun/sea.js"></script>
+  <!-- IndexedDB storage adapter (avoid localStorage) -->
+  <script src="https://cdn.jsdelivr.net/npm/gun/lib/rindexed.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gun/lib/then.js"></script>
+</head>
+
+<body>
+  <div class="app">
+    <div class="tabs">
+      <button class="tab-btn active" data-view="flow" id="tabFlowBtn">Поток</button>
+      <button class="tab-btn" data-view="history" id="tabHistoryBtn">История</button>
+    </div>
+
+    <!-- =============== View: Flow =============== -->
+    <div class="view active" id="flowView">
+      <div class="thought-input" id="thoughtContainer">
+        <textarea id="thoughtInput" placeholder="Поделитесь мыслью..."></textarea>
+
+        <div class="input-actions">
+          <div class="status-line" id="statusMsg"></div>
+
+          <div class="swipe-hint" id="swipeHint">
+            <span>↑</span> <span id="swipeHintText">смахните вверх для публикации</span>
+          </div>
+
+          <div class="btn-row">
+            <button class="btn btn-ghost" id="saveLocalBtn" disabled>Сохранить</button>
+            <button class="btn" id="publishBtn" disabled>Опубликовать</button>
+          </div>
         </div>
-        <button id="saveBtn" class="btn" disabled>Отправить</button>
+      </div>
+
+      <div id="personalSection" class="feed-section" style="display:none;">
+        <div class="section-title" id="personalTitle">Мои мысли</div>
+        <div id="personalCards" class="carousel"></div>
+      </div>
+
+      <div id="relevantSection" class="feed-section" style="display:none;">
+        <div class="section-title" id="relevantTitle">Мир</div>
+        <div id="relevantCards" class="carousel"></div>
+      </div>
+
+      <div id="serendipitySection" class="feed-section" style="display:none;">
+        <div class="section-title" id="serendipityTitle">Смежные</div>
+        <div id="serendipityCards" class="carousel"></div>
       </div>
     </div>
-    <div id="personalSection" class="feed-section" style="display:none">
-      <div class="section-title" id="personalTitle">Мои мысли</div>
-      <div id="personalCards" class="carousel"></div>
-    </div>
-    <div id="relevantSection" class="feed-section" style="display:none">
-      <div class="section-title" id="relevantTitle">Мир</div>
-      <div id="relevantCards" class="carousel"></div>
-    </div>
-    <div id="serendipitySection" class="feed-section" style="display:none">
-      <div class="section-title" id="serendipityTitle">Смежные</div>
-      <div id="serendipityCards" class="carousel"></div>
-    </div>
-    <div id="diagBox" class="diag" style="display:none"></div>
-  </div>
 
-  <div class="view" id="historyView">
-    <div class="history-input">
-      <input type="text" id="historySearchInput" placeholder="Поиск по истории..." style="width:100%; padding:.75rem; border:1px solid var(--border); border-radius:14px; background:var(--surface); color:var(--text)">
-    </div>
-    <div id="historyContent"></div>
-  </div>
-</div>
-
-<div class="burger-btn" id="settingsTrigger">☰</div>
-<div class="overlay" id="overlay"></div>
-<div class="settings-panel" id="settingsPanel">
-  <h2 style="margin-bottom:1.5rem">Настройки</h2>
-  <div class="setting-row">
-    <label>Язык / Language</label>
-    <select id="langSelect"><option value="ru">Русский</option><option value="en">English</option></select>
-  </div>
-  <div class="setting-row">
-    <label>Тема</label>
-    <select id="themeSelect"><option value="auto">Авто</option><option value="light">День</option><option value="dark">Ночь</option></select>
-  </div>
-  <div class="setting-row">
-    <label>Порог релевантности</label>
-    <div class="range-display">
-      <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.25">
-      <span id="thresholdValue">0.25</span>
+    <!-- =============== View: History =============== -->
+    <div class="view" id="historyView">
+      <div class="history-input">
+        <input type="text" id="historySearchInput" placeholder="Поиск по истории..." />
+      </div>
+      <div id="historyContent"></div>
     </div>
   </div>
-  <div class="setting-row">
-    <label>Дельта смежности</label>
-    <div class="range-display">
-      <input type="range" id="serendipitySlider" min="0" max="0.5" step="0.01" value="0.15">
-      <span id="serendipityValue">0.15</span>
+
+  <!-- =============== Settings UI =============== -->
+  <div class="burger-btn" id="settingsTrigger">☰</div>
+  <div class="overlay" id="overlay"></div>
+
+  <div class="settings-panel" id="settingsPanel">
+    <h2 id="settingsTitle" style="margin-bottom:1rem;">Настройки</h2>
+
+    <div class="setting-row">
+      <label id="langLabel">Язык / Language</label>
+      <select id="langSelect">
+        <option value="ru">Русский</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+
+    <div class="setting-row">
+      <label id="themeLabel">Тема</label>
+      <select id="themeSelect">
+        <option value="auto">Авто</option>
+        <option value="light">День</option>
+        <option value="dark">Ночь</option>
+      </select>
+    </div>
+
+    <div class="setting-row">
+      <label id="thresholdLabel">Порог релевантности</label>
+      <div class="range-display">
+        <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.25" />
+        <span id="thresholdValue">0.25</span>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <label id="serLabel">Дельта смежности</label>
+      <div class="range-display">
+        <input type="range" id="serendipitySlider" min="0" max="0.5" step="0.01" value="0.15" />
+        <span id="serendipityValue">0.15</span>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <label id="minWavesLabel">Мин. волн</label>
+      <select id="minWavesSelect">
+        <option value="0">0</option>
+        <option value="1" selected>1</option>
+        <option value="3">3</option>
+        <option value="5">5</option>
+      </select>
+    </div>
+
+    <div class="setting-row">
+      <label id="maxCardsLabel">Макс. карточек</label>
+      <select id="maxResultsSelect">
+        <option value="3">3</option>
+        <option value="5" selected>5</option>
+        <option value="10">10</option>
+      </select>
+    </div>
+
+    <div class="setting-row">
+      <label id="peersLabel">Gun peers (по одному URL на строку)</label>
+      <textarea id="peersTextarea" class="mono" spellcheck="false"></textarea>
+      <div class="tiny" id="peersHint">
+        Если пусто — работает офлайн (IndexedDB). Для сети добавьте relay (например https://relay.peer.ooo/gun).
+      </div>
+    </div>
+
+    <div class="settings-actions">
+      <button id="exportCapsuleBtn" class="btn btn-ghost">Скачать капсулу</button>
+      <button id="importCapsuleBtn" class="btn btn-ghost">Импортировать капсулу</button>
+      <input type="file" id="importFileInput" accept=".capsule,.json" style="display:none;" />
+      <button id="rebuildVectorsBtn" class="btn btn-ghost">Пересоздать векторы</button>
+      <button id="resetDeviceBtn" class="btn btn-danger">Сбросить устройство (новый ID)</button>
+    </div>
+
+    <div style="display:flex; gap:0.5rem; margin:0.5rem 0 0;">
+      <button id="applySettingsBtn" class="btn" style="flex:1;">Применить</button>
+    </div>
+
+    <div class="tiny" style="margin-top:1rem;">
+      <div id="modelInfo">Модель: MiniLM (Transformers.js)</div>
+      <div id="deviceInfo" class="mono"></div>
+      <div id="netInfo" class="mono"></div>
     </div>
   </div>
-  <div class="setting-row">
-    <label>Мин. волн</label>
-    <select id="minWavesSelect"><option value="0">0</option><option value="1" selected>1</option><option value="3">3</option><option value="5">5</option></select>
-  </div>
-  <div class="setting-row">
-    <label>Макс. карточек</label>
-    <select id="maxResultsSelect"><option value="3">3</option><option value="5" selected>5</option><option value="10">10</option></select>
-  </div>
-  <div class="setting-row">
-    <label>Gun relay (P2P)</label>
-    <textarea id="relaysInput" placeholder="https://...">https://gun-manhattan.herokuapp.com/gun.js</textarea>
-  </div>
-  <div class="setting-row">
-    <label>Namespace (P2P комната)</label>
-    <input type="text" id="namespaceInput" placeholder="auto-generated">
-  </div>
-  <div class="settings-actions">
-    <button id="exportCapsuleBtn" class="btn btn-ghost">Экспорт JSON</button>
-    <button id="importCapsuleBtn" class="btn btn-ghost">Импорт JSON</button>
-    <input type="file" id="importFileInput" accept=".json" style="display:none">
-    <button id="selfSaveBtn" class="btn btn-ghost">Записать в HTML (TiddlyWiki)</button>
-    <button id="rebuildVectorsBtn" class="btn btn-ghost">Пересоздать векторы</button>
-  </div>
-  <div style="display:flex; gap:.5rem; margin:1rem 0">
-    <button id="resetSettingsBtn" class="btn btn-ghost" style="flex:1">Сбросить всё</button>
-    <button id="applySettingsBtn" class="btn" style="flex:1">Применить</button>
-  </div>
-  <p style="font-size:.75rem;color:var(--text2)">Модель: MiniLM-L12 (quantized)</p>
-</div>
 
-<!-- GunDB: UMD, глобальные объекты Gun, SEA, Axe -->
-<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/gun/sea.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/gun/axe.js"></script>
+  <!-- =============== App (ESM) =============== -->
+  <script type="module">
+    import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-<script type="module">
-/* ========================================================================== */
-/* NOOSPHERE — module structure via window.NS namespace                        */
-/* ========================================================================== */
-const NS = window.NS = {};
+    // ===================== Module: Utils =====================
+    const Utils = (() => {
+      const $ = (sel, root = document) => root.querySelector(sel);
+      const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-/* ========================================================================== */
-/* NS.Config — constants only                                                  */
-/* ========================================================================== */
-NS.Config = Object.freeze({
-  VERSION: '3.0.0',
-  DEFAULTS: {
-    lang: 'ru',
-    theme: 'auto',
-    threshold: 0.25,
-    serendipityDelta: 0.15,
-    minWaves: 1,
-    maxResults: 5,
-    relays: ['https://gun-manhattan.herokuapp.com/gun.js'],
-    namespace: null, // generated on first run
-    cloudEnabled: false
-  },
-  STORAGE_KEYS: {
-    settings: 'noosphere_settings',
-    myNotes: 'noosphere_mynotes',
-    world: 'noosphere_world',
-    gunIdentity: 'noosphere_gun_identity'
-  },
-  GUN_PREFIX: 'noosphere/v3',
-  MODEL: {
-    name: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
-    quantized: true,
-    dims: 384
-  }
-});
+      const debounce = (fn, ms) => {
+        let t;
+        return (...args) => {
+          clearTimeout(t);
+          t = setTimeout(() => fn(...args), ms);
+        };
+      };
 
-/* ========================================================================== */
-/* NS.Bus — pub/sub, only way layers talk to each other                        */
-/* ========================================================================== */
-NS.Bus = (() => {
-  const subs = new Map();
-  return {
-    EVENTS: {
-      MODEL_READY: 'model:ready',
-      MODEL_ERROR: 'model:error',
-      MY_NOTES_CHANGED: 'mynotes:changed',
-      WORLD_CHANGED: 'world:changed',
-      SETTINGS_CHANGED: 'settings:changed',
-      NETWORK_STATUS: 'network:status'
-    },
-    on(evt, fn) {
-      if (!subs.has(evt)) subs.set(evt, new Set());
-      subs.get(evt).add(fn);
-      return () => subs.get(evt).delete(fn);
-    },
-    emit(evt, payload) {
-      const set = subs.get(evt);
-      if (!set) return;
-      set.forEach(fn => {
-        try { fn(payload); } catch (e) { console.error('[Bus]', evt, e); }
-      });
-    }
-  };
-})();
+      const escapeHTML = (s) => {
+        const d = document.createElement('div');
+        d.textContent = String(s ?? '');
+        return d.innerHTML;
+      };
 
-/* ========================================================================== */
-/* NS.I18n — localization                                                      */
-/* ========================================================================== */
-NS.I18n = (() => {
-  const dict = {
-    ru: {
-      inputPlaceholder: 'Поделитесь мыслью...',
-      saveBtn: 'Отправить',
-      personalTitle: 'Мои мысли', worldTitle: 'Мир', serendipityTitle: 'Смежные',
-      emptyPersonal: 'Нет похожих мыслей', emptyWorld: 'Ничего не найдено',
-      edit: 'ред.', save: 'сохр.', cancel: 'отм.', delete: 'удал.',
-      noteEdited: '(изм.)', today: 'Сегодня', yesterday: 'Вчера',
-      confirmDelete: 'Удалить заметку?',
-      importSuccess: 'Импортировано {n} заметок.',
-      rebuildDone: 'Векторы пересозданы',
-      resetConfirm: 'Сбросить все заметки и настройки?',
-      modelLoading: 'Загрузка модели...', ready: 'Готов',
-      settingsTitle: 'Настройки', swipeHint: 'смахните вверх для публикации',
-      tabFlow: 'Поток', tabHistory: 'История',
-      diagFileProtocol: 'Работает через file://. Для P2P и модели используйте HTTP-сервер.',
-      diagNoGun: 'GunDB не загружен — P2P отключён',
-      diagNetOk: 'P2P: {n} пиров',
-      modelError: 'Ошибка модели: {msg}'
-    },
-    en: {
-      inputPlaceholder: 'Share a thought...',
-      saveBtn: 'Send',
-      personalTitle: 'My thoughts', worldTitle: 'World', serendipityTitle: 'Serendipity',
-      emptyPersonal: 'No similar thoughts', emptyWorld: 'Nothing found',
-      edit: 'edit', save: 'save', cancel: 'cancel', delete: 'delete',
-      noteEdited: '(edited)', today: 'Today', yesterday: 'Yesterday',
-      confirmDelete: 'Delete note?',
-      importSuccess: 'Imported {n} notes.',
-      rebuildDone: 'Vectors rebuilt',
-      resetConfirm: 'Reset all notes and settings?',
-      modelLoading: 'Loading model...', ready: 'Ready',
-      settingsTitle: 'Settings', swipeHint: 'swipe up to publish',
-      tabFlow: 'Flow', tabHistory: 'History',
-      diagFileProtocol: 'Running via file://. Use HTTP server for P2P and model.',
-      diagNoGun: 'GunDB not loaded — P2P disabled',
-      diagNetOk: 'P2P: {n} peers',
-      modelError: 'Model error: {msg}'
-    }
-  };
-  let lang = 'ru';
-  return {
-    setLang(l) { lang = dict[l] ? l : 'ru'; },
-    getLang() { return lang; },
-    t(key, params) {
-      let s = dict[lang]?.[key] ?? dict.ru[key] ?? key;
-      if (params) {
-        for (const [k, v] of Object.entries(params)) {
-          s = s.replaceAll('{' + k + '}', v);
+      const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+
+      const formatDayLabel = (iso, t) => {
+        const d = new Date(iso);
+        const today = new Date(); today.setHours(0,0,0,0);
+        const yest = new Date(today); yest.setDate(yest.getDate() - 1);
+        if (d >= today) return t('today');
+        if (d >= yest) return t('yesterday');
+        return d.toLocaleDateString();
+      };
+
+      const groupByDay = (notes) => {
+        const map = new Map();
+        for (const n of notes) {
+          const key = new Date(n.createdAt).toLocaleDateString();
+          if (!map.has(key)) map.set(key, []);
+          map.get(key).push(n);
+        }
+        return map;
+      };
+
+      const safeJSON = (x, fallback) => {
+        try { return JSON.parse(x); } catch { return fallback; }
+      };
+
+      class Emitter {
+        #m = new Map();
+        on(ev, fn) {
+          if (!this.#m.has(ev)) this.#m.set(ev, new Set());
+          this.#m.get(ev).add(fn);
+          return () => this.#m.get(ev)?.delete(fn);
+        }
+        emit(ev, payload) {
+          for (const fn of this.#m.get(ev) ?? []) {
+            try { fn(payload); } catch (e) { console.error(e); }
+          }
         }
       }
-      return s;
-    }
-  };
-})();
 
-/* ========================================================================== */
-/* NS.Theme — apply theme mode                                                 */
-/* ========================================================================== */
-NS.Theme = {
-  apply(mode) {
-    const isDark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
-    document.body.classList.toggle('dark', isDark);
-  }
-};
+      return { $, $$, debounce, escapeHTML, clamp, formatDayLabel, groupByDay, safeJSON, Emitter };
+    })();
 
-/* ========================================================================== */
-/* NS.Util — stateless helpers                                                 */
-/* ========================================================================== */
-NS.Util = {
-  uid() {
-    if (crypto.randomUUID) return 'id_' + crypto.randomUUID();
-    return 'id_' + Date.now().toString(36) + Math.random().toString(36).slice(2);
-  },
-  now() { return new Date().toISOString(); },
-  esc(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  },
-  debounce(fn, ms) {
-    let t = null;
-    return function(...args) {
-      if (t) clearTimeout(t);
-      t = setTimeout(() => fn.apply(this, args), ms);
-    };
-  },
-  // Fast non-crypto FNV-1a hash — for cache keys
-  hashQuick(s) {
-    let h = 2166136261;
-    for (let i = 0; i < s.length; i++) {
-      h ^= s.charCodeAt(i);
-      h = Math.imul(h, 16777619);
-    }
-    return (h >>> 0).toString(16);
-  },
-  // Crypto SHA-256 when available, fallback to quick
-  async hash(s) {
-    try {
-      if (!crypto.subtle) throw new Error('no subtle');
-      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
-      return Array.from(new Uint8Array(buf))
-        .map(b => b.toString(16).padStart(2, '0'))
-        .join('')
-        .slice(0, 16);
-    } catch {
-      return this.hashQuick(s).padStart(16, '0');
-    }
-  }
-};
+    // ===================== Module: IndexedDB KV (NO localStorage) =====================
+    const KV = (() => {
+      const DB_NAME = 'noosphere_kv_v1';
+      const STORE = 'kv';
 
-/* ========================================================================== */
-/* NS.Store.Local — localStorage wrapper                                       */
-/* ========================================================================== */
-NS.Store = {};
-NS.Store.Local = (() => {
-  function read(key, fallback) {
-    try {
-      const v = localStorage.getItem(key);
-      return v ? JSON.parse(v) : fallback;
-    } catch { return fallback; }
-  }
-  function write(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value)); }
-    catch (e) { console.error('[Store.Local]', e); }
-  }
-  return {
-    get settings() { return { ...NS.Config.DEFAULTS, ...read(NS.Config.STORAGE_KEYS.settings, {}) }; },
-    set settings(v) { write(NS.Config.STORAGE_KEYS.settings, v); },
-    get myNotes() { return read(NS.Config.STORAGE_KEYS.myNotes, []); },
-    set myNotes(v) { write(NS.Config.STORAGE_KEYS.myNotes, v); },
-    get world() { return read(NS.Config.STORAGE_KEYS.world, []); },
-    set world(v) { write(NS.Config.STORAGE_KEYS.world, v); },
-    get gunIdentity() { return read(NS.Config.STORAGE_KEYS.gunIdentity, null); },
-    set gunIdentity(v) {
-      if (v === null) localStorage.removeItem(NS.Config.STORAGE_KEYS.gunIdentity);
-      else write(NS.Config.STORAGE_KEYS.gunIdentity, v);
-    }
-  };
-})();
-
-/* ========================================================================== */
-/* NS.Store.File — TiddlyWiki-style self-save, JSON export/import              */
-/* ========================================================================== */
-NS.Store.File = (function() {
-  var fileHandle = null;
-
-  // Безопасные паттерны для regex, собранные через new RegExp
-  var STATE_PATTERN = new RegExp(
-    '<script id="state" type="application/json">[\\s\\S]*?</script>\\s*',
-    'i'
-  );
-  var LESS_THAN = new RegExp('<', 'g');
-  var SCRIPT_OPEN = '<script id="state" type="application/json">';
-  var SCRIPT_CLOSE = '</script>\n</body>';
-  var BODY_CLOSE = '</body>';
-
-  function escapeForScript(s) {
-    // Заменяем < на безопасный вариант, чтобы payload не ломал HTML
-    return s.replace(LESS_THAN, '\\u003c');
-  }
-
-  function buildSelfSaveHtml(state) {
-    var payload = escapeForScript(JSON.stringify(state));
-    var html = document.documentElement.outerHTML;
-    // Удаляем старый state-блок если есть
-    html = html.replace(STATE_PATTERN, '');
-    // Вшиваем новый state перед </body>
-    var idx = html.lastIndexOf(BODY_CLOSE);
-    if (idx === -1) throw new Error('Cannot find </body> tag');
-    return html.slice(0, idx) + SCRIPT_OPEN + payload + SCRIPT_CLOSE + html.slice(idx + BODY_CLOSE.length);
-  }
-
-  async function selfSave(state) {
-    var finalHtml = buildSelfSaveHtml(state);
-    var blob = new Blob([finalHtml], { type: 'text/html' });
-
-    if ('showSaveFilePicker' in window) {
-      try {
-        if (!fileHandle) {
-          fileHandle = await window.showSaveFilePicker({
-            suggestedName: 'noosphere.html',
-            types: [{ description: 'HTML', accept: { 'text/html': ['.html'] } }]
-          });
-        }
-        var w = await fileHandle.createWritable();
-        await w.write(blob);
-        await w.close();
-        return { ok: true, mode: 'overwrite' };
-      } catch (e) {
-        if (e && e.name === 'AbortError') return { ok: false };
-        throw e;
+      function openDB() {
+        return new Promise((resolve, reject) => {
+          const req = indexedDB.open(DB_NAME, 1);
+          req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+          };
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
       }
-    }
-    // Fallback: download
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'noosphere.html';
-    a.click();
-    setTimeout(function() { URL.revokeObjectURL(a.href); }, 1000);
-    return { ok: true, mode: 'download' };
-  }
 
-  function loadEmbedded() {
-    var el = document.getElementById('state');
-    if (!el) return null;
-    try {
-      return JSON.parse(el.textContent);
-    } catch (e) {
-      console.warn('[Store.File] embedded state parse error', e);
-      return null;
-    }
-  }
+      async function get(key) {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(STORE, 'readonly');
+          const st = tx.objectStore(STORE);
+          const req = st.get(key);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      }
 
-  function exportJSON(state) {
-    var blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'noosphere-' + Date.now() + '.json';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function() {
-      URL.revokeObjectURL(a.href);
-      a.remove();
-    }, 1000);
-    return Promise.resolve();
-  }
+      async function set(key, val) {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(STORE, 'readwrite');
+          const st = tx.objectStore(STORE);
+          const req = st.put(val, key);
+          req.onsuccess = () => resolve(true);
+          req.onerror = () => reject(req.error);
+        });
+      }
 
-  function importJSON() {
-    return new Promise(function(resolve, reject) {
-      var inp = document.createElement('input');
-      inp.type = 'file';
-      inp.accept = 'application/json,.json';
-      inp.onchange = async function() {
-        if (!inp.files || !inp.files[0]) {
-          reject(new Error('No file selected'));
-          return;
-        }
-        try {
-          var text = await inp.files[0].text();
-          resolve(JSON.parse(text));
-        } catch (e) {
-          reject(e);
+      async function del(key) {
+        const db = await openDB();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(STORE, 'readwrite');
+          const st = tx.objectStore(STORE);
+          const req = st.delete(key);
+          req.onsuccess = () => resolve(true);
+          req.onerror = () => reject(req.error);
+        });
+      }
+
+      return { get, set, del };
+    })();
+
+    // ===================== Module: I18n =====================
+    const I18n = (() => {
+      const dict = {
+        ru: {
+          tabFlow: 'Поток', tabHistory: 'История',
+          inputPlaceholder: 'Поделитесь мыслью...',
+          saveLocal: 'Сохранить', publish: 'Опубликовать',
+          personalTitle: 'Мои мысли', worldTitle: 'Мир', serTitle: 'Смежные',
+          emptyPersonal: 'Нет похожих мыслей', emptyWorld: 'Ничего не найдено',
+          emptyHistory: 'Нет заметок',
+          historyPlaceholder: 'Поиск по истории...',
+          edit: 'ред.', save: 'сохр.', cancel: 'отм.', delete: 'удал.',
+          noteEdited: '(изм.)', today: 'Сегодня', yesterday: 'Вчера',
+          confirmDelete: 'Удалить заметку?',
+          resetDeviceConfirm: 'Сбросить устройство? Будет создан новый ID (старые данные останутся в сети). Продолжить?',
+          importSuccess: 'Импортировано {n} заметок.',
+          rebuildDone: 'Векторы пересозданы.',
+          settingsTitle: 'Настройки',
+          language: 'Язык / Language',
+          theme: 'Тема', themeAuto: 'Авто', themeLight: 'День', themeDark: 'Ночь',
+          threshold: 'Порог релевантности', ser: 'Дельта смежности',
+          minWaves: 'Мин. волн', maxCards: 'Макс. карточек',
+          peers: 'Gun peers (по одному URL на строку)',
+          peersHint: 'Если пусто — работает офлайн (IndexedDB). Для сети добавьте relay (например https://relay.peer.ooo/gun).',
+          exportCapsule: 'Скачать капсулу', importCapsule: 'Импортировать капсулу',
+          rebuildVectors: 'Пересоздать векторы',
+          resetDevice: 'Сбросить устройство (новый ID)',
+          apply: 'Применить',
+          swipeHint: 'смахните вверх для публикации',
+          modelLoading: 'Загрузка модели...', ready: 'Готов',
+          netOffline: 'Gun: offline (no peers)',
+          netPeers: 'Gun peers: {n}',
+          publishing: 'Публикация...', saving: 'Сохранение...'
+        },
+        en: {
+          tabFlow: 'Flow', tabHistory: 'History',
+          inputPlaceholder: 'Share a thought...',
+          saveLocal: 'Save', publish: 'Publish',
+          personalTitle: 'My thoughts', worldTitle: 'World', serTitle: 'Serendipity',
+          emptyPersonal: 'No similar thoughts', emptyWorld: 'Nothing found',
+          emptyHistory: 'No notes',
+          historyPlaceholder: 'Search history...',
+          edit: 'edit', save: 'save', cancel: 'cancel', delete: 'delete',
+          noteEdited: '(edited)', today: 'Today', yesterday: 'Yesterday',
+          confirmDelete: 'Delete note?',
+          resetDeviceConfirm: 'Reset device? A new ID will be created (old data may still exist on the network). Continue?',
+          importSuccess: 'Imported {n} notes.',
+          rebuildDone: 'Vectors rebuilt.',
+          settingsTitle: 'Settings',
+          language: 'Language',
+          theme: 'Theme', themeAuto: 'Auto', themeLight: 'Light', themeDark: 'Dark',
+          threshold: 'Relevance threshold', ser: 'Serendipity delta',
+          minWaves: 'Min waves', maxCards: 'Max cards',
+          peers: 'Gun peers (one URL per line)',
+          peersHint: 'Empty = offline (IndexedDB). Add a relay for networking (e.g. https://relay.peer.ooo/gun).',
+          exportCapsule: 'Download capsule', importCapsule: 'Import capsule',
+          rebuildVectors: 'Rebuild vectors',
+          resetDevice: 'Reset device (new ID)',
+          apply: 'Apply',
+          swipeHint: 'swipe up to publish',
+          modelLoading: 'Loading model...', ready: 'Ready',
+          netOffline: 'Gun: offline (no peers)',
+          netPeers: 'Gun peers: {n}',
+          publishing: 'Publishing...', saving: 'Saving...'
         }
       };
-      inp.click();
-    });
-  }
 
-  return { selfSave: selfSave, loadEmbedded: loadEmbedded, exportJSON: exportJSON, importJSON: importJSON };
-})();
+      let lang = 'ru';
+      const t = (key, vars = null) => {
+        const s = (dict[lang]?.[key] ?? dict.ru[key] ?? key);
+        if (!vars) return s;
+        return s.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ''));
+      };
+      const setLang = (v) => { lang = v in dict ? v : 'ru'; };
+      const getLang = () => lang;
 
-/* ========================================================================== */
-/* NS.Settings — runtime settings (over NS.Store.Local.settings)               */
-/* ========================================================================== */
-NS.Settings = (() => {
-  let cur = NS.Store.Local.settings;
-  return {
-    get() { return { ...cur }; },
-    set(patch) {
-      cur = { ...cur, ...patch };
-      NS.Store.Local.settings = cur;
-      NS.Bus.emit(NS.Bus.EVENTS.SETTINGS_CHANGED, cur);
-    },
-    reset() {
-      cur = { ...NS.Config.DEFAULTS };
-      NS.Store.Local.settings = cur;
-      NS.Bus.emit(NS.Bus.EVENTS.SETTINGS_CHANGED, cur);
-    }
-  };
-})();
+      return { t, setLang, getLang };
+    })();
 
-/* ========================================================================== */
-/* NS.Model — embedding interface, swappable implementation                    */
-/* ========================================================================== */
-NS.Model = (() => {
-  let extractor = null;
-  let loaded = false;
+    // ===================== Module: Theme =====================
+    const Theme = (() => {
+      function apply(mode) {
+        const dark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.body.classList.toggle('dark', !!dark);
+      }
+      return { apply };
+    })();
 
-  async function load() {
-    if (loaded) return;
-    // +esm = esm-обёртка на jsdelivr, работает без bundler
-    const tf = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/+esm');
+    // ===================== Module: Vector math + packing =====================
+    const Vectors = (() => {
+      const dot = (a, b) => {
+        let d = 0;
+        for (let i = 0; i < a.length; i++) d += a[i] * b[i];
+        return d;
+      };
 
-    // КРИТИЧНО: numThreads=1 иначе требуются COOP/COEP заголовки
-    if (tf.env?.backends?.onnx?.wasm) {
-      tf.env.backends.onnx.wasm.numThreads = 1;
-      tf.env.backends.onnx.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/';
-    }
-    if (tf.env) {
-      tf.env.useBrowserCache = true;
-      tf.env.allowRemoteModels = true;
-    }
+      const norm = (v) => {
+        let s = 0;
+        for (let i = 0; i < v.length; i++) s += v[i] * v[i];
+        const m = Math.sqrt(s) || 0;
+        if (!m) return v;
+        for (let i = 0; i < v.length; i++) v[i] /= m;
+        return v;
+      };
 
-    extractor = await tf.pipeline('feature-extraction', NS.Config.MODEL.name, {
-      quantized: NS.Config.MODEL.quantized
-    });
-    loaded = true;
-    NS.Bus.emit(NS.Bus.EVENTS.MODEL_READY);
-  }
+      // "Smart" storage: pack normalized vector [-1..1] into Int8 base64
+      const _b64encode = (u8) => {
+        let s = '';
+        const CHUNK = 0x8000;
+        for (let i = 0; i < u8.length; i += CHUNK) {
+          s += String.fromCharCode(...u8.subarray(i, i + CHUNK));
+        }
+        return btoa(s);
+      };
+      const _b64decode = (b64) => {
+        const bin = atob(b64);
+        const u8 = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+        return u8;
+      };
 
-  async function embed(text) {
-    if (!loaded) throw new Error('Model not loaded');
-    const out = await extractor([text], { pooling: 'mean', normalize: true });
-    // Если pipeline вернул Float32Array нужной длины — используем
-    if (out.data && out.data.length === NS.Config.MODEL.dims) {
-      return new Float32Array(out.data);
-    }
-    // Fallback: ручной mean pooling + L2 norm
-    const { data, dims } = out;
-    const [, tokens, hidden] = dims;
-    const emb = new Float32Array(hidden);
-    for (let t = 0; t < tokens; t++) {
-      for (let h = 0; h < hidden; h++) emb[h] += data[t * hidden + h];
-    }
-    for (let h = 0; h < hidden; h++) emb[h] /= tokens;
-    return normalize(emb);
-  }
+      const packInt8 = (f32) => {
+        const v = new Float32Array(f32); // copy
+        norm(v);
+        const i8 = new Int8Array(v.length);
+        for (let i = 0; i < v.length; i++) i8[i] = Math.max(-127, Math.min(127, Math.round(v[i] * 127)));
+        return _b64encode(new Uint8Array(i8.buffer));
+      };
 
-  function normalize(v) {
-    let m = 0;
-    for (let i = 0; i < v.length; i++) m += v[i] * v[i];
-    m = Math.sqrt(m) || 1;
-    const r = new Float32Array(v.length);
-    for (let i = 0; i < v.length; i++) r[i] = v[i] / m;
-    return r;
-  }
+      const unpackInt8 = (b64) => {
+        const u8 = _b64decode(b64);
+        const i8 = new Int8Array(u8.buffer);
+        const v = new Float32Array(i8.length);
+        for (let i = 0; i < i8.length; i++) v[i] = i8[i] / 127;
+        return norm(v);
+      };
 
-  // Cosine with explicit normalization — works even if vectors are not unit
-  function cosine(a, b) {
-    if (!a || !b || a.length !== b.length) return -1;
-    let dot = 0, na = 0, nb = 0;
-    for (let i = 0; i < a.length; i++) {
-      const x = a[i], y = b[i];
-      dot += x * y; na += x * x; nb += y * y;
-    }
-    return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-12);
-  }
+      return { dot, norm, packInt8, unpackInt8 };
+    })();
 
-  function serialize(v) { return Array.from(v); }
-  function deserialize(a) { return new Float32Array(a); }
+    // ===================== Module: Embedder (Transformers.js) =====================
+    const Embedder = (() => {
+      let model = null;
 
-  return {
-    load, embed, cosine, normalize, serialize, deserialize,
-    get loaded() { return loaded; }
-  };
-})();
-
-/* ========================================================================== */
-/* NS.Engine — vector cache + search                                           */
-/* ========================================================================== */
-NS.Engine = (() => {
-  const cache = new Map(); // noteId -> Float32Array
-
-  async function ensureEmbed(text, id) {
-    if (cache.has(id)) return cache.get(id);
-    if (!NS.Model.loaded) return null;
-    const v = await NS.Model.embed(text);
-    cache.set(id, v);
-    return v;
-  }
-
-  function invalidate(id) { cache.delete(id); }
-  function clear() { cache.clear(); }
-
-  async function rebuild(notes) {
-    cache.clear();
-    if (!NS.Model.loaded) return;
-    for (const n of notes) {
-      try { await ensureEmbed(n.text, n.id); }
-      catch (e) { console.warn('[Engine] rebuild skip', n.id, e); }
-    }
-  }
-
-  async function searchLocal(query, s) {
-    if (!NS.Model.loaded) return [];
-    const qv = await NS.Model.embed(query);
-    const out = [];
-    for (const n of NS.Store.Local.myNotes) {
-      const v = cache.get(n.id);
-      if (!v) continue;
-      const sc = NS.Model.cosine(qv, v);
-      if (sc >= s.threshold) out.push({ ...n, score: sc });
-    }
-    return out.sort((a, b) => b.score - a.score).slice(0, s.maxResults);
-  }
-
-  async function searchWorld(query, s) {
-    if (!NS.Model.loaded) return { rel: [], ser: [] };
-    const qv = await NS.Model.embed(query);
-    const rel = [], ser = [];
-    const low = s.threshold - s.serendipityDelta;
-    for (const n of NS.Store.Local.world) {
-      if ((n.waves || 0) < s.minWaves) continue;
-      const v = NS.Model.deserialize(n.vec);
-      const sc = NS.Model.cosine(qv, v);
-      if (sc >= s.threshold) rel.push({ ...n, score: sc });
-      else if (sc >= low) ser.push({ ...n, score: sc });
-    }
-    return {
-      rel: rel.sort((a, b) => b.score - a.score).slice(0, s.maxResults),
-      ser: ser.sort((a, b) => b.score - a.score).slice(0, s.maxResults)
-    };
-  }
-
-  return { ensureEmbed, invalidate, clear, rebuild, searchLocal, searchWorld };
-})();
-
-/* ========================================================================== */
-/* NS.Domain — business logic (only layer UI touches directly)                 */
-/* ========================================================================== */
-NS.Domain = {};
-
-NS.Domain.MyNotes = (() => {
-  function all() { return NS.Store.Local.myNotes.slice(); }
-
-  async function add(text) {
-    if (!text.trim()) return null;
-    const n = {
-      id: NS.Util.uid(),
-      text: text.trim(),
-      date: NS.Util.now(),
-      editedAt: null
-    };
-    const list = [n, ...NS.Store.Local.myNotes];
-    NS.Store.Local.myNotes = list;
-    if (NS.Model.loaded) await NS.Engine.ensureEmbed(n.text, n.id);
-    NS.Bus.emit(NS.Bus.EVENTS.MY_NOTES_CHANGED, { action: 'add', note: n });
-    return n;
-  }
-
-  async function update(id, text) {
-    const list = NS.Store.Local.myNotes;
-    const n = list.find(x => x.id === id);
-    if (!n) return null;
-    n.text = text.trim();
-    n.editedAt = NS.Util.now();
-    NS.Store.Local.myNotes = list;
-    NS.Engine.invalidate(id);
-    if (NS.Model.loaded) await NS.Engine.ensureEmbed(n.text, id);
-    NS.Bus.emit(NS.Bus.EVENTS.MY_NOTES_CHANGED, { action: 'update', note: n });
-    return n;
-  }
-
-  function remove(id) {
-    NS.Store.Local.myNotes = NS.Store.Local.myNotes.filter(x => x.id !== id);
-    NS.Engine.invalidate(id);
-    NS.Bus.emit(NS.Bus.EVENTS.MY_NOTES_CHANGED, { action: 'remove', id });
-  }
-
-  function clear() {
-    NS.Store.Local.myNotes = [];
-    NS.Engine.clear();
-    NS.Bus.emit(NS.Bus.EVENTS.MY_NOTES_CHANGED, { action: 'clear' });
-  }
-
-  return { all, add, update, remove, clear };
-})();
-
-NS.Domain.World = (() => {
-  function all() { return NS.Store.Local.world.slice(); }
-
-  // upsert: идемпотентно, вызывается и из UI и из Network
-  function upsert(n) {
-    const list = NS.Store.Local.world;
-    const i = list.findIndex(x => x.id === n.id);
-    if (i >= 0) {
-      list[i] = { ...list[i], ...n, waves: list[i].waves ?? 0 };
-    } else {
-      list.unshift({ ...n, waves: n.waves ?? 0 });
-    }
-    NS.Store.Local.world = list;
-    NS.Bus.emit(NS.Bus.EVENTS.WORLD_CHANGED, { action: 'upsert', note: n });
-  }
-
-  function wave(id, delta) {
-    const list = NS.Store.Local.world;
-    const n = list.find(x => x.id === id);
-    if (!n) return;
-    n.waves = Math.max(0, (n.waves || 0) + delta);
-    NS.Store.Local.world = list;
-    NS.Bus.emit(NS.Bus.EVENTS.WORLD_CHANGED, { action: 'wave', id, waves: n.waves });
-  }
-
-  function add(vec, text, localId) {
-    const n = {
-      id: 'g_' + NS.Util.uid().slice(3),
-      vec: NS.Model.serialize(vec),
-      waves: 0,
-      excerpt: text.slice(0, 150),
-      localId
-    };
-    upsert(n);
-    return n;
-  }
-
-  function removeByLocalId(localId) {
-    NS.Store.Local.world = NS.Store.Local.world.filter(n => n.localId !== localId);
-    NS.Bus.emit(NS.Bus.EVENTS.WORLD_CHANGED, { action: 'removeByLocal' });
-  }
-
-  function clear() {
-    NS.Store.Local.world = [];
-    NS.Bus.emit(NS.Bus.EVENTS.WORLD_CHANGED, { action: 'clear' });
-  }
-
-  return { all, upsert, wave, add, removeByLocalId, clear };
-})();
-
-/* ========================================================================== */
-/* NS.Network — GunDB P2P layer (isolated, knows only Domain.World)            */
-/* ========================================================================== */
-NS.Network = (() => {
-  let gun = null;
-  let user = null;
-  let rootNode = null;
-  let peers = new Set();
-  let enabled = false;
-  let namespace = null;
-
-  function status(msg, count) {
-    NS.Bus.emit(NS.Bus.EVENTS.NETWORK_STATUS, { msg, count });
-  }
-
-  function init(relays, ns) {
-    if (typeof window.Gun === 'undefined') {
-      status('GunDB not loaded', 0);
-      return;
-    }
-    namespace = ns;
-    try {
-      gun = window.Gun({ peers: relays, localStorage: false });
-      user = gun.user();
-      rootNode = gun.get(NS.Config.GUN_PREFIX).get(namespace).get('notes');
-
-      // Identity
-      const saved = NS.Store.Local.gunIdentity;
-      if (saved) {
-        user.auth(saved.alias, saved.pass, ack => {
-          if (ack.err) console.warn('[Network] auth:', ack.err);
-        });
-      } else {
-        const alias = 'ns_' + Math.random().toString(36).slice(2, 10);
-        const pass = Array.from(crypto.getRandomValues(new Uint8Array(16)))
-          .map(b => b.toString(16)).join('');
-        user.create(alias, pass, ack => {
-          if (ack.err) { console.warn('[Network] create:', ack.err); return; }
-          user.auth(alias, pass);
-          NS.Store.Local.gunIdentity = { alias, pass };
-        });
+      async function init() {
+        model = await pipeline(
+          'feature-extraction',
+          'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+          { quantized: true }
+        );
       }
 
-      gun.on('hi', p => {
-        peers.add(p.id || 'x');
-        status('connected', peers.size);
-      });
-      gun.on('bye', p => {
-        peers.delete(p.id || 'x');
-        status('connected', peers.size);
-      });
+      async function embed(text) {
+        if (!model) throw new Error('Embedder not initialized');
 
-      // Subscribe: last-write-wins по updatedAt
-      rootNode.map().on((data, key) => {
-        if (!data || typeof data !== 'object') return;
-        if (!key || key === '_') return;
-        if (!data.id || !data.vec || !data.excerpt) return;
-        const existing = NS.Store.Local.world.find(n => n.id === data.id);
-        if (!existing || (data.ts || 0) >= (existing.ts || 0)) {
-          NS.Domain.World.upsert({
-            id: data.id,
-            vec: data.vec,
-            waves: data.waves || 0,
-            excerpt: data.excerpt,
-            ts: data.ts || NS.Util.now(),
-            localId: data.localId || null
+        // Robust pooling (manual mean over tokens) - stable across versions.
+        const out = await model([text]);
+        const { data, dims } = out;
+
+        // dims: [batch, tokens, hidden] for raw features
+        const tokens = dims?.[1];
+        const hidden = dims?.[2];
+
+        if (!tokens || !hidden) {
+          // fallback: already pooled?
+          const v = new Float32Array(data);
+          return Vectors.norm(v);
+        }
+
+        const emb = new Float32Array(hidden);
+        for (let t = 0; t < tokens; t++) {
+          const base = t * hidden;
+          for (let h = 0; h < hidden; h++) emb[h] += data[base + h];
+        }
+        for (let h = 0; h < hidden; h++) emb[h] /= tokens;
+        return Vectors.norm(emb);
+      }
+
+      return { init, embed };
+    })();
+
+    // ===================== Module: Gun Network =====================
+    const GunNet = (() => {
+      function create({ peers }) {
+        if (!window.Gun) throw new Error('Gun not loaded');
+        const list = (peers ?? []).map(s => s.trim()).filter(Boolean);
+
+        // IMPORTANT: disable localStorage usage
+        const gun = Gun({
+          peers: list,
+          localStorage: false,
+          // WebSocket reconnect etc handled internally
+        });
+
+        return { gun, peers: list };
+      }
+
+      return { create };
+    })();
+
+    // ===================== Module: App Schema (Gun paths only) =====================
+    const Schema = (() => {
+      const ROOT = 'noosphere_v1';
+      const root = (gun) => gun.get(ROOT);
+
+      const client = (gun, deviceId) => root(gun).get('clients').get(deviceId);
+      const settings = (gun, deviceId) => client(gun, deviceId).get('settings');
+      const personalNotes = (gun, deviceId) => client(gun, deviceId).get('notes');
+
+      const world = (gun) => root(gun).get('world');
+      const worldNotes = (gun) => world(gun).get('notes');
+
+      return { root, client, settings, personalNotes, worldNotes };
+    })();
+
+    // ===================== Module: Settings Store (Gun) =====================
+    const SettingsStore = (() => {
+      const DEFAULT = {
+        lang: 'ru',
+        theme: 'auto',
+        threshold: 0.25,
+        serDelta: 0.15,
+        minWaves: 1,
+        maxResults: 5,
+        peers: ['https://relay.peer.ooo/gun']
+      };
+
+      function sanitize(raw) {
+        const x = raw && typeof raw === 'object' ? raw : {};
+        const peers = Array.isArray(x.peers) ? x.peers.map(String) : DEFAULT.peers.slice();
+        return {
+          lang: (x.lang === 'en' || x.lang === 'ru') ? x.lang : DEFAULT.lang,
+          theme: (x.theme === 'auto' || x.theme === 'light' || x.theme === 'dark') ? x.theme : DEFAULT.theme,
+          threshold: Utils.clamp(Number(x.threshold ?? DEFAULT.threshold), 0, 1),
+          serDelta: Utils.clamp(Number(x.serDelta ?? DEFAULT.serDelta), 0, 0.5),
+          minWaves: Math.max(0, Number(x.minWaves ?? DEFAULT.minWaves) | 0),
+          maxResults: Math.max(1, Number(x.maxResults ?? DEFAULT.maxResults) | 0),
+          peers
+        };
+      }
+
+      function create({ gun, deviceId }) {
+        const ee = new Utils.Emitter();
+        const ref = Schema.settings(gun, deviceId);
+
+        let current = { ...DEFAULT };
+        let initialized = false;
+
+        ref.on((data) => {
+          // data may include Gun metadata
+          const clean = sanitize(data);
+          current = clean;
+          initialized = true;
+          ee.emit('change', current);
+        });
+
+        // Debounced put to avoid hammering peers
+        let putTimer = null;
+        function put(partial) {
+          current = sanitize({ ...current, ...partial });
+          clearTimeout(putTimer);
+          putTimer = setTimeout(() => {
+            ref.put(current);
+          }, 150);
+          ee.emit('change', current);
+        }
+
+        return {
+          DEFAULT,
+          get: () => current,
+          isReady: () => initialized,
+          onChange: (fn) => ee.on('change', fn),
+          put
+        };
+      }
+
+      return { create };
+    })();
+
+    // ===================== Module: Personal Notes Store (Gun) =====================
+    const PersonalStore = (() => {
+      // note shape (in memory):
+      // { id, text, createdAt, updatedAt, editedAt, vPacked, deleted }
+      function normalizeNote(id, data) {
+        if (!data || typeof data !== 'object') return null;
+        if (data.deleted) return { id, deleted: true };
+
+        const createdAt = Number(data.createdAt) || Date.now();
+        const updatedAt = Number(data.updatedAt) || createdAt;
+
+        // migration: allow vec array in `vec` or packed in `v`
+        let vPacked = typeof data.v === 'string' ? data.v : null;
+
+        return {
+          id,
+          text: String(data.text ?? ''),
+          createdAt,
+          updatedAt,
+          editedAt: data.editedAt ? Number(data.editedAt) : null,
+          vPacked,
+          deleted: false
+        };
+      }
+
+      function create({ gun, deviceId }) {
+        const ee = new Utils.Emitter();
+        const ref = Schema.personalNotes(gun, deviceId);
+
+        const map = new Map(); // id -> note
+
+        ref.map().on((data, id) => {
+          if (!id || id === '_' || id === 'null') return;
+          const n = normalizeNote(id, data);
+          if (!n) return;
+
+          if (n.deleted) {
+            map.delete(id);
+            ee.emit('change', getAll());
+            return;
+          }
+
+          // Keep latest by updatedAt (safety)
+          const prev = map.get(id);
+          if (!prev || (n.updatedAt >= (prev.updatedAt ?? 0))) {
+            map.set(id, n);
+            ee.emit('change', getAll());
+          }
+        });
+
+        function getAll() {
+          return Array.from(map.values()).sort((a,b) => b.createdAt - a.createdAt);
+        }
+
+        async function add({ text, vPacked }) {
+          const id = crypto.randomUUID();
+          const now = Date.now();
+          ref.get(id).put({
+            id,
+            text,
+            createdAt: now,
+            updatedAt: now,
+            editedAt: null,
+            v: vPacked ?? null,
+            deleted: false
+          });
+          return id;
+        }
+
+        async function update({ id, text, vPacked }) {
+          const now = Date.now();
+          ref.get(id).put({
+            text,
+            updatedAt: now,
+            editedAt: now,
+            ...(vPacked ? { v: vPacked } : {})
           });
         }
-      });
 
-      enabled = true;
-    } catch (e) {
-      console.error('[Network] init:', e);
-      status('error: ' + e.message, 0);
-    }
-  }
+        async function markDeleted(id) {
+          ref.get(id).put({ deleted: true, updatedAt: Date.now() });
+        }
 
-  async function publish(note, vector) {
-    if (!rootNode || !enabled) return;
-    const ts = NS.Util.now();
-    rootNode.get(note.id).put({
-      id: note.id,
-      excerpt: note.text.slice(0, 150),
-      vec: NS.Model.serialize(vector),
-      waves: 0,
-      ts: ts,
-      localId: note.id
-    });
-  }
+        async function putVector(id, vPacked) {
+          ref.get(id).put({ v: vPacked, updatedAt: Date.now() });
+        }
 
-  async function sendWave(noteId, currentWaves) {
-    if (!rootNode || !enabled) return;
-    rootNode.get(noteId).get('waves').put(currentWaves);
-  }
-
-  function setRelays(relays) {
-    if (gun) try { gun.off(); } catch {}
-    gun = null; user = null; rootNode = null;
-    peers.clear(); enabled = false;
-    init(relays, namespace);
-  }
-
-  return { init, publish, sendWave, setRelays, get peers() { return peers.size; } };
-})();
-
-/* ========================================================================== */
-/* NS.UI — rendering, knows Domain + Model, not Store directly                 */
-/* ========================================================================== */
-NS.UI = (() => {
-  const $ = s => document.querySelector(s);
-
-  const els = {
-    input: $('#thoughtInput'),
-    saveBtn: $('#saveBtn'),
-    statusMsg: $('#statusMsg'),
-    swipeHint: $('#swipeHint'),
-    swipeHintText: $('#swipeHintText'),
-    personalSection: $('#personalSection'),
-    personalCards: $('#personalCards'),
-    relevantSection: $('#relevantSection'),
-    relevantCards: $('#relevantCards'),
-    serendipitySection: $('#serendipitySection'),
-    serendipityCards: $('#serendipityCards'),
-    historySearch: $('#historySearchInput'),
-    historyContent: $('#historyContent'),
-    settingsTrigger: $('#settingsTrigger'),
-    overlay: $('#overlay'),
-    panel: $('#settingsPanel'),
-    thresholdSl: $('#thresholdSlider'),
-    thresholdVal: $('#thresholdValue'),
-    serendipitySl: $('#serendipitySlider'),
-    serendipityVal: $('#serendipityValue'),
-    minWavesSel: $('#minWavesSelect'),
-    maxResSel: $('#maxResultsSelect'),
-    langSelect: $('#langSelect'),
-    themeSelect: $('#themeSelect'),
-    relaysInput: $('#relaysInput'),
-    namespaceInput: $('#namespaceInput'),
-    applyBtn: $('#applySettingsBtn'),
-    resetBtn: $('#resetSettingsBtn'),
-    rebuildBtn: $('#rebuildVectorsBtn'),
-    exportBtn: $('#exportCapsuleBtn'),
-    importBtn: $('#importCapsuleBtn'),
-    selfSaveBtn: $('#selfSaveBtn'),
-    importFile: $('#importFileInput'),
-    diagBox: $('#diagBox')
-  };
-
-  let lastQuery = '';
-  let lastResults = { local: [], rel: [], ser: [] };
-
-  function status(msg) {
-    if (els.statusMsg) els.statusMsg.textContent = msg || '';
-  }
-
-  function diag(msg, warn = false) {
-    if (!els.diagBox) return;
-    if (!msg) { els.diagBox.style.display = 'none'; return; }
-    els.diagBox.style.display = 'block';
-    els.diagBox.className = 'diag' + (warn ? ' warn' : '');
-    els.diagBox.innerHTML = msg;
-  }
-
-  function renderCarousel(container, items, isWorld = false) {
-    if (!items.length) {
-      container.innerHTML = '<div class="empty-message">' +
-        (isWorld ? NS.I18n.t('emptyWorld') : NS.I18n.t('emptyPersonal')) +
-        '</div>';
-      return;
-    }
-    container.innerHTML = items.map(item => {
-      const text = isWorld ? (item.excerpt || '') : item.text;
-      const charged = isWorld && item.waves > 0 ? ' charged' : '';
-      const footer = isWorld
-        ? '<span class="score-badge">' + item.score.toFixed(2) + '</span>' +
-          '<div class="wave-group">' +
-          '<button class="wave-btn" data-id="' + item.id + '" data-action="down">−</button>' +
-          '<span>' + item.waves + '</span>' +
-          '<button class="wave-btn" data-id="' + item.id + '" data-action="up">+</button>' +
-          '</div>'
-        : '<span class="score-badge">' + item.score.toFixed(2) + '</span>' +
-          '<span>' + new Date(item.date).toLocaleDateString() + '</span>';
-      return '<div class="card' + charged + '">' +
-        '<div class="card-text">' + NS.Util.esc(text) + '</div>' +
-        '<div class="card-footer">' + footer + '</div>' +
-        '</div>';
-    }).join('');
-  }
-
-  function formatDate(iso) {
-    const d = new Date(iso);
-    const now = new Date(); now.setHours(0, 0, 0, 0);
-    const yest = new Date(now); yest.setDate(yest.getDate() - 1);
-    if (d >= now) return NS.I18n.t('today');
-    if (d >= yest) return NS.I18n.t('yesterday');
-    return d.toLocaleDateString();
-  }
-
-  function renderHistory(filtered = null) {
-    const notes = filtered || NS.Domain.MyNotes.all();
-    if (!notes.length) {
-      els.historyContent.innerHTML = '<div class="empty-message">' + NS.I18n.t('emptyHistory') + '</div>';
-      return;
-    }
-    const groups = new Map();
-    notes.forEach(n => {
-      const day = new Date(n.date).toLocaleDateString();
-      if (!groups.has(day)) groups.set(day, []);
-      groups.get(day).push(n);
-    });
-    let html = '';
-    for (const [, dayNotes] of groups) {
-      html += '<div class="day-group"><div class="day-title">' + formatDate(dayNotes[0].date) + '</div>';
-      dayNotes.forEach(note => {
-        const time = new Date(note.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const edited = note.editedAt ? '<span>' + NS.I18n.t('noteEdited') + '</span>' : '';
-        html += '<div class="archive-item" data-id="' + note.id + '">' +
-          '<div class="meta"><span>' + time + '</span>' + edited + '</div>' +
-          '<div class="text">' + NS.Util.esc(note.text) + '</div>' +
-          '<div class="actions">' +
-          '<button class="edit-btn" data-id="' + note.id + '">' + NS.I18n.t('edit') + '</button>' +
-          '<button class="delete-btn" data-id="' + note.id + '">' + NS.I18n.t('delete') + '</button>' +
-          '</div></div>';
-      });
-      html += '</div>';
-    }
-    els.historyContent.innerHTML = html;
-  }
-
-  async function searchHistory() {
-    const q = els.historySearch.value.trim();
-    if (!q) { renderHistory(); return; }
-    if (!NS.Model.loaded) { renderHistory(); return; }
-    const s = NS.Settings.get();
-    const qv = await NS.Model.embed(q);
-    const scored = [];
-    for (const n of NS.Domain.MyNotes.all()) {
-      const v = await NS.Engine.ensureEmbed(n.text, n.id);
-      if (!v) continue;
-      const sc = NS.Model.cosine(qv, v);
-      if (sc >= s.threshold) scored.push({ ...n, score: sc });
-    }
-    scored.sort((a, b) => b.score - a.score);
-    renderHistory(scored);
-  }
-
-  let flowJob = 0; // race condition protection
-  async function searchFlow() {
-    const q = els.input.value.trim();
-    if (!q) {
-      els.personalSection.style.display = 'none';
-      els.relevantSection.style.display = 'none';
-      els.serendipitySection.style.display = 'none';
-      lastQuery = '';
-      lastResults = { local: [], rel: [], ser: [] };
-      return;
-    }
-    if (!NS.Model.loaded) { status(NS.I18n.t('modelLoading')); return; }
-
-    const myJob = ++flowJob;
-    status('…');
-    try {
-      const s = NS.Settings.get();
-      const [local, world] = await Promise.all([
-        NS.Engine.searchLocal(q, s),
-        NS.Engine.searchWorld(q, s)
-      ]);
-      if (myJob !== flowJob) return; // stale
-      lastQuery = q;
-      lastResults = { local, rel: world.rel, ser: world.ser };
-
-      els.personalSection.style.display = local.length ? 'block' : 'none';
-      renderCarousel(els.personalCards, local);
-      els.relevantSection.style.display = world.rel.length ? 'block' : 'none';
-      renderCarousel(els.relevantCards, world.rel, true);
-      els.serendipitySection.style.display = world.ser.length ? 'block' : 'none';
-      renderCarousel(els.serendipityCards, world.ser, true);
-      status('');
-    } catch (e) {
-      if (myJob !== flowJob) return;
-      status('!');
-      console.error('[UI] searchFlow:', e);
-    }
-  }
-
-  async function saveNote(share = false) {
-    const text = els.input.value.trim();
-    if (!text) return;
-    const note = await NS.Domain.MyNotes.add(text);
-    if (share && note && NS.Model.loaded) {
-      const vec = await NS.Model.embed(text);
-      const worldNote = NS.Domain.World.add(vec, text, note.id);
-      NS.Network.publish(note, vec);
-      animateStar();
-    }
-    els.input.value = '';
-    searchFlow();
-  }
-
-  function animateStar() {
-    const container = document.getElementById('thoughtContainer');
-    const rect = container.getBoundingClientRect();
-    const star = document.createElement('div');
-    star.textContent = '✦';
-    star.style.cssText = 'position:fixed; left:' + (rect.left + rect.width / 2) + 'px; top:' +
-      (rect.top + rect.height / 2) + 'px; font-size:24px; color:var(--star);' +
-      'transition:all 1s cubic-bezier(.25,.1,.25,1); z-index:999; pointer-events:none;';
-    document.body.appendChild(star);
-    requestAnimationFrame(() => {
-      star.style.transform = 'translateY(-200px) scale(0)';
-      star.style.opacity = '0';
-    });
-    setTimeout(() => star.remove(), 1000);
-  }
-
-  function syncSettingsUI() {
-    const s = NS.Settings.get();
-    els.thresholdSl.value = s.threshold;
-    els.thresholdVal.textContent = s.threshold.toFixed(2);
-    els.serendipitySl.value = s.serendipityDelta;
-    els.serendipityVal.textContent = s.serendipityDelta.toFixed(2);
-    els.minWavesSel.value = s.minWaves;
-    els.maxResSel.value = s.maxResults;
-    els.langSelect.value = s.lang;
-    els.themeSelect.value = s.theme;
-    els.relaysInput.value = (s.relays || []).join('\n');
-    els.namespaceInput.value = s.namespace || '';
-  }
-
-  function applySettings(skipSearch = true) {
-    const relays = els.relaysInput.value.split('\n').map(x => x.trim()).filter(Boolean);
-    const newLang = els.langSelect.value;
-    NS.Settings.set({
-      threshold: +els.thresholdSl.value,
-      serendipityDelta: +els.serendipitySl.value,
-      minWaves: +els.minWavesSel.value,
-      maxResults: +els.maxResSel.value,
-      theme: els.themeSelect.value,
-      lang: newLang,
-      relays: relays.length ? relays : NS.Config.DEFAULTS.relays,
-      namespace: els.namespaceInput.value.trim() || null
-    });
-    if (NS.I18n.getLang() !== newLang) {
-      NS.I18n.setLang(newLang);
-      updateI18nLabels();
-    }
-    NS.Theme.apply(els.themeSelect.value);
-    NS.Network.setRelays(relays.length ? relays : NS.Config.DEFAULTS.relays);
-    if (!skipSearch) searchFlow();
-  }
-
-  function updateI18nLabels() {
-    const t = NS.I18n.t.bind(NS.I18n);
-    document.querySelector('.tab-btn[data-view="flow"]').textContent = t('tabFlow');
-    document.querySelector('.tab-btn[data-view="history"]').textContent = t('tabHistory');
-    els.personalTitle = $('#personalTitle');
-    document.getElementById('personalTitle').textContent = t('personalTitle');
-    document.getElementById('relevantTitle').textContent = t('worldTitle');
-    document.getElementById('serendipityTitle').textContent = t('serendipityTitle');
-    els.saveBtn.textContent = t('saveBtn');
-    els.swipeHintText.textContent = t('swipeHint');
-    els.historySearch.placeholder = t('inputPlaceholder');
-    if (document.getElementById('historyView').classList.contains('active')) renderHistory();
-  }
-
-  async function resetAll() {
-    if (!confirm(NS.I18n.t('resetConfirm'))) return;
-    NS.Domain.MyNotes.clear();
-    NS.Domain.World.clear();
-    NS.Settings.reset();
-    syncSettingsUI();
-    NS.I18n.setLang(NS.Settings.get().lang);
-    updateI18nLabels();
-    NS.Theme.apply(NS.Settings.get().theme);
-    els.input.value = '';
-    searchFlow();
-    renderHistory();
-    closeSettings();
-  }
-
-  async function rebuildVectors() {
-    if (!NS.Model.loaded) return;
-    els.rebuildBtn.disabled = true;
-    els.rebuildBtn.textContent = '...';
-    await NS.Engine.rebuild(NS.Domain.MyNotes.all());
-    els.rebuildBtn.textContent = 'Пересоздать векторы';
-    els.rebuildBtn.disabled = false;
-    closeSettings();
-    alert(NS.I18n.t('rebuildDone'));
-  }
-
-  function openSettings() {
-    els.overlay.classList.add('open');
-    els.panel.classList.add('open');
-  }
-  function closeSettings() {
-    els.overlay.classList.remove('open');
-    els.panel.classList.remove('open');
-  }
-
-  async function doExport() {
-    await NS.Store.File.exportJSON({
-      version: 1,
-      myNotes: NS.Domain.MyNotes.all(),
-      world: NS.Domain.World.all(),
-      settings: NS.Settings.get()
-    });
-  }
-
-  async function doImport() {
-    try {
-      const data = await NS.Store.File.importJSON();
-      if (Array.isArray(data.myNotes)) NS.Store.Local.myNotes = data.myNotes;
-      if (Array.isArray(data.world)) NS.Store.Local.world = data.world;
-      if (NS.Model.loaded) await NS.Engine.rebuild(NS.Domain.MyNotes.all());
-      NS.Bus.emit(NS.Bus.EVENTS.MY_NOTES_CHANGED, { action: 'bulk' });
-      NS.Bus.emit(NS.Bus.EVENTS.WORLD_CHANGED, { action: 'bulk' });
-      alert(NS.I18n.t('importSuccess', { n: (data.myNotes || []).length }));
-    } catch (e) { alert('Import error: ' + e.message); }
-  }
-
-  async function doSelfSave() {
-    try {
-      const r = await NS.Store.File.selfSave({
-        version: 1,
-        myNotes: NS.Domain.MyNotes.all(),
-        world: NS.Domain.World.all(),
-        settings: NS.Settings.get()
-      });
-      if (r && r.ok) status('Saved: ' + r.mode);
-    } catch (e) { alert('Self-save error: ' + e.message); }
-  }
-
-  function bindEvents() {
-    els.input.addEventListener('input', () => {
-      els.swipeHint.classList.toggle('visible', els.input.value.trim().length > 0);
-    });
-
-    // Swipe up to publish
-    let touchY = 0;
-    els.input.addEventListener('touchstart', e => { touchY = e.touches[0].clientY; });
-    els.input.addEventListener('touchend', e => {
-      if (touchY - e.changedTouches[0].clientY > 60 && els.input.value.trim()) {
-        e.preventDefault();
-        saveNote(true);
+        return {
+          onChange: (fn) => ee.on('change', fn),
+          list: () => getAll(),
+          get: (id) => map.get(id) ?? null,
+          add, update, markDeleted, putVector
+        };
       }
-    });
 
-    els.saveBtn.addEventListener('click', e => saveNote(e.shiftKey));
-    els.input.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        saveNote(e.shiftKey);
+      return { create };
+    })();
+
+    // ===================== Module: World Store (Gun + votes) =====================
+    const WorldStore = (() => {
+      // world note in memory:
+      // { id, excerpt, createdAt, vPacked, waves, myWave }
+      function normalizeWorld(id, data) {
+        if (!data || typeof data !== 'object') return null;
+        if (data.deleted) return { id, deleted: true };
+
+        const createdAt = Number(data.createdAt) || Date.now();
+        const excerpt = String(data.excerpt ?? '');
+        const vPacked = typeof data.v === 'string' ? data.v : null;
+
+        return { id, excerpt, createdAt, vPacked, deleted: false };
       }
-    });
 
-    els.input.addEventListener('input', NS.Util.debounce(searchFlow, 300));
-    els.historySearch.addEventListener('input', NS.Util.debounce(searchHistory, 300));
+      function create({ gun, deviceId }) {
+        const ee = new Utils.Emitter();
+        const ref = Schema.worldNotes(gun);
 
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        const view = btn.dataset.view;
-        if (view === 'history') {
-          document.getElementById('flowView').classList.remove('active');
-          document.getElementById('historyView').classList.add('active');
+        const notes = new Map();      // id -> {id, excerpt, createdAt, vPacked}
+        const voteSets = new Map();   // id -> Map(voterId -> 1|0)
+        const waves = new Map();      // id -> number
+        const myWave = new Map();     // id -> boolean
+
+        const voteSubs = new Map();   // id -> unsubscribe? (Gun doesn't provide clean off easily; we keep simple)
+
+        function recompute(id) {
+          const m = voteSets.get(id);
+          let count = 0;
+          if (m) for (const v of m.values()) if (v === 1) count++;
+          waves.set(id, count);
+          myWave.set(id, (m?.get(deviceId) === 1) || false);
+        }
+
+        function emit() {
+          ee.emit('change', list());
+        }
+
+        function list() {
+          const out = [];
+          for (const n of notes.values()) {
+            const w = waves.get(n.id) ?? 0;
+            const mine = myWave.get(n.id) ?? false;
+            out.push({ ...n, waves: w, myWave: mine });
+          }
+          return out.sort((a,b) => b.createdAt - a.createdAt);
+        }
+
+        // Subscribe world notes
+        ref.map().on((data, id) => {
+          if (!id || id === '_' || id === 'null') return;
+          const n = normalizeWorld(id, data);
+          if (!n) return;
+
+          if (n.deleted) {
+            notes.delete(id);
+            voteSets.delete(id);
+            waves.delete(id);
+            myWave.delete(id);
+            emit();
+            return;
+          }
+
+          notes.set(id, n);
+
+          // lazy subscribe to votes once per note
+          if (!voteSubs.has(id)) {
+            voteSubs.set(id, true);
+            const votesRef = ref.get(id).get('votes');
+            votesRef.map().on((v, voterId) => {
+              if (!voterId || voterId === '_' || voterId === 'null') return;
+              const vv = Number(v) === 1 ? 1 : 0;
+
+              if (!voteSets.has(id)) voteSets.set(id, new Map());
+              voteSets.get(id).set(voterId, vv);
+              recompute(id);
+              emit();
+            });
+          }
+
+          recompute(id);
+          emit();
+        });
+
+        async function publish({ excerpt, vPacked }) {
+          const id = crypto.randomUUID();
+          const now = Date.now();
+          ref.get(id).put({
+            id,
+            excerpt: String(excerpt ?? '').slice(0, 220),
+            createdAt: now,
+            v: vPacked ?? null,
+            deleted: false
+          });
+          return id;
+        }
+
+        async function setMyWave(id, on) {
+          // store per-device vote
+          ref.get(id).get('votes').get(deviceId).put(on ? 1 : 0);
+        }
+
+        return {
+          onChange: (fn) => ee.on('change', fn),
+          list,
+          publish,
+          setMyWave
+        };
+      }
+
+      return { create };
+    })();
+
+    // ===================== Module: Search Engine (pure) =====================
+    const SearchEngine = (() => {
+      function create({ settingsStore, personalStore, worldStore }) {
+        const vecCache = new Map(); // noteId/worldId -> Float32Array
+
+        function getVecFromPacked(packed) {
+          if (!packed || typeof packed !== 'string') return null;
+          try { return Vectors.unpackInt8(packed); } catch { return null; }
+        }
+
+        function getNoteVecCached(id, packed) {
+          if (vecCache.has(id)) return vecCache.get(id);
+          const v = getVecFromPacked(packed);
+          if (v) vecCache.set(id, v);
+          return v;
+        }
+
+        function clearCache() { vecCache.clear(); }
+
+        function scoreList(queryVec, items, getPacked, extraFilter = () => true) {
+          const res = [];
+          for (const it of items) {
+            if (!extraFilter(it)) continue;
+            const v = getNoteVecCached(it.id, getPacked(it));
+            if (!v) continue;
+            const s = Vectors.dot(queryVec, v);
+            res.push({ ...it, score: s });
+          }
+          res.sort((a,b) => b.score - a.score);
+          return res;
+        }
+
+        async function searchFlow(text) {
+          const q = String(text ?? '').trim();
+          if (!q) return { personal: [], rel: [], ser: [] };
+
+          const st = settingsStore.get();
+          const qVec = await Embedder.embed(q);
+
+          const personalItems = personalStore.list();
+          const worldItems = worldStore.list();
+
+          const personal = scoreList(qVec, personalItems, (n) => n.vPacked)
+            .filter(x => x.score >= st.threshold)
+            .slice(0, st.maxResults);
+
+          const low = Math.max(0, st.threshold - st.serDelta);
+
+          const scoredWorld = scoreList(qVec, worldItems, (n) => n.vPacked, (n) => (n.waves ?? 0) >= st.minWaves);
+
+          const rel = scoredWorld.filter(x => x.score >= st.threshold).slice(0, st.maxResults);
+          const ser = scoredWorld.filter(x => x.score >= low && x.score < st.threshold).slice(0, st.maxResults);
+
+          return { personal, rel, ser };
+        }
+
+        async function searchHistory(text) {
+          const q = String(text ?? '').trim();
+          if (!q) return personalStore.list();
+
+          const st = settingsStore.get();
+          const qVec = await Embedder.embed(q);
+
+          const scored = scoreList(qVec, personalStore.list(), (n) => n.vPacked)
+            .filter(x => x.score >= st.threshold);
+
+          return scored;
+        }
+
+        return { clearCache, searchFlow, searchHistory };
+      }
+
+      return { create };
+    })();
+
+    // ===================== Module: UI Renderer (DOM only) =====================
+    const UI = (() => {
+      function createRefs() {
+        const { $ } = Utils;
+        return {
+          tabFlowBtn: $('#tabFlowBtn'),
+          tabHistoryBtn: $('#tabHistoryBtn'),
+          flowView: $('#flowView'),
+          historyView: $('#historyView'),
+
+          input: $('#thoughtInput'),
+          thoughtContainer: $('#thoughtContainer'),
+          statusMsg: $('#statusMsg'),
+          swipeHint: $('#swipeHint'),
+          swipeHintText: $('#swipeHintText'),
+          saveLocalBtn: $('#saveLocalBtn'),
+          publishBtn: $('#publishBtn'),
+
+          personalSection: $('#personalSection'),
+          personalTitle: $('#personalTitle'),
+          personalCards: $('#personalCards'),
+
+          relevantSection: $('#relevantSection'),
+          relevantTitle: $('#relevantTitle'),
+          relevantCards: $('#relevantCards'),
+
+          serSection: $('#serendipitySection'),
+          serTitle: $('#serendipityTitle'),
+          serCards: $('#serendipityCards'),
+
+          historySearch: $('#historySearchInput'),
+          historyContent: $('#historyContent'),
+
+          settingsTrigger: $('#settingsTrigger'),
+          overlay: $('#overlay'),
+          panel: $('#settingsPanel'),
+
+          settingsTitle: $('#settingsTitle'),
+          langLabel: $('#langLabel'),
+          themeLabel: $('#themeLabel'),
+          thresholdLabel: $('#thresholdLabel'),
+          serLabel: $('#serLabel'),
+          minWavesLabel: $('#minWavesLabel'),
+          maxCardsLabel: $('#maxCardsLabel'),
+          peersLabel: $('#peersLabel'),
+          peersHint: $('#peersHint'),
+
+          langSelect: $('#langSelect'),
+          themeSelect: $('#themeSelect'),
+          thresholdSl: $('#thresholdSlider'),
+          thresholdVal: $('#thresholdValue'),
+          serSl: $('#serendipitySlider'),
+          serVal: $('#serendipityValue'),
+          minWavesSel: $('#minWavesSelect'),
+          maxResSel: $('#maxResultsSelect'),
+          peersTA: $('#peersTextarea'),
+
+          exportBtn: $('#exportCapsuleBtn'),
+          importBtn: $('#importCapsuleBtn'),
+          importFile: $('#importFileInput'),
+          rebuildBtn: $('#rebuildVectorsBtn'),
+          resetDeviceBtn: $('#resetDeviceBtn'),
+          applyBtn: $('#applySettingsBtn'),
+
+          modelInfo: $('#modelInfo'),
+          deviceInfo: $('#deviceInfo'),
+          netInfo: $('#netInfo')
+        };
+      }
+
+      function setTexts(els, t) {
+        els.tabFlowBtn.textContent = t('tabFlow');
+        els.tabHistoryBtn.textContent = t('tabHistory');
+        els.input.placeholder = t('inputPlaceholder');
+        els.saveLocalBtn.textContent = t('saveLocal');
+        els.publishBtn.textContent = t('publish');
+
+        els.personalTitle.textContent = t('personalTitle');
+        els.relevantTitle.textContent = t('worldTitle');
+        els.serTitle.textContent = t('serTitle');
+
+        els.historySearch.placeholder = t('historyPlaceholder');
+        els.swipeHintText.textContent = t('swipeHint');
+
+        els.settingsTitle.textContent = t('settingsTitle');
+        els.langLabel.textContent = t('language');
+        els.themeLabel.textContent = t('theme');
+        els.thresholdLabel.textContent = t('threshold');
+        els.serLabel.textContent = t('ser');
+        els.minWavesLabel.textContent = t('minWaves');
+        els.maxCardsLabel.textContent = t('maxCards');
+        els.peersLabel.textContent = t('peers');
+        els.peersHint.textContent = t('peersHint');
+
+        els.exportBtn.textContent = t('exportCapsule');
+        els.importBtn.textContent = t('importCapsule');
+        els.rebuildBtn.textContent = t('rebuildVectors');
+        els.resetDeviceBtn.textContent = t('resetDevice');
+        els.applyBtn.textContent = t('apply');
+      }
+
+      function renderCarousel(container, items, { emptyText, isWorld }) {
+        if (!items.length) {
+          container.innerHTML = `<div class="empty">${Utils.escapeHTML(emptyText)}</div>`;
+          return;
+        }
+        container.innerHTML = items.map(it => {
+          const text = isWorld ? (it.excerpt || '') : (it.text || '');
+          const charged = isWorld && (it.waves ?? 0) > 0 ? 'charged' : '';
+          const score = typeof it.score === 'number' ? it.score.toFixed(2) : '';
+
+          const right = isWorld
+            ? `
+              <div class="wave-group">
+                <button class="wave-btn ${it.myWave ? 'active' : ''}" data-action="wave" data-id="${it.id}" title="wave">
+                  ~
+                </button>
+                <span>${it.waves ?? 0}</span>
+              </div>`
+            : `<span>${new Date(it.createdAt).toLocaleDateString()}</span>`;
+
+          return `
+            <div class="card ${charged}">
+              <div class="card-text">${Utils.escapeHTML(text)}</div>
+              <div class="card-footer">
+                <span class="badge">${score}</span>
+                ${right}
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      function renderHistory(els, notes, t) {
+        if (!notes.length) {
+          els.historyContent.innerHTML = `<div class="empty">${Utils.escapeHTML(t('emptyHistory'))}</div>`;
+          return;
+        }
+
+        const groups = Utils.groupByDay(notes);
+        let html = '';
+
+        for (const [, dayNotes] of groups) {
+          html += `<div class="day-group"><div class="day-title">${Utils.escapeHTML(Utils.formatDayLabel(dayNotes[0].createdAt, t))}</div>`;
+          for (const n of dayNotes) {
+            const time = new Date(n.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const edited = n.editedAt ? `<span>${Utils.escapeHTML(t('noteEdited'))} ${Utils.escapeHTML(new Date(n.editedAt).toLocaleString())}</span>` : '';
+            html += `
+              <div class="archive-item" data-id="${n.id}">
+                <div class="meta"><span>${Utils.escapeHTML(time)}</span>${edited}</div>
+                <div class="text">${Utils.escapeHTML(n.text)}</div>
+                <div class="actions">
+                  <button class="edit-btn" data-id="${n.id}">${Utils.escapeHTML(t('edit'))}</button>
+                  <button class="delete-btn danger" data-id="${n.id}">${Utils.escapeHTML(t('delete'))}</button>
+                </div>
+              </div>
+            `;
+          }
+          html += `</div>`;
+        }
+
+        els.historyContent.innerHTML = html;
+      }
+
+      function openSettings(els) { els.overlay.classList.add('open'); els.panel.classList.add('open'); }
+      function closeSettings(els) { els.overlay.classList.remove('open'); els.panel.classList.remove('open'); }
+
+      function setTab(els, which, t) {
+        const flow = which === 'flow';
+        els.tabFlowBtn.classList.toggle('active', flow);
+        els.tabHistoryBtn.classList.toggle('active', !flow);
+        els.flowView.classList.toggle('active', flow);
+        els.historyView.classList.toggle('active', !flow);
+        // (t used by caller for rerender)
+      }
+
+      function setStatus(els, html) { els.statusMsg.innerHTML = html; }
+      function setReady(els, ready) {
+        els.saveLocalBtn.disabled = !ready;
+        els.publishBtn.disabled = !ready;
+      }
+
+      function settingsToUI(els, s) {
+        els.langSelect.value = s.lang;
+        els.themeSelect.value = s.theme;
+        els.thresholdSl.value = String(s.threshold);
+        els.thresholdVal.textContent = Number(s.threshold).toFixed(2);
+        els.serSl.value = String(s.serDelta);
+        els.serVal.textContent = Number(s.serDelta).toFixed(2);
+        els.minWavesSel.value = String(s.minWaves);
+        els.maxResSel.value = String(s.maxResults);
+        els.peersTA.value = (s.peers ?? []).join('\n');
+      }
+
+      function uiToSettings(els) {
+        const peers = els.peersTA.value
+          .split('\n')
+          .map(s => s.trim())
+          .filter(Boolean);
+
+        return {
+          lang: els.langSelect.value,
+          theme: els.themeSelect.value,
+          threshold: Number(els.thresholdSl.value),
+          serDelta: Number(els.serSl.value),
+          minWaves: Number(els.minWavesSel.value),
+          maxResults: Number(els.maxResSel.value),
+          peers
+        };
+      }
+
+      return {
+        createRefs, setTexts, renderCarousel, renderHistory,
+        openSettings, closeSettings, setTab, setStatus, setReady,
+        settingsToUI, uiToSettings
+      };
+    })();
+
+    // ===================== Module: Capsules (import/export) =====================
+    const Capsule = (() => {
+      function exportNotes(notes) {
+        const capsule = {
+          version: 2,
+          kind: 'noosphere',
+          createdAt: Date.now(),
+          notes: notes.map(n => ({
+            id: n.id,
+            text: n.text,
+            createdAt: n.createdAt,
+            editedAt: n.editedAt ?? null
+          }))
+        };
+        const blob = new Blob([JSON.stringify(capsule)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'noosphere.capsule.json';
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+
+      async function importNotes(file) {
+        const text = await file.text();
+        const cap = Utils.safeJSON(text, null);
+        if (!cap || !Array.isArray(cap.notes)) throw new Error('Bad capsule');
+        return cap.notes
+          .filter(n => n && typeof n.text === 'string')
+          .map(n => ({
+            id: String(n.id || crypto.randomUUID()),
+            text: String(n.text),
+            createdAt: Number(n.createdAt) || Date.now(),
+            editedAt: n.editedAt ? Number(n.editedAt) : null
+          }));
+      }
+
+      return { exportNotes, importNotes };
+    })();
+
+    // ===================== Module: App Controller (glue, no DOM render code inside) =====================
+    const App = (() => {
+      async function ensureDeviceId() {
+        let id = await KV.get('deviceId');
+        if (!id) {
+          id = crypto.randomUUID();
+          await KV.set('deviceId', id);
+        }
+        return id;
+      }
+
+      async function resetDeviceId() {
+        const id = crypto.randomUUID();
+        await KV.set('deviceId', id);
+        location.reload();
+      }
+
+      function createStarBurstAt(el) {
+        const rect = el.getBoundingClientRect();
+        const star = document.createElement('div');
+        star.textContent = '✦';
+        star.style.cssText = `
+          position:fixed;
+          left:${rect.left + rect.width / 2}px;
+          top:${rect.top + rect.height / 2}px;
+          font-size:24px;
+          color:var(--star);
+          transition:all 1s cubic-bezier(0.25,0.1,0.25,1);
+          z-index:999;
+          pointer-events:none;
+          transform:translate(-50%,-50%);
+        `;
+        document.body.appendChild(star);
+        requestAnimationFrame(() => {
+          star.style.transform = 'translate(-50%, -250px) scale(0.1)';
+          star.style.opacity = '0';
+        });
+        setTimeout(() => star.remove(), 1000);
+      }
+
+      async function start() {
+        const els = UI.createRefs();
+
+        // ---- device id
+        const deviceId = await ensureDeviceId();
+        els.deviceInfo.textContent = `device: ${deviceId}`;
+
+        // ---- Gun init (peers will be reconfigured after settings loaded)
+        // start with empty peers; settings may add
+        const net = GunNet.create({ peers: [] });
+        const gun = net.gun;
+
+        // ---- Stores
+        const settingsStore = SettingsStore.create({ gun, deviceId });
+        const personalStore = PersonalStore.create({ gun, deviceId });
+        const worldStore = WorldStore.create({ gun, deviceId });
+
+        // ---- Engine
+        const search = SearchEngine.create({ settingsStore, personalStore, worldStore });
+
+        // ---- Reactive state (for UI)
+        const state = {
+          modelReady: false,
+          flowResults: { personal: [], rel: [], ser: [] },
+          historyList: []
+        };
+
+        // =================== Module: UI Bindings (only here we touch DOM events) ===================
+        function applyI18nAndTheme(s) {
+          I18n.setLang(s.lang);
+          Theme.apply(s.theme);
+          UI.setTexts(els, I18n.t);
+          UI.settingsToUI(els, s);
+        }
+
+        function updateNetInfo(s) {
+          const peers = (s.peers ?? []).map(x => x.trim()).filter(Boolean);
+          els.netInfo.textContent = peers.length
+            ? I18n.t('netPeers', { n: peers.length })
+            : I18n.t('netOffline');
+        }
+
+        function applyPeersToGun(s) {
+          const peers = (s.peers ?? []).map(x => x.trim()).filter(Boolean);
+          // Gun supports opt() at runtime
+          gun.opt({ peers });
+        }
+
+        function renderFlow() {
+          const t = I18n.t;
+          const { personal, rel, ser } = state.flowResults;
+
+          els.personalSection.style.display = personal.length ? 'block' : 'none';
+          if (personal.length) UI.renderCarousel(els.personalCards, personal, { emptyText: t('emptyPersonal'), isWorld: false });
+
+          els.relevantSection.style.display = rel.length ? 'block' : 'none';
+          if (rel.length) UI.renderCarousel(els.relevantCards, rel, { emptyText: t('emptyWorld'), isWorld: true });
+
+          els.serSection.style.display = ser.length ? 'block' : 'none';
+          if (ser.length) UI.renderCarousel(els.serCards, ser, { emptyText: t('emptyWorld'), isWorld: true });
+        }
+
+        function renderHistory(list = null) {
+          const notes = list ?? personalStore.list();
+          UI.renderHistory(els, notes, I18n.t);
+        }
+
+        async function refreshFlowSearch() {
+          const q = els.input.value.trim();
+          if (!q) {
+            state.flowResults = { personal: [], rel: [], ser: [] };
+            renderFlow();
+            return;
+          }
+          state.flowResults = await search.searchFlow(q);
+          renderFlow();
+        }
+
+        async function refreshHistorySearch() {
+          const q = els.historySearch.value.trim();
+          if (!q) {
+            renderHistory();
+            return;
+          }
+          const list = await search.searchHistory(q);
+          renderHistory(list);
+        }
+
+        async function ensureVectorForPersonalNote(noteId) {
+          const n = personalStore.get(noteId);
+          if (!n || n.vPacked) return;
+          try {
+            const v = await Embedder.embed(n.text);
+            const packed = Vectors.packInt8(v);
+            await personalStore.putVector(noteId, packed);
+            search.clearCache();
+          } catch (e) {
+            console.error('vector build failed', e);
+          }
+        }
+
+        async function createPersonalNote({ text, publish }) {
+          const trimmed = String(text ?? '').trim();
+          if (!trimmed) return;
+
+          // optimistic UI status
+          UI.setStatus(els, `${I18n.t(publish ? 'publishing' : 'saving')}`);
+
+          const v = await Embedder.embed(trimmed);
+          const packed = Vectors.packInt8(v);
+
+          const id = await personalStore.add({ text: trimmed, vPacked: packed });
+          search.clearCache();
+
+          if (publish) {
+            await worldStore.publish({ excerpt: trimmed, vPacked: packed });
+            createStarBurstAt(els.thoughtContainer);
+          }
+
+          els.input.value = '';
+          els.swipeHint.classList.remove('visible');
+
+          UI.setStatus(els, I18n.t('ready'));
+          await refreshFlowSearch();
+          if (els.historyView.classList.contains('active')) renderHistory();
+        }
+
+        async function updatePersonalNote({ id, newText }) {
+          const trimmed = String(newText ?? '').trim();
+          if (!trimmed) return;
+
+          const v = await Embedder.embed(trimmed);
+          const packed = Vectors.packInt8(v);
+
+          await personalStore.update({ id, text: trimmed, vPacked: packed });
+          search.clearCache();
+
+          if (els.historyView.classList.contains('active')) renderHistory();
+          await refreshFlowSearch();
+        }
+
+        // =================== Module: Store subscriptions (no DOM events) ===================
+        settingsStore.onChange((s) => {
+          applyI18nAndTheme(s);
+          updateNetInfo(s);
+          applyPeersToGun(s);
+          // also re-run searches because thresholds could change
+          refreshFlowSearch();
+          if (els.historyView.classList.contains('active')) refreshHistorySearch();
+        });
+
+        personalStore.onChange((list) => {
+          // background: ensure vectors for notes missing them
+          // (avoid blocking UI)
+          for (const n of list) if (!n.vPacked) ensureVectorForPersonalNote(n.id);
+          if (els.historyView.classList.contains('active')) renderHistory();
+          refreshFlowSearch();
+        });
+
+        worldStore.onChange(() => {
+          refreshFlowSearch();
+        });
+
+        // =================== Module: UI init ===================
+        // Initial texts while settings not loaded yet:
+        I18n.setLang('ru');
+        UI.setTexts(els, I18n.t);
+        Theme.apply('auto');
+
+        UI.setStatus(els, `<span class="spinner"></span> ${I18n.t('modelLoading')}`);
+        UI.setReady(els, false);
+
+        // =================== Module: Model init ===================
+        try {
+          await Embedder.init();
+          state.modelReady = true;
+          UI.setStatus(els, I18n.t('ready'));
+          UI.setReady(els, true);
+        } catch (e) {
+          UI.setStatus(els, 'Ошибка загрузки модели');
+          console.error(e);
+        }
+
+        // =================== Module: UI events ===================
+        els.input.addEventListener('input', () => {
+          els.swipeHint.classList.toggle('visible', els.input.value.trim().length > 0);
+        });
+        els.input.addEventListener('input', Utils.debounce(refreshFlowSearch, 250));
+
+        // Swipe up = publish
+        let touchY = 0;
+        els.input.addEventListener('touchstart', (e) => { touchY = e.touches?.[0]?.clientY ?? 0; }, { passive: true });
+        els.input.addEventListener('touchend', async (e) => {
+          const endY = e.changedTouches?.[0]?.clientY ?? 0;
+          if (touchY - endY > 60 && els.input.value.trim()) {
+            e.preventDefault();
+            if (!state.modelReady) return;
+            await createPersonalNote({ text: els.input.value, publish: true });
+          }
+        }, { passive: false });
+
+        // Buttons
+        els.saveLocalBtn.addEventListener('click', async () => {
+          if (!state.modelReady) return;
+          await createPersonalNote({ text: els.input.value, publish: false });
+        });
+        els.publishBtn.addEventListener('click', async () => {
+          if (!state.modelReady) return;
+          await createPersonalNote({ text: els.input.value, publish: true });
+        });
+
+        // Keyboard: Ctrl/Cmd+Enter = publish, Shift+Ctrl+Enter = save local
+        els.input.addEventListener('keydown', async (e) => {
+          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            if (!state.modelReady) return;
+            await createPersonalNote({ text: els.input.value, publish: !e.shiftKey });
+          }
+        });
+
+        // Tabs
+        els.tabFlowBtn.addEventListener('click', () => {
+          UI.setTab(els, 'flow', I18n.t);
+        });
+        els.tabHistoryBtn.addEventListener('click', () => {
+          UI.setTab(els, 'history', I18n.t);
           renderHistory();
-        } else {
-          document.getElementById('historyView').classList.remove('active');
-          document.getElementById('flowView').classList.add('active');
-        }
-      });
-    });
+        });
 
-    // Delegated clicks: waves, edit, delete
-    document.addEventListener('click', e => {
-      const waveBtn = e.target.closest('.wave-btn');
-      if (waveBtn) {
-        const id = waveBtn.dataset.id;
-        const action = waveBtn.dataset.action;
-        const list = NS.Store.Local.world;
-        const n = list.find(x => x.id === id);
-        if (!n) return;
-        const newWaves = action === 'up' ? (n.waves || 0) + 1 : Math.max(0, (n.waves || 0) - 1);
-        NS.Domain.World.wave(id, action === 'up' ? 1 : -1);
-        NS.Network.sendWave(id, newWaves);
-        searchFlow();
-        return;
+        // Settings panel
+        els.settingsTrigger.addEventListener('click', () => UI.openSettings(els));
+        els.overlay.addEventListener('click', () => UI.closeSettings(els));
+
+        els.thresholdSl.addEventListener('input', () => els.thresholdVal.textContent = Number(els.thresholdSl.value).toFixed(2));
+        els.serSl.addEventListener('input', () => els.serVal.textContent = Number(els.serSl.value).toFixed(2));
+
+        els.applyBtn.addEventListener('click', () => {
+          const next = UI.uiToSettings(els);
+          settingsStore.put(next);
+          UI.closeSettings(els);
+        });
+
+        // History search
+        els.historySearch.addEventListener('input', Utils.debounce(refreshHistorySearch, 250));
+
+        // Wave clicks (event delegation)
+        document.addEventListener('click', async (e) => {
+          const wave = e.target.closest?.('.wave-btn');
+          if (wave && wave.dataset.action === 'wave') {
+            const id = wave.dataset.id;
+            const isActive = wave.classList.contains('active');
+            await worldStore.setMyWave(id, !isActive);
+            return;
+          }
+
+          // History edit/delete
+          const editBtn = e.target.closest?.('.edit-btn');
+          const delBtn = e.target.closest?.('.delete-btn');
+          const saveEdit = e.target.closest?.('.save-edit-btn');
+          const cancelEdit = e.target.closest?.('.cancel-edit-btn');
+
+          if (editBtn) {
+            const item = editBtn.closest('.archive-item');
+            const id = item?.dataset?.id;
+            const note = personalStore.get(id);
+            if (!note) return;
+
+            item.querySelector('.text').innerHTML =
+              `<textarea class="edit-textarea" style="width:100%;min-height:60px;">${Utils.escapeHTML(note.text)}</textarea>`;
+            item.querySelector('.actions').innerHTML =
+              `<button class="save-edit-btn" data-id="${id}">${Utils.escapeHTML(I18n.t('save'))}</button>
+               <button class="cancel-edit-btn" data-id="${id}">${Utils.escapeHTML(I18n.t('cancel'))}</button>`;
+            return;
+          }
+
+          if (saveEdit) {
+            const item = saveEdit.closest('.archive-item');
+            const id = saveEdit.dataset.id;
+            const ta = item?.querySelector('.edit-textarea');
+            if (ta?.value?.trim()) {
+              await updatePersonalNote({ id, newText: ta.value });
+            }
+            renderHistory();
+            return;
+          }
+
+          if (cancelEdit) {
+            renderHistory();
+            return;
+          }
+
+          if (delBtn) {
+            const id = delBtn.dataset.id;
+            if (confirm(I18n.t('confirmDelete'))) {
+              await personalStore.markDeleted(id);
+              search.clearCache();
+              renderHistory();
+              refreshFlowSearch();
+            }
+            return;
+          }
+        });
+
+        // Capsule export/import
+        els.exportBtn.addEventListener('click', () => {
+          Capsule.exportNotes(personalStore.list());
+        });
+
+        els.importBtn.addEventListener('click', () => els.importFile.click());
+
+        els.importFile.addEventListener('change', async (e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          if (!file) return;
+
+          try {
+            const imported = await Capsule.importNotes(file);
+            // Import as new notes (new ids in Gun) to avoid clashes:
+            let n = 0;
+            for (const item of imported) {
+              const v = await Embedder.embed(item.text);
+              const packed = Vectors.packInt8(v);
+              await personalStore.add({ text: item.text, vPacked: packed });
+              n++;
+            }
+            alert(I18n.t('importSuccess', { n }));
+          } catch (err) {
+            alert('Import error: ' + (err?.message ?? String(err)));
+          }
+        });
+
+        // Rebuild vectors (personal only)
+        els.rebuildBtn.addEventListener('click', async () => {
+          els.rebuildBtn.disabled = true;
+          els.rebuildBtn.textContent = '...';
+          try {
+            for (const n of personalStore.list()) {
+              const v = await Embedder.embed(n.text);
+              const packed = Vectors.packInt8(v);
+              await personalStore.putVector(n.id, packed);
+            }
+            search.clearCache();
+            alert(I18n.t('rebuildDone'));
+          } finally {
+            els.rebuildBtn.disabled = false;
+            els.rebuildBtn.textContent = I18n.t('rebuildVectors');
+          }
+        });
+
+        // Reset device id
+        els.resetDeviceBtn.addEventListener('click', async () => {
+          if (!confirm(I18n.t('resetDeviceConfirm'))) return;
+          await resetDeviceId();
+        });
+
+        // Initial render
+        updateNetInfo(settingsStore.get());
+        renderFlow();
       }
 
-      const editBtn = e.target.closest('.edit-btn');
-      if (editBtn) {
-        const item = editBtn.closest('.archive-item');
-        const note = NS.Domain.MyNotes.all().find(n => n.id === item.dataset.id);
-        if (note) {
-          item.querySelector('.text').innerHTML = '<textarea class="edit-textarea" style="width:100%;min-height:60px">' + NS.Util.esc(note.text) + '</textarea>';
-          item.querySelector('.actions').innerHTML =
-            '<button class="save-edit-btn" data-id="' + note.id + '">' + NS.I18n.t('save') + '</button>' +
-            '<button class="cancel-edit-btn" data-id="' + note.id + '">' + NS.I18n.t('cancel') + '</button>';
-        }
-        return;
-      }
-      const saveEditBtn = e.target.closest('.save-edit-btn');
-      if (saveEditBtn) {
-        const item = saveEditBtn.closest('.archive-item');
-        const ta = item.querySelector('.edit-textarea');
-        if (ta && ta.value.trim()) NS.Domain.MyNotes.update(saveEditBtn.dataset.id, ta.value.trim());
-        renderHistory();
-        return;
-      }
-      const cancelBtn = e.target.closest('.cancel-edit-btn');
-      if (cancelBtn) { renderHistory(); return; }
+      return { start };
+    })();
 
-      const deleteBtn = e.target.closest('.delete-btn');
-      if (deleteBtn) {
-        if (confirm(NS.I18n.t('confirmDelete'))) {
-          const id = deleteBtn.dataset.id;
-          NS.Domain.MyNotes.remove(id);
-          NS.Domain.World.removeByLocalId(id);
-          renderHistory();
-          searchFlow();
-        }
-        return;
-      }
+    // ===================== Module: Boot =====================
+    App.start().catch(err => {
+      console.error(err);
+      alert('Fatal error: ' + (err?.message ?? String(err)));
     });
-
-    els.settingsTrigger.addEventListener('click', openSettings);
-    els.overlay.addEventListener('click', closeSettings);
-
-    els.thresholdSl.addEventListener('input', () => {
-      els.thresholdVal.textContent = parseFloat(els.thresholdSl.value).toFixed(2);
-    });
-    els.serendipitySl.addEventListener('input', () => {
-      els.serendipityVal.textContent = parseFloat(els.serendipitySl.value).toFixed(2);
-    });
-
-    els.applyBtn.addEventListener('click', () => { applySettings(false); closeSettings(); });
-    els.resetBtn.addEventListener('click', resetAll);
-    els.rebuildBtn.addEventListener('click', rebuildVectors);
-    els.exportBtn.addEventListener('click', doExport);
-    els.importBtn.addEventListener('click', () => els.importFile.click());
-    els.selfSaveBtn.addEventListener('click', doSelfSave);
-    els.importFile.addEventListener('change', e => {
-      if (e.target.files[0]) { doImport(); e.target.value = ''; }
-    });
-
-    els.thresholdSl.addEventListener('change', applySettings);
-    els.serendipitySl.addEventListener('change', applySettings);
-    els.minWavesSel.addEventListener('change', () => applySettings(false));
-    els.maxResSel.addEventListener('change', () => applySettings(false));
-    els.langSelect.addEventListener('change', applySettings);
-    els.themeSelect.addEventListener('change', applySettings);
-  }
-
-  function init() {
-    bindEvents();
-    syncSettingsUI();
-    updateI18nLabels();
-  }
-
-  return {
-    init, status, diag, syncSettingsUI, updateI18nLabels,
-    renderHistory, searchFlow,
-    get els() { return els; }
-  };
-})();
-
-/* ========================================================================== */
-/* NS.App — bootstrap, wires everything                                        */
-/* ========================================================================== */
-NS.App = (() => {
-  async function main() {
-    // 1. Load settings + apply
-    const s = NS.Settings.get();
-    NS.I18n.setLang(s.lang);
-    NS.Theme.apply(s.theme);
-
-    // 2. Generate namespace if missing
-    if (!s.namespace) {
-      NS.Settings.set({ namespace: 'ns-' + NS.Util.uid().slice(3, 11) });
-    }
-
-    // 3. Restore embedded state (TiddlyWiki-style)
-    const embedded = NS.Store.File.loadEmbedded();
-    if (embedded && !NS.Store.Local.myNotes.length) {
-      if (Array.isArray(embedded.myNotes)) NS.Store.Local.myNotes = embedded.myNotes;
-      if (Array.isArray(embedded.world)) NS.Store.Local.world = embedded.world;
-    }
-
-    // 4. Diagnostics: file:// vs http
-    const isFile = location.protocol === 'file:';
-    const hasGun = typeof window.Gun !== 'undefined';
-    if (isFile) {
-      NS.UI.diag(NS.I18n.t('diagFileProtocol'), true);
-    } else if (!hasGun) {
-      NS.UI.diag(NS.I18n.t('diagNoGun'), true);
-    }
-
-    // 5. Init UI (renders immediately, model loads async)
-    NS.UI.init();
-    NS.UI.status(NS.I18n.t('modelLoading'));
-
-    // 6. Bus subscriptions
-    NS.Bus.on(NS.Bus.EVENTS.MODEL_READY, () => {
-      NS.UI.status(NS.I18n.t('ready'));
-      NS.UI.els.saveBtn.disabled = false;
-    });
-    NS.Bus.on(NS.Bus.EVENTS.MODEL_ERROR, msg => {
-      NS.UI.status(NS.I18n.t('modelError', { msg }));
-    });
-    NS.Bus.on(NS.Bus.EVENTS.MY_NOTES_CHANGED, () => {
-      if (document.getElementById('historyView').classList.contains('active')) {
-        NS.UI.renderHistory();
-      }
-    });
-    NS.Bus.on(NS.Bus.EVENTS.NETWORK_STATUS, ({ count }) => {
-      if (!isFile && hasGun && count > 0) {
-        NS.UI.diag(NS.I18n.t('diagNetOk', { n: count }));
-      }
-    });
-
-    // 7. Load model (async, non-blocking)
-    NS.Model.load()
-      .then(() => NS.Engine.rebuild(NS.Domain.MyNotes.all()))
-      .catch(e => {
-        console.error('[App] model:', e);
-        NS.Bus.emit(NS.Bus.EVENTS.MODEL_ERROR, e.message || String(e));
-      });
-
-    // 8. Init P2P (async, non-blocking)
-    if (hasGun && !isFile) {
-      try {
-        NS.Network.init(
-          NS.Settings.get().relays,
-          NS.Settings.get().namespace
-        );
-      } catch (e) {
-        console.warn('[App] network:', e);
-      }
-    }
-  }
-
-  return { main };
-})();
-
-/* ========================================================================== */
-/* ENTRY                                                                       */
-/* ========================================================================== */
-NS.App.main().catch(e => console.error('[App] fatal:', e));
-</script>
+  </script>
 </body>
 </html>
+```
