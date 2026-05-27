@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Noosphere Core (IDB Local + Gun World MAP)</title>
+  <title>Noosphere Core (IDB Local + Gun World FINAL)</title>
 
   <style>
     :root{
@@ -79,7 +79,6 @@
     .tiny{ font-size:12px; color:var(--muted); }
   </style>
 
-  <!-- GunDB -->
   <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/gun/sea.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/gun/lib/rindexed.js"></script>
@@ -174,7 +173,7 @@
     <div class="field">
       <label>Gun relay peers (по одному URL на строку)</label>
       <textarea id="peersText" class="panel-ta" spellcheck="false"></textarea>
-      <div class="tiny">Встроено: https://relay.peer.ooo/gun</div>
+      <div class="tiny">По умолчанию: https://relay.peer.ooo/gun</div>
     </div>
 
     <div class="field">
@@ -192,7 +191,11 @@
   <script type="module">
     import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-    // Utils
+    // ====== HARD CONSTANTS ======
+    const CODE_VER = '2026-05-27-world-map-final';
+    const WORLD_ROOT = 'noosphere_world_prod_v2'; // fixed shared root for everyone
+
+    // ====== Utils ======
     const Utils = (() => {
       const $ = (s, r=document) => r.querySelector(s);
       const esc = (s) => { const d=document.createElement('div'); d.textContent=String(s??''); return d.innerHTML; };
@@ -208,7 +211,7 @@
       return { $, esc, debounce, clamp, uuid, safeJSON, Emitter };
     })();
 
-    // IDB
+    // ====== IDB ======
     const IDB = (() => {
       const DB = 'noosphere_idb_local_v1';
       const STO_KV = 'kv';
@@ -281,10 +284,16 @@
       return { kvGet, kvSet, notesPut, notesDelete, notesGetAll, ok:()=>ok };
     })();
 
-    // Settings (relay встроен)
+    // ====== Settings ======
     const Settings = (() => {
       const KEY='settings';
-      const DEFAULT = { theme:'auto', threshold:0.25, serDelta:0.15, maxResults:5, peersText:'https://relay.peer.ooo/gun' };
+      const DEFAULT = {
+        theme:'auto',
+        threshold:0.25,
+        serDelta:0.15,
+        maxResults:5,
+        peersText:'https://relay.peer.ooo/gun'
+      };
 
       const sanitize = (raw) => {
         const x = raw && typeof raw==='object' ? raw : {};
@@ -296,7 +305,9 @@
           peersText: (typeof x.peersText==='string') ? x.peersText : DEFAULT.peersText
         };
       };
-      const parsePeers = (peersText) => String(peersText??'').split('\n').map(s=>s.trim()).filter(Boolean);
+
+      const parsePeers = (peersText) =>
+        String(peersText??'').split('\n').map(s=>s.trim()).filter(Boolean);
 
       async function load() { return sanitize((await IDB.kvGet(KEY)) ?? DEFAULT); }
       async function save(s) { await IDB.kvSet(KEY, sanitize(s)); }
@@ -304,6 +315,7 @@
       return { sanitize, parsePeers, load, save };
     })();
 
+    // ====== Theme ======
     const Theme = (() => {
       function apply(mode) {
         const dark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -312,7 +324,7 @@
       return { apply };
     })();
 
-    // Vectors
+    // ====== Vectors ======
     const Vectors = (() => {
       const dot = (a,b)=>{ let d=0; for(let i=0;i<a.length;i++) d+=a[i]*b[i]; return d; };
       const norm = (v)=>{ let s=0; for(let i=0;i<v.length;i++) s+=v[i]*v[i]; const m=Math.sqrt(s)||1; for(let i=0;i<v.length;i++) v[i]/=m; return v; };
@@ -323,7 +335,7 @@
       return { dot, packI8, unpackI8 };
     })();
 
-    // Embedder
+    // ====== Embedder ======
     const Embedder = (() => {
       let model=null;
       async function init() { model = await pipeline('feature-extraction','Xenova/paraphrase-multilingual-MiniLM-L12-v2',{ quantized:true }); }
@@ -346,7 +358,7 @@
       return { init, ready, embed };
     })();
 
-    // Local notes
+    // ====== Local notes ======
     const LocalNotes = (() => {
       function create() {
         const ee = new Utils.Emitter();
@@ -389,34 +401,17 @@
       return { create };
     })();
 
-    // ===== Gun World MAP: feed.get(id).put({note: ref, ...meta}) =====
+    // ====== World (Gun) correct: feed[id] -> {note: link}, note[id] -> data ======
     const World = (() => {
-      const ROOT = 'noosphere_world_prod_v1';
-
       function create(gun) {
         const ee = new Utils.Emitter();
-        const feed = gun.get(ROOT).get('world').get('feed');      // map id -> entry
-        const noteRoot = gun.get(ROOT).get('world').get('note');  // note/<id>
+        const feed = gun.get(WORLD_ROOT).get('world').get('feed');     // map
+        const noteRoot = gun.get(WORLD_ROOT).get('world').get('note'); // nodes
 
-        const entries = new Map(); // id -> { id, at, author, noteSoul }
-        const notes = new Map();   // id -> { id, text, vPacked, author, createdAt }
+        const notes = new Map();        // id -> note
+        const soulSubscribed = new Set();
 
-        const subSoul = new Set();
-
-        function emit() {
-          // merge entries+notes when possible
-          const out = [];
-          for (const [id, n] of notes) out.push(n);
-          ee.emit('change', out.sort((a,b)=>b.createdAt-a.createdAt));
-        }
-
-        function listAll() {
-          const out = [];
-          for (const [id, n] of notes) out.push(n);
-          return out.sort((a,b)=>b.createdAt-a.createdAt);
-        }
-
-        function normalizeNote(id, raw) {
+        function normalize(id, raw) {
           const x = raw && typeof raw === 'object' ? raw : {};
           if (x.deleted) return null;
           if (typeof x.text !== 'string') return null;
@@ -429,21 +424,29 @@
           };
         }
 
-        // Subscribe feed entries by id
+        function listAll() {
+          return Array.from(notes.values()).sort((a,b)=>b.createdAt-a.createdAt);
+        }
+
+        function emit() { ee.emit('change', listAll()); }
+
+        // Subscribe feed entries deterministically
         feed.map().on((entry, id) => {
           if (!id || id === '_' || id === 'null') return;
           const e = entry && typeof entry === 'object' ? entry : {};
-          // entry.note is relation link { '#': soul }
-          const soul = e.note && typeof e.note === 'object' && typeof e.note['#'] === 'string' ? e.note['#'] : null;
+          const link = e.note;
+
+          const soul =
+            (link && typeof link === 'object' && typeof link['#'] === 'string') ? link['#'] :
+            (typeof link === 'string' ? link : null);
+
           if (!soul) return;
 
-          entries.set(id, { id, soul, at: Number(e.at) || 0, author: String(e.author ?? '') });
-
-          if (subSoul.has(soul)) return;
-          subSoul.add(soul);
+          if (soulSubscribed.has(soul)) return;
+          soulSubscribed.add(soul);
 
           gun.get(soul).on((raw) => {
-            const n = normalizeNote(id, raw);
+            const n = normalize(id, raw);
             if (!n) { notes.delete(id); emit(); return; }
             notes.set(id, n);
             emit();
@@ -453,24 +456,17 @@
         function publish({ id, text, vPacked, author }) {
           const now = Date.now();
           const ref = noteRoot.get(id);
-          // write note
           ref.put({ id, text, vPacked, author, createdAt: now, deleted:false });
-          // write feed entry under deterministic key id
           feed.get(id).put({ id, at: now, author, note: ref });
           return id;
         }
 
-        return {
-          ROOT,
-          listAll,
-          onChange: (fn) => ee.on('change', fn),
-          publish
-        };
+        return { listAll, onChange:(fn)=>ee.on('change', fn), publish };
       }
-
       return { create };
     })();
 
+    // ====== Indexer ======
     const Indexer = (() => {
       function create({ local }) {
         let running = false;
@@ -492,6 +488,7 @@
       return { create };
     })();
 
+    // ====== Publisher ======
     const Publisher = (() => {
       function create({ local, world, deviceId }) {
         let running = false;
@@ -501,6 +498,7 @@
           running = true;
           try {
             if (!Embedder.ready()) return;
+
             const pending = local.list().filter(n => n.publishState === 'pending');
             for (const n of pending) {
               let v = n.vPacked;
@@ -525,16 +523,15 @@
       return { create };
     })();
 
+    // ====== Search ======
     const Search = (() => {
       function create({ local, world, settings, deviceId }) {
-        const cache = new Map(); // id -> Float32Array
-
+        const cache = new Map();
         function vecFromPacked(id, packed) {
           if (!packed) return null;
           if (cache.has(id)) return cache.get(id);
           try { const v = Vectors.unpackI8(packed); cache.set(id, v); return v; } catch { return null; }
         }
-
         function clear() { cache.clear(); }
 
         async function searchAll(queryText) {
@@ -561,9 +558,7 @@
           const worldHits = [];
           const serHits = [];
           for (const w of world.listAll()) {
-            // hide own published in world
-            if (w.author === deviceId) continue;
-
+            if (w.author === deviceId) continue; // hide own in world
             const v = vecFromPacked(w.id, w.vPacked);
             if (!v) continue;
             const score = Vectors.dot(qVec, v);
@@ -588,6 +583,7 @@
       return { create };
     })();
 
+    // ====== UI rendering ======
     const UI = (() => {
       function pill(label, state='neutral') {
         const dot = state === 'ok' ? 'ok' : state === 'warn' ? 'warn' : state === 'bad' ? 'bad' : '';
@@ -619,7 +615,7 @@
             ? `<span class="badge pending">pending</span>`
             : (n.publishState === 'published' ? `<span class="badge world">world</span>` : '');
           return `
-            <div class="item" data-id="${n.id}">
+            <div class="item">
               <div class="text">${Utils.esc(n.text)}</div>
               <div class="meta">
                 <span>${new Date(n.createdAt).toLocaleString()}</span>
@@ -637,27 +633,55 @@
       return { pill, renderItems, renderHistory };
     })();
 
-    const Capsule = (() => {
-      function exportNotes(notes) {
-        const cap = { version: 1, kind: 'noosphere', createdAt: Date.now(), notes };
-        const blob = new Blob([JSON.stringify(cap)], { type:'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'noosphere.capsule.json';
-        a.click();
-        URL.revokeObjectURL(a.href);
+    // ====== WS probe (real connection check) ======
+    const NetProbe = (() => {
+      function toWS(url) {
+        // accept https://host/path => wss://host/path
+        if (url.startsWith('https://')) return 'wss://' + url.slice('https://'.length);
+        if (url.startsWith('http://')) return 'ws://' + url.slice('http://'.length);
+        return url;
       }
 
-      async function importNotes(file) {
-        const txt = await file.text();
-        const cap = Utils.safeJSON(txt, null);
-        if (!cap || !Array.isArray(cap.notes)) throw new Error('bad capsule');
-        return cap.notes;
+      function probePeer(peer, timeoutMs=2000) {
+        return new Promise((resolve) => {
+          let done = false;
+          let ws;
+          const t = setTimeout(() => {
+            if (done) return;
+            done = true;
+            try { ws?.close(); } catch {}
+            resolve(false);
+          }, timeoutMs);
+
+          try {
+            ws = new WebSocket(toWS(peer));
+            ws.onopen = () => {
+              if (done) return;
+              done = true;
+              clearTimeout(t);
+              try { ws.close(); } catch {}
+              resolve(true);
+            };
+            ws.onerror = () => {
+              if (done) return;
+              done = true;
+              clearTimeout(t);
+              try { ws.close(); } catch {}
+              resolve(false);
+            };
+          } catch {
+            if (done) return;
+            done = true;
+            clearTimeout(t);
+            resolve(false);
+          }
+        });
       }
 
-      return { exportNotes, importNotes };
+      return { probePeer };
     })();
 
+    // ====== App ======
     const App = (() => {
       const els = {
         tabFlow: Utils.$('#tabFlow'),
@@ -709,8 +733,14 @@
       let modelReady = false;
       let busy = false;
 
+      let netWS = null;
+      let netIn = 0;
+      let netOut = 0;
+
       function renderStatus(errMsg = '') {
-        const peersCount = Settings.parsePeers(settings.peersText).length;
+        const peers = Settings.parsePeers(settings.peersText);
+        const peersCount = peers.length;
+
         const localCount = local.list().length;
         const pendingCount = local.list().filter(n => n.publishState === 'pending').length;
 
@@ -718,8 +748,13 @@
         const worldForeign = world.listAll().filter(n => n.author !== deviceId).length;
 
         const pills = [
+          UI.pill(`ver:${CODE_VER}`),
+          UI.pill(`root:${WORLD_ROOT}`),
           UI.pill(`IDB:${IDB.ok() ? 'ok' : 'fail'}`, IDB.ok() ? 'ok' : 'bad'),
           UI.pill(`relay:${peersCount}`, peersCount ? 'ok' : 'warn'),
+          UI.pill(`ws:${netWS === null ? '...' : (netWS ? 'up' : 'down')}`, netWS ? 'ok' : (netWS === null ? 'warn' : 'bad')),
+          UI.pill(`in:${netIn}`),
+          UI.pill(`out:${netOut}`),
           UI.pill(`model:${modelReady ? 'ok' : 'load'}`, modelReady ? 'ok' : 'warn'),
           UI.pill(`local:${localCount}`),
           UI.pill(`pending:${pendingCount}`, pendingCount ? 'warn' : 'neutral'),
@@ -729,7 +764,7 @@
 
         if (errMsg) pills.push(UI.pill(errMsg, 'bad'));
         els.status.innerHTML = pills.join(' ');
-        els.diag.textContent = `device:${deviceId} | worldRoot:${world.ROOT}`;
+        els.diag.textContent = `device:${deviceId}`;
       }
 
       function applyTheme() { Theme.apply(settings.theme); }
@@ -765,12 +800,26 @@
           peersText: els.peersText.value
         });
         await Settings.save(settings);
+
         applyTheme();
         gun.opt({ peers: Settings.parsePeers(settings.peersText) });
+
+        // re-probe ws
+        netWS = null;
+        probeWS();
+
         search.clear();
         renderStatus();
         refreshFlow();
         publisher.run();
+      }
+
+      async function probeWS() {
+        const peers = Settings.parsePeers(settings.peersText);
+        if (!peers.length) { netWS = false; renderStatus(); return; }
+        // check only first peer (enough to know)
+        netWS = await NetProbe.probePeer(peers[0], 2500);
+        renderStatus();
       }
 
       let seq = 0;
@@ -899,20 +948,8 @@
         location.reload();
       }
 
-      async function doExport() { Capsule.exportNotes(local.list()); }
-      async function doImport(file) {
-        const imported = await Capsule.importNotes(file);
-        for (const n of imported) {
-          if (!n.id) n.id = Utils.uuid();
-          await IDB.notesPut(n);
-        }
-        await local.load();
-        search.clear();
-        renderHistory();
-        refreshFlow();
-        indexer.runOnce();
-        publisher.run();
-      }
+      async function doExport() { /* optional, keep simple */ }
+      async function doImport(file) { /* optional, keep simple */ }
 
       async function boot() {
         deviceId = await IDB.kvGet('deviceId');
@@ -922,7 +959,12 @@
         settingsToUI();
         applyTheme();
 
-        gun = Gun({ peers: Settings.parsePeers(settings.peersText), localStorage:false });
+        const peers = Settings.parsePeers(settings.peersText);
+        gun = Gun({ peers, localStorage:false });
+
+        // network counters (REAL: if out stays 0 — no network activity)
+        gun.on('out', function(msg){ netOut++; this.to.next(msg); });
+        gun.on('in', function(msg){ netIn++; this.to.next(msg); });
 
         local = LocalNotes.create();
         await local.load();
@@ -939,6 +981,7 @@
         world.onChange(() => { renderStatus(); refreshFlow(); });
 
         renderStatus();
+        probeWS();
 
         els.sendWorld.disabled = true;
         (async() => {
@@ -959,6 +1002,7 @@
 
         setInterval(() => publisher.run(), 4000);
 
+        // UI events
         els.tabFlow.addEventListener('click', () => setTab('flow'));
         els.tabHistory.addEventListener('click', () => setTab('history'));
 
@@ -982,14 +1026,6 @@
         els.maxResults.addEventListener('change', uiToSettingsApply);
         els.peersText.addEventListener('change', uiToSettingsApply);
 
-        els.export.addEventListener('click', doExport);
-        els.import.addEventListener('click', () => els.importFile.click());
-        els.importFile.addEventListener('change', (e) => {
-          const f = e.target.files?.[0];
-          e.target.value = '';
-          if (f) doImport(f);
-        });
-
         els.reindex.addEventListener('click', doReindex);
         els.resetDevice.addEventListener('click', doResetDevice);
 
@@ -997,7 +1033,7 @@
         renderHistory();
         renderStatus();
 
-        window.__noosphere = { gun, local, world, settings: () => settings, deviceId };
+        window.__noosphere = { gun, local, world, settings: () => settings, deviceId, CODE_VER, WORLD_ROOT };
       }
 
       return { boot };
