@@ -5,196 +5,1033 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Noosphere</title>
 <style>
-:root{--bg:#f8fafc;--surface:#fff;--text:#0f172a;--muted:#64748b;--border:#e2e8f0;--accent:#4f46e5}
+:root{--bg:#f8fafc;--surface:#fff;--text:#0f172a;--muted:#64748b;--border:#e2e8f0;--accent:#4f46e5;--radius:12px}
+.dark{--bg:#0f172a;--surface:#1e293b;--text:#f1f5f9;--muted:#94a3b8;--border:#334155;--accent:#818cf8}
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--text);padding:1rem}
-.app{max-width:720px;margin:0 auto}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.75rem;margin-bottom:.5rem}
-textarea{width:100%;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:12px;padding:.75rem;font:inherit;min-height:80px;outline:none}
-button{padding:.5rem 1rem;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;font:inherit}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.5;padding:1rem}
+.app{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:1rem}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:.75rem;margin-bottom:.5rem}
+textarea,input[type=text],select{width:100%;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:var(--radius);padding:.75rem;font:inherit;outline:none}
+textarea{min-height:80px;resize:vertical}
+button{padding:.5rem 1rem;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;font:inherit;font-weight:500}
 button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
 button:disabled{opacity:.5;cursor:not-allowed}
-.row{display:flex;gap:.5rem;align-items:center}
-.row-between{display:flex;justify-content:space-between;align-items:center}
-.meta{font-size:.75rem;color:var(--muted);margin-bottom:.25rem}
+.row{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
+.row-between{display:flex;justify-content:space-between;align-items:center;gap:.5rem}
+.meta{font-size:.75rem;color:var(--muted);margin-bottom:.25rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}
 .score{background:rgba(79,70,229,.1);color:var(--accent);padding:2px 6px;border-radius:6px;font-weight:600}
-.section-title{font-size:.75rem;text-transform:uppercase;color:var(--muted);font-weight:600;margin:.75rem 0 .25rem}
-.carousel{display:flex;overflow-x:auto;gap:.5rem}
+.section-title{font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;margin:.75rem 0 .25rem}
+.tabs{display:flex;gap:.5rem;border-bottom:1px solid var(--border);padding-bottom:.5rem}
+.tab{padding:.4rem .8rem;border-radius:8px;border:none;background:transparent;cursor:pointer}
+.tab.active{background:var(--accent);color:#fff}
+.carousel{display:flex;overflow-x:auto;gap:.5rem;padding:.25rem 0}
 .carousel .card{min-width:260px;flex:0 0 auto}
-.status{font-size:.75rem;color:var(--muted)}
+.wave-btns{display:flex;align-items:center;gap:.25rem}
+.wave-btns button{padding:2px 6px;font-size:.8rem}
+.charged{border-color:#0ea5e9}
+.status{font-size:.75rem;color:var(--muted);padding:.25rem .5rem}
+.hidden{display:none!important}
+details{border:1px solid var(--border);border-radius:var(--radius);padding:.5rem .75rem;background:var(--surface);margin-bottom:.5rem}
+details>summary{cursor:pointer;font-weight:500}
+.field{margin:.5rem 0;display:flex;flex-direction:column;gap:.25rem}
+.field label{font-size:.8rem;color:var(--muted)}
+.field input[type=range]{padding:0}
 </style>
 </head>
 <body>
-<div class="app" id="app">
-  <div class="status">Загрузка...</div>
-</div>
+<div class="app" id="app"><div class="status">Загрузка…</div></div>
 
+<!-- GunDB: UMD, работает через обычный script -->
 <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/sea.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/axe.js"></script>
 
-<script>
-const CONFIG = {
-  modelName: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
-  threshold: 0.25,
-  maxResults: 5
-};
+<script type="module">
+// ============================================================================
+// IMPORTS — Transformers.js только через ESM
+// ============================================================================
+import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-const Storage = {
-  get myNotes() {
-    try { return JSON.parse(localStorage.getItem('myNotes') || '[]'); }
-    catch { return []; }
+// ============================================================================
+// CONFIG
+// ============================================================================
+const Config = {
+  VERSION: '1.0.2',
+  DEFAULTS: {
+    theme: 'auto',
+    lang: 'ru',
+    threshold: 0.25,
+    serendipityDelta: 0.15,
+    minWaves: 1,
+    maxResults: 5,
+    gunRelays: ['https://gun-manhattan.herokuapp.com/gun.js']
   },
-  set myNotes(v) { localStorage.setItem('myNotes', JSON.stringify(v)); },
-  
-  get world() {
-    try { return JSON.parse(localStorage.getItem('world') || '[]'); }
-    catch { return []; }
+  STORAGE: {
+    settings: 'ns_settings',
+    myNotes: 'ns_mynotes',
+    worldLocal: 'ns_world_local',
+    gunIdentity: 'ns_gun_identity'
   },
-  set world(v) { localStorage.setItem('world', JSON.stringify(v)); }
-};
-
-const Model = {
-  extractor: null,
-  
-  async load() {
-    if (!window.transformers) throw new Error('Transformers.js не загружен');
-    this.extractor = await window.transformers.pipeline('feature-extraction', CONFIG.modelName, { quantized: true });
+  GUN: {
+    PUBLIC_PREFIX: 'noosphere/public/v1',
+    USER_WAVES: 'waves'
   },
-  
-  async embed(text) {
-    const out = await this.extractor([text], { pooling: 'mean', normalize: true });
-    return Array.from(out.data);
-  },
-  
-  cosine(a, b) {
-    let dot = 0;
-    for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
-    return dot;
+  MODEL: {
+    name: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+    quantized: true
   }
 };
 
-const Engine = {
-  cache: new Map(),
-  
-  async embed(text, id) {
-    if (this.cache.has(id)) return this.cache.get(id);
-    const vec = await Model.embed(text);
-    this.cache.set(id, vec);
-    return vec;
+// ============================================================================
+// EVENT BUS
+// ============================================================================
+const EventBus = {
+  _subs: new Map(),
+  on(event, fn) {
+    if (!this._subs.has(event)) this._subs.set(event, new Set());
+    this._subs.get(event).add(fn);
+    return () => this._subs.get(event).delete(fn);
   },
-  
-  async search(query) {
-    const qVec = await Model.embed(query);
-    const results = [];
-    
-    for (const note of Storage.myNotes) {
-      const vec = this.cache.get(note.id);
-      if (!vec) continue;
-      const score = Model.cosine(qVec, vec);
-      if (score >= CONFIG.threshold) {
-        results.push({ ...note, score });
+  emit(event, payload) {
+    const set = this._subs.get(event);
+    if (!set) return;
+    set.forEach(fn => {
+      try { fn(payload); }
+      catch (err) { console.error('[EventBus]', event, err); }
+    });
+  },
+  EVENTS: {
+    MODEL_LOADED: 'model:loaded',
+    MODEL_ERROR: 'model:error',
+    MY_NOTES_CHANGED: 'mynotes:changed',
+    WORLD_CHANGED: 'world:changed',
+    SETTINGS_CHANGED: 'settings:changed',
+    NETWORK_PEER: 'network:peer',
+    NETWORK_ERROR: 'network:error'
+  }
+};
+
+// ============================================================================
+// I18N
+// ============================================================================
+const I18n = {
+  _lang: 'ru',
+  _dict: {
+    ru: {
+      tabFlow: 'Поток', tabHistory: 'История', placeholder: 'Поделитесь мыслью…',
+      send: 'Отправить', sendShare: 'Опубликовать в P2P', myThoughts: 'Мои', world: 'Мир',
+      serendipity: 'Смежные', empty: '—', settings: 'Настройки', ready: 'Готово',
+      loadingModel: 'Загрузка модели…', exportCapsule: 'Экспорт JSON',
+      importCapsule: 'Импорт JSON', selfSave: 'Записать в HTML (TiddlyWiki)',
+      threshold: 'Порог релевантности', serendipityDelta: 'Дельта смежности',
+      minWaves: 'Мин. волн', maxResults: 'Макс. карточек', theme: 'Тема',
+      themeAuto: 'Авто', themeLight: 'День', themeDark: 'Ночь',
+      relayList: 'Gun relay (по одному на строку)', rebuildVectors: 'Перестроить векторы',
+      resetAll: 'Сбросить всё', waves: 'волн', delete: 'удал.', edit: 'ред.',
+      save: 'сохр.', cancel: 'отм.', confirmDelete: 'Удалить заметку?',
+      today: 'Сегодня', yesterday: 'Вчера', peers: 'Пиры', histSearch: 'Поиск по истории…',
+      lang: 'Язык', modelError: 'Модель не загружена', netError: 'Сеть недоступна',
+      edited: '(изм.)'
+    },
+    en: {
+      tabFlow: 'Flow', tabHistory: 'History', placeholder: 'Share a thought…',
+      send: 'Send', sendShare: 'Publish to P2P', myThoughts: 'Mine', world: 'World',
+      serendipity: 'Serendipity', empty: '—', settings: 'Settings', ready: 'Ready',
+      loadingModel: 'Loading model…', exportCapsule: 'Export JSON',
+      importCapsule: 'Import JSON', selfSave: 'Embed in HTML (TiddlyWiki)',
+      threshold: 'Relevance threshold', serendipityDelta: 'Serendipity delta',
+      minWaves: 'Min waves', maxResults: 'Max cards', theme: 'Theme',
+      themeAuto: 'Auto', themeLight: 'Light', themeDark: 'Dark',
+      relayList: 'Gun relays (one per line)', rebuildVectors: 'Rebuild vectors',
+      resetAll: 'Reset all', waves: 'waves', delete: 'del', edit: 'edit',
+      save: 'save', cancel: 'cancel', confirmDelete: 'Delete note?',
+      today: 'Today', yesterday: 'Yesterday', peers: 'Peers', histSearch: 'Search history…',
+      lang: 'Language', modelError: 'Model not loaded', netError: 'Network down',
+      edited: '(edited)'
+    }
+  },
+  setLang(l) { this._lang = this._dict[l] ? l : 'ru'; },
+  get lang() { return this._lang; },
+  t(key, params) {
+    let s = this._dict[this._lang]?.[key] ?? this._dict.ru[key] ?? key;
+    if (params) {
+      for (const [k, v] of Object.entries(params)) {
+        s = s.replaceAll('{' + k + '}', v);
       }
     }
-    
-    return results.sort((a, b) => b.score - a.score).slice(0, CONFIG.maxResults);
+    return s;
   }
 };
 
-const UI = {
-  render() {
-    const app = document.getElementById('app');
-    app.innerHTML = `
-      <div class="card">
-        <textarea id="input" placeholder="Поделитесь мыслью..."></textarea>
-        <div class="row-between" style="margin-top:.5rem">
-          <span class="status" id="status">Готово</span>
-          <button id="send" disabled>Отправить</button>
-        </div>
-      </div>
-      <div id="results"></div>
-    `;
-    
-    const input = document.getElementById('input');
-    const send = document.getElementById('send');
-    const status = document.getElementById('status');
-    
-    input.addEventListener('input', () => {
-      this.search(this.debounce(() => this.doSearch(input.value, status), 300));
-    });
-    
-    send.addEventListener('click', async () => {
-      const text = input.value.trim();
-      if (!text) return;
-      
-      const note = {
-        id: 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2),
-        text: text,
-        date: new Date().toISOString()
-      };
-      
-      Storage.myNotes = [note, ...Storage.myNotes];
-      await Engine.embed(text, note.id);
-      
-      input.value = '';
-      this.doSearch('', status);
-    });
-    
-    Model.load().then(() => {
-      send.disabled = false;
-      status.textContent = 'Модель загружена';
-    }).catch(err => {
-      status.textContent = 'Ошибка: ' + err.message;
-    });
+// ============================================================================
+// UTIL
+// ============================================================================
+const Util = {
+  uid() { return 'id_' + crypto.randomUUID(); },
+  now() { return new Date().toISOString(); },
+  esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
   },
-  
   debounce(fn, ms) {
-    let t;
-    return () => {
-      clearTimeout(t);
-      t = setTimeout(fn, ms);
+    let t = null;
+    return function(...args) {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), ms);
     };
   },
-  
-  async doSearch(query, status) {
-    const results = document.getElementById('results');
-    
-    if (!query.trim()) {
-      results.innerHTML = '';
-      return;
-    }
-    
-    status.textContent = 'Поиск...';
-    
+  async hash(str) {
     try {
-      const matches = await Engine.search(query);
-      
-      if (!matches.length) {
-        results.innerHTML = '<div class="status">Ничего не найдено</div>';
-        status.textContent = 'Готово';
-        return;
-      }
-      
-      results.innerHTML = '<div class="section-title">Похожие мысли</div><div class="carousel"></div>';
-      const carousel = results.querySelector('.carousel');
-      
-      for (const note of matches) {
-        const card = document.createElement('div');
-        card.className = 'card';
-        card.innerHTML = `
-          <div class="meta"><span class="score">${note.score.toFixed(2)}</span> ${new Date(note.date).toLocaleDateString()}</div>
-          <div>${note.text}</div>
-        `;
-        carousel.appendChild(card);
-      }
-      
-      status.textContent = 'Готово';
-    } catch (err) {
-      status.textContent = 'Ошибка: ' + err.message;
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+      return Array.from(new Uint8Array(buf))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('')
+        .slice(0, 16);
+    } catch {
+      return Math.abs(str.split('').reduce((a, c) => ((a << 5) - a) + c.charCodeAt(0), 0))
+        .toString(16).padStart(16, '0');
     }
   }
 };
 
-UI.render();
+// ============================================================================
+// LOCAL STORE
+// ============================================================================
+const LocalStore = {
+  _read(k, fb) {
+    try {
+      const v = localStorage.getItem(k);
+      return v ? JSON.parse(v) : fb;
+    } catch { return fb; }
+  },
+  _write(k, v) {
+    try { localStorage.setItem(k, JSON.stringify(v)); }
+    catch (e) { console.error('[LocalStore]', e); }
+  },
+  get settings() { return { ...Config.DEFAULTS, ...this._read(Config.STORAGE.settings, {}) }; },
+  set settings(v) { this._write(Config.STORAGE.settings, v); },
+  get myNotes() { return this._read(Config.STORAGE.myNotes, []); },
+  set myNotes(v) { this._write(Config.STORAGE.myNotes, v); },
+  get worldLocal() { return this._read(Config.STORAGE.worldLocal, []); },
+  set worldLocal(v) { this._write(Config.STORAGE.worldLocal, v); },
+  get gunIdentity() { return this._read(Config.STORAGE.gunIdentity, null); },
+  set gunIdentity(v) {
+    if (v === null) localStorage.removeItem(Config.STORAGE.gunIdentity);
+    else this._write(Config.STORAGE.gunIdentity, v);
+  }
+};
+
+// ============================================================================
+// FILE STORE (TiddlyWiki-style self-save)
+// ============================================================================
+const FileStore = {
+  _handle: null,
+  async selfSave(state) {
+    const payload = JSON.stringify(state).replace(/</g, '\\u003c');
+    const html = document.documentElement.outerHTML
+      .replace(/<script id="state" type="application\/json">[\s\S]*?<\/script>\s*/i, '')
+      .replace('</body>', '<script id="state" type="application/json">' + payload + '</script>\n</body>');
+    const blob = new Blob([html], { type: 'text/html' });
+    if ('showSaveFilePicker' in window) {
+      try {
+        if (!this._handle) {
+          this._handle = await window.showSaveFilePicker({
+            suggestedName: 'noosphere.html',
+            types: [{ description: 'HTML', accept: { 'text/html': ['.html'] } }]
+          });
+        }
+        const w = await this._handle.createWritable();
+        await w.write(blob);
+        await w.close();
+        return { ok: true, mode: 'overwrite' };
+      } catch (e) {
+        if (e.name === 'AbortError') return { ok: false };
+        throw e;
+      }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'noosphere.html';
+    a.click();
+    return { ok: true, mode: 'download' };
+  },
+  loadEmbedded() {
+    const el = document.getElementById('state');
+    if (!el) return null;
+    try { return JSON.parse(el.textContent); }
+    catch { return null; }
+  },
+  async exportJSON(state) {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'noosphere-' + Date.now() + '.json';
+    a.click();
+  },
+  importJSON() {
+    return new Promise((resolve, reject) => {
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = 'application/json,.json';
+      inp.onchange = async () => {
+        try {
+          const txt = await inp.files[0].text();
+          resolve(JSON.parse(txt));
+        } catch (e) { reject(e); }
+      };
+      inp.click();
+    });
+  }
+};
+
+// ============================================================================
+// MODEL (EmbeddingModel interface)
+// ============================================================================
+const Model = {
+  _extractor: null,
+  _loaded: false,
+  _dims: 384,
+  async load() {
+    if (this._loaded) return;
+    this._extractor = await pipeline(
+      'feature-extraction',
+      Config.MODEL.name,
+      { quantized: Config.MODEL.quantized }
+    );
+    this._loaded = true;
+    EventBus.emit(EventBus.EVENTS.MODEL_LOADED);
+  },
+  async embed(text) {
+    if (!this._loaded) throw new Error('Model not loaded');
+    const out = await this._extractor([text], { pooling: 'mean', normalize: true });
+    if (out.data.length !== this._dims) {
+      const { data, dims } = out;
+      const [, tokens, hidden] = dims;
+      const emb = new Float32Array(hidden);
+      for (let t = 0; t < tokens; t++) {
+        for (let h = 0; h < hidden; h++) {
+          emb[h] += data[t * hidden + h];
+        }
+      }
+      for (let h = 0; h < hidden; h++) emb[h] /= tokens;
+      const m = Math.sqrt(emb.reduce((s, x) => s + x * x, 0)) || 1;
+      return new Float32Array(emb.map(x => x / m));
+    }
+    return new Float32Array(out.data);
+  },
+  cosine(a, b) {
+    let d = 0;
+    for (let i = 0; i < a.length; i++) d += a[i] * b[i];
+    return d;
+  },
+  get loaded() { return this._loaded; },
+  serialize(v) { return Array.from(v); },
+  deserialize(a) { return new Float32Array(a); }
+};
+
+// ============================================================================
+// ENGINE (vector search + cache)
+// ============================================================================
+const Engine = {
+  _cache: new Map(),
+  async ensureEmbed(text, id) {
+    if (this._cache.has(id)) return this._cache.get(id);
+    if (!Model.loaded) return null;
+    const v = await Model.embed(text);
+    this._cache.set(id, v);
+    return v;
+  },
+  invalidate(id) { this._cache.delete(id); },
+  clear() { this._cache.clear(); },
+  async rebuildCache(notes) {
+    this._cache.clear();
+    if (!Model.loaded) return;
+    for (const n of notes) {
+      try { await this.ensureEmbed(n.text, n.id); }
+      catch (e) { console.warn('[Engine] rebuild skip', n.id, e); }
+    }
+  },
+  async searchLocal(query, settings) {
+    if (!Model.loaded) return [];
+    const qv = await Model.embed(query);
+    const out = [];
+    for (const n of LocalStore.myNotes) {
+      const v = this._cache.get(n.id);
+      if (!v) continue;
+      const sc = Model.cosine(qv, v);
+      if (sc >= settings.threshold) out.push({ ...n, score: sc });
+    }
+    return out.sort((a, b) => b.score - a.score).slice(0, settings.maxResults);
+  },
+  async searchWorld(query, settings) {
+    if (!Model.loaded) return { rel: [], ser: [] };
+    const qv = await Model.embed(query);
+    const rel = [], ser = [];
+    const low = settings.threshold - settings.serendipityDelta;
+    for (const n of LocalStore.worldLocal) {
+      if (n.waves < settings.minWaves) continue;
+      const v = Model.deserialize(n.vec);
+      const sc = Model.cosine(qv, v);
+      if (sc >= settings.threshold) rel.push({ ...n, score: sc });
+      else if (sc >= low) ser.push({ ...n, score: sc });
+    }
+    return {
+      rel: rel.sort((a, b) => b.score - a.score).slice(0, settings.maxResults),
+      ser: ser.sort((a, b) => b.score - a.score).slice(0, settings.maxResults)
+    };
+  }
+};
+
+// ============================================================================
+// DOMAIN: MyNotes
+// ============================================================================
+const MyNotes = {
+  all() { return LocalStore.myNotes.slice(); },
+  async add(text) {
+    if (!text.trim()) return null;
+    const n = { id: Util.uid(), text: text.trim(), date: Util.now(), editedAt: null };
+    LocalStore.myNotes = [n, ...LocalStore.myNotes];
+    if (Model.loaded) await Engine.ensureEmbed(n.text, n.id);
+    EventBus.emit(EventBus.EVENTS.MY_NOTES_CHANGED, { action: 'add', note: n });
+    return n;
+  },
+  async update(id, text) {
+    const list = LocalStore.myNotes;
+    const n = list.find(x => x.id === id);
+    if (!n) return;
+    n.text = text.trim();
+    n.editedAt = Util.now();
+    LocalStore.myNotes = list;
+    Engine.invalidate(id);
+    if (Model.loaded) await Engine.ensureEmbed(n.text, id);
+    EventBus.emit(EventBus.EVENTS.MY_NOTES_CHANGED, { action: 'update', note: n });
+  },
+  remove(id) {
+    LocalStore.myNotes = LocalStore.myNotes.filter(x => x.id !== id);
+    Engine.invalidate(id);
+    EventBus.emit(EventBus.EVENTS.MY_NOTES_CHANGED, { action: 'remove', id });
+  },
+  clear() {
+    LocalStore.myNotes = [];
+    Engine.clear();
+    EventBus.emit(EventBus.EVENTS.MY_NOTES_CHANGED, { action: 'clear' });
+  }
+};
+
+// ============================================================================
+// DOMAIN: World
+// ============================================================================
+const World = {
+  all() { return LocalStore.worldLocal.slice(); },
+  upsert(n) {
+    const list = LocalStore.worldLocal;
+    const i = list.findIndex(x => x.id === n.id);
+    if (i >= 0) {
+      list[i] = { ...list[i], ...n, waves: list[i].waves ?? 0 };
+    } else {
+      list.unshift({ ...n, waves: n.waves ?? 0 });
+    }
+    LocalStore.worldLocal = list;
+    EventBus.emit(EventBus.EVENTS.WORLD_CHANGED, { action: 'upsert', note: n });
+  },
+  wave(id, d) {
+    const list = LocalStore.worldLocal;
+    const n = list.find(x => x.id === id);
+    if (!n) return;
+    n.waves = Math.max(0, (n.waves || 0) + d);
+    LocalStore.worldLocal = list;
+    EventBus.emit(EventBus.EVENTS.WORLD_CHANGED, { action: 'wave', id, waves: n.waves });
+  },
+  clear() {
+    LocalStore.worldLocal = [];
+    EventBus.emit(EventBus.EVENTS.WORLD_CHANGED, { action: 'clear' });
+  }
+};
+
+// ============================================================================
+// SETTINGS
+// ============================================================================
+const Settings = {
+  _cur: LocalStore.settings,
+  get() { return { ...this._cur }; },
+  set(p) {
+    this._cur = { ...this._cur, ...p };
+    LocalStore.settings = this._cur;
+    EventBus.emit(EventBus.EVENTS.SETTINGS_CHANGED, this._cur);
+  },
+  reset() {
+    this._cur = { ...Config.DEFAULTS };
+    LocalStore.settings = this._cur;
+    EventBus.emit(EventBus.EVENTS.SETTINGS_CHANGED, this._cur);
+  }
+};
+
+// ============================================================================
+// NETWORK (GunDB P2P)
+// ============================================================================
+const Network = {
+  _gun: null,
+  _user: null,
+  _publicNode: null,
+  _peers: new Set(),
+  _enabled: false,
+  init(relays) {
+    if (typeof Gun === 'undefined') {
+      EventBus.emit(EventBus.EVENTS.NETWORK_ERROR, 'Gun undefined');
+      return;
+    }
+    try {
+      this._gun = Gun({ peers: relays, localStorage: false });
+      this._user = this._gun.user();
+      this._publicNode = this._gun.get(Config.GUN.PUBLIC_PREFIX);
+
+      const saved = LocalStore.gunIdentity;
+      if (saved) {
+        this._user.auth(saved.alias, saved.pass, ack => {
+          if (ack.err) console.warn('[Network] auth:', ack.err);
+        });
+      } else {
+        const alias = 'ns_' + Math.random().toString(36).slice(2, 10);
+        const pass = crypto.getRandomValues(new Uint8Array(16)).join('');
+        this._user.create(alias, pass, ack => {
+          if (ack.err) { console.warn('[Network] create:', ack.err); return; }
+          this._user.auth(alias, pass);
+          LocalStore.gunIdentity = { alias, pass };
+        });
+      }
+
+      this._gun.on('hi', p => {
+        this._peers.add(p.id || 'x');
+        EventBus.emit(EventBus.EVENTS.NETWORK_PEER, { type: 'hi', count: this._peers.size });
+      });
+      this._gun.on('bye', p => {
+        this._peers.delete(p.id || 'x');
+        EventBus.emit(EventBus.EVENTS.NETWORK_PEER, { type: 'bye', count: this._peers.size });
+      });
+
+      this._publicNode.map().on(data => {
+        if (!data || !data.id || !data.vec || !data.excerpt) return;
+        World.upsert({
+          id: data.id,
+          author: data.author || 'anon',
+          excerpt: data.excerpt,
+          vec: data.vec,
+          ts: data.ts,
+          hash: data.hash
+        });
+      });
+
+      this._enabled = true;
+    } catch (e) {
+      console.error('[Network] init:', e);
+      EventBus.emit(EventBus.EVENTS.NETWORK_ERROR, e.message);
+    }
+  },
+  async publish(note, vector) {
+    if (!this._publicNode) return;
+    const hash = await Util.hash(note.text);
+    this._publicNode.get(note.id).put({
+      id: note.id,
+      author: this._user?.is?.alias || 'anon',
+      excerpt: note.text.slice(0, 150),
+      vec: Model.serialize(vector),
+      ts: note.date,
+      hash
+    });
+  },
+  async sendWave(id, d) {
+    if (!this._user || !this._user.is) return;
+    this._user.get(Config.GUN.USER_WAVES).get(id).put({ delta: d, ts: Util.now() });
+  },
+  setRelays(r) {
+    if (this._gun) { try { this._gun.off(); } catch {} }
+    this._gun = null;
+    this._user = null;
+    this._publicNode = null;
+    this._peers.clear();
+    this._enabled = false;
+    this.init(r);
+  },
+  get peers() { return this._peers.size; }
+};
+
+// ============================================================================
+// THEME
+// ============================================================================
+const Theme = {
+  apply(mode) {
+    const dark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+    document.body.classList.toggle('dark', dark);
+  }
+};
+
+// ============================================================================
+// UI
+// ============================================================================
+const UI = {
+  _root: document.getElementById('app'),
+  _view: 'flow',
+  _lastQuery: '',
+  _lastFlowResults: { local: [], rel: [], ser: [] },
+  _publishMode: false,
+
+  render() {
+    this._root.innerHTML = [
+      '<header class="row-between">',
+      '  <div class="row"><strong>Noosphere</strong><span class="status" id="st"></span></div>',
+      '  <div class="row"><span class="status" id="ps"></span><button id="setBtn">' + I18n.t('settings') + '</button></div>',
+      '</header>',
+      '<nav class="tabs">',
+      '  <button class="tab' + (this._view === 'flow' ? ' active' : '') + '" data-v="flow">' + I18n.t('tabFlow') + '</button>',
+      '  <button class="tab' + (this._view === 'history' ? ' active' : '') + '" data-v="history">' + I18n.t('tabHistory') + '</button>',
+      '</nav>',
+      '<main id="vc"></main>',
+      '<section id="sp" class="hidden"></section>'
+    ].join('\n');
+
+    this._root.querySelectorAll('.tab').forEach(b => {
+      b.addEventListener('click', () => {
+        this._root.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        this._view = b.dataset.v;
+        this._renderView();
+      });
+    });
+    this._root.querySelector('#setBtn').addEventListener('click', () => this._openSettings());
+    this._renderView();
+  },
+
+  status(m) {
+    const e = document.getElementById('st');
+    if (e) e.textContent = m || '';
+  },
+
+  peerStatus(n) {
+    const e = document.getElementById('ps');
+    if (e) e.textContent = n > 0 ? I18n.t('peers') + ': ' + n : '';
+  },
+
+  _renderView() {
+    const vc = document.getElementById('vc');
+    if (!vc) return;
+    if (this._view === 'flow') this._renderFlow(vc);
+    else this._renderHistory(vc);
+  },
+
+  _renderFlow(c) {
+    c.innerHTML = [
+      '<div class="card">',
+      '  <textarea id="fi" placeholder="' + I18n.t('placeholder') + '">' + Util.esc(this._lastQuery) + '</textarea>',
+      '  <div class="row-between" style="margin-top:.5rem;">',
+      '    <label class="row" style="font-size:.8rem; color:var(--muted);">',
+      '      <input type="checkbox" id="pt"' + (this._publishMode ? ' checked' : '') + '> ' + I18n.t('sendShare'),
+      '    </label>',
+      '    <button id="fs"' + (!Model.loaded ? ' disabled' : '') + '>' + I18n.t('send') + '</button>',
+      '  </div>',
+      '</div>',
+      '<div id="fr"></div>'
+    ].join('\n');
+
+    const fi = c.querySelector('#fi');
+    const fs = c.querySelector('#fs');
+    const pt = c.querySelector('#pt');
+
+    pt.addEventListener('change', () => { this._publishMode = pt.checked; });
+
+    const search = Util.debounce(async () => {
+      this._lastQuery = fi.value.trim();
+      if (!this._lastQuery) {
+        this._lastFlowResults = { local: [], rel: [], ser: [] };
+        this._drawFlowResults();
+        return;
+      }
+      if (!Model.loaded) { this.status(I18n.t('modelError')); return; }
+      this.status('…');
+      try {
+        const s = Settings.get();
+        const [local, world] = await Promise.all([
+          Engine.searchLocal(this._lastQuery, s),
+          Engine.searchWorld(this._lastQuery, s)
+        ]);
+        this._lastFlowResults = { local, rel: world.rel, ser: world.ser };
+        this._drawFlowResults();
+        this.status('');
+      } catch (e) {
+        this.status('!');
+        console.error('[UI] search:', e);
+      }
+    }, 300);
+
+    fi.addEventListener('input', search);
+
+    fs.addEventListener('click', async () => {
+      const text = fi.value.trim();
+      if (!text) return;
+      const n = await MyNotes.add(text);
+      if (this._publishMode && n && Model.loaded) {
+        const v = await Model.embed(text);
+        Network.publish(n, v);
+      }
+      fi.value = '';
+      this._lastQuery = '';
+      this._publishMode = false;
+      this._lastFlowResults = { local: [], rel: [], ser: [] };
+      this._drawFlowResults();
+    });
+
+    this._drawFlowResults();
+  },
+
+  _drawFlowResults() {
+    const host = document.getElementById('fr');
+    if (!host) return;
+    host.innerHTML = '';
+    const secs = [
+      { t: I18n.t('myThoughts'), items: this._lastFlowResults.local, w: false },
+      { t: I18n.t('world'), items: this._lastFlowResults.rel, w: true },
+      { t: I18n.t('serendipity'), items: this._lastFlowResults.ser, w: true }
+    ];
+    for (const s of secs) {
+      if (!s.items.length) continue;
+      const b = document.createElement('div');
+      const title = document.createElement('div');
+      title.className = 'section-title';
+      title.textContent = s.t;
+      const car = document.createElement('div');
+      car.className = 'carousel';
+      for (const it of s.items) car.appendChild(this._cardEl(it, s.w));
+      b.appendChild(title);
+      b.appendChild(car);
+      host.appendChild(b);
+    }
+    if (!host.children.length && this._lastQuery) {
+      host.innerHTML = '<div class="status">' + I18n.t('empty') + '</div>';
+    }
+  },
+
+  _cardEl(it, isWorld) {
+    const el = document.createElement('div');
+    el.className = 'card' + (isWorld && it.waves > 0 ? ' charged' : '');
+    const txt = isWorld ? (it.excerpt || '') : it.text;
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const score = document.createElement('span');
+    score.className = 'score';
+    score.textContent = it.score.toFixed(2);
+    meta.appendChild(score);
+
+    if (isWorld) {
+      const wb = document.createElement('div');
+      wb.className = 'wave-btns';
+      const wd = document.createElement('button');
+      wd.textContent = '−';
+      wd.addEventListener('click', () => {
+        World.wave(it.id, -1);
+        Network.sendWave(it.id, -1);
+      });
+      const wn = document.createElement('span');
+      wn.textContent = it.waves + ' ' + I18n.t('waves');
+      const wu = document.createElement('button');
+      wu.textContent = '+';
+      wu.addEventListener('click', () => {
+        World.wave(it.id, +1);
+        Network.sendWave(it.id, +1);
+      });
+      wb.appendChild(wd);
+      wb.appendChild(wn);
+      wb.appendChild(wu);
+      meta.appendChild(wb);
+    } else {
+      const dt = document.createElement('span');
+      dt.textContent = new Date(it.date).toLocaleDateString();
+      meta.appendChild(dt);
+    }
+
+    const body = document.createElement('div');
+    body.textContent = txt;
+
+    el.appendChild(meta);
+    el.appendChild(body);
+    return el;
+  },
+
+  _renderHistory(c) {
+    c.innerHTML = [
+      '<div class="card"><input type="text" id="hs" placeholder="' + I18n.t('histSearch') + '"></div>',
+      '<div id="hl"></div>'
+    ].join('\n');
+
+    const hs = c.querySelector('#hs');
+    const hl = c.querySelector('#hl');
+
+    const draw = Util.debounce(async () => {
+      const q = hs.value.trim();
+      if (!q) { this._drawHistList(hl, MyNotes.all(), false); return; }
+      if (!Model.loaded) { this._drawHistList(hl, MyNotes.all(), false); return; }
+      const s = Settings.get();
+      const qv = await Model.embed(q);
+      const scored = [];
+      for (const n of MyNotes.all()) {
+        const v = await Engine.ensureEmbed(n.text, n.id);
+        if (!v) continue;
+        const sc = Model.cosine(qv, v);
+        if (sc >= s.threshold) scored.push({ ...n, score: sc });
+      }
+      scored.sort((a, b) => b.score - a.score);
+      this._drawHistList(hl, scored, true);
+    }, 300);
+
+    hs.addEventListener('input', draw);
+    this._drawHistList(hl, MyNotes.all(), false);
+  },
+
+  _drawHistList(host, notes, withScore) {
+    host.innerHTML = '';
+    if (!notes.length) {
+      host.innerHTML = '<div class="status">' + I18n.t('empty') + '</div>';
+      return;
+    }
+    const groups = new Map();
+    for (const n of notes) {
+      const d = new Date(n.date).toDateString();
+      if (!groups.has(d)) groups.set(d, []);
+      groups.get(d).push(n);
+    }
+    for (const [day, items] of groups) {
+      const d = new Date(items[0].date);
+      const now = new Date(); now.setHours(0, 0, 0, 0);
+      const yest = new Date(now); yest.setDate(yest.getDate() - 1);
+      const title = d >= now ? I18n.t('today') : d >= yest ? I18n.t('yesterday') : d.toLocaleDateString();
+      const sec = document.createElement('div');
+      const tEl = document.createElement('div');
+      tEl.className = 'section-title';
+      tEl.textContent = title;
+      sec.appendChild(tEl);
+      for (const n of items) sec.appendChild(this._histEl(n, withScore));
+      host.appendChild(sec);
+    }
+  },
+
+  _histEl(n, withScore) {
+    const el = document.createElement('div');
+    el.className = 'card';
+    const time = new Date(n.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    if (withScore) {
+      const sc = document.createElement('span');
+      sc.className = 'score';
+      sc.textContent = n.score.toFixed(2);
+      meta.appendChild(sc);
+    }
+    const ts = document.createElement('span');
+    ts.textContent = time;
+    meta.appendChild(ts);
+    if (n.editedAt) {
+      const ed = document.createElement('span');
+      ed.textContent = I18n.t('edited');
+      meta.appendChild(ed);
+    }
+
+    const body = document.createElement('div');
+    body.className = 'htext';
+    body.textContent = n.text;
+
+    const actions = document.createElement('div');
+    actions.className = 'row';
+    actions.style.marginTop = '.25rem';
+    const editBtn = document.createElement('button');
+    editBtn.textContent = I18n.t('edit');
+    editBtn.addEventListener('click', () => {
+      const ta = document.createElement('textarea');
+      ta.value = n.text;
+      body.replaceWith(ta);
+      actions.innerHTML = '';
+      const saveBtn = document.createElement('button');
+      saveBtn.textContent = I18n.t('save');
+      saveBtn.addEventListener('click', () => MyNotes.update(n.id, ta.value));
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = I18n.t('cancel');
+      cancelBtn.addEventListener('click', () => this._renderView());
+      actions.appendChild(saveBtn);
+      actions.appendChild(cancelBtn);
+    });
+    const delBtn = document.createElement('button');
+    delBtn.textContent = I18n.t('delete');
+    delBtn.addEventListener('click', () => {
+      if (confirm(I18n.t('confirmDelete'))) MyNotes.remove(n.id);
+    });
+    actions.appendChild(editBtn);
+    actions.appendChild(delBtn);
+
+    el.appendChild(meta);
+    el.appendChild(body);
+    el.appendChild(actions);
+    return el;
+  },
+
+  _openSettings() {
+    const p = document.getElementById('sp');
+    p.classList.remove('hidden');
+    const s = Settings.get();
+
+    p.innerHTML = [
+      '<details open>',
+      '  <summary>' + I18n.t('settings') + '</summary>',
+      '  <div class="field"><label>' + I18n.t('lang') + '</label>',
+      '    <select id="s_lang">',
+      '      <option value="ru"' + (s.lang === 'ru' ? ' selected' : '') + '>Русский</option>',
+      '      <option value="en"' + (s.lang === 'en' ? ' selected' : '') + '>English</option>',
+      '    </select>',
+      '  </div>',
+      '  <div class="field"><label>' + I18n.t('theme') + '</label>',
+      '    <select id="s_theme">',
+      '      <option value="auto"' + (s.theme === 'auto' ? ' selected' : '') + '>' + I18n.t('themeAuto') + '</option>',
+      '      <option value="light"' + (s.theme === 'light' ? ' selected' : '') + '>' + I18n.t('themeLight') + '</option>',
+      '      <option value="dark"' + (s.theme === 'dark' ? ' selected' : '') + '>' + I18n.t('themeDark') + '</option>',
+      '    </select>',
+      '  </div>',
+      '  <div class="field"><label>' + I18n.t('threshold') + ' <b id="v_thr">' + s.threshold.toFixed(2) + '</b></label>',
+      '    <input type="range" id="s_thr" min="0" max="1" step="0.01" value="' + s.threshold + '">',
+      '  </div>',
+      '  <div class="field"><label>' + I18n.t('serendipityDelta') + ' <b id="v_ser">' + s.serendipityDelta.toFixed(2) + '</b></label>',
+      '    <input type="range" id="s_ser" min="0" max="0.5" step="0.01" value="' + s.serendipityDelta + '">',
+      '  </div>',
+      '  <div class="field"><label>' + I18n.t('minWaves') + '</label>',
+      '    <select id="s_mw">' + [0, 1, 3, 5].map(v => '<option value="' + v + '"' + (s.minWaves === v ? ' selected' : '') + '>' + v + '</option>').join('') + '</select>',
+      '  </div>',
+      '  <div class="field"><label>' + I18n.t('maxResults') + '</label>',
+      '    <select id="s_mr">' + [3, 5, 10, 20].map(v => '<option value="' + v + '"' + (s.maxResults === v ? ' selected' : '') + '>' + v + '</option>').join('') + '</select>',
+      '  </div>',
+      '  <div class="field"><label>' + I18n.t('relayList') + '</label>',
+      '    <textarea id="s_rel" style="min-height:60px;">' + s.gunRelays.join('\n') + '</textarea>',
+      '  </div>',
+      '  <div class="row">',
+      '    <button id="s_exp">' + I18n.t('exportCapsule') + '</button>',
+      '    <button id="s_imp">' + I18n.t('importCapsule') + '</button>',
+      '    <button id="s_ss">' + I18n.t('selfSave') + '</button>',
+      '    <button id="s_rb">' + I18n.t('rebuildVectors') + '</button>',
+      '    <button id="s_rst">' + I18n.t('resetAll') + '</button>',
+      '    <button class="primary" id="s_ok">' + I18n.t('save') + '</button>',
+      '    <button id="s_no">' + I18n.t('cancel') + '</button>',
+      '  </div>',
+      '</details>'
+    ].join('\n');
+
+    const $ = id => p.querySelector('#' + id);
+    $('s_thr').addEventListener('input', e => { $('v_thr').textContent = (+e.target.value).toFixed(2); });
+    $('s_ser').addEventListener('input', e => { $('v_ser').textContent = (+e.target.value).toFixed(2); });
+
+    $('s_ok').addEventListener('click', () => {
+      const relays = $('s_rel').value.split('\n').map(x => x.trim()).filter(Boolean);
+      const newLang = $('s_lang').value;
+      Settings.set({
+        lang: newLang,
+        theme: $('s_theme').value,
+        threshold: +$('s_thr').value,
+        serendipityDelta: +$('s_ser').value,
+        minWaves: +$('s_mw').value,
+        maxResults: +$('s_mr').value,
+        gunRelays: relays.length ? relays : Config.DEFAULTS.gunRelays
+      });
+      Theme.apply($('s_theme').value);
+      if (newLang !== I18n.lang) { I18n.setLang(newLang); this.render(); }
+      Network.setRelays(relays);
+      p.classList.add('hidden');
+    });
+    $('s_no').addEventListener('click', () => p.classList.add('hidden'));
+
+    $('s_exp').addEventListener('click', () => {
+      FileStore.exportJSON({
+        version: 1,
+        myNotes: MyNotes.all(),
+        worldLocal: World.all(),
+        settings: Settings.get()
+      });
+    });
+
+    $('s_imp').addEventListener('click', async () => {
+      try {
+        const d = await FileStore.importJSON();
+        if (d.myNotes) LocalStore.myNotes = d.myNotes;
+        if (d.worldLocal) LocalStore.worldLocal = d.worldLocal;
+        if (Model.loaded) await Engine.rebuildCache(MyNotes.all());
+        EventBus.emit(EventBus.EVENTS.MY_NOTES_CHANGED, { action: 'bulk' });
+        EventBus.emit(EventBus.EVENTS.WORLD_CHANGED, { action: 'bulk' });
+      } catch (e) { alert('Import: ' + e.message); }
+    });
+
+    $('s_ss').addEventListener('click', async () => {
+      const r = await FileStore.selfSave({
+        version: 1,
+        myNotes: MyNotes.all(),
+        worldLocal: World.all(),
+        settings: Settings.get()
+      });
+      if (r && r.ok) this.status('Saved: ' + r.mode);
+    });
+
+    $('s_rb').addEventListener('click', async () => {
+      if (!Model.loaded) { this.status(I18n.t('modelError')); return; }
+      this.status('…');
+      await Engine.rebuildCache(MyNotes.all());
+      this.status(I18n.t('ready'));
+    });
+
+    $('s_rst').addEventListener('click', () => {
+      if (!confirm('Reset ALL data?')) return;
+      MyNotes.clear();
+      World.clear();
+      Settings.reset();
+      Theme.apply(Settings.get().theme);
+      p.classList.add('hidden');
+      this.render();
+    });
+  }
+};
+
+// ============================================================================
+// BOOTSTRAP
+// ============================================================================
+(async () => {
+  const s = Settings.get();
+  I18n.setLang(s.lang);
+  Theme.apply(s.theme);
+
+  const emb = FileStore.loadEmbedded();
+  if (emb && !LocalStore.myNotes.length) {
+    if (emb.myNotes) LocalStore.myNotes = emb.myNotes;
+    if (emb.worldLocal) LocalStore.worldLocal = emb.worldLocal;
+    if (emb.settings) Settings.set(emb.settings);
+  }
+
+  UI.render();
+  UI.status(I18n.t('loadingModel'));
+
+  EventBus.on(EventBus.EVENTS.MY_NOTES_CHANGED, () => UI._renderView());
+  EventBus.on(EventBus.EVENTS.WORLD_CHANGED, () => UI._renderView());
+  EventBus.on(EventBus.EVENTS.NETWORK_PEER, ({ count }) => UI.peerStatus(count));
+  EventBus.on(EventBus.EVENTS.NETWORK_ERROR, () => UI.status(I18n.t('netError')));
+  EventBus.on(EventBus.EVENTS.MODEL_ERROR, () => UI.status(I18n.t('modelError')));
+  EventBus.on(EventBus.EVENTS.MODEL_LOADED, () => {
+    UI.status(I18n.t('ready'));
+    const sendBtn = document.getElementById('fs');
+    if (sendBtn) sendBtn.disabled = false;
+  });
+
+  Model.load()
+    .then(() => Engine.rebuildCache(MyNotes.all()))
+    .catch(e => {
+      console.error('[Model]', e);
+      EventBus.emit(EventBus.EVENTS.MODEL_ERROR, e.message);
+    });
+
+  try { Network.init(Settings.get().gunRelays); }
+  catch (e) { console.warn('[Network]', e); }
+})();
 </script>
 </body>
 </html>
