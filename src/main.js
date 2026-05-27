@@ -1,72 +1,48 @@
 import { init, embed } from './embedder.js';
 import { MyNotes } from './storage.js';
-import {
-  loadWorld,
-  getWorldCache,
-  searchWorld,
-  searchLocal,
-  enqueueShare,
-  getPending,
-  clearPending,
-  exportPendingAsWorld
-} from './world.js';
+import { searchWorld, searchLocal, publish, waveUp, getInfo } from './qdrant.js';
 
-// === DOM ===
 const $ = id => document.getElementById(id);
 const input = $('input');
 const statusEl = $('status');
 const saveBtn = $('saveBtn');
 const shareCheckbox = $('shareCheckbox');
-const exportBtn = $('exportBtn');
 const personalSection = $('personalSection');
 const personalResults = $('personalResults');
 const worldSection = $('worldSection');
 const worldResults = $('worldResults');
 const myNotesEl = $('myNotes');
 
-function setStatus(msg, spinner = false) {
+const setStatus = (msg, spinner = false) =>
   statusEl.innerHTML = (spinner ? '<span class="loader"></span> ' : '') + msg;
-}
 
-function setReady(ok) {
-  saveBtn.disabled = !ok;
-}
+const setReady = ok => saveBtn.disabled = !ok;
 
-function esc(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
+const esc = s => { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; };
 
-function formatDate(iso) {
+const formatDate = iso => {
   const d = new Date(iso);
-  return d.toLocaleDateString('ru-RU') + ' ' +
-    d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-}
+  return d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+};
 
 function renderLocalCards(items) {
-  if (!items.length) {
-    return '<div class="empty">Нет похожих заметок</div>';
-  }
-  return items.map(item => `
-    <div class="card" data-id="${item.id}">
-      <div class="card-text">${esc(item.text)}</div>
-      <div class="card-meta">
-        <span>${formatDate(item.date)}</span>
-        <span class="score">${item.score.toFixed(2)}</span>
-      </div>
-    </div>
+  if (!items.length) return '<div class="empty">Нет похожих</div>';
+  return items.map(it => `
+    <div class="card"><div class="card-text">${esc(it.text)}</div>
+      <div class="card-meta"><span>${formatDate(it.date)}</span><span class="score">${it.score.toFixed(2)}</span></div></div>
   `).join('');
 }
 
 function renderWorldCards(items) {
   if (!items.length) return '';
-  return items.map(item => `
-    <div class="card" data-id="${item.id}">
-      <div class="card-text">${esc(item.excerpt || '(пусто)')}</div>
+  return items.map(it => `
+    <div class="card" data-wid="${it.id}">
+      <div class="card-text">${esc(it.excerpt || '(пусто)')}</div>
       <div class="card-meta">
-        <span>${new Date(item.timestamp).toLocaleDateString('ru-RU')}</span>
-        <span class="score">${item.score.toFixed(2)} · 🌊 ${item.waves || 0}</span>
+        <span>${new Date(it.timestamp).toLocaleDateString('ru-RU')}</span>
+        <span class="score">${it.score.toFixed(2)} · 🌊 ${it.waves}
+          <button class="wave-btn" data-wave="${it.id}" title="Поддержать">+</button>
+        </span>
       </div>
     </div>
   `).join('');
@@ -74,16 +50,13 @@ function renderWorldCards(items) {
 
 function renderMyNotes() {
   const notes = MyNotes.list();
-  if (!notes.length) {
-    myNotesEl.innerHTML = '<div class="empty">Пока нет заметок</div>';
-    return;
-  }
+  if (!notes.length) { myNotesEl.innerHTML = '<div class="empty">Пока нет заметок</div>'; return; }
   myNotesEl.innerHTML = notes.map(n => `
     <div class="card" data-id="${n.id}">
       <div class="card-text">${esc(n.text)}</div>
       <div class="card-meta">
         <span>${formatDate(n.date)}${n.editedAt ? ' (изм.)' : ''}</span>
-        <span>${n.vec ? '✓ вектор' : '○ нет вектора'}</span>
+        <span>${n.vec ? '✓' : '○'}</span>
       </div>
       <div class="actions">
         <button class="ghost edit-btn">ред.</button>
@@ -93,14 +66,6 @@ function renderMyNotes() {
   `).join('');
 }
 
-function updatePendingButton() {
-  const count = getPending().length;
-  exportBtn.textContent = count
-    ? `📤 Экспорт очереди (${count})`
-    : '📤 Экспорт очереди';
-}
-
-// === Поиск ===
 async function runSearch() {
   const text = input.value.trim();
   if (!text) {
@@ -108,67 +73,55 @@ async function runSearch() {
     worldSection.style.display = 'none';
     return;
   }
-
   setStatus('Поиск...', true);
   try {
     const qVec = await embed(text);
-    const local = searchLocal(qVec, MyNotes.list());
-    const { relevant, serendipity } = await searchWorld(qVec);
-
+    const [local, world] = await Promise.all([
+      Promise.resolve(searchLocal(qVec, MyNotes.list())),
+      searchWorld(qVec)
+    ]);
     personalSection.style.display = local.length ? 'block' : 'none';
     personalResults.innerHTML = renderLocalCards(local);
-
-    const hasWorld = relevant.length || serendipity.length;
+    const hasWorld = world.relevant.length || world.serendipity.length;
     worldSection.style.display = hasWorld ? 'block' : 'none';
-
     if (hasWorld) {
       worldResults.innerHTML = `
-        ${relevant.length ? '<div class="sub-section-title relevant">Релевантные</div>' : ''}
-        ${renderWorldCards(relevant)}
-        ${serendipity.length ? '<div class="sub-section-title serendipity">Смежные</div>' : ''}
-        ${renderWorldCards(serendipity)}
+        ${world.relevant.length ? '<div class="sub-title relevant">Релевантные</div>' : ''}
+        ${renderWorldCards(world.relevant)}
+        ${world.serendipity.length ? '<div class="sub-title serendipity">Смежные</div>' : ''}
+        ${renderWorldCards(world.serendipity)}
       `;
     } else {
-      worldResults.innerHTML = '<div class="empty">Ничего не найдено</div>';
+      worldResults.innerHTML = '<div class="empty">В мире пока нет похожих</div>';
     }
-
     setStatus('Готово');
   } catch (e) {
-    setStatus('Ошибка поиска: ' + e.message);
+    setStatus('Ошибка: ' + e.message);
     console.error(e);
   }
-}
-
-// === Сохранение ===
-async function saveToLocal(text) {
-  const note = MyNotes.add(text);
-  const vec = await embed(text);
-  MyNotes.updateVec(note.id, vec);
-  return { ...note, vec };
 }
 
 saveBtn.addEventListener('click', async () => {
   const text = input.value.trim();
   if (!text) return;
-
   setStatus('Сохранение...', true);
   setReady(false);
   try {
-    const note = await saveToLocal(text);
-    input.value = '';
-    personalSection.style.display = 'none';
-    worldSection.style.display = 'none';
-
+    const note = MyNotes.add(text);
+    const vec = await embed(text);
+    MyNotes.updateVec(note.id, vec);
     if (shareCheckbox.checked) {
-      const count = enqueueShare(note);
-      setStatus(`✓ Сохранено + в очереди на публикацию (${count} шт).`);
+      setStatus('Публикация в мир...', true);
+      await publish(vec, text);
       shareCheckbox.checked = false;
+      setStatus('✓ Сохранено + опубликовано в мире.');
     } else {
       setStatus('✓ Сохранено локально.');
     }
-
+    input.value = '';
+    personalSection.style.display = 'none';
+    worldSection.style.display = 'none';
     renderMyNotes();
-    updatePendingButton();
   } catch (e) {
     setStatus('Ошибка: ' + e.message);
     console.error(e);
@@ -177,40 +130,28 @@ saveBtn.addEventListener('click', async () => {
   }
 });
 
-exportBtn.addEventListener('click', async () => {
-  const pending = getPending();
-  if (!pending.length) {
-    alert('Очередь пуста. Сохраните заметки с галочкой "Отправить в мир".');
+// Клики: ред/удал своих + лайк мировых
+document.body.addEventListener('click', async e => {
+  const card = e.target.closest('.card');
+  const waveId = e.target.dataset.wave;
+  if (waveId) {
+    try {
+      await waveUp(waveId);
+      runSearch();
+    } catch (err) { console.error(err); }
     return;
   }
-  setStatus('Экспорт...', true);
-  try {
-    await exportPendingAsWorld();
-    clearPending();
-    updatePendingButton();
-    setStatus('✓ Файл world-pending.json скачан. Вручную добавьте его содержимое в world.json репозитория.');
-  } catch (e) {
-    setStatus('Ошибка экспорта: ' + e.message);
-  }
-});
-
-// === События редактирования ===
-myNotesEl.addEventListener('click', async (e) => {
-  const card = e.target.closest('.card');
   if (!card) return;
   const id = card.dataset.id;
-
+  if (!id) return;
   if (e.target.classList.contains('delete-btn')) {
-    if (confirm('Удалить заметку?')) {
-      MyNotes.remove(id);
-      renderMyNotes();
-    }
+    if (confirm('Удалить?')) { MyNotes.remove(id); renderMyNotes(); }
   } else if (e.target.classList.contains('edit-btn')) {
     const note = MyNotes.list().find(n => n.id === id);
     const newText = prompt('Редактировать:', note.text);
-    if (newText !== null && newText.trim()) {
+    if (newText && newText.trim()) {
       MyNotes.updateText(id, newText.trim());
-      setStatus('Пересчёт вектора...', true);
+      setStatus('Пересчёт...', true);
       const vec = await embed(newText.trim());
       MyNotes.updateVec(id, vec);
       setStatus('Готово');
@@ -219,31 +160,21 @@ myNotesEl.addEventListener('click', async (e) => {
   }
 });
 
-// === Живой поиск ===
-let searchTimer;
-input.addEventListener('input', () => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(runSearch, 600);
-});
+let timer;
+input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(runSearch, 600); });
 
-// === Старт ===
 async function boot() {
   try {
-    await init((p) => {
-      if (p.status === 'progress') {
-        setStatus(`Загрузка модели: ${Math.round(p.progress || 0)}%`, true);
-      } else if (p.status === 'done') {
-        setStatus('Модель готова. Загрузка мировых заметок...', true);
-      }
+    await init(p => {
+      if (p.status === 'progress') setStatus(`Модель: ${Math.round(p.progress || 0)}%`, true);
+      else if (p.status === 'done') setStatus('Подключение к миру...', true);
     });
-
-    const count = await loadWorld();
-    setStatus(`Готово. В мире: ${count.length} заметок.`);
+    const count = await getInfo();
+    setStatus(`Готово. В мире: ${count} заметок.`);
     setReady(true);
     renderMyNotes();
-    updatePendingButton();
   } catch (e) {
-    setStatus('Ошибка запуска: ' + e.message);
+    setStatus('Ошибка: ' + e.message);
     console.error(e);
   }
 }
