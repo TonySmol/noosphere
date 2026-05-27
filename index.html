@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Noosphere Core (Offline IDB + World Gun) FIX</title>
+  <title>Noosphere Core (IDB Local + Gun World stable)</title>
 
   <style>
     :root{
@@ -17,44 +17,25 @@
       --accent:#818cf8; --accent2:#6366f1;
     }
     *{ box-sizing:border-box; margin:0; padding:0; }
-    body{
-      font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
-      background:var(--bg); color:var(--text);
-      display:flex; justify-content:center; padding:12px;
-    }
+    body{ font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); display:flex; justify-content:center; padding:12px; }
     .app{ width:100%; max-width:760px; display:flex; flex-direction:column; gap:10px; }
 
     .topbar{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
     .tabs{ display:flex; gap:8px; }
-    .tab{
-      border:1px solid var(--border); background:transparent; color:var(--muted);
-      padding:8px 12px; border-radius:12px; font-weight:800; cursor:pointer;
-    }
+    .tab{ border:1px solid var(--border); background:transparent; color:var(--muted); padding:8px 12px; border-radius:12px; font-weight:800; cursor:pointer; }
     .tab.active{ background:var(--accent); color:#fff; border-color:var(--accent); }
-    .gear{
-      width:40px; height:40px; border-radius:999px; border:1px solid var(--border);
-      background:var(--surface); cursor:pointer; font-weight:900;
-    }
+    .gear{ width:40px; height:40px; border-radius:999px; border:1px solid var(--border); background:var(--surface); cursor:pointer; font-weight:900; }
 
     .view{ display:none; }
     .view.active{ display:block; }
 
-    .box{
-      background:var(--surface); border:1px solid var(--border); border-radius:var(--r);
-      padding:12px;
-    }
-    textarea{
-      width:100%; min-height:92px; resize:none; outline:none; border:none;
-      background:transparent; color:var(--text); font-size:16px; line-height:1.4;
-    }
+    .box{ background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:12px; }
+    textarea{ width:100%; min-height:92px; resize:none; outline:none; border:none; background:transparent; color:var(--text); font-size:16px; line-height:1.4; }
     textarea::placeholder{ color:var(--muted); opacity:0.8; }
 
     .row{ display:flex; gap:8px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin-top:10px; }
     .btns{ display:flex; gap:8px; margin-left:auto; }
-    .btn{
-      border:none; border-radius:12px; padding:10px 12px; cursor:pointer; font-weight:900;
-      background:var(--accent); color:#fff;
-    }
+    .btn{ border:none; border-radius:12px; padding:10px 12px; cursor:pointer; font-weight:900; background:var(--accent); color:#fff; }
     .btn:hover{ background:var(--accent2); }
     .btn:disabled{ opacity:.45; pointer-events:none; }
     .btn.ghost{ background:transparent; color:var(--muted); border:1px solid var(--border); }
@@ -68,9 +49,7 @@
     .section{ margin-top:10px; }
     .h{ font-size:12px; color:var(--muted); font-weight:950; text-transform:uppercase; letter-spacing:.06em; margin:10px 0 6px; }
     .list{ display:flex; flex-direction:column; gap:8px; }
-    .item{
-      background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:10px 12px;
-    }
+    .item{ background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:10px 12px; }
     .item .text{ white-space:pre-wrap; word-break:break-word; }
     .item .meta{ margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--muted); align-items:center; }
     .badge{ font-weight:950; border:1px solid var(--border); border-radius:999px; padding:2px 8px; }
@@ -78,11 +57,7 @@
     .badge.world{ border-color:rgba(22,163,74,0.5); color:var(--ok); }
 
     .empty{ text-align:center; color:var(--muted); font-style:italic; padding:12px; border:1px dashed var(--border); border-radius:var(--r); background:var(--surface); }
-
-    .search{
-      width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:var(--r);
-      background:var(--surface); color:var(--text); outline:none;
-    }
+    .search{ width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:var(--r); background:var(--surface); color:var(--text); outline:none; }
 
     .overlay{ position:fixed; inset:0; background:rgba(0,0,0,0.35); display:none; z-index:9; }
     .overlay.open{ display:block; }
@@ -104,7 +79,7 @@
     .tiny{ font-size:12px; color:var(--muted); }
   </style>
 
-  <!-- Gun -->
+  <!-- GunDB -->
   <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/gun/sea.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/gun/lib/rindexed.js"></script>
@@ -122,7 +97,7 @@
     </div>
 
     <div class="view active" id="flowView">
-      <div class="box" id="inputBox">
+      <div class="box">
         <textarea id="thought" placeholder="Поделитесь мыслью..."></textarea>
         <div class="row">
           <div class="status" id="status"></div>
@@ -131,9 +106,7 @@
             <button class="btn" id="sendWorld" disabled>Сохранить + в Мир</button>
           </div>
         </div>
-        <div class="tiny" style="margin-top:8px;">
-          Свайп вверх по полю ввода = «Сохранить + в Мир»
-        </div>
+        <div class="tiny" style="margin-top:8px;">Свайп вверх по полю ввода = «Сохранить + в Мир»</div>
       </div>
 
       <div class="section">
@@ -201,7 +174,7 @@
     <div class="field">
       <label>Gun relay peers (по одному URL на строку)</label>
       <textarea id="peersText" class="panel-ta" spellcheck="false"></textarea>
-      <div class="tiny">Встроено: https://relay.peer.ooo/gun (можно добавить ещё).</div>
+      <div class="tiny">Встроено: https://relay.peer.ooo/gun</div>
     </div>
 
     <div class="field">
@@ -219,7 +192,6 @@
   <script type="module">
     import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-    // ===================== Utils =====================
     const Utils = (() => {
       const $ = (s, r=document) => r.querySelector(s);
       const esc = (s) => { const d=document.createElement('div'); d.textContent=String(s??''); return d.innerHTML; };
@@ -232,10 +204,10 @@
         on(ev, fn){ if(!this.#m.has(ev)) this.#m.set(ev,new Set()); this.#m.get(ev).add(fn); return ()=>this.#m.get(ev)?.delete(fn); }
         emit(ev, p){ for(const fn of this.#m.get(ev)??[]) { try{fn(p);}catch(e){console.error(e);} } }
       }
-      return { $, esc, debounce, clamp, uuid, safeJSON, Emitter };
+      const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
+      return { $, esc, debounce, clamp, uuid, safeJSON, Emitter, sleep };
     })();
 
-    // ===================== IDB (KV + Notes) =====================
     const IDB = (() => {
       const DB = 'noosphere_idb_local_v1';
       const STO_KV = 'kv';
@@ -244,19 +216,17 @@
 
       function open() {
         return new Promise((resolve, reject) => {
-          try{
-            const req = indexedDB.open(DB, 1);
-            req.onupgradeneeded = () => {
-              const db = req.result;
-              if (!db.objectStoreNames.contains(STO_KV)) db.createObjectStore(STO_KV);
-              if (!db.objectStoreNames.contains(STO_NOTES)) {
-                const st = db.createObjectStore(STO_NOTES, { keyPath: 'id' });
-                st.createIndex('createdAt', 'createdAt');
-              }
-            };
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => reject(req.error);
-          } catch(e){ reject(e); }
+          const req = indexedDB.open(DB, 1);
+          req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(STO_KV)) db.createObjectStore(STO_KV);
+            if (!db.objectStoreNames.contains(STO_NOTES)) {
+              const st = db.createObjectStore(STO_NOTES, { keyPath: 'id' });
+              st.createIndex('createdAt', 'createdAt');
+            }
+          };
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
         });
       }
 
@@ -310,7 +280,6 @@
       return { kvGet, kvSet, notesPut, notesDelete, notesGetAll, ok:()=>ok };
     })();
 
-    // ===================== Settings =====================
     const Settings = (() => {
       const KEY='settings';
       const DEFAULT = {
@@ -318,7 +287,7 @@
         threshold:0.25,
         serDelta:0.15,
         maxResults:5,
-        peersText:'https://relay.peer.ooo/gun' // встроено
+        peersText:'https://relay.peer.ooo/gun'
       };
 
       const sanitize = (raw) => {
@@ -346,7 +315,6 @@
       return { DEFAULT, sanitize, parsePeers, load, save };
     })();
 
-    // ===================== Theme =====================
     const Theme = (() => {
       function apply(mode) {
         const dark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -355,35 +323,21 @@
       return { apply };
     })();
 
-    // ===================== Vectors =====================
     const Vectors = (() => {
       const dot = (a,b)=>{ let d=0; for(let i=0;i<a.length;i++) d += a[i]*b[i]; return d; };
       const norm = (v)=>{ let s=0; for(let i=0;i<v.length;i++) s+=v[i]*v[i]; const m=Math.sqrt(s)||1; for(let i=0;i<v.length;i++) v[i]/=m; return v; };
-
       const b64enc = (u8)=>{ let s=''; const CH=0x8000; for(let i=0;i<u8.length;i+=CH) s+=String.fromCharCode(...u8.subarray(i,i+CH)); return btoa(s); };
       const b64dec = (b64)=>{ const bin=atob(b64); const u8=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i); return u8; };
-
-      const packI8 = (f32)=>{ const v=new Float32Array(f32); norm(v); const i8=new Int8Array(v.length);
-        for(let i=0;i<v.length;i++) i8[i]=Math.max(-127, Math.min(127, Math.round(v[i]*127)));
-        return b64enc(new Uint8Array(i8.buffer));
-      };
-      const unpackI8 = (b64)=>{ const u8=b64dec(b64); const i8=new Int8Array(u8.buffer); const v=new Float32Array(i8.length);
-        for(let i=0;i<i8.length;i++) v[i]=i8[i]/127;
-        return norm(v);
-      };
-
+      const packI8 = (f32)=>{ const v=new Float32Array(f32); norm(v); const i8=new Int8Array(v.length); for(let i=0;i<v.length;i++) i8[i]=Math.max(-127, Math.min(127, Math.round(v[i]*127))); return b64enc(new Uint8Array(i8.buffer)); };
+      const unpackI8 = (b64)=>{ const u8=b64dec(b64); const i8=new Int8Array(u8.buffer); const v=new Float32Array(i8.length); for(let i=0;i<i8.length;i++) v[i]=i8[i]/127; return norm(v); };
       return { dot, packI8, unpackI8 };
     })();
 
-    // ===================== Embedder =====================
     const Embedder = (() => {
       let model=null;
-      async function init() {
-        model = await pipeline('feature-extraction','Xenova/paraphrase-multilingual-MiniLM-L12-v2',{ quantized:true });
-      }
+      async function init() { model = await pipeline('feature-extraction','Xenova/paraphrase-multilingual-MiniLM-L12-v2',{ quantized:true }); }
       const ready = ()=>!!model;
       async function embed(text) {
-        if (!model) throw new Error('model not ready');
         const out = await model([text]);
         const { data, dims } = out;
         const tokens=dims?.[1], hidden=dims?.[2];
@@ -393,7 +347,6 @@
           for(let h=0;h<hidden;h++) emb[h] += data[base+h];
         }
         for(let h=0;h<hidden;h++) emb[h] /= tokens;
-        // normalize
         let s=0; for(let h=0;h<hidden;h++) s += emb[h]*emb[h];
         const m=Math.sqrt(s)||1;
         for(let h=0;h<hidden;h++) emb[h] /= m;
@@ -402,7 +355,6 @@
       return { init, ready, embed };
     })();
 
-    // ===================== LocalNotes (offline authority) =====================
     const LocalNotes = (() => {
       function create() {
         const ee = new Utils.Emitter();
@@ -467,55 +419,60 @@
       return { create };
     })();
 
-    // ===================== World (Gun) FIXED =====================
+    // ===================== World (Gun) — subscribe to NOTES directly (stable) =====================
     const World = (() => {
-      const ROOT = 'noosphere_world_v2'; // bump root so old broken data doesn't confuse
+      const ROOT = 'noosphere_world_v3'; // new root
       function create(gun) {
         const ee = new Utils.Emitter();
-        const index = gun.get(ROOT).get('world').get('index');
         const notes = gun.get(ROOT).get('world').get('notes');
 
-        const subscribed = new Set();
         const map = new Map(); // id -> note
 
         function list() { return Array.from(map.values()).sort((a,b)=>b.createdAt-a.createdAt); }
         function emit() { ee.emit('change', list()); }
 
-        // index value is primitive timestamp (guaranteed map.on)
-        index.map().on((val, id) => {
+        // Subscribe to all notes directly
+        notes.map().on((raw, id) => {
           if (!id || id === '_' || id === 'null') return;
-          if (subscribed.has(id)) return;
-          subscribed.add(id);
+          const x = raw && typeof raw === 'object' ? raw : {};
+          if (x.deleted) { map.delete(id); emit(); return; }
+          if (typeof x.text !== 'string') return;
 
-          notes.get(id).on((raw) => {
-            const x = raw && typeof raw === 'object' ? raw : {};
-            if (x.deleted) { map.delete(id); emit(); return; }
-            const n = {
-              id,
-              text: String(x.text ?? ''),
-              vPacked: (typeof x.vPacked === 'string') ? x.vPacked : null,
-              author: String(x.author ?? ''),
-              createdAt: Number(x.createdAt) || Date.now()
-            };
-            map.set(id, n);
-            emit();
+          map.set(id, {
+            id,
+            text: String(x.text ?? ''),
+            vPacked: (typeof x.vPacked === 'string') ? x.vPacked : null,
+            author: String(x.author ?? ''),
+            createdAt: Number(x.createdAt) || Date.now()
           });
+          emit();
         });
 
-        // IMPORTANT: do NOT await ack (no hanging). Gun will sync when it can.
-        async function publish({ id, text, vPacked, author }) {
+        // Put without waiting ack (Gun sync later). But publisher will verify via once().
+        function publish({ id, text, vPacked, author }) {
           const now = Date.now();
           notes.get(id).put({ id, text, vPacked, author, createdAt: now, deleted: false });
-          index.get(id).put(now); // primitive
           return id;
         }
 
-        return { list, onChange:(fn)=>ee.on('change', fn), publish };
+        function onceNote(id, timeoutMs = 1200) {
+          return new Promise((resolve) => {
+            let done = false;
+            const t = setTimeout(() => { if (!done) { done = true; resolve(null); } }, timeoutMs);
+            notes.get(id).once((d) => {
+              if (done) return;
+              clearTimeout(t);
+              done = true;
+              resolve(d);
+            });
+          });
+        }
+
+        return { list, onChange:(fn)=>ee.on('change', fn), publish, onceNote };
       }
       return { create };
     })();
 
-    // ===================== Indexer (build local vectors) =====================
     const Indexer = (() => {
       function create({ local }) {
         let running = false;
@@ -539,7 +496,7 @@
       return { create };
     })();
 
-    // ===================== Publisher FIXED (no hang, idempotent ids) =====================
+    // Publisher: mark "published" only after local confirmation that world note exists.
     const Publisher = (() => {
       function create({ local, world, deviceId }) {
         let running = false;
@@ -559,9 +516,18 @@
                 await local.update(n.id, { vPacked: v });
               }
 
-              // world id = local id (idempotent)
-              await world.publish({ id: n.id, text: n.text, vPacked: v, author: deviceId });
-              await local.update(n.id, { publishState:'published', worldId: n.id });
+              // publish (idempotent: world id = local id)
+              world.publish({ id: n.id, text: n.text, vPacked: v, author: deviceId });
+
+              // verify local gun graph sees it
+              const seen = await world.onceNote(n.id, 1400);
+              const ok = seen && typeof seen.text === 'string' && seen.text.length > 0;
+
+              if (ok) {
+                await local.update(n.id, { publishState:'published', worldId: n.id });
+              } else {
+                // keep pending; will retry
+              }
             }
           } finally {
             running = false;
@@ -578,7 +544,6 @@
       return { create };
     })();
 
-    // ===================== Search =====================
     const Search = (() => {
       function create({ local, world, settings }) {
         const cache = new Map(); // id -> Float32Array
@@ -586,11 +551,7 @@
         function vecFromPacked(id, packed) {
           if (!packed) return null;
           if (cache.has(id)) return cache.get(id);
-          try {
-            const v = Vectors.unpackI8(packed);
-            cache.set(id, v);
-            return v;
-          } catch { return null; }
+          try { const v = Vectors.unpackI8(packed); cache.set(id, v); return v; } catch { return null; }
         }
 
         function clear() { cache.clear(); }
@@ -628,12 +589,7 @@
           worldHits.sort((a,b)=>b.score-a.score);
           serHits.sort((a,b)=>b.score-a.score);
 
-          return {
-            mode:'ok',
-            local: localHits.slice(0, max),
-            world: worldHits.slice(0, max),
-            ser: serHits.slice(0, max)
-          };
+          return { mode:'ok', local: localHits.slice(0, max), world: worldHits.slice(0, max), ser: serHits.slice(0, max) };
         }
 
         function historyFilter(q) {
@@ -648,7 +604,6 @@
       return { create };
     })();
 
-    // ===================== UI helpers =====================
     const UI = (() => {
       function pill(label, state='neutral') {
         const dot = state === 'ok' ? 'ok' : state === 'warn' ? 'warn' : state === 'bad' ? 'bad' : '';
@@ -656,10 +611,7 @@
       }
 
       function renderItems(container, items, { emptyText, kind }) {
-        if (!items.length) {
-          container.innerHTML = `<div class="empty">${Utils.esc(emptyText)}</div>`;
-          return;
-        }
+        if (!items.length) { container.innerHTML = `<div class="empty">${Utils.esc(emptyText)}</div>`; return; }
         container.innerHTML = items.map(it => {
           const metaRight = kind === 'world'
             ? `<span>author:${Utils.esc(String(it.author||'').slice(0,8))}</span>`
@@ -677,10 +629,7 @@
       }
 
       function renderHistory(container, notes) {
-        if (!notes.length) {
-          container.innerHTML = `<div class="empty">Нет заметок</div>`;
-          return;
-        }
+        if (!notes.length) { container.innerHTML = `<div class="empty">Нет заметок</div>`; return; }
         container.innerHTML = notes.map(n => {
           const pub = n.publishState === 'pending'
             ? `<span class="badge pending">pending</span>`
@@ -704,23 +653,9 @@
       return { pill, renderItems, renderHistory };
     })();
 
-    // ===================== Capsule =====================
     const Capsule = (() => {
       function exportNotes(notes) {
-        const cap = {
-          version: 2,
-          kind: 'noosphere',
-          createdAt: Date.now(),
-          notes: notes.map(n => ({
-            id: n.id,
-            text: n.text,
-            createdAt: n.createdAt,
-            editedAt: n.editedAt ?? null,
-            publishState: n.publishState ?? 'none',
-            worldId: n.worldId ?? null,
-            vPacked: n.vPacked ?? null
-          }))
-        };
+        const cap = { version: 2, kind: 'noosphere', createdAt: Date.now(), notes };
         const blob = new Blob([JSON.stringify(cap)], { type:'application/json' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -733,21 +668,12 @@
         const txt = await file.text();
         const cap = Utils.safeJSON(txt, null);
         if (!cap || !Array.isArray(cap.notes)) throw new Error('bad capsule');
-        return cap.notes.map(x => ({
-          id: String(x.id || Utils.uuid()),
-          text: String(x.text || ''),
-          createdAt: Number(x.createdAt) || Date.now(),
-          editedAt: x.editedAt ? Number(x.editedAt) : null,
-          publishState: String(x.publishState || 'none'),
-          worldId: x.worldId ? String(x.worldId) : null,
-          vPacked: typeof x.vPacked === 'string' ? x.vPacked : null
-        }));
+        return cap.notes;
       }
 
       return { exportNotes, importNotes };
     })();
 
-    // ===================== App =====================
     const App = (() => {
       const els = {
         tabFlow: Utils.$('#tabFlow'),
@@ -801,11 +727,7 @@
       let toast = '';
       let toastUntil = 0;
 
-      function setToast(msg, ms=1400) {
-        toast = msg;
-        toastUntil = Date.now() + ms;
-        renderStatus();
-      }
+      function setToast(msg, ms=1400) { toast = msg; toastUntil = Date.now() + ms; renderStatus(); }
 
       function renderStatus(errMsg = '') {
         const peersCount = Settings.parsePeers(settings.peersText).length;
@@ -862,17 +784,14 @@
           peersText: els.peersText.value
         });
         await Settings.save(settings);
-
         applyTheme();
         gun.opt({ peers: Settings.parsePeers(settings.peersText) });
-
         search.clear();
         renderStatus();
         refreshFlow();
         publisher.run();
       }
 
-      // ---- flow
       let seq = 0;
       const refreshFlow = Utils.debounce(async() => {
         const my = ++seq;
@@ -935,14 +854,13 @@
           els.thought.value = '';
           refreshFlow();
           setToast('Отправка в Мир…');
-          await publisher.enqueue(id); // will no longer hang
+          await publisher.enqueue(id);
         } finally {
           busy = false;
           renderStatus();
         }
       }
 
-      // swipe up => send world
       let touchY = 0;
       function bindSwipeUp() {
         els.thought.addEventListener('touchstart', (e) => { touchY = e.touches?.[0]?.clientY ?? 0; }, { passive:true });
@@ -1004,7 +922,6 @@
       }
 
       async function doExport() { Capsule.exportNotes(local.list()); }
-
       async function doImport(file) {
         const imported = await Capsule.importNotes(file);
         await local.bulkPut(imported);
@@ -1030,7 +947,6 @@
         await local.load();
 
         world = World.create(gun);
-
         indexer = Indexer.create({ local });
         publisher = Publisher.create({ local, world, deviceId });
         search = Search.create({ local, world, settings: () => settings });
@@ -1060,6 +976,9 @@
           }
         })();
 
+        // Retry pending every 4s (important for real network)
+        setInterval(() => publisher.run(), 4000);
+
         // UI events
         els.tabFlow.addEventListener('click', () => setTab('flow'));
         els.tabHistory.addEventListener('click', () => setTab('history'));
@@ -1082,7 +1001,6 @@
 
         els.historySearch.addEventListener('input', renderHistory);
 
-        // settings apply
         els.threshold.addEventListener('input', () => els.thresholdV.textContent = Number(els.threshold.value).toFixed(2));
         els.serDelta.addEventListener('input', () => els.serDeltaV.textContent = Number(els.serDelta.value).toFixed(2));
 
