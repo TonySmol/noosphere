@@ -1,13 +1,23 @@
-import { init, embed, vecToBase64 } from './embedder.js';
+import { init, embed } from './embedder.js';
 import { MyNotes } from './storage.js';
-import { loadWorld, getWorldCache, searchWorld, searchLocal, enqueueShare, getPending, exportPendingAsWorld } from './world.js';
+import {
+  loadWorld,
+  getWorldCache,
+  searchWorld,
+  searchLocal,
+  enqueueShare,
+  getPending,
+  clearPending,
+  exportPendingAsWorld
+} from './world.js';
 
 // === DOM ===
 const $ = id => document.getElementById(id);
 const input = $('input');
 const statusEl = $('status');
-const searchBtn = $('searchBtn');
-const shareBtn = $('shareBtn');
+const saveBtn = $('saveBtn');
+const shareCheckbox = $('shareCheckbox');
+const exportBtn = $('exportBtn');
 const personalSection = $('personalSection');
 const personalResults = $('personalResults');
 const worldSection = $('worldSection');
@@ -19,8 +29,7 @@ function setStatus(msg, spinner = false) {
 }
 
 function setReady(ok) {
-  searchBtn.disabled = !ok;
-  shareBtn.disabled = !ok;
+  saveBtn.disabled = !ok;
 }
 
 function esc(s) {
@@ -31,27 +40,34 @@ function esc(s) {
 
 function formatDate(iso) {
   const d = new Date(iso);
-  return d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString('ru-RU') + ' ' +
+    d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 
-function renderCards(container, items, showActions = false) {
+function renderLocalCards(items) {
   if (!items.length) {
-    container.innerHTML = '<div class="empty">Ничего не найдено</div>';
-    return;
+    return '<div class="empty">Нет похожих заметок</div>';
   }
-  container.innerHTML = items.map(item => `
+  return items.map(item => `
     <div class="card" data-id="${item.id}">
-      <div class="card-text">${esc(item.excerpt || item.text)}</div>
+      <div class="card-text">${esc(item.text)}</div>
       <div class="card-meta">
-        ${item.score != null ? `<span class="score">${item.score.toFixed(2)}</span>` : `<span>${formatDate(item.date)}</span>`}
-        ${item.score != null ? `<span>waves: ${item.waves || 0}</span>` : ''}
+        <span>${formatDate(item.date)}</span>
+        <span class="score">${item.score.toFixed(2)}</span>
       </div>
-      ${showActions ? `
-        <div class="actions">
-          <button class="ghost edit-btn">ред.</button>
-          <button class="ghost delete-btn">удал.</button>
-        </div>
-      ` : ''}
+    </div>
+  `).join('');
+}
+
+function renderWorldCards(items) {
+  if (!items.length) return '';
+  return items.map(item => `
+    <div class="card" data-id="${item.id}">
+      <div class="card-text">${esc(item.excerpt || '(пусто)')}</div>
+      <div class="card-meta">
+        <span>${new Date(item.timestamp).toLocaleDateString('ru-RU')}</span>
+        <span class="score">${item.score.toFixed(2)} · 🌊 ${item.waves || 0}</span>
+      </div>
     </div>
   `).join('');
 }
@@ -77,6 +93,13 @@ function renderMyNotes() {
   `).join('');
 }
 
+function updatePendingButton() {
+  const count = getPending().length;
+  exportBtn.textContent = count
+    ? `📤 Экспорт очереди (${count})`
+    : '📤 Экспорт очереди';
+}
+
 // === Поиск ===
 async function runSearch() {
   const text = input.value.trim();
@@ -85,21 +108,30 @@ async function runSearch() {
     worldSection.style.display = 'none';
     return;
   }
-  
+
   setStatus('Поиск...', true);
   try {
     const qVec = await embed(text);
-    const [local, world] = await Promise.all([
-      Promise.resolve(searchLocal(qVec, MyNotes.list())),
-      searchWorld(qVec)
-    ]);
-    
-    personalSection.style.display = 'block';
-    renderCards(personalResults, local);
-    
-    worldSection.style.display = 'block';
-    renderCards(worldResults, world);
-    
+    const local = searchLocal(qVec, MyNotes.list());
+    const { relevant, serendipity } = await searchWorld(qVec);
+
+    personalSection.style.display = local.length ? 'block' : 'none';
+    personalResults.innerHTML = renderLocalCards(local);
+
+    const hasWorld = relevant.length || serendipity.length;
+    worldSection.style.display = hasWorld ? 'block' : 'none';
+
+    if (hasWorld) {
+      worldResults.innerHTML = `
+        ${relevant.length ? '<div class="sub-section-title relevant">Релевантные</div>' : ''}
+        ${renderWorldCards(relevant)}
+        ${serendipity.length ? '<div class="sub-section-title serendipity">Смежные</div>' : ''}
+        ${renderWorldCards(serendipity)}
+      `;
+    } else {
+      worldResults.innerHTML = '<div class="empty">Ничего не найдено</div>';
+    }
+
     setStatus('Готово');
   } catch (e) {
     setStatus('Ошибка поиска: ' + e.message);
@@ -107,69 +139,67 @@ async function runSearch() {
   }
 }
 
-// === Сохранение в личное ===
+// === Сохранение ===
 async function saveToLocal(text) {
   const note = MyNotes.add(text);
-  setStatus('Векторизация...', true);
   const vec = await embed(text);
   MyNotes.updateVec(note.id, vec);
   return { ...note, vec };
 }
 
-// === Инициализация ===
-async function boot() {
-  try {
-    await init((p) => {
-      if (p.status === 'progress') {
-        setStatus(`Загрузка модели: ${Math.round(p.progress || 0)}%`, true);
-      } else if (p.status === 'done') {
-        setStatus('Модель готова. Загрузка мировых заметок...', true);
-      }
-    });
-    
-    await loadWorld();
-    setStatus(`Готово. В мире: ${getWorldCache().length} заметок.`);
-    setReady(true);
-    renderMyNotes();
-  } catch (e) {
-    setStatus('Ошибка запуска: ' + e.message);
-    console.error(e);
-  }
-}
-
-// === События ===
-let searchTimer;
-input.addEventListener('input', () => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(runSearch, 600);
-});
-
-searchBtn.addEventListener('click', runSearch);
-
-shareBtn.addEventListener('click', async () => {
+saveBtn.addEventListener('click', async () => {
   const text = input.value.trim();
   if (!text) return;
-  
-  setStatus('Подготовка...', true);
+
+  setStatus('Сохранение...', true);
+  setReady(false);
   try {
     const note = await saveToLocal(text);
-    const count = enqueueShare(note);
     input.value = '';
     personalSection.style.display = 'none';
     worldSection.style.display = 'none';
-    setStatus(`✓ Сохранено + в очереди на публикацию (${count} шт).`);
+
+    if (shareCheckbox.checked) {
+      const count = enqueueShare(note);
+      setStatus(`✓ Сохранено + в очереди на публикацию (${count} шт).`);
+      shareCheckbox.checked = false;
+    } else {
+      setStatus('✓ Сохранено локально.');
+    }
+
     renderMyNotes();
+    updatePendingButton();
   } catch (e) {
     setStatus('Ошибка: ' + e.message);
+    console.error(e);
+  } finally {
+    setReady(true);
   }
 });
 
-// Клики по заметкам (редактирование/удаление)
+exportBtn.addEventListener('click', async () => {
+  const pending = getPending();
+  if (!pending.length) {
+    alert('Очередь пуста. Сохраните заметки с галочкой "Отправить в мир".');
+    return;
+  }
+  setStatus('Экспорт...', true);
+  try {
+    await exportPendingAsWorld();
+    clearPending();
+    updatePendingButton();
+    setStatus('✓ Файл world-pending.json скачан. Вручную добавьте его содержимое в world.json репозитория.');
+  } catch (e) {
+    setStatus('Ошибка экспорта: ' + e.message);
+  }
+});
+
+// === События редактирования ===
 myNotesEl.addEventListener('click', async (e) => {
   const card = e.target.closest('.card');
   if (!card) return;
   const id = card.dataset.id;
-  
+
   if (e.target.classList.contains('delete-btn')) {
     if (confirm('Удалить заметку?')) {
       MyNotes.remove(id);
@@ -189,5 +219,33 @@ myNotesEl.addEventListener('click', async (e) => {
   }
 });
 
-// Автопоиск по истории при загрузке (если что-то в поле)
+// === Живой поиск ===
+let searchTimer;
+input.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 600);
+});
+
+// === Старт ===
+async function boot() {
+  try {
+    await init((p) => {
+      if (p.status === 'progress') {
+        setStatus(`Загрузка модели: ${Math.round(p.progress || 0)}%`, true);
+      } else if (p.status === 'done') {
+        setStatus('Модель готова. Загрузка мировых заметок...', true);
+      }
+    });
+
+    const count = await loadWorld();
+    setStatus(`Готово. В мире: ${count.length} заметок.`);
+    setReady(true);
+    renderMyNotes();
+    updatePendingButton();
+  } catch (e) {
+    setStatus('Ошибка запуска: ' + e.message);
+    console.error(e);
+  }
+}
+
 boot();
