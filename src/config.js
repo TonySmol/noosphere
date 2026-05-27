@@ -1,6 +1,5 @@
 export const CONFIG = {
-  // ⚠️ ЗАМЕНИ НА URL СВОЕГО CLOUDFLARE WORKER
-  workerUrl: 'https://noosphere-proxy.твой-ник.workers.dev',
+  workerUrl: 'https://hidden-unit-1b90.as1994g.workers.dev',
   collection: 'noosphere',
   search: {
     threshold: 0.3,
