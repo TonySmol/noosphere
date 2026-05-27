@@ -1,1826 +1,1442 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Vector Notes (SPA) — IndexedDB + GunDB + transformers.js</title>
-  <style>
-    :root{
-      --bg:#0b0f17; --panel:#0f1624; --panel2:#111b2d; --text:#e6edf7; --muted:#a9b4c7;
-      --border:#22304a; --accent:#5aa9ff; --danger:#ff5a7a; --ok:#28d17c; --warn:#ffcc66;
-      --shadow: 0 12px 40px rgba(0,0,0,.35);
-      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-    }
-    *{ box-sizing:border-box }
-    html,body{ height:100% }
-    body{
-      margin:0; font-family:var(--sans); background:linear-gradient(180deg,#070a10,#0b0f17); color:var(--text);
-    }
-    a{ color:var(--accent); text-decoration:none }
-    a:hover{ text-decoration:underline }
-
-    .app{
-      height:100%;
-      display:grid;
-      grid-template-rows: 56px 1fr;
-    }
-
-    header{
-      display:flex; align-items:center; justify-content:space-between;
-      padding:0 14px; border-bottom:1px solid var(--border);
-      background:rgba(8,12,19,.85); backdrop-filter: blur(10px);
-      position:sticky; top:0; z-index:10;
-    }
-    .brand{ display:flex; gap:10px; align-items:center; min-width: 260px; }
-    .dot{ width:10px; height:10px; border-radius:50%; background:var(--accent); box-shadow:0 0 22px rgba(90,169,255,.55) }
-    .title{ font-weight:650; letter-spacing:.2px }
-    .sub{ color:var(--muted); font-size:12px }
-    .header-right{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; justify-content:flex-end }
-    .pill{
-      font-size:12px; color:var(--muted); border:1px solid var(--border);
-      padding:6px 10px; border-radius:999px; background:rgba(15,22,36,.6);
-      display:flex; gap:8px; align-items:center;
-    }
-    .pill b{ color:var(--text); font-weight:650 }
-    .btn{
-      border:1px solid var(--border); background:rgba(15,22,36,.75); color:var(--text);
-      padding:9px 12px; border-radius:10px; cursor:pointer;
-      transition: transform .03s ease, background .15s ease, border-color .15s ease;
-      box-shadow: none;
-    }
-    .btn:hover{ border-color:#2e4165; background:rgba(17,27,45,.85) }
-    .btn:active{ transform: translateY(1px) }
-    .btn.primary{ border-color:rgba(90,169,255,.55); background:rgba(90,169,255,.12) }
-    .btn.danger{ border-color:rgba(255,90,122,.55); background:rgba(255,90,122,.10) }
-    .btn.ghost{ background:transparent }
-    .btn:disabled{ opacity:.55; cursor:not-allowed }
-
-    main{
-      height:100%;
-      display:grid;
-      grid-template-columns: 320px 1fr 360px;
-      gap:12px;
-      padding:12px;
-      max-width: 1500px;
-      margin:0 auto;
-      width:100%;
-    }
-
-    .panel{
-      background:rgba(15,22,36,.72);
-      border:1px solid var(--border);
-      border-radius:14px;
-      box-shadow: var(--shadow);
-      overflow:hidden;
-      display:flex;
-      flex-direction:column;
-      min-height:0;
-    }
-    .panel header{
-      position:static;
-      backdrop-filter:none;
-      background:rgba(15,22,36,.2);
-      border-bottom:1px solid var(--border);
-      height:auto;
-      padding:10px 12px;
-    }
-    .panel header .hrow{
-      display:flex; gap:10px; align-items:center; justify-content:space-between;
-    }
-    .panel header h2{
-      margin:0; font-size:13px; letter-spacing:.2px;
-      text-transform:uppercase; color:var(--muted); font-weight:700;
-    }
-    .panel .body{
-      padding:10px 12px;
-      overflow:auto;
-      min-height:0;
-    }
-
-    .field{ display:flex; flex-direction:column; gap:6px; margin-bottom:10px }
-    .label{ color:var(--muted); font-size:12px }
-    input[type="text"], textarea, select{
-      width:100%;
-      border:1px solid var(--border);
-      background:rgba(7,10,16,.35);
-      color:var(--text);
-      border-radius:10px;
-      padding:10px 10px;
-      outline:none;
-    }
-    input[type="text"]:focus, textarea:focus, select:focus{ border-color:#35507c }
-    textarea{
-      resize:none;
-      min-height: 320px;
-      line-height:1.42;
-      font-size:14px;
-      font-family: var(--sans);
-    }
-    .mono{ font-family:var(--mono) }
-
-    .notes-list{
-      display:flex; flex-direction:column; gap:8px;
-    }
-    .note-item{
-      border:1px solid var(--border);
-      background:rgba(7,10,16,.25);
-      border-radius:12px;
-      padding:10px 10px;
-      cursor:pointer;
-      transition: border-color .15s ease, background .15s ease;
-    }
-    .note-item:hover{ border-color:#2e4165; background:rgba(7,10,16,.35) }
-    .note-item.active{ border-color:rgba(90,169,255,.65); background:rgba(90,169,255,.10) }
-    .note-title{ font-weight:650; font-size:13px; margin:0 0 4px 0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .note-meta{ display:flex; justify-content:space-between; color:var(--muted); font-size:12px; gap:10px }
-    .badge{
-      font-size:11px; border:1px solid var(--border);
-      padding:2px 8px; border-radius:999px; color:var(--muted);
-      background:rgba(15,22,36,.5);
-    }
-    .badge.ok{ border-color:rgba(40,209,124,.45); color:#bdf6d9; background:rgba(40,209,124,.10) }
-    .badge.warn{ border-color:rgba(255,204,102,.45); color:#ffe8b3; background:rgba(255,204,102,.10) }
-
-    .row{ display:flex; gap:10px; align-items:center }
-    .row.wrap{ flex-wrap:wrap }
-    .space{ height:10px }
-    .split{ display:grid; grid-template-columns: 1fr 1fr; gap:10px }
-
-    .hint{ color:var(--muted); font-size:12px; line-height:1.35 }
-    .statusline{
-      display:flex; align-items:center; justify-content:space-between; gap:10px;
-      border-top:1px solid var(--border);
-      padding:8px 12px; color:var(--muted); font-size:12px;
-      background:rgba(7,10,16,.18);
-    }
-    .status-left{ display:flex; gap:10px; align-items:center; min-width:0 }
-    .status-right{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end }
-    .k{ color:var(--muted) }
-    .v{ color:var(--text) }
-
-    .related-item{
-      border:1px solid var(--border);
-      background:rgba(7,10,16,.22);
-      border-radius:12px;
-      padding:10px;
-      display:flex; flex-direction:column; gap:6px;
-    }
-    .related-top{ display:flex; justify-content:space-between; gap:10px; align-items:flex-start }
-    .related-title{ font-weight:650; font-size:13px; margin:0; }
-    .score{ font-family:var(--mono); color:var(--muted); font-size:12px }
-    .related-snippet{ color:var(--muted); font-size:12px; line-height:1.35; max-height: 3.9em; overflow:hidden }
-    .related-actions{ display:flex; gap:8px; flex-wrap:wrap; align-items:center }
-
-    dialog{
-      border:none; border-radius:14px; padding:0; width:min(860px, 95vw);
-      background:rgba(15,22,36,.98); color:var(--text);
-      box-shadow: var(--shadow);
-    }
-    dialog::backdrop{ background:rgba(0,0,0,.65) }
-    .modal-head{
-      padding:12px 14px; border-bottom:1px solid var(--border);
-      display:flex; justify-content:space-between; align-items:center;
-    }
-    .modal-head h3{ margin:0; font-size:14px; letter-spacing:.2px }
-    .modal-body{ padding:12px 14px; max-height:70vh; overflow:auto }
-    .modal-foot{ padding:12px 14px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px }
-
-    .warnbox{
-      border:1px solid rgba(255,204,102,.35);
-      background:rgba(255,204,102,.08);
-      color:#ffe8b3;
-      border-radius:12px;
-      padding:10px 12px;
-      font-size:12px;
-      line-height:1.35;
-    }
-    .errbox{
-      border:1px solid rgba(255,90,122,.35);
-      background:rgba(255,90,122,.08);
-      color:#ffd1da;
-      border-radius:12px;
-      padding:10px 12px;
-      font-size:12px;
-      line-height:1.35;
-    }
-    .okbox{
-      border:1px solid rgba(40,209,124,.35);
-      background:rgba(40,209,124,.08);
-      color:#bdf6d9;
-      border-radius:12px;
-      padding:10px 12px;
-      font-size:12px;
-      line-height:1.35;
-    }
-
-    .small{ font-size:12px; color:var(--muted) }
-    .right{ text-align:right }
-  </style>
-
-  <!-- GunDB (обычно пользователь пишет "ganDB", но правильное название GunDB) -->
-  <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Noosphere</title>
+<style>
+:root {
+  --bg:#f8fafc; --surface:#fff; --text:#0f172a; --text2:#64748b;
+  --border:#e2e8f0; --accent:#4f46e5; --accent-hover:#4338ca;
+  --shadow:0 1px 3px rgba(0,0,0,.05); --radius:16px;
+  --wave:#0ea5e9; --star:#fbbf24; --personal:#a78bfa;
+  --world:#38bdf8; --serendipity:#fbbf24;
+}
+.dark {
+  --bg:#0f172a; --surface:#1e293b; --text:#f1f5f9; --text2:#94a3b8;
+  --border:#334155; --accent:#818cf8; --shadow:0 1px 3px rgba(0,0,0,.3);
+}
+* { box-sizing:border-box; margin:0; padding:0 }
+body {
+  font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg); color:var(--text); line-height:1.5;
+  display:flex; justify-content:center; padding:.5rem; overflow-x:hidden;
+}
+.app { width:100%; max-width:600px; display:flex; flex-direction:column; gap:.75rem; margin-top:.5rem }
+.tabs { display:flex; gap:.5rem; justify-content:center; margin-bottom:.25rem }
+.tab-btn {
+  padding:.5rem 1.5rem; border-radius:12px; border:1px solid var(--border);
+  background:transparent; color:var(--text2); cursor:pointer; font-weight:500; transition:all .2s;
+}
+.tab-btn.active { background:var(--accent); color:#fff; border-color:var(--accent) }
+.thought-input {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius); padding:1rem; box-shadow:var(--shadow);
+}
+textarea {
+  width:100%; border:none; background:transparent;
+  font-size:1.1rem; font-family:inherit; resize:none;
+  outline:none; color:var(--text); min-height:90px;
+}
+textarea::placeholder { color:var(--text2); opacity:.7 }
+.input-actions { display:flex; justify-content:space-between; align-items:center; margin-top:.75rem }
+.btn {
+  padding:.6rem 1.4rem; border-radius:12px; font-weight:600;
+  border:none; cursor:pointer; background:var(--accent); color:#fff;
+  font-size:.9rem; transition:all .2s;
+}
+.btn:hover { background:var(--accent-hover); transform:translateY(-1px) }
+.btn:disabled { opacity:.4; pointer-events:none }
+.btn-ghost { background:transparent; color:var(--text2); border:1px solid var(--border) }
+.status-line { font-size:.8rem; color:var(--text2) }
+.swipe-hint { font-size:.8rem; color:var(--text2); display:none; align-items:center; gap:.3rem }
+.swipe-hint.visible { display:flex }
+.view { display:none }
+.view.active { display:block }
+.feed-section { margin-top:.5rem }
+.section-title {
+  display:flex; align-items:center; gap:.5rem;
+  font-size:.8rem; font-weight:600; color:var(--text2);
+  text-transform:uppercase; letter-spacing:.05em; margin-bottom:.5rem;
+}
+.section-title::before {
+  content:''; display:block; width:8px; height:8px;
+  border-radius:50%; background:currentColor;
+}
+#personalSection .section-title { color:var(--personal) }
+#relevantSection .section-title { color:var(--world) }
+#serendipitySection .section-title { color:var(--serendipity) }
+.carousel {
+  display:flex; overflow-x:auto; scroll-snap-type:x mandatory;
+  -webkit-overflow-scrolling:touch; gap:.75rem; padding-bottom:.5rem;
+}
+.carousel::-webkit-scrollbar { height:4px }
+.carousel::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px }
+.card {
+  flex:0 0 calc(100% - 1.5rem); scroll-snap-align:start;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius); padding:1rem;
+  box-shadow:var(--shadow); animation:fadeInUp .4s ease both;
+}
+@keyframes fadeInUp { from { opacity:0; transform:translateY(10px) } to { opacity:1; transform:translateY(0) } }
+.card.charged { border-color:var(--wave); box-shadow:0 0 0 1px var(--wave) }
+.card-text { font-size:.95rem; line-height:1.5; margin-bottom:.5rem; white-space:pre-wrap; word-break:break-word }
+.card-footer { display:flex; align-items:center; justify-content:space-between; font-size:.8rem; color:var(--text2) }
+.score-badge { background:rgba(79,70,229,.1); color:var(--accent); padding:2px 8px; border-radius:10px; font-weight:600 }
+.wave-group { display:flex; align-items:center; gap:.3rem }
+.wave-btn {
+  background:none; border:1px solid var(--border); border-radius:50%;
+  width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center;
+  font-size:.85rem; cursor:pointer; color:var(--text2); transition:all .2s;
+}
+.wave-btn:hover { background:var(--wave); color:#fff; border-color:var(--wave) }
+.empty-message { text-align:center; color:var(--text2); padding:2rem 1rem; font-style:italic }
+.history-input { margin-bottom:1rem }
+.day-group { margin-bottom:1.5rem }
+.day-title { font-size:.85rem; font-weight:600; color:var(--text2); margin-bottom:.5rem }
+.archive-item {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:12px; padding:.75rem 1rem; margin-bottom:.5rem;
+}
+.archive-item .meta { font-size:.75rem; color:var(--text2); margin-bottom:.25rem; display:flex; gap:.75rem }
+.archive-item .text { font-size:.95rem; white-space:pre-wrap; word-break:break-word }
+.archive-item .actions { margin-top:.5rem; display:flex; gap:.5rem }
+.archive-item .actions button {
+  background:none; border:1px solid var(--border); border-radius:8px;
+  padding:.25rem .7rem; font-size:.8rem; cursor:pointer; color:var(--text2);
+}
+.burger-btn {
+  position:fixed; top:1rem; right:1rem; width:44px; height:44px;
+  background:var(--surface); border:1px solid var(--border); border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer; z-index:5; font-size:1.4rem; box-shadow:var(--shadow);
+}
+.settings-panel {
+  position:fixed; top:0; right:0; width:340px; max-width:85vw;
+  height:100%; background:var(--surface); box-shadow:-5px 0 25px rgba(0,0,0,.15);
+  z-index:10; padding:1.5rem; overflow-y:auto;
+  transform:translateX(100%); transition:transform .4s cubic-bezier(.4,0,.2,1);
+}
+.settings-panel.open { transform:translateX(0) }
+.overlay { position:fixed; inset:0; background:rgba(0,0,0,.3); z-index:9; display:none }
+.overlay.open { display:block }
+.setting-row { margin-bottom:1rem; display:flex; flex-direction:column; gap:.2rem }
+.setting-row label { font-size:.85rem; color:var(--text2) }
+.setting-row select, .setting-row input[type=text] {
+  padding:.5rem; border:1px solid var(--border); border-radius:8px;
+  background:var(--surface); color:var(--text); font:inherit;
+}
+.setting-row textarea {
+  min-height:60px; font-size:.85rem;
+  border:1px solid var(--border); border-radius:8px; padding:.5rem;
+  background:var(--surface); color:var(--text);
+}
+.range-display { display:flex; align-items:center; gap:.5rem }
+.range-display span { min-width:3rem; font-weight:600; color:var(--accent) }
+.settings-actions { display:flex; flex-direction:column; gap:.75rem; margin:1.5rem 0 }
+.settings-actions .btn { width:100%; justify-content:center }
+.spinner {
+  display:inline-block; width:16px; height:16px;
+  border:2px solid var(--text2); border-right-color:transparent;
+  border-radius:50%; animation:spin .8s linear infinite; vertical-align:middle;
+}
+@keyframes spin { to { transform:rotate(360deg) } }
+.diag {
+  font-size:.7rem; color:var(--text2); padding:.4rem .6rem;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:8px; margin-top:.5rem;
+}
+.diag b { color:var(--text) }
+.diag.warn { border-color:var(--star); color:#92400e }
+.dark .diag.warn { color:#fcd34d }
+</style>
 </head>
-
 <body>
 <div class="app">
-  <header>
-    <div class="brand">
-      <div class="dot"></div>
-      <div>
-        <div class="title">Vector Notes</div>
-        <div class="sub">SPA: IndexedDB (локально) + GunDB (облако/P2P) + transformers.js (локальные эмбеддинги)</div>
+  <div class="tabs">
+    <button class="tab-btn active" data-view="flow">Поток</button>
+    <button class="tab-btn" data-view="history">История</button>
+  </div>
+
+  <div class="view active" id="flowView">
+    <div class="thought-input" id="thoughtContainer">
+      <textarea id="thoughtInput" placeholder="Поделитесь мыслью..."></textarea>
+      <div class="input-actions">
+        <div class="status-line" id="statusMsg"></div>
+        <div class="swipe-hint" id="swipeHint">
+          <span>↑</span> <span id="swipeHintText">смахните вверх для публикации</span>
+        </div>
+        <button id="saveBtn" class="btn" disabled>Отправить</button>
       </div>
     </div>
-
-    <div class="header-right">
-      <div class="pill" title="Состояние эмбеддингов / модели">
-        <span class="k">Embeddings:</span> <b id="pillEmb">off</b>
-        <span class="k">Model:</span> <b id="pillModel">—</b>
-      </div>
-
-      <div class="pill" title="Состояние облачной синхронизации через GunDB">
-        <span class="k">Cloud:</span> <b id="pillCloud">off</b>
-        <span class="k">NS:</span> <b id="pillNS" class="mono">—</b>
-      </div>
-
-      <select id="langSelect" aria-label="Language" title="UI language">
-        <option value="ru">RU</option>
-        <option value="en">EN</option>
-      </select>
-
-      <button class="btn primary" id="btnNew">Новая заметка</button>
-      <button class="btn" id="btnSave">Сохранить</button>
-      <button class="btn danger" id="btnDelete">Удалить</button>
-      <button class="btn" id="btnSettings">Настройки</button>
+    <div id="personalSection" class="feed-section" style="display:none">
+      <div class="section-title" id="personalTitle">Мои мысли</div>
+      <div id="personalCards" class="carousel"></div>
     </div>
-  </header>
+    <div id="relevantSection" class="feed-section" style="display:none">
+      <div class="section-title" id="relevantTitle">Мир</div>
+      <div id="relevantCards" class="carousel"></div>
+    </div>
+    <div id="serendipitySection" class="feed-section" style="display:none">
+      <div class="section-title" id="serendipityTitle">Смежные</div>
+      <div id="serendipityCards" class="carousel"></div>
+    </div>
+    <div id="diagBox" class="diag" style="display:none"></div>
+  </div>
 
-  <main>
-    <!-- LEFT: notes -->
-    <section class="panel" aria-label="Notes list">
-      <header>
-        <div class="hrow">
-          <h2 id="hNotes">Заметки</h2>
-          <span class="badge" id="notesCount">0</span>
-        </div>
-      </header>
-      <div class="body">
-        <div class="field">
-          <div class="label" id="lblFilter">Фильтр</div>
-          <input type="text" id="filterInput" placeholder="Поиск по заголовку/тексту..." />
-        </div>
-        <div class="notes-list" id="notesList"></div>
-        <div class="space"></div>
-        <div class="hint" id="hintLocal">
-          Локальные данные хранятся в <span class="mono">IndexedDB</span> (на этом устройстве/в этом браузере).
-        </div>
-      </div>
-      <div class="statusline">
-        <div class="status-left">
-          <span id="localDbStatus">DB: …</span>
-        </div>
-        <div class="status-right">
-          <button class="btn ghost" id="btnExport">Экспорт JSON</button>
-          <button class="btn ghost" id="btnImport">Импорт JSON</button>
-          <input type="file" id="importFile" accept="application/json" hidden />
-        </div>
-      </div>
-    </section>
-
-    <!-- CENTER: editor -->
-    <section class="panel" aria-label="Editor">
-      <header>
-        <div class="hrow">
-          <h2 id="hEditor">Редактор</h2>
-          <div class="row wrap">
-            <span class="badge" id="badgeSaved">—</span>
-            <span class="badge" id="badgeEmbed">emb: —</span>
-          </div>
-        </div>
-      </header>
-
-      <div class="body">
-        <div class="field">
-          <div class="label" id="lblTitle">Заголовок</div>
-          <input type="text" id="titleInput" placeholder="Например: Идеи для проекта" />
-        </div>
-
-        <div class="field">
-          <div class="label" id="lblContent">Заметка</div>
-          <textarea id="contentInput" placeholder="Пиши здесь. Если эмбеддинги включены — похожие заметки будут появляться справа (локально + облако)." ></textarea>
-        </div>
-
-        <div class="split">
-          <div class="warnbox" id="boxRunHint" style="display:none"></div>
-          <div class="okbox" id="boxInfo" style="display:none"></div>
-        </div>
-        <div class="space"></div>
-
-        <div class="hint" id="hintEmbed">
-          Подсказка: эмбеддинги считаются локально в браузере через <span class="mono">transformers.js</span>.
-          Первый запуск может скачать модель (десятки/сотни МБ) и занять время.
-        </div>
-      </div>
-
-      <div class="statusline">
-        <div class="status-left">
-          <span id="editorStatus">…</span>
-        </div>
-        <div class="status-right">
-          <span class="mono small" id="noteId">id: —</span>
-        </div>
-      </div>
-    </section>
-
-    <!-- RIGHT: related -->
-    <section class="panel" aria-label="Related notes">
-      <header>
-        <div class="hrow">
-          <h2 id="hRelated">Похожие</h2>
-          <div class="row wrap">
-            <span class="badge ok" id="badgeLocalRel">local: 0</span>
-            <span class="badge warn" id="badgeCloudRel">cloud: 0</span>
-          </div>
-        </div>
-      </header>
-      <div class="body">
-        <div class="field">
-          <div class="label" id="lblRelMode">Режим</div>
-          <select id="relMode">
-            <option value="auto">Авто (по текущему тексту)</option>
-            <option value="saved">По сохранённой заметке</option>
-          </select>
-        </div>
-
-        <div class="field">
-          <div class="label" id="lblRelMin">Порог похожести</div>
-          <input type="text" id="minScore" class="mono" value="0.25" />
-          <div class="hint" id="hintScore">Косинусная похожесть. Для MiniLM часто полезно 0.20–0.35.</div>
-        </div>
-
-        <div class="space"></div>
-        <div class="label" id="lblLocalRel">Локально</div>
-        <div id="relatedLocal"></div>
-
-        <div class="space"></div>
-        <div class="label" id="lblCloudRel">Облако (GunDB)</div>
-        <div id="relatedCloud"></div>
-
-        <div class="space"></div>
-        <div class="hint" id="hintCloudPrivacy">
-          Важно: если включить облако с публичным relay — данные могут быть публичны. По умолчанию облако выключено.
-        </div>
-      </div>
-
-      <div class="statusline">
-        <div class="status-left">
-          <span id="relStatus">…</span>
-        </div>
-        <div class="status-right">
-          <button class="btn ghost" id="btnForceRel">Обновить</button>
-        </div>
-      </div>
-    </section>
-  </main>
+  <div class="view" id="historyView">
+    <div class="history-input">
+      <input type="text" id="historySearchInput" placeholder="Поиск по истории..." style="width:100%; padding:.75rem; border:1px solid var(--border); border-radius:14px; background:var(--surface); color:var(--text)">
+    </div>
+    <div id="historyContent"></div>
+  </div>
 </div>
 
-<!-- Settings Modal -->
-<dialog id="settingsDlg">
-  <div class="modal-head">
-    <h3 id="hSettings">Настройки</h3>
-    <button class="btn" id="btnCloseSettings">Закрыть</button>
+<div class="burger-btn" id="settingsTrigger">☰</div>
+<div class="overlay" id="overlay"></div>
+<div class="settings-panel" id="settingsPanel">
+  <h2 style="margin-bottom:1.5rem">Настройки</h2>
+  <div class="setting-row">
+    <label>Язык / Language</label>
+    <select id="langSelect"><option value="ru">Русский</option><option value="en">English</option></select>
   </div>
-
-  <div class="modal-body">
-    <div class="warnbox" id="settingsWarnings" style="display:none"></div>
-
-    <div class="split">
-      <div class="panel" style="border-radius:12px">
-        <header><div class="hrow"><h2 id="hLocal">Локально</h2></div></header>
-        <div class="body">
-          <div class="field">
-            <div class="label" id="lblNamespace">Namespace (для облака)</div>
-            <input type="text" id="nsInput" class="mono" />
-            <div class="hint" id="hintNS">
-              Это “комната/пространство” в GunDB. Скопируй одинаковый namespace на двух устройствах — и увидишь общие заметки.
-            </div>
-          </div>
-
-          <div class="field">
-            <div class="label" id="lblEmbEnable">Эмбеддинги</div>
-            <select id="embEnabled">
-              <option value="on">Включены</option>
-              <option value="off">Выключены</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <div class="label" id="lblModel">Модель эмбеддингов</div>
-            <input type="text" id="modelInput" class="mono" />
-            <div class="hint" id="hintModel">
-              Рекомендуется мультиязычная: <span class="mono">Xenova/paraphrase-multilingual-MiniLM-L12-v2</span>
-            </div>
-          </div>
-
-          <div class="field">
-            <div class="label" id="lblQuant">Quantized</div>
-            <select id="quantized">
-              <option value="true">true (быстрее/меньше)</option>
-              <option value="false">false (точнее/больше)</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <div class="label" id="lblAutoRel">Автопоиск похожих при наборе</div>
-            <select id="autoRel">
-              <option value="on">Включён</option>
-              <option value="off">Выключён</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel" style="border-radius:12px">
-        <header><div class="hrow"><h2 id="hCloud">Облако / GunDB</h2></div></header>
-        <div class="body">
-          <div class="field">
-            <div class="label" id="lblCloudEnable">Cloud sync</div>
-            <select id="cloudEnabled">
-              <option value="off">Выключено</option>
-              <option value="on">Включено</option>
-            </select>
-          </div>
-
-          <div class="field">
-            <div class="label" id="lblPeers">Gun peers (relay URLs, через запятую)</div>
-            <input type="text" id="peersInput" class="mono" />
-            <div class="hint" id="hintPeers">
-              Пример: <span class="mono">https://gun-manhattan.herokuapp.com/gun</span> (может быть нестабилен). Лучше поднять свой relay для продакшена.
-            </div>
-          </div>
-
-          <div class="field">
-            <div class="label" id="lblCloudUploadEmb">Загружать эмбеддинги в облако</div>
-            <select id="cloudUploadEmb">
-              <option value="on">Да (для облачного similarity)</option>
-              <option value="off">Нет (меньше утечек/размер)</option>
-            </select>
-            <div class="hint" id="hintCloudEmb">
-              Чтобы искать “родственные” в облаке, клиент должен получить эмбеддинги (или тексты) удалённых заметок.
-            </div>
-          </div>
-
-          <div class="field">
-            <div class="label" id="lblCloudLimit">Лимит загружаемых облачных заметок (для поиска)</div>
-            <input type="text" id="cloudLimit" class="mono" value="200" />
-          </div>
-
-          <div class="okbox" id="cloudStateBox" style="display:none"></div>
-          <div class="errbox" id="cloudErrBox" style="display:none"></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="space"></div>
-    <div class="panel" style="border-radius:12px">
-      <header><div class="hrow"><h2 id="hDev">Проверка запуска</h2></div></header>
-      <div class="body">
-        <div class="warnbox" id="runChecks"></div>
-      </div>
+  <div class="setting-row">
+    <label>Тема</label>
+    <select id="themeSelect"><option value="auto">Авто</option><option value="light">День</option><option value="dark">Ночь</option></select>
+  </div>
+  <div class="setting-row">
+    <label>Порог релевантности</label>
+    <div class="range-display">
+      <input type="range" id="thresholdSlider" min="0" max="1" step="0.01" value="0.25">
+      <span id="thresholdValue">0.25</span>
     </div>
   </div>
-
-  <div class="modal-foot">
-    <button class="btn" id="btnResetLocal">Сбросить локальную базу</button>
-    <button class="btn primary" id="btnApplySettings">Применить</button>
+  <div class="setting-row">
+    <label>Дельта смежности</label>
+    <div class="range-display">
+      <input type="range" id="serendipitySlider" min="0" max="0.5" step="0.01" value="0.15">
+      <span id="serendipityValue">0.15</span>
+    </div>
   </div>
-</dialog>
+  <div class="setting-row">
+    <label>Мин. волн</label>
+    <select id="minWavesSelect"><option value="0">0</option><option value="1" selected>1</option><option value="3">3</option><option value="5">5</option></select>
+  </div>
+  <div class="setting-row">
+    <label>Макс. карточек</label>
+    <select id="maxResultsSelect"><option value="3">3</option><option value="5" selected>5</option><option value="10">10</option></select>
+  </div>
+  <div class="setting-row">
+    <label>Gun relay (P2P)</label>
+    <textarea id="relaysInput" placeholder="https://...">https://gun-manhattan.herokuapp.com/gun.js</textarea>
+  </div>
+  <div class="setting-row">
+    <label>Namespace (P2P комната)</label>
+    <input type="text" id="namespaceInput" placeholder="auto-generated">
+  </div>
+  <div class="settings-actions">
+    <button id="exportCapsuleBtn" class="btn btn-ghost">Экспорт JSON</button>
+    <button id="importCapsuleBtn" class="btn btn-ghost">Импорт JSON</button>
+    <input type="file" id="importFileInput" accept=".json" style="display:none">
+    <button id="selfSaveBtn" class="btn btn-ghost">Записать в HTML (TiddlyWiki)</button>
+    <button id="rebuildVectorsBtn" class="btn btn-ghost">Пересоздать векторы</button>
+  </div>
+  <div style="display:flex; gap:.5rem; margin:1rem 0">
+    <button id="resetSettingsBtn" class="btn btn-ghost" style="flex:1">Сбросить всё</button>
+    <button id="applySettingsBtn" class="btn" style="flex:1">Применить</button>
+  </div>
+  <p style="font-size:.75rem;color:var(--text2)">Модель: MiniLM-L12 (quantized)</p>
+</div>
+
+<!-- GunDB: UMD, глобальные объекты Gun, SEA, Axe -->
+<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/sea.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/axe.js"></script>
 
 <script type="module">
-/**
- * Vector Notes — один HTML, “профессиональный каркас”.
- * Что важно для теста:
- * 1) Открой через http(s), НЕ file://
- *    - python -m http.server 8080
- *    - затем http://localhost:8080/
- * 2) Первый запуск transformers.js скачает модель (может быть долго).
- * 3) GunDB peer по умолчанию может быть нестабильным — это нормально для демо.
- */
+/* ========================================================================== */
+/* NOOSPHERE — module structure via window.NS namespace                        */
+/* ========================================================================== */
+const NS = window.NS = {};
 
-/* ----------------------------- i18n ----------------------------- */
-const I18N = {
-  ru: {
-    newNote: "Новая заметка", save:"Сохранить", delete:"Удалить", settings:"Настройки",
-    notes:"Заметки", editor:"Редактор", related:"Похожие",
-    filter:"Фильтр", title:"Заголовок", content:"Заметка",
-    mode:"Режим", autoDraft:"Авто (по текущему тексту)", bySaved:"По сохранённой заметке",
-    threshold:"Порог похожести",
-    local:"Локально", cloud:"Облако (GunDB)",
-    exportJSON:"Экспорт JSON", importJSON:"Импорт JSON",
-    dbReady:"DB: готово", dbFail:"DB: ошибка",
-    noNotes:"Нет заметок. Создай новую.",
-    modelOff:"off", cloudOff:"off",
-    saved:"сохранено", unsaved:"не сохранено",
-    embOff:"emb: off",
-    embLoading:"emb: загрузка модели…",
-    embReady:"emb: готово",
-    embErr:"emb: ошибка",
-    runHintTitle:"Подсказка запуска",
-    runHintText:"Похоже, страница открыта как file://. Для transformers.js/Gun/IndexedDB надёжнее запускать через локальный сервер (http://localhost).",
-    infoReady:"Готово. Пиши — справа появятся похожие заметки (локальные/облачные).",
-    relComputing:"Ищу похожие…",
-    relNeedEmb:"Чтобы искать похожие, включи эмбеддинги.",
-    confirmDelete:"Удалить заметку? Это удалит локально (и из облака, если включено).",
-    imported:"Импортировано",
-    resetConfirm:"Точно сбросить локальную базу? Все локальные заметки будут удалены.",
-    cloudPublicWarn:"Внимание: облако включено. Если peer публичный — данные могут быть публичны.",
+/* ========================================================================== */
+/* NS.Config — constants only                                                  */
+/* ========================================================================== */
+NS.Config = Object.freeze({
+  VERSION: '3.0.0',
+  DEFAULTS: {
+    lang: 'ru',
+    theme: 'auto',
+    threshold: 0.25,
+    serendipityDelta: 0.15,
+    minWaves: 1,
+    maxResults: 5,
+    relays: ['https://gun-manhattan.herokuapp.com/gun.js'],
+    namespace: null, // generated on first run
+    cloudEnabled: false
   },
-  en: {
-    newNote: "New note", save:"Save", delete:"Delete", settings:"Settings",
-    notes:"Notes", editor:"Editor", related:"Related",
-    filter:"Filter", title:"Title", content:"Note",
-    mode:"Mode", autoDraft:"Auto (current draft)", bySaved:"Saved note embedding",
-    threshold:"Similarity threshold",
-    local:"Local", cloud:"Cloud (GunDB)",
-    exportJSON:"Export JSON", importJSON:"Import JSON",
-    dbReady:"DB: ready", dbFail:"DB: error",
-    noNotes:"No notes yet. Create one.",
-    modelOff:"off", cloudOff:"off",
-    saved:"saved", unsaved:"unsaved",
-    embOff:"emb: off",
-    embLoading:"emb: loading model…",
-    embReady:"emb: ready",
-    embErr:"emb: error",
-    runHintTitle:"Run hint",
-    runHintText:"Looks like you're opening via file://. For transformers.js/Gun/IndexedDB you should use a local HTTP server (http://localhost).",
-    infoReady:"Ready. Type to see similar notes (local/cloud) on the right.",
-    relComputing:"Searching related…",
-    relNeedEmb:"Enable embeddings to search related notes.",
-    confirmDelete:"Delete this note? This removes it locally (and from cloud if enabled).",
-    imported:"Imported",
-    resetConfirm:"Reset local DB? All local notes will be deleted.",
-    cloudPublicWarn:"Warning: cloud is enabled. If your peer is public, your data may be public.",
+  STORAGE_KEYS: {
+    settings: 'noosphere_settings',
+    myNotes: 'noosphere_mynotes',
+    world: 'noosphere_world',
+    gunIdentity: 'noosphere_gun_identity'
+  },
+  GUN_PREFIX: 'noosphere/v3',
+  MODEL: {
+    name: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+    quantized: true,
+    dims: 384
   }
-};
+});
 
-let uiLang = detectLang();
-function t(key){
-  return (I18N[uiLang] && I18N[uiLang][key]) || I18N.en[key] || key;
-}
-function detectLang(){
-  const nav = (navigator.language || "en").toLowerCase();
-  return nav.startsWith("ru") ? "ru" : "en";
-}
-
-/* ----------------------------- DOM ----------------------------- */
-const $ = (sel) => document.querySelector(sel);
-
-const el = {
-  pillEmb: $("#pillEmb"),
-  pillModel: $("#pillModel"),
-  pillCloud: $("#pillCloud"),
-  pillNS: $("#pillNS"),
-
-  langSelect: $("#langSelect"),
-
-  btnNew: $("#btnNew"),
-  btnSave: $("#btnSave"),
-  btnDelete: $("#btnDelete"),
-  btnSettings: $("#btnSettings"),
-
-  hNotes: $("#hNotes"),
-  hEditor: $("#hEditor"),
-  hRelated: $("#hRelated"),
-
-  notesCount: $("#notesCount"),
-  filterInput: $("#filterInput"),
-  notesList: $("#notesList"),
-  localDbStatus: $("#localDbStatus"),
-
-  btnExport: $("#btnExport"),
-  btnImport: $("#btnImport"),
-  importFile: $("#importFile"),
-
-  titleInput: $("#titleInput"),
-  contentInput: $("#contentInput"),
-  badgeSaved: $("#badgeSaved"),
-  badgeEmbed: $("#badgeEmbed"),
-  editorStatus: $("#editorStatus"),
-  noteId: $("#noteId"),
-
-  boxRunHint: $("#boxRunHint"),
-  boxInfo: $("#boxInfo"),
-
-  relMode: $("#relMode"),
-  minScore: $("#minScore"),
-  relatedLocal: $("#relatedLocal"),
-  relatedCloud: $("#relatedCloud"),
-  badgeLocalRel: $("#badgeLocalRel"),
-  badgeCloudRel: $("#badgeCloudRel"),
-  relStatus: $("#relStatus"),
-  btnForceRel: $("#btnForceRel"),
-
-  settingsDlg: $("#settingsDlg"),
-  btnCloseSettings: $("#btnCloseSettings"),
-  btnApplySettings: $("#btnApplySettings"),
-  btnResetLocal: $("#btnResetLocal"),
-
-  // settings fields
-  nsInput: $("#nsInput"),
-  embEnabled: $("#embEnabled"),
-  modelInput: $("#modelInput"),
-  quantized: $("#quantized"),
-  autoRel: $("#autoRel"),
-  cloudEnabled: $("#cloudEnabled"),
-  peersInput: $("#peersInput"),
-  cloudUploadEmb: $("#cloudUploadEmb"),
-  cloudLimit: $("#cloudLimit"),
-  cloudStateBox: $("#cloudStateBox"),
-  cloudErrBox: $("#cloudErrBox"),
-  settingsWarnings: $("#settingsWarnings"),
-  runChecks: $("#runChecks"),
-
-  // labels that change with i18n
-  lblFilter: $("#lblFilter"),
-  lblTitle: $("#lblTitle"),
-  lblContent: $("#lblContent"),
-  lblRelMode: $("#lblRelMode"),
-  lblRelMin: $("#lblRelMin"),
-  lblLocalRel: $("#lblLocalRel"),
-  lblCloudRel: $("#lblCloudRel"),
-};
-
-/* ----------------------------- Utils ----------------------------- */
-const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-const now = () => Date.now();
-
-function uuid(){
-  if (crypto?.randomUUID) return crypto.randomUUID();
-  // fallback
-  const s = ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g, c =>
-    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)
-  );
-  return s;
-}
-
-function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
-
-function debounce(fn, ms){
-  let t = null;
-  return (...args) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...args), ms);
-  };
-}
-
-function formatTime(ts){
-  if (!ts) return "—";
-  const d = new Date(ts);
-  return d.toLocaleString(uiLang === "ru" ? "ru-RU" : "en-US", {year:"2-digit", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit"});
-}
-
-function snippet(s, n=160){
-  s = (s || "").trim().replace(/\s+/g," ");
-  return s.length > n ? s.slice(0,n-1) + "…" : s;
-}
-
-function safeParseFloat(s, def){
-  const x = Number.parseFloat(String(s).trim());
-  return Number.isFinite(x) ? x : def;
-}
-
-function cosineSim(a, b){
-  if (!a || !b || a.length !== b.length) return -1;
-  let dot = 0, na = 0, nb = 0;
-  for (let i=0;i<a.length;i++){
-    const x = a[i], y = b[i];
-    dot += x*y; na += x*x; nb += y*y;
-  }
-  return dot / (Math.sqrt(na)*Math.sqrt(nb) + 1e-12);
-}
-
-/* ----------------------------- IndexedDB wrapper ----------------------------- */
-const DB_NAME = "vector-notes-db";
-const DB_VER = 1;
-
-let db = null;
-
-function openDB(){
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VER);
-    req.onupgradeneeded = () => {
-      const d = req.result;
-      if (!d.objectStoreNames.contains("notes")) {
-        const s = d.createObjectStore("notes", { keyPath: "id" });
-        s.createIndex("updatedAt", "updatedAt", { unique:false });
-      }
-      if (!d.objectStoreNames.contains("settings")) {
-        d.createObjectStore("settings", { keyPath: "key" });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-function tx(store, mode="readonly"){
-  return db.transaction(store, mode).objectStore(store);
-}
-
-function idbGet(store, key){
-  return new Promise((resolve, reject) => {
-    const r = tx(store).get(key);
-    r.onsuccess = () => resolve(r.result);
-    r.onerror = () => reject(r.error);
-  });
-}
-function idbPut(store, value){
-  return new Promise((resolve, reject) => {
-    const r = tx(store, "readwrite").put(value);
-    r.onsuccess = () => resolve(true);
-    r.onerror = () => reject(r.error);
-  });
-}
-function idbDel(store, key){
-  return new Promise((resolve, reject) => {
-    const r = tx(store, "readwrite").delete(key);
-    r.onsuccess = () => resolve(true);
-    r.onerror = () => reject(r.error);
-  });
-}
-function idbClear(store){
-  return new Promise((resolve, reject) => {
-    const r = tx(store, "readwrite").clear();
-    r.onsuccess = () => resolve(true);
-    r.onerror = () => reject(r.error);
-  });
-}
-function idbGetAll(store){
-  return new Promise((resolve, reject) => {
-    const r = tx(store).getAll();
-    r.onsuccess = () => resolve(r.result || []);
-    r.onerror = () => reject(r.error);
-  });
-}
-
-/* ----------------------------- App state ----------------------------- */
-const DEFAULTS = {
-  namespace: null, // generated on first run
-  embeddings: true,
-  model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
-  quantized: true,
-  autoRelated: true,
-
-  cloud: false,
-  peers: ["https://gun-manhattan.herokuapp.com/gun"],
-  cloudUploadEmb: true,
-  cloudLimit: 200,
-};
-
-const state = {
-  notes: new Map(),         // local notes
-  order: [],                // ids sorted by updatedAt desc
-  currentId: null,
-
-  // embeddings
-  tfReady: false,
-  tfError: null,
-  embedder: null,
-  embedderLoading: null,
-  draftEmbedding: null,
-  lastDraftHash: "",
-  lastDraftEmbedAt: 0,
-
-  // settings
-  settings: structuredClone(DEFAULTS),
-
-  // cloud
-  gun: null,
-  gunRoot: null,
-  remote: new Map(),        // remote notes by id
-  remoteCount: 0,
-  lastCloudMsg: "",
-
-  // UI
-  dirty: false,
-  lastSavedAt: 0,
-  embeddingStatus: "off", // off|loading|ready|error
-};
-
-/* ----------------------------- Transformers.js (dynamic import) ----------------------------- */
-let tf = null;
-
-async function ensureTransformersLoaded(){
-  if (tf) return tf;
-  try {
-    // ESM wrapper so it works in-browser without build tools.
-    tf = await import("https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/+esm");
-
-    // Make WASM assets resolvable regardless of your local path.
-    // Avoid numThreads>1 because that requires crossOriginIsolated headers (COOP/COEP).
-    tf.env.backends.onnx.wasm.numThreads = 1;
-    tf.env.backends.onnx.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/";
-    tf.env.useBrowserCache = true;
-    tf.env.allowRemoteModels = true;
-
-    return tf;
-  } catch (e) {
-    state.tfError = e;
-    throw e;
-  }
-}
-
-async function getEmbedder(){
-  if (!state.settings.embeddings) return null;
-  if (state.embedder) return state.embedder;
-  if (state.embedderLoading) return state.embedderLoading;
-
-  state.embeddingStatus = "loading";
-  renderStatus();
-
-  state.embedderLoading = (async () => {
-    const { pipeline } = await ensureTransformersLoaded();
-    const model = state.settings.model;
-    const quantized = !!state.settings.quantized;
-
-    // feature-extraction supports pooling/normalize
-    const emb = await pipeline("feature-extraction", model, { quantized });
-
-    state.embedder = emb;
-    state.tfReady = true;
-    state.embeddingStatus = "ready";
-    state.embedderLoading = null;
-    renderStatus();
-    return emb;
-  })().catch(err => {
-    state.embeddingStatus = "error";
-    state.tfError = err;
-    state.embedderLoading = null;
-    renderStatus();
-    throw err;
-  });
-
-  return state.embedderLoading;
-}
-
-function textForEmbedding(title, content){
-  // Простая схема: title + content.
-  // Для очень длинных заметок лучше потом сделать чанкинг — этот каркас оставляет место для улучшений.
-  const t = (title || "").trim();
-  const c = (content || "").trim();
-  let s = t ? (t + "\n\n" + c) : c;
-  s = s.replace(/\s+/g, " ").trim();
-  const MAX_CHARS = 4000;
-  if (s.length > MAX_CHARS) s = s.slice(0, MAX_CHARS);
-  return s;
-}
-
-async function computeEmbeddingForText(text){
-  const emb = await getEmbedder();
-  if (!emb) return null;
-  if (!text || text.length < 10) return null;
-
-  // Transformers.js output is usually a Tensor with .data typed array.
-  // Use mean pooling + normalize to get a sentence embedding.
-  const out = await emb(text, { pooling: "mean", normalize: true });
-  const data = out?.data;
-  if (!data) return null;
-
-  // Keep as Float32Array for fast cosine
-  return (data instanceof Float32Array) ? data : new Float32Array(data);
-}
-
-function hashQuick(s){
-  // Non-crypto quick hash for change detection
-  let h = 2166136261;
-  for (let i=0;i<s.length;i++){
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return (h >>> 0).toString(16);
-}
-
-/* ----------------------------- GunDB (cloud) ----------------------------- */
-function normalizePeers(peersStr){
-  const list = String(peersStr || "")
-    .split(",")
-    .map(s => s.trim())
-    .filter(Boolean);
-  return list.length ? list : [];
-}
-
-function initGun(){
-  if (!state.settings.cloud) {
-    state.gun = null;
-    state.gunRoot = null;
-    state.remote.clear();
-    state.remoteCount = 0;
-    return;
-  }
-  const peers = state.settings.peers || [];
-  // GUN exposes window.Gun and window.GUN in most builds.
-  const GunCtor = window.Gun || window.GUN;
-  if (!GunCtor) throw new Error("GunDB not loaded");
-
-  // Create instance (no special config required for demo)
-  state.gun = GunCtor({ peers });
-
-  // Namespace root:
-  state.gunRoot = state.gun.get("vector-notes").get(state.settings.namespace).get("notes");
-
-  // Subscribe to remote notes
-  subscribeRemoteNotes();
-}
-
-let remoteSubActive = false;
-function subscribeRemoteNotes(){
-  if (!state.gunRoot || remoteSubActive) return;
-  remoteSubActive = true;
-
-  const limit = clamp(Number(state.settings.cloudLimit || 200), 10, 5000);
-
-  let seen = 0;
-  state.gunRoot.map().on((data, id) => {
-    try {
-      if (!data || typeof data !== "object") return;
-      if (!id || id === "_") return;
-      if (data._) delete data._;
-
-      // Optional: basic limiting to avoid infinite public-room spam
-      if (!state.remote.has(id)) {
-        seen++;
-        if (seen > limit) return;
-      }
-
-      const note = normalizeRemoteNote({ id, ...data });
-      const prev = state.remote.get(note.id);
-
-      // last-write-wins by updatedAt
-      if (!prev || (note.updatedAt || 0) >= (prev.updatedAt || 0)) {
-        state.remote.set(note.id, note);
-      }
-
-      state.remoteCount = state.remote.size;
-      renderCloudBox();
-      renderRelated(); // allow cloud related to refresh opportunistically
-    } catch (e) {
-      // ignore
-    }
-  });
-}
-
-function normalizeRemoteNote(n){
-  const title = (n.title ?? "").toString();
-  const content = (n.content ?? "").toString();
-  const updatedAt = Number(n.updatedAt || 0) || 0;
-  const createdAt = Number(n.createdAt || updatedAt || 0) || 0;
-
-  // embedding might be Float32Array stored as plain array
-  let embedding = null;
-  if (Array.isArray(n.embedding) && n.embedding.length > 0) {
-    try { embedding = new Float32Array(n.embedding); } catch { embedding = null; }
-  }
+/* ========================================================================== */
+/* NS.Bus — pub/sub, only way layers talk to each other                        */
+/* ========================================================================== */
+NS.Bus = (() => {
+  const subs = new Map();
   return {
-    id: n.id,
-    title, content, createdAt, updatedAt,
-    embedding,
-    embeddingModel: (n.embeddingModel ?? "").toString(),
-  };
-}
-
-function cloudPut(note){
-  if (!state.settings.cloud || !state.gunRoot) return;
-  // For demo: publish plaintext. If you want privacy -> add encryption later.
-  const payload = {
-    id: note.id,
-    title: note.title || "",
-    content: note.content || "",
-    createdAt: note.createdAt || 0,
-    updatedAt: note.updatedAt || 0,
-  };
-
-  if (state.settings.cloudUploadEmb && note.embedding && note.embedding.length) {
-    payload.embedding = Array.from(note.embedding);
-    payload.embeddingModel = note.embeddingModel || state.settings.model;
-  } else {
-    payload.embedding = null;
-    payload.embeddingModel = note.embeddingModel || "";
-  }
-
-  state.gunRoot.get(note.id).put(payload);
-}
-
-function cloudDel(id){
-  if (!state.settings.cloud || !state.gunRoot) return;
-  // In GUN, "delete" often means put null fields (tombstone).
-  state.gunRoot.get(id).put({
-    id,
-    title: null,
-    content: null,
-    embedding: null,
-    updatedAt: now(),
-    deleted: true,
-  });
-}
-
-/* ----------------------------- Notes model ----------------------------- */
-function makeEmptyNote(){
-  const id = uuid();
-  const ts = now();
-  return {
-    id,
-    title: "",
-    content: "",
-    createdAt: ts,
-    updatedAt: ts,
-    embedding: null,
-    embeddingModel: "",
-    embeddingUpdatedAt: 0,
-    deleted: false,
-  };
-}
-
-function computeOrder(){
-  state.order = [...state.notes.values()]
-    .filter(n => !n.deleted)
-    .sort((a,b) => (b.updatedAt||0) - (a.updatedAt||0))
-    .map(n => n.id);
-}
-
-async function persistNote(note){
-  await idbPut("notes", note);
-}
-
-async function removeNoteLocal(id){
-  await idbDel("notes", id);
-}
-
-/* ----------------------------- Related search ----------------------------- */
-let relJob = 0;
-
-async function computeRelated(){
-  const myJob = ++relJob;
-
-  if (!state.settings.embeddings) {
-    el.relStatus.textContent = t("relNeedEmb");
-    setRelatedLists([], []);
-    return;
-  }
-
-  const cur = getCurrentNote();
-  if (!cur) {
-    setRelatedLists([], []);
-    return;
-  }
-
-  const mode = el.relMode.value;
-  const threshold = clamp(safeParseFloat(el.minScore.value, 0.25), -1, 1);
-
-  el.relStatus.textContent = t("relComputing");
-
-  let qEmb = null;
-
-  if (mode === "saved") {
-    qEmb = cur.embedding || null;
-  } else {
-    // auto: compute from draft text
-    qEmb = await ensureDraftEmbedding();
-  }
-
-  if (myJob !== relJob) return;
-  if (!qEmb) {
-    setRelatedLists([], []);
-    el.relStatus.textContent = "—";
-    return;
-  }
-
-  // local candidates
-  const localCandidates = [];
-  for (const n of state.notes.values()){
-    if (n.deleted) continue;
-    if (n.id === cur.id) continue;
-    if (!n.embedding || n.embedding.length !== qEmb.length) continue;
-    const score = cosineSim(qEmb, n.embedding);
-    if (score >= threshold) localCandidates.push({ note:n, score });
-  }
-  localCandidates.sort((a,b) => b.score - a.score);
-
-  // cloud candidates (only those with embeddings)
-  const cloudCandidates = [];
-  if (state.settings.cloud) {
-    for (const n of state.remote.values()){
-      if (!n || n.deleted) continue;
-      if (n.id === cur.id) continue;
-      if (!n.embedding || n.embedding.length !== qEmb.length) continue;
-      const score = cosineSim(qEmb, n.embedding);
-      if (score >= threshold) cloudCandidates.push({ note:n, score });
-    }
-    cloudCandidates.sort((a,b) => b.score - a.score);
-  }
-
-  if (myJob !== relJob) return;
-  setRelatedLists(localCandidates.slice(0, 12), cloudCandidates.slice(0, 12));
-  el.relStatus.textContent = "—";
-}
-
-const computeRelatedDebounced = debounce(() => computeRelated(), 500);
-
-async function ensureDraftEmbedding(){
-  const cur = getCurrentNote();
-  if (!cur) return null;
-
-  const text = textForEmbedding(el.titleInput.value, el.contentInput.value);
-  const h = hashQuick(text);
-
-  // Avoid recompute too often
-  const minIntervalMs = 1500;
-  const elapsed = now() - state.lastDraftEmbedAt;
-  if (state.draftEmbedding && state.lastDraftHash === h && elapsed < 60_000) {
-    return state.draftEmbedding;
-  }
-  if (elapsed < minIntervalMs && state.lastDraftHash === h) {
-    return state.draftEmbedding;
-  }
-
-  try {
-    state.lastDraftHash = h;
-    state.lastDraftEmbedAt = now();
-    el.badgeEmbed.textContent = t("embLoading");
-    const emb = await computeEmbeddingForText(text);
-    state.draftEmbedding = emb;
-    el.badgeEmbed.textContent = emb ? t("embReady") : t("embOff");
-    return emb;
-  } catch (e) {
-    el.badgeEmbed.textContent = t("embErr");
-    return null;
-  }
-}
-
-function setRelatedLists(localArr, cloudArr){
-  el.badgeLocalRel.textContent = `local: ${localArr.length}`;
-  el.badgeCloudRel.textContent = `cloud: ${cloudArr.length}`;
-
-  el.relatedLocal.innerHTML = localArr.length ? "" : `<div class="hint">${t("noNotes")}</div>`;
-  el.relatedCloud.innerHTML = cloudArr.length ? "" : `<div class="hint">${state.settings.cloud ? "—" : t("cloudOff")}</div>`;
-
-  if (localArr.length){
-    for (const {note, score} of localArr){
-      el.relatedLocal.appendChild(renderRelatedCard(note, score, { kind:"local" }));
-    }
-  }
-  if (cloudArr.length){
-    for (const {note, score} of cloudArr){
-      el.relatedCloud.appendChild(renderRelatedCard(note, score, { kind:"cloud" }));
-    }
-  }
-}
-
-function renderRelatedCard(note, score, {kind}){
-  const wrap = document.createElement("div");
-  wrap.className = "related-item";
-  const title = note.title?.trim() || "(untitled)";
-  const snip = snippet(note.content || "", 220);
-  const upd = formatTime(note.updatedAt);
-
-  wrap.innerHTML = `
-    <div class="related-top">
-      <div style="min-width:0">
-        <p class="related-title" title="${escapeHtml(title)}">${escapeHtml(title)}</p>
-        <div class="small">${kind === "cloud" ? "cloud" : "local"} • ${escapeHtml(upd)}</div>
-      </div>
-      <div class="score" title="cosine similarity">${score.toFixed(3)}</div>
-    </div>
-    <div class="related-snippet">${escapeHtml(snip)}</div>
-    <div class="related-actions"></div>
-  `;
-
-  const actions = wrap.querySelector(".related-actions");
-
-  if (kind === "local") {
-    const b = document.createElement("button");
-    b.className = "btn";
-    b.textContent = "Открыть";
-    b.onclick = () => openNote(note.id);
-    actions.appendChild(b);
-  } else {
-    const openBtn = document.createElement("button");
-    openBtn.className = "btn";
-    openBtn.textContent = "Просмотр";
-    openBtn.onclick = () => previewRemote(note);
-    actions.appendChild(openBtn);
-
-    const impBtn = document.createElement("button");
-    impBtn.className = "btn primary";
-    impBtn.textContent = "Импорт";
-    impBtn.onclick = async () => {
-      await importRemoteToLocal(note);
-    };
-    actions.appendChild(impBtn);
-  }
-
-  return wrap;
-}
-
-function escapeHtml(s){
-  return String(s)
-    .replaceAll("&","&amp;")
-    .replaceAll("<","&lt;")
-    .replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;")
-    .replaceAll("'","&#039;");
-}
-
-/* ----------------------------- UI actions ----------------------------- */
-function getCurrentNote(){
-  if (!state.currentId) return null;
-  return state.notes.get(state.currentId) || null;
-}
-
-function setDirty(d){
-  state.dirty = d;
-  el.badgeSaved.textContent = d ? t("unsaved") : t("saved");
-  el.badgeSaved.className = "badge" + (d ? " warn" : " ok");
-}
-
-function renderStatus(){
-  el.pillEmb.textContent = state.settings.embeddings ? "on" : "off";
-  el.pillModel.textContent = state.settings.embeddings ? state.settings.model.split("/").pop() : "—";
-  el.pillCloud.textContent = state.settings.cloud ? "on" : "off";
-  el.pillNS.textContent = state.settings.namespace || "—";
-
-  if (!state.settings.embeddings) {
-    el.badgeEmbed.textContent = t("embOff");
-  } else {
-    if (state.embeddingStatus === "loading") el.badgeEmbed.textContent = t("embLoading");
-    else if (state.embeddingStatus === "ready") el.badgeEmbed.textContent = t("embReady");
-    else if (state.embeddingStatus === "error") el.badgeEmbed.textContent = t("embErr");
-    else el.badgeEmbed.textContent = "emb: —";
-  }
-
-  // Editor bottom line
-  if (state.embeddingStatus === "error" && state.tfError) {
-    el.editorStatus.textContent = `Model error: ${String(state.tfError?.message || state.tfError)}`;
-  } else {
-    el.editorStatus.textContent = state.settings.embeddings ? "Embeddings enabled" : "Embeddings disabled";
-  }
-}
-
-function renderNotesList(){
-  const filter = el.filterInput.value.trim().toLowerCase();
-  computeOrder();
-  const ids = state.order;
-
-  el.notesCount.textContent = String(ids.length);
-  el.notesList.innerHTML = "";
-
-  let shown = 0;
-  for (const id of ids){
-    const n = state.notes.get(id);
-    if (!n) continue;
-    const hay = ((n.title||"") + "\n" + (n.content||"")).toLowerCase();
-    if (filter && !hay.includes(filter)) continue;
-    shown++;
-    el.notesList.appendChild(renderNoteItem(n));
-  }
-  if (shown === 0){
-    el.notesList.innerHTML = `<div class="hint">${t("noNotes")}</div>`;
-  }
-}
-
-function renderNoteItem(n){
-  const div = document.createElement("div");
-  div.className = "note-item" + (n.id === state.currentId ? " active" : "");
-  const title = (n.title || "").trim() || "(untitled)";
-  const updated = formatTime(n.updatedAt);
-  const hasEmb = !!(n.embedding && n.embedding.length);
-
-  div.innerHTML = `
-    <div class="note-title">${escapeHtml(title)}</div>
-    <div class="note-meta">
-      <span>${escapeHtml(updated)}</span>
-      <span class="badge ${hasEmb ? "ok" : ""}">${hasEmb ? "emb" : "—"}</span>
-    </div>
-  `;
-  div.onclick = () => openNote(n.id);
-  return div;
-}
-
-function openNote(id){
-  const n = state.notes.get(id);
-  if (!n) return;
-  state.currentId = id;
-
-  el.titleInput.value = n.title || "";
-  el.contentInput.value = n.content || "";
-  el.noteId.textContent = `id: ${n.id}`;
-  setDirty(false);
-
-  renderNotesList();
-  renderStatus();
-  computeRelatedDebounced();
-}
-
-function previewRemote(n){
-  // Simple preview: show in editor info boxes without overwriting local current note
-  el.boxInfo.style.display = "block";
-  el.boxInfo.innerHTML = `
-    <div><b>Remote preview</b></div>
-    <div class="small mono">id: ${escapeHtml(n.id)}</div>
-    <div class="space"></div>
-    <div><b>${escapeHtml((n.title||"(untitled)").trim())}</b></div>
-    <div class="small">${escapeHtml(snippet(n.content||"", 900))}</div>
-  `;
-  el.boxRunHint.style.display = "none";
-}
-
-async function importRemoteToLocal(remoteNote){
-  // Merge into local (last-write-wins)
-  const existing = state.notes.get(remoteNote.id);
-  const local = existing ? structuredClone(existing) : makeEmptyNote();
-  local.id = remoteNote.id; // keep same
-  local.title = remoteNote.title || local.title || "";
-  local.content = remoteNote.content || local.content || "";
-  local.createdAt = remoteNote.createdAt || local.createdAt || now();
-  local.updatedAt = Math.max(remoteNote.updatedAt || 0, local.updatedAt || 0, now());
-  // keep embedding if exists and matches our model
-  if (remoteNote.embedding && remoteNote.embedding.length) {
-    local.embedding = remoteNote.embedding;
-    local.embeddingModel = remoteNote.embeddingModel || "";
-    local.embeddingUpdatedAt = now();
-  }
-
-  state.notes.set(local.id, local);
-  await persistNote(local);
-
-  el.boxInfo.style.display = "block";
-  el.boxInfo.textContent = `${t("imported")}: ${local.id}`;
-  renderNotesList();
-}
-
-async function newNote(){
-  const n = makeEmptyNote();
-  state.notes.set(n.id, n);
-  await persistNote(n);
-  openNote(n.id);
-}
-
-async function saveCurrent(){
-  const n = getCurrentNote();
-  if (!n) return;
-
-  n.title = el.titleInput.value;
-  n.content = el.contentInput.value;
-  n.updatedAt = now();
-
-  setDirty(false);
-
-  // Persist quickly
-  await persistNote(n);
-  state.lastSavedAt = n.updatedAt;
-
-  // Optionally compute & store embedding for the note (background)
-  if (state.settings.embeddings) {
-    try {
-      state.embeddingStatus = state.embeddingStatus === "ready" ? "ready" : "loading";
-      renderStatus();
-      const text = textForEmbedding(n.title, n.content);
-      const emb = await computeEmbeddingForText(text);
-      if (emb) {
-        n.embedding = emb;
-        n.embeddingModel = state.settings.model;
-        n.embeddingUpdatedAt = now();
-        await persistNote(n);
-      }
-      state.embeddingStatus = "ready";
-    } catch (e) {
-      state.embeddingStatus = "error";
-      state.tfError = e;
-    }
-  }
-
-  // Cloud sync
-  if (state.settings.cloud) {
-    cloudPut(n);
-  }
-
-  renderNotesList();
-  renderStatus();
-  computeRelatedDebounced();
-}
-
-async function deleteCurrent(){
-  const n = getCurrentNote();
-  if (!n) return;
-  if (!confirm(t("confirmDelete"))) return;
-
-  const id = n.id;
-  state.notes.delete(id);
-  await removeNoteLocal(id);
-
-  if (state.settings.cloud) cloudDel(id);
-
-  // open next note
-  const next = state.order.find(x => x !== id);
-  if (next) openNote(next);
-  else {
-    state.currentId = null;
-    el.titleInput.value = "";
-    el.contentInput.value = "";
-    el.noteId.textContent = "id: —";
-    setDirty(false);
-  }
-  renderNotesList();
-  setRelatedLists([], []);
-}
-
-const autosaveDebounced = debounce(async () => {
-  if (!state.currentId) return;
-  if (!state.dirty) return;
-  await saveCurrent();
-}, 1200);
-
-function onEditorChange(){
-  setDirty(true);
-
-  // Update note preview list immediately (without persisting)
-  const n = getCurrentNote();
-  if (n) {
-    n.title = el.titleInput.value;
-    n.content = el.contentInput.value;
-    // don't bump updatedAt until real save
-  }
-  renderNotesList();
-
-  // Auto related (draft embedding)
-  if (state.settings.autoRelated && state.settings.embeddings) {
-    computeRelatedDebounced();
-  }
-
-  autosaveDebounced();
-}
-
-/* ----------------------------- Import / Export ----------------------------- */
-async function exportJSON(){
-  const notes = [...state.notes.values()].filter(n => !n.deleted).map(n => ({
-    ...n,
-    embedding: n.embedding ? Array.from(n.embedding) : null
-  }));
-
-  const payload = {
-    version: 1,
-    exportedAt: now(),
-    settings: {
-      model: state.settings.model,
-      quantized: state.settings.quantized,
+    EVENTS: {
+      MODEL_READY: 'model:ready',
+      MODEL_ERROR: 'model:error',
+      MY_NOTES_CHANGED: 'mynotes:changed',
+      WORLD_CHANGED: 'world:changed',
+      SETTINGS_CHANGED: 'settings:changed',
+      NETWORK_STATUS: 'network:status'
     },
-    notes
+    on(evt, fn) {
+      if (!subs.has(evt)) subs.set(evt, new Set());
+      subs.get(evt).add(fn);
+      return () => subs.get(evt).delete(fn);
+    },
+    emit(evt, payload) {
+      const set = subs.get(evt);
+      if (!set) return;
+      set.forEach(fn => {
+        try { fn(payload); } catch (e) { console.error('[Bus]', evt, e); }
+      });
+    }
   };
+})();
 
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type:"application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `vector-notes-export-${new Date().toISOString().slice(0,19).replaceAll(":","-")}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
+/* ========================================================================== */
+/* NS.I18n — localization                                                      */
+/* ========================================================================== */
+NS.I18n = (() => {
+  const dict = {
+    ru: {
+      inputPlaceholder: 'Поделитесь мыслью...',
+      saveBtn: 'Отправить',
+      personalTitle: 'Мои мысли', worldTitle: 'Мир', serendipityTitle: 'Смежные',
+      emptyPersonal: 'Нет похожих мыслей', emptyWorld: 'Ничего не найдено',
+      edit: 'ред.', save: 'сохр.', cancel: 'отм.', delete: 'удал.',
+      noteEdited: '(изм.)', today: 'Сегодня', yesterday: 'Вчера',
+      confirmDelete: 'Удалить заметку?',
+      importSuccess: 'Импортировано {n} заметок.',
+      rebuildDone: 'Векторы пересозданы',
+      resetConfirm: 'Сбросить все заметки и настройки?',
+      modelLoading: 'Загрузка модели...', ready: 'Готов',
+      settingsTitle: 'Настройки', swipeHint: 'смахните вверх для публикации',
+      tabFlow: 'Поток', tabHistory: 'История',
+      diagFileProtocol: 'Работает через file://. Для P2P и модели используйте HTTP-сервер.',
+      diagNoGun: 'GunDB не загружен — P2P отключён',
+      diagNetOk: 'P2P: {n} пиров',
+      modelError: 'Ошибка модели: {msg}'
+    },
+    en: {
+      inputPlaceholder: 'Share a thought...',
+      saveBtn: 'Send',
+      personalTitle: 'My thoughts', worldTitle: 'World', serendipityTitle: 'Serendipity',
+      emptyPersonal: 'No similar thoughts', emptyWorld: 'Nothing found',
+      edit: 'edit', save: 'save', cancel: 'cancel', delete: 'delete',
+      noteEdited: '(edited)', today: 'Today', yesterday: 'Yesterday',
+      confirmDelete: 'Delete note?',
+      importSuccess: 'Imported {n} notes.',
+      rebuildDone: 'Vectors rebuilt',
+      resetConfirm: 'Reset all notes and settings?',
+      modelLoading: 'Loading model...', ready: 'Ready',
+      settingsTitle: 'Settings', swipeHint: 'swipe up to publish',
+      tabFlow: 'Flow', tabHistory: 'History',
+      diagFileProtocol: 'Running via file://. Use HTTP server for P2P and model.',
+      diagNoGun: 'GunDB not loaded — P2P disabled',
+      diagNetOk: 'P2P: {n} peers',
+      modelError: 'Model error: {msg}'
+    }
+  };
+  let lang = 'ru';
+  return {
+    setLang(l) { lang = dict[l] ? l : 'ru'; },
+    getLang() { return lang; },
+    t(key, params) {
+      let s = dict[lang]?.[key] ?? dict.ru[key] ?? key;
+      if (params) {
+        for (const [k, v] of Object.entries(params)) {
+          s = s.replaceAll('{' + k + '}', v);
+        }
+      }
+      return s;
+    }
+  };
+})();
 
-async function importJSONFile(file){
-  const text = await file.text();
-  const data = JSON.parse(text);
+/* ========================================================================== */
+/* NS.Theme — apply theme mode                                                 */
+/* ========================================================================== */
+NS.Theme = {
+  apply(mode) {
+    const isDark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+    document.body.classList.toggle('dark', isDark);
+  }
+};
 
-  const notes = Array.isArray(data.notes) ? data.notes : [];
-  let imported = 0;
-
-  for (const raw of notes){
-    if (!raw || !raw.id) continue;
-    const n = {
-      id: String(raw.id),
-      title: String(raw.title || ""),
-      content: String(raw.content || ""),
-      createdAt: Number(raw.createdAt || now()),
-      updatedAt: Number(raw.updatedAt || now()),
-      embedding: Array.isArray(raw.embedding) ? new Float32Array(raw.embedding) : null,
-      embeddingModel: String(raw.embeddingModel || ""),
-      embeddingUpdatedAt: Number(raw.embeddingUpdatedAt || 0),
-      deleted: false,
+/* ========================================================================== */
+/* NS.Util — stateless helpers                                                 */
+/* ========================================================================== */
+NS.Util = {
+  uid() {
+    if (crypto.randomUUID) return 'id_' + crypto.randomUUID();
+    return 'id_' + Date.now().toString(36) + Math.random().toString(36).slice(2);
+  },
+  now() { return new Date().toISOString(); },
+  esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  },
+  debounce(fn, ms) {
+    let t = null;
+    return function(...args) {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => fn.apply(this, args), ms);
     };
-
-    const prev = state.notes.get(n.id);
-    if (!prev || (n.updatedAt || 0) >= (prev.updatedAt || 0)) {
-      state.notes.set(n.id, n);
-      await persistNote(n);
-      imported++;
+  },
+  // Fast non-crypto FNV-1a hash — for cache keys
+  hashQuick(s) {
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return (h >>> 0).toString(16);
+  },
+  // Crypto SHA-256 when available, fallback to quick
+  async hash(s) {
+    try {
+      if (!crypto.subtle) throw new Error('no subtle');
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+      return Array.from(new Uint8Array(buf))
+        .map(b => b.toString(16).padStart(2, '0'))
+        .join('')
+        .slice(0, 16);
+    } catch {
+      return this.hashQuick(s).padStart(16, '0');
     }
   }
-  renderNotesList();
-  el.boxInfo.style.display = "block";
-  el.boxInfo.textContent = `${t("imported")}: ${imported}`;
-}
+};
 
-/* ----------------------------- Settings ----------------------------- */
-async function loadSettings(){
-  const s = await idbGet("settings", "app");
-  if (s?.value && typeof s.value === "object") {
-    state.settings = { ...structuredClone(DEFAULTS), ...s.value };
-  } else {
-    // generate namespace first run
-    state.settings.namespace = `ns-${uuid().slice(0, 8)}`;
-    await saveSettings();
+/* ========================================================================== */
+/* NS.Store.Local — localStorage wrapper                                       */
+/* ========================================================================== */
+NS.Store = {};
+NS.Store.Local = (() => {
+  function read(key, fallback) {
+    try {
+      const v = localStorage.getItem(key);
+      return v ? JSON.parse(v) : fallback;
+    } catch { return fallback; }
   }
-
-  // ensure types
-  state.settings.quantized = !!state.settings.quantized;
-  state.settings.embeddings = !!state.settings.embeddings;
-  state.settings.autoRelated = !!state.settings.autoRelated;
-  state.settings.cloud = !!state.settings.cloud;
-  state.settings.cloudUploadEmb = !!state.settings.cloudUploadEmb;
-  state.settings.cloudLimit = clamp(Number(state.settings.cloudLimit || 200), 10, 5000);
-  if (!Array.isArray(state.settings.peers)) state.settings.peers = [...DEFAULTS.peers];
-
-  applySettingsToUI();
-}
-
-async function saveSettings(){
-  await idbPut("settings", { key:"app", value: state.settings });
-}
-
-function applySettingsToUI(){
-  el.nsInput.value = state.settings.namespace || "";
-  el.embEnabled.value = state.settings.embeddings ? "on" : "off";
-  el.modelInput.value = state.settings.model;
-  el.quantized.value = state.settings.quantized ? "true" : "false";
-  el.autoRel.value = state.settings.autoRelated ? "on" : "off";
-
-  el.cloudEnabled.value = state.settings.cloud ? "on" : "off";
-  el.peersInput.value = (state.settings.peers || []).join(", ");
-  el.cloudUploadEmb.value = state.settings.cloudUploadEmb ? "on" : "off";
-  el.cloudLimit.value = String(state.settings.cloudLimit || 200);
-
-  renderStatus();
-  renderCloudBox();
-}
-
-function collectSettingsFromUI(){
-  const ns = el.nsInput.value.trim() || `ns-${uuid().slice(0,8)}`;
-  const embeddings = el.embEnabled.value === "on";
-  const model = (el.modelInput.value.trim() || DEFAULTS.model);
-  const quantized = el.quantized.value === "true";
-  const autoRelated = el.autoRel.value === "on";
-
-  const cloud = el.cloudEnabled.value === "on";
-  const peers = normalizePeers(el.peersInput.value);
-  const cloudUploadEmb = el.cloudUploadEmb.value === "on";
-  const cloudLimit = clamp(safeParseFloat(el.cloudLimit.value, 200), 10, 5000);
-
-  return { ns, embeddings, model, quantized, autoRelated, cloud, peers, cloudUploadEmb, cloudLimit };
-}
-
-async function applySettings(){
-  const s = collectSettingsFromUI();
-
-  state.settings.namespace = s.ns;
-  state.settings.embeddings = s.embeddings;
-  state.settings.model = s.model;
-  state.settings.quantized = s.quantized;
-  state.settings.autoRelated = s.autoRelated;
-
-  state.settings.cloud = s.cloud;
-  state.settings.peers = s.peers.length ? s.peers : [...DEFAULTS.peers];
-  state.settings.cloudUploadEmb = s.cloudUploadEmb;
-  state.settings.cloudLimit = s.cloudLimit;
-
-  await saveSettings();
-
-  // Reset embedding pipeline if model/quantized changed
-  state.embedder = null;
-  state.embedderLoading = null;
-  state.draftEmbedding = null;
-  state.lastDraftHash = "";
-  state.embeddingStatus = state.settings.embeddings ? "loading" : "off";
-  state.tfError = null;
-
-  // (Re)initialize Gun
-  remoteSubActive = false;
-  try {
-    initGun();
-  } catch (e) {
-    // show in modal
-    el.cloudErrBox.style.display = "block";
-    el.cloudErrBox.textContent = String(e?.message || e);
+  function write(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); }
+    catch (e) { console.error('[Store.Local]', e); }
   }
-
-  renderStatus();
-  renderNotesList();
-  computeRelatedDebounced();
-
-  // pre-warm model optionally
-  if (state.settings.embeddings) {
-    getEmbedder().catch(() => {});
-  }
-}
-
-function renderCloudBox(){
-  el.cloudStateBox.style.display = "none";
-  el.cloudErrBox.style.display = "none";
-
-  if (!state.settings.cloud) return;
-
-  el.cloudStateBox.style.display = "block";
-  el.cloudStateBox.innerHTML = `
-    <div><b>${t("cloudPublicWarn")}</b></div>
-    <div class="small">peers: <span class="mono">${escapeHtml((state.settings.peers||[]).join(", "))}</span></div>
-    <div class="small">remote cached: <span class="mono">${state.remote.size}</span></div>
-  `;
-}
-
-/* ----------------------------- Run checks ----------------------------- */
-function runChecks(){
-  const lines = [];
-  const isFile = location.protocol === "file:";
-  const secure = window.isSecureContext;
-
-  lines.push(`<b>${t("runHintTitle")}</b>`);
-  lines.push(`<div class="small">origin: <span class="mono">${escapeHtml(location.origin)}</span></div>`);
-  lines.push(`<div class="small">protocol: <span class="mono">${escapeHtml(location.protocol)}</span> • secureContext: <span class="mono">${secure}</span></div>`);
-  lines.push(`<div class="small">IndexedDB: <span class="mono">${"indexedDB" in window}</span></div>`);
-
-  if (isFile) {
-    el.boxRunHint.style.display = "block";
-    el.boxRunHint.innerHTML = `<b>${t("runHintTitle")}</b><div class="space"></div>${escapeHtml(t("runHintText"))}`;
-  } else {
-    el.boxRunHint.style.display = "none";
-    el.boxInfo.style.display = "block";
-    el.boxInfo.textContent = t("infoReady");
-  }
-
-  // In modal too
-  el.runChecks.innerHTML = lines.join("");
-
-  if (isFile) {
-    el.settingsWarnings.style.display = "block";
-    el.settingsWarnings.textContent = t("runHintText");
-  } else {
-    el.settingsWarnings.style.display = "none";
-  }
-}
-
-/* ----------------------------- Boot ----------------------------- */
-async function loadNotes(){
-  const all = await idbGetAll("notes");
-  state.notes.clear();
-
-  for (const raw of all){
-    if (!raw || !raw.id) continue;
-    const n = {
-      id: String(raw.id),
-      title: String(raw.title || ""),
-      content: String(raw.content || ""),
-      createdAt: Number(raw.createdAt || now()),
-      updatedAt: Number(raw.updatedAt || now()),
-      embedding: raw.embedding ? (raw.embedding instanceof Float32Array ? raw.embedding : new Float32Array(raw.embedding)) : null,
-      embeddingModel: String(raw.embeddingModel || ""),
-      embeddingUpdatedAt: Number(raw.embeddingUpdatedAt || 0),
-      deleted: !!raw.deleted,
-    };
-    state.notes.set(n.id, n);
-  }
-  renderNotesList();
-
-  // open the newest note
-  computeOrder();
-  if (state.order.length && !state.currentId) openNote(state.order[0]);
-}
-
-function applyI18N(){
-  el.langSelect.value = uiLang;
-
-  el.btnNew.textContent = t("newNote");
-  el.btnSave.textContent = t("save");
-  el.btnDelete.textContent = t("delete");
-  el.btnSettings.textContent = t("settings");
-
-  el.hNotes.textContent = t("notes");
-  el.hEditor.textContent = t("editor");
-  el.hRelated.textContent = t("related");
-
-  el.lblFilter.textContent = t("filter");
-  el.lblTitle.textContent = t("title");
-  el.lblContent.textContent = t("content");
-  el.lblRelMode.textContent = t("mode");
-  el.lblRelMin.textContent = t("threshold");
-  el.lblLocalRel.textContent = t("local");
-  el.lblCloudRel.textContent = t("cloud");
-
-  // related mode options
-  el.relMode.options[0].textContent = t("autoDraft");
-  el.relMode.options[1].textContent = t("bySaved");
-
-  // sidebar buttons
-  el.btnExport.textContent = t("exportJSON");
-  el.btnImport.textContent = t("importJSON");
-
-  renderNotesList();
-  renderStatus();
-}
-
-function wireEvents(){
-  el.langSelect.onchange = () => {
-    uiLang = el.langSelect.value;
-    applyI18N();
+  return {
+    get settings() { return { ...NS.Config.DEFAULTS, ...read(NS.Config.STORAGE_KEYS.settings, {}) }; },
+    set settings(v) { write(NS.Config.STORAGE_KEYS.settings, v); },
+    get myNotes() { return read(NS.Config.STORAGE_KEYS.myNotes, []); },
+    set myNotes(v) { write(NS.Config.STORAGE_KEYS.myNotes, v); },
+    get world() { return read(NS.Config.STORAGE_KEYS.world, []); },
+    set world(v) { write(NS.Config.STORAGE_KEYS.world, v); },
+    get gunIdentity() { return read(NS.Config.STORAGE_KEYS.gunIdentity, null); },
+    set gunIdentity(v) {
+      if (v === null) localStorage.removeItem(NS.Config.STORAGE_KEYS.gunIdentity);
+      else write(NS.Config.STORAGE_KEYS.gunIdentity, v);
+    }
   };
-
-  el.btnNew.onclick = () => newNote();
-  el.btnSave.onclick = () => saveCurrent();
-  el.btnDelete.onclick = () => deleteCurrent();
-  el.btnSettings.onclick = () => {
-    applySettingsToUI();
-    renderCloudBox();
-    runChecks();
-    el.settingsDlg.showModal();
-  };
-  el.btnCloseSettings.onclick = () => el.settingsDlg.close();
-  el.btnApplySettings.onclick = async () => {
-    await applySettings();
-    el.settingsDlg.close();
-  };
-  el.btnResetLocal.onclick = async () => {
-    if (!confirm(t("resetConfirm"))) return;
-    await idbClear("notes");
-    state.notes.clear();
-    state.currentId = null;
-    renderNotesList();
-    setRelatedLists([], []);
-    el.titleInput.value = "";
-    el.contentInput.value = "";
-    el.noteId.textContent = "id: —";
-  };
-
-  el.filterInput.oninput = () => renderNotesList();
-
-  el.titleInput.oninput = onEditorChange;
-  el.contentInput.oninput = onEditorChange;
-
-  el.relMode.onchange = () => computeRelatedDebounced();
-  el.minScore.oninput = debounce(() => computeRelated(), 450);
-  el.btnForceRel.onclick = () => computeRelated();
-
-  el.btnExport.onclick = () => exportJSON();
-  el.btnImport.onclick = () => el.importFile.click();
-  el.importFile.onchange = async () => {
-    const f = el.importFile.files?.[0];
-    if (!f) return;
-    await importJSONFile(f);
-    el.importFile.value = "";
-  };
-}
-
-(async function boot(){
-  applyI18N();
-  wireEvents();
-  runChecks();
-
-  try {
-    db = await openDB();
-    el.localDbStatus.textContent = t("dbReady");
-  } catch (e) {
-    el.localDbStatus.textContent = t("dbFail") + ": " + String(e?.message || e);
-    return;
-  }
-
-  await loadSettings();
-  renderStatus();
-
-  // init cloud if enabled
-  try {
-    initGun();
-  } catch (e) {
-    // keep app working locally
-    console.warn("Gun init failed", e);
-  }
-
-  await loadNotes();
-
-  // pre-warm model if embeddings enabled (optional)
-  if (state.settings.embeddings) {
-    getEmbedder().catch(() => {});
-  }
-
-  // If no notes, create one
-  if (state.order.length === 0) {
-    await newNote();
-  }
-
-  el.badgeSaved.textContent = t("saved");
-  el.badgeSaved.className = "badge ok";
-  el.relStatus.textContent = "—";
-
-  // compute initial related
-  computeRelatedDebounced();
 })();
+
+/* ========================================================================== */
+/* NS.Store.File — TiddlyWiki-style self-save, JSON export/import              */
+/* ========================================================================== */
+NS.Store.File = (() => {
+  let fileHandle = null;
+
+  async function selfSave(state) {
+    const payload = JSON.stringify(state).replace(/</g, '\\u003c');
+    const html = document.documentElement.outerHTML
+      .replace(/<script id="state" type="application\/json">[\s\S]*?<\/script>\s*/i, '')
+      .replace('</body>', '<script id="state" type="application/json">' + payload + '</script>\n</body>');
+    const blob = new Blob([html], { type: 'text/html' });
+    if ('showSaveFilePicker' in window) {
+      try {
+        if (!fileHandle) {
+          fileHandle = await window.showSaveFilePicker({
+            suggestedName: 'noosphere.html',
+            types: [{ description: 'HTML', accept: { 'text/html': ['.html'] } }]
+          });
+        }
+        const w = await fileHandle.createWritable();
+        await w.write(blob);
+        await w.close();
+        return { ok: true, mode: 'overwrite' };
+      } catch (e) {
+        if (e.name === 'AbortError') return { ok: false };
+        throw e;
+      }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'noosphere.html';
+    a.click();
+    return { ok: true, mode: 'download' };
+  }
+
+  function loadEmbedded() {
+    const el = document.getElementById('state');
+    if (!el) return null;
+    try { return JSON.parse(el.textContent); }
+    catch { return null; }
+  }
+
+  async function exportJSON(state) {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'noosphere-' + Date.now() + '.json';
+    a.click();
+  }
+
+  function importJSON() {
+    return new Promise((resolve, reject) => {
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = 'application/json,.json';
+      inp.onchange = async () => {
+        try { resolve(JSON.parse(await inp.files[0].text())); }
+        catch (e) { reject(e); }
+      };
+      inp.click();
+    });
+  }
+
+  return { selfSave, loadEmbedded, exportJSON, importJSON };
+})();
+
+/* ========================================================================== */
+/* NS.Settings — runtime settings (over NS.Store.Local.settings)               */
+/* ========================================================================== */
+NS.Settings = (() => {
+  let cur = NS.Store.Local.settings;
+  return {
+    get() { return { ...cur }; },
+    set(patch) {
+      cur = { ...cur, ...patch };
+      NS.Store.Local.settings = cur;
+      NS.Bus.emit(NS.Bus.EVENTS.SETTINGS_CHANGED, cur);
+    },
+    reset() {
+      cur = { ...NS.Config.DEFAULTS };
+      NS.Store.Local.settings = cur;
+      NS.Bus.emit(NS.Bus.EVENTS.SETTINGS_CHANGED, cur);
+    }
+  };
+})();
+
+/* ========================================================================== */
+/* NS.Model — embedding interface, swappable implementation                    */
+/* ========================================================================== */
+NS.Model = (() => {
+  let extractor = null;
+  let loaded = false;
+
+  async function load() {
+    if (loaded) return;
+    // +esm = esm-обёртка на jsdelivr, работает без bundler
+    const tf = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/+esm');
+
+    // КРИТИЧНО: numThreads=1 иначе требуются COOP/COEP заголовки
+    if (tf.env?.backends?.onnx?.wasm) {
+      tf.env.backends.onnx.wasm.numThreads = 1;
+      tf.env.backends.onnx.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/';
+    }
+    if (tf.env) {
+      tf.env.useBrowserCache = true;
+      tf.env.allowRemoteModels = true;
+    }
+
+    extractor = await tf.pipeline('feature-extraction', NS.Config.MODEL.name, {
+      quantized: NS.Config.MODEL.quantized
+    });
+    loaded = true;
+    NS.Bus.emit(NS.Bus.EVENTS.MODEL_READY);
+  }
+
+  async function embed(text) {
+    if (!loaded) throw new Error('Model not loaded');
+    const out = await extractor([text], { pooling: 'mean', normalize: true });
+    // Если pipeline вернул Float32Array нужной длины — используем
+    if (out.data && out.data.length === NS.Config.MODEL.dims) {
+      return new Float32Array(out.data);
+    }
+    // Fallback: ручной mean pooling + L2 norm
+    const { data, dims } = out;
+    const [, tokens, hidden] = dims;
+    const emb = new Float32Array(hidden);
+    for (let t = 0; t < tokens; t++) {
+      for (let h = 0; h < hidden; h++) emb[h] += data[t * hidden + h];
+    }
+    for (let h = 0; h < hidden; h++) emb[h] /= tokens;
+    return normalize(emb);
+  }
+
+  function normalize(v) {
+    let m = 0;
+    for (let i = 0; i < v.length; i++) m += v[i] * v[i];
+    m = Math.sqrt(m) || 1;
+    const r = new Float32Array(v.length);
+    for (let i = 0; i < v.length; i++) r[i] = v[i] / m;
+    return r;
+  }
+
+  // Cosine with explicit normalization — works even if vectors are not unit
+  function cosine(a, b) {
+    if (!a || !b || a.length !== b.length) return -1;
+    let dot = 0, na = 0, nb = 0;
+    for (let i = 0; i < a.length; i++) {
+      const x = a[i], y = b[i];
+      dot += x * y; na += x * x; nb += y * y;
+    }
+    return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-12);
+  }
+
+  function serialize(v) { return Array.from(v); }
+  function deserialize(a) { return new Float32Array(a); }
+
+  return {
+    load, embed, cosine, normalize, serialize, deserialize,
+    get loaded() { return loaded; }
+  };
+})();
+
+/* ========================================================================== */
+/* NS.Engine — vector cache + search                                           */
+/* ========================================================================== */
+NS.Engine = (() => {
+  const cache = new Map(); // noteId -> Float32Array
+
+  async function ensureEmbed(text, id) {
+    if (cache.has(id)) return cache.get(id);
+    if (!NS.Model.loaded) return null;
+    const v = await NS.Model.embed(text);
+    cache.set(id, v);
+    return v;
+  }
+
+  function invalidate(id) { cache.delete(id); }
+  function clear() { cache.clear(); }
+
+  async function rebuild(notes) {
+    cache.clear();
+    if (!NS.Model.loaded) return;
+    for (const n of notes) {
+      try { await ensureEmbed(n.text, n.id); }
+      catch (e) { console.warn('[Engine] rebuild skip', n.id, e); }
+    }
+  }
+
+  async function searchLocal(query, s) {
+    if (!NS.Model.loaded) return [];
+    const qv = await NS.Model.embed(query);
+    const out = [];
+    for (const n of NS.Store.Local.myNotes) {
+      const v = cache.get(n.id);
+      if (!v) continue;
+      const sc = NS.Model.cosine(qv, v);
+      if (sc >= s.threshold) out.push({ ...n, score: sc });
+    }
+    return out.sort((a, b) => b.score - a.score).slice(0, s.maxResults);
+  }
+
+  async function searchWorld(query, s) {
+    if (!NS.Model.loaded) return { rel: [], ser: [] };
+    const qv = await NS.Model.embed(query);
+    const rel = [], ser = [];
+    const low = s.threshold - s.serendipityDelta;
+    for (const n of NS.Store.Local.world) {
+      if ((n.waves || 0) < s.minWaves) continue;
+      const v = NS.Model.deserialize(n.vec);
+      const sc = NS.Model.cosine(qv, v);
+      if (sc >= s.threshold) rel.push({ ...n, score: sc });
+      else if (sc >= low) ser.push({ ...n, score: sc });
+    }
+    return {
+      rel: rel.sort((a, b) => b.score - a.score).slice(0, s.maxResults),
+      ser: ser.sort((a, b) => b.score - a.score).slice(0, s.maxResults)
+    };
+  }
+
+  return { ensureEmbed, invalidate, clear, rebuild, searchLocal, searchWorld };
+})();
+
+/* ========================================================================== */
+/* NS.Domain — business logic (only layer UI touches directly)                 */
+/* ========================================================================== */
+NS.Domain = {};
+
+NS.Domain.MyNotes = (() => {
+  function all() { return NS.Store.Local.myNotes.slice(); }
+
+  async function add(text) {
+    if (!text.trim()) return null;
+    const n = {
+      id: NS.Util.uid(),
+      text: text.trim(),
+      date: NS.Util.now(),
+      editedAt: null
+    };
+    const list = [n, ...NS.Store.Local.myNotes];
+    NS.Store.Local.myNotes = list;
+    if (NS.Model.loaded) await NS.Engine.ensureEmbed(n.text, n.id);
+    NS.Bus.emit(NS.Bus.EVENTS.MY_NOTES_CHANGED, { action: 'add', note: n });
+    return n;
+  }
+
+  async function update(id, text) {
+    const list = NS.Store.Local.myNotes;
+    const n = list.find(x => x.id === id);
+    if (!n) return null;
+    n.text = text.trim();
+    n.editedAt = NS.Util.now();
+    NS.Store.Local.myNotes = list;
+    NS.Engine.invalidate(id);
+    if (NS.Model.loaded) await NS.Engine.ensureEmbed(n.text, id);
+    NS.Bus.emit(NS.Bus.EVENTS.MY_NOTES_CHANGED, { action: 'update', note: n });
+    return n;
+  }
+
+  function remove(id) {
+    NS.Store.Local.myNotes = NS.Store.Local.myNotes.filter(x => x.id !== id);
+    NS.Engine.invalidate(id);
+    NS.Bus.emit(NS.Bus.EVENTS.MY_NOTES_CHANGED, { action: 'remove', id });
+  }
+
+  function clear() {
+    NS.Store.Local.myNotes = [];
+    NS.Engine.clear();
+    NS.Bus.emit(NS.Bus.EVENTS.MY_NOTES_CHANGED, { action: 'clear' });
+  }
+
+  return { all, add, update, remove, clear };
+})();
+
+NS.Domain.World = (() => {
+  function all() { return NS.Store.Local.world.slice(); }
+
+  // upsert: идемпотентно, вызывается и из UI и из Network
+  function upsert(n) {
+    const list = NS.Store.Local.world;
+    const i = list.findIndex(x => x.id === n.id);
+    if (i >= 0) {
+      list[i] = { ...list[i], ...n, waves: list[i].waves ?? 0 };
+    } else {
+      list.unshift({ ...n, waves: n.waves ?? 0 });
+    }
+    NS.Store.Local.world = list;
+    NS.Bus.emit(NS.Bus.EVENTS.WORLD_CHANGED, { action: 'upsert', note: n });
+  }
+
+  function wave(id, delta) {
+    const list = NS.Store.Local.world;
+    const n = list.find(x => x.id === id);
+    if (!n) return;
+    n.waves = Math.max(0, (n.waves || 0) + delta);
+    NS.Store.Local.world = list;
+    NS.Bus.emit(NS.Bus.EVENTS.WORLD_CHANGED, { action: 'wave', id, waves: n.waves });
+  }
+
+  function add(vec, text, localId) {
+    const n = {
+      id: 'g_' + NS.Util.uid().slice(3),
+      vec: NS.Model.serialize(vec),
+      waves: 0,
+      excerpt: text.slice(0, 150),
+      localId
+    };
+    upsert(n);
+    return n;
+  }
+
+  function removeByLocalId(localId) {
+    NS.Store.Local.world = NS.Store.Local.world.filter(n => n.localId !== localId);
+    NS.Bus.emit(NS.Bus.EVENTS.WORLD_CHANGED, { action: 'removeByLocal' });
+  }
+
+  function clear() {
+    NS.Store.Local.world = [];
+    NS.Bus.emit(NS.Bus.EVENTS.WORLD_CHANGED, { action: 'clear' });
+  }
+
+  return { all, upsert, wave, add, removeByLocalId, clear };
+})();
+
+/* ========================================================================== */
+/* NS.Network — GunDB P2P layer (isolated, knows only Domain.World)            */
+/* ========================================================================== */
+NS.Network = (() => {
+  let gun = null;
+  let user = null;
+  let rootNode = null;
+  let peers = new Set();
+  let enabled = false;
+  let namespace = null;
+
+  function status(msg, count) {
+    NS.Bus.emit(NS.Bus.EVENTS.NETWORK_STATUS, { msg, count });
+  }
+
+  function init(relays, ns) {
+    if (typeof window.Gun === 'undefined') {
+      status('GunDB not loaded', 0);
+      return;
+    }
+    namespace = ns;
+    try {
+      gun = window.Gun({ peers: relays, localStorage: false });
+      user = gun.user();
+      rootNode = gun.get(NS.Config.GUN_PREFIX).get(namespace).get('notes');
+
+      // Identity
+      const saved = NS.Store.Local.gunIdentity;
+      if (saved) {
+        user.auth(saved.alias, saved.pass, ack => {
+          if (ack.err) console.warn('[Network] auth:', ack.err);
+        });
+      } else {
+        const alias = 'ns_' + Math.random().toString(36).slice(2, 10);
+        const pass = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+          .map(b => b.toString(16)).join('');
+        user.create(alias, pass, ack => {
+          if (ack.err) { console.warn('[Network] create:', ack.err); return; }
+          user.auth(alias, pass);
+          NS.Store.Local.gunIdentity = { alias, pass };
+        });
+      }
+
+      gun.on('hi', p => {
+        peers.add(p.id || 'x');
+        status('connected', peers.size);
+      });
+      gun.on('bye', p => {
+        peers.delete(p.id || 'x');
+        status('connected', peers.size);
+      });
+
+      // Subscribe: last-write-wins по updatedAt
+      rootNode.map().on((data, key) => {
+        if (!data || typeof data !== 'object') return;
+        if (!key || key === '_') return;
+        if (!data.id || !data.vec || !data.excerpt) return;
+        const existing = NS.Store.Local.world.find(n => n.id === data.id);
+        if (!existing || (data.ts || 0) >= (existing.ts || 0)) {
+          NS.Domain.World.upsert({
+            id: data.id,
+            vec: data.vec,
+            waves: data.waves || 0,
+            excerpt: data.excerpt,
+            ts: data.ts || NS.Util.now(),
+            localId: data.localId || null
+          });
+        }
+      });
+
+      enabled = true;
+    } catch (e) {
+      console.error('[Network] init:', e);
+      status('error: ' + e.message, 0);
+    }
+  }
+
+  async function publish(note, vector) {
+    if (!rootNode || !enabled) return;
+    const ts = NS.Util.now();
+    rootNode.get(note.id).put({
+      id: note.id,
+      excerpt: note.text.slice(0, 150),
+      vec: NS.Model.serialize(vector),
+      waves: 0,
+      ts: ts,
+      localId: note.id
+    });
+  }
+
+  async function sendWave(noteId, currentWaves) {
+    if (!rootNode || !enabled) return;
+    rootNode.get(noteId).get('waves').put(currentWaves);
+  }
+
+  function setRelays(relays) {
+    if (gun) try { gun.off(); } catch {}
+    gun = null; user = null; rootNode = null;
+    peers.clear(); enabled = false;
+    init(relays, namespace);
+  }
+
+  return { init, publish, sendWave, setRelays, get peers() { return peers.size; } };
+})();
+
+/* ========================================================================== */
+/* NS.UI — rendering, knows Domain + Model, not Store directly                 */
+/* ========================================================================== */
+NS.UI = (() => {
+  const $ = s => document.querySelector(s);
+
+  const els = {
+    input: $('#thoughtInput'),
+    saveBtn: $('#saveBtn'),
+    statusMsg: $('#statusMsg'),
+    swipeHint: $('#swipeHint'),
+    swipeHintText: $('#swipeHintText'),
+    personalSection: $('#personalSection'),
+    personalCards: $('#personalCards'),
+    relevantSection: $('#relevantSection'),
+    relevantCards: $('#relevantCards'),
+    serendipitySection: $('#serendipitySection'),
+    serendipityCards: $('#serendipityCards'),
+    historySearch: $('#historySearchInput'),
+    historyContent: $('#historyContent'),
+    settingsTrigger: $('#settingsTrigger'),
+    overlay: $('#overlay'),
+    panel: $('#settingsPanel'),
+    thresholdSl: $('#thresholdSlider'),
+    thresholdVal: $('#thresholdValue'),
+    serendipitySl: $('#serendipitySlider'),
+    serendipityVal: $('#serendipityValue'),
+    minWavesSel: $('#minWavesSelect'),
+    maxResSel: $('#maxResultsSelect'),
+    langSelect: $('#langSelect'),
+    themeSelect: $('#themeSelect'),
+    relaysInput: $('#relaysInput'),
+    namespaceInput: $('#namespaceInput'),
+    applyBtn: $('#applySettingsBtn'),
+    resetBtn: $('#resetSettingsBtn'),
+    rebuildBtn: $('#rebuildVectorsBtn'),
+    exportBtn: $('#exportCapsuleBtn'),
+    importBtn: $('#importCapsuleBtn'),
+    selfSaveBtn: $('#selfSaveBtn'),
+    importFile: $('#importFileInput'),
+    diagBox: $('#diagBox')
+  };
+
+  let lastQuery = '';
+  let lastResults = { local: [], rel: [], ser: [] };
+
+  function status(msg) {
+    if (els.statusMsg) els.statusMsg.textContent = msg || '';
+  }
+
+  function diag(msg, warn = false) {
+    if (!els.diagBox) return;
+    if (!msg) { els.diagBox.style.display = 'none'; return; }
+    els.diagBox.style.display = 'block';
+    els.diagBox.className = 'diag' + (warn ? ' warn' : '');
+    els.diagBox.innerHTML = msg;
+  }
+
+  function renderCarousel(container, items, isWorld = false) {
+    if (!items.length) {
+      container.innerHTML = '<div class="empty-message">' +
+        (isWorld ? NS.I18n.t('emptyWorld') : NS.I18n.t('emptyPersonal')) +
+        '</div>';
+      return;
+    }
+    container.innerHTML = items.map(item => {
+      const text = isWorld ? (item.excerpt || '') : item.text;
+      const charged = isWorld && item.waves > 0 ? ' charged' : '';
+      const footer = isWorld
+        ? '<span class="score-badge">' + item.score.toFixed(2) + '</span>' +
+          '<div class="wave-group">' +
+          '<button class="wave-btn" data-id="' + item.id + '" data-action="down">−</button>' +
+          '<span>' + item.waves + '</span>' +
+          '<button class="wave-btn" data-id="' + item.id + '" data-action="up">+</button>' +
+          '</div>'
+        : '<span class="score-badge">' + item.score.toFixed(2) + '</span>' +
+          '<span>' + new Date(item.date).toLocaleDateString() + '</span>';
+      return '<div class="card' + charged + '">' +
+        '<div class="card-text">' + NS.Util.esc(text) + '</div>' +
+        '<div class="card-footer">' + footer + '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  function formatDate(iso) {
+    const d = new Date(iso);
+    const now = new Date(); now.setHours(0, 0, 0, 0);
+    const yest = new Date(now); yest.setDate(yest.getDate() - 1);
+    if (d >= now) return NS.I18n.t('today');
+    if (d >= yest) return NS.I18n.t('yesterday');
+    return d.toLocaleDateString();
+  }
+
+  function renderHistory(filtered = null) {
+    const notes = filtered || NS.Domain.MyNotes.all();
+    if (!notes.length) {
+      els.historyContent.innerHTML = '<div class="empty-message">' + NS.I18n.t('emptyHistory') + '</div>';
+      return;
+    }
+    const groups = new Map();
+    notes.forEach(n => {
+      const day = new Date(n.date).toLocaleDateString();
+      if (!groups.has(day)) groups.set(day, []);
+      groups.get(day).push(n);
+    });
+    let html = '';
+    for (const [, dayNotes] of groups) {
+      html += '<div class="day-group"><div class="day-title">' + formatDate(dayNotes[0].date) + '</div>';
+      dayNotes.forEach(note => {
+        const time = new Date(note.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const edited = note.editedAt ? '<span>' + NS.I18n.t('noteEdited') + '</span>' : '';
+        html += '<div class="archive-item" data-id="' + note.id + '">' +
+          '<div class="meta"><span>' + time + '</span>' + edited + '</div>' +
+          '<div class="text">' + NS.Util.esc(note.text) + '</div>' +
+          '<div class="actions">' +
+          '<button class="edit-btn" data-id="' + note.id + '">' + NS.I18n.t('edit') + '</button>' +
+          '<button class="delete-btn" data-id="' + note.id + '">' + NS.I18n.t('delete') + '</button>' +
+          '</div></div>';
+      });
+      html += '</div>';
+    }
+    els.historyContent.innerHTML = html;
+  }
+
+  async function searchHistory() {
+    const q = els.historySearch.value.trim();
+    if (!q) { renderHistory(); return; }
+    if (!NS.Model.loaded) { renderHistory(); return; }
+    const s = NS.Settings.get();
+    const qv = await NS.Model.embed(q);
+    const scored = [];
+    for (const n of NS.Domain.MyNotes.all()) {
+      const v = await NS.Engine.ensureEmbed(n.text, n.id);
+      if (!v) continue;
+      const sc = NS.Model.cosine(qv, v);
+      if (sc >= s.threshold) scored.push({ ...n, score: sc });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    renderHistory(scored);
+  }
+
+  let flowJob = 0; // race condition protection
+  async function searchFlow() {
+    const q = els.input.value.trim();
+    if (!q) {
+      els.personalSection.style.display = 'none';
+      els.relevantSection.style.display = 'none';
+      els.serendipitySection.style.display = 'none';
+      lastQuery = '';
+      lastResults = { local: [], rel: [], ser: [] };
+      return;
+    }
+    if (!NS.Model.loaded) { status(NS.I18n.t('modelLoading')); return; }
+
+    const myJob = ++flowJob;
+    status('…');
+    try {
+      const s = NS.Settings.get();
+      const [local, world] = await Promise.all([
+        NS.Engine.searchLocal(q, s),
+        NS.Engine.searchWorld(q, s)
+      ]);
+      if (myJob !== flowJob) return; // stale
+      lastQuery = q;
+      lastResults = { local, rel: world.rel, ser: world.ser };
+
+      els.personalSection.style.display = local.length ? 'block' : 'none';
+      renderCarousel(els.personalCards, local);
+      els.relevantSection.style.display = world.rel.length ? 'block' : 'none';
+      renderCarousel(els.relevantCards, world.rel, true);
+      els.serendipitySection.style.display = world.ser.length ? 'block' : 'none';
+      renderCarousel(els.serendipityCards, world.ser, true);
+      status('');
+    } catch (e) {
+      if (myJob !== flowJob) return;
+      status('!');
+      console.error('[UI] searchFlow:', e);
+    }
+  }
+
+  async function saveNote(share = false) {
+    const text = els.input.value.trim();
+    if (!text) return;
+    const note = await NS.Domain.MyNotes.add(text);
+    if (share && note && NS.Model.loaded) {
+      const vec = await NS.Model.embed(text);
+      const worldNote = NS.Domain.World.add(vec, text, note.id);
+      NS.Network.publish(note, vec);
+      animateStar();
+    }
+    els.input.value = '';
+    searchFlow();
+  }
+
+  function animateStar() {
+    const container = document.getElementById('thoughtContainer');
+    const rect = container.getBoundingClientRect();
+    const star = document.createElement('div');
+    star.textContent = '✦';
+    star.style.cssText = 'position:fixed; left:' + (rect.left + rect.width / 2) + 'px; top:' +
+      (rect.top + rect.height / 2) + 'px; font-size:24px; color:var(--star);' +
+      'transition:all 1s cubic-bezier(.25,.1,.25,1); z-index:999; pointer-events:none;';
+    document.body.appendChild(star);
+    requestAnimationFrame(() => {
+      star.style.transform = 'translateY(-200px) scale(0)';
+      star.style.opacity = '0';
+    });
+    setTimeout(() => star.remove(), 1000);
+  }
+
+  function syncSettingsUI() {
+    const s = NS.Settings.get();
+    els.thresholdSl.value = s.threshold;
+    els.thresholdVal.textContent = s.threshold.toFixed(2);
+    els.serendipitySl.value = s.serendipityDelta;
+    els.serendipityVal.textContent = s.serendipityDelta.toFixed(2);
+    els.minWavesSel.value = s.minWaves;
+    els.maxResSel.value = s.maxResults;
+    els.langSelect.value = s.lang;
+    els.themeSelect.value = s.theme;
+    els.relaysInput.value = (s.relays || []).join('\n');
+    els.namespaceInput.value = s.namespace || '';
+  }
+
+  function applySettings(skipSearch = true) {
+    const relays = els.relaysInput.value.split('\n').map(x => x.trim()).filter(Boolean);
+    const newLang = els.langSelect.value;
+    NS.Settings.set({
+      threshold: +els.thresholdSl.value,
+      serendipityDelta: +els.serendipitySl.value,
+      minWaves: +els.minWavesSel.value,
+      maxResults: +els.maxResSel.value,
+      theme: els.themeSelect.value,
+      lang: newLang,
+      relays: relays.length ? relays : NS.Config.DEFAULTS.relays,
+      namespace: els.namespaceInput.value.trim() || null
+    });
+    if (NS.I18n.getLang() !== newLang) {
+      NS.I18n.setLang(newLang);
+      updateI18nLabels();
+    }
+    NS.Theme.apply(els.themeSelect.value);
+    NS.Network.setRelays(relays.length ? relays : NS.Config.DEFAULTS.relays);
+    if (!skipSearch) searchFlow();
+  }
+
+  function updateI18nLabels() {
+    const t = NS.I18n.t.bind(NS.I18n);
+    document.querySelector('.tab-btn[data-view="flow"]').textContent = t('tabFlow');
+    document.querySelector('.tab-btn[data-view="history"]').textContent = t('tabHistory');
+    els.personalTitle = $('#personalTitle');
+    document.getElementById('personalTitle').textContent = t('personalTitle');
+    document.getElementById('relevantTitle').textContent = t('worldTitle');
+    document.getElementById('serendipityTitle').textContent = t('serendipityTitle');
+    els.saveBtn.textContent = t('saveBtn');
+    els.swipeHintText.textContent = t('swipeHint');
+    els.historySearch.placeholder = t('inputPlaceholder');
+    if (document.getElementById('historyView').classList.contains('active')) renderHistory();
+  }
+
+  async function resetAll() {
+    if (!confirm(NS.I18n.t('resetConfirm'))) return;
+    NS.Domain.MyNotes.clear();
+    NS.Domain.World.clear();
+    NS.Settings.reset();
+    syncSettingsUI();
+    NS.I18n.setLang(NS.Settings.get().lang);
+    updateI18nLabels();
+    NS.Theme.apply(NS.Settings.get().theme);
+    els.input.value = '';
+    searchFlow();
+    renderHistory();
+    closeSettings();
+  }
+
+  async function rebuildVectors() {
+    if (!NS.Model.loaded) return;
+    els.rebuildBtn.disabled = true;
+    els.rebuildBtn.textContent = '...';
+    await NS.Engine.rebuild(NS.Domain.MyNotes.all());
+    els.rebuildBtn.textContent = 'Пересоздать векторы';
+    els.rebuildBtn.disabled = false;
+    closeSettings();
+    alert(NS.I18n.t('rebuildDone'));
+  }
+
+  function openSettings() {
+    els.overlay.classList.add('open');
+    els.panel.classList.add('open');
+  }
+  function closeSettings() {
+    els.overlay.classList.remove('open');
+    els.panel.classList.remove('open');
+  }
+
+  async function doExport() {
+    await NS.Store.File.exportJSON({
+      version: 1,
+      myNotes: NS.Domain.MyNotes.all(),
+      world: NS.Domain.World.all(),
+      settings: NS.Settings.get()
+    });
+  }
+
+  async function doImport() {
+    try {
+      const data = await NS.Store.File.importJSON();
+      if (Array.isArray(data.myNotes)) NS.Store.Local.myNotes = data.myNotes;
+      if (Array.isArray(data.world)) NS.Store.Local.world = data.world;
+      if (NS.Model.loaded) await NS.Engine.rebuild(NS.Domain.MyNotes.all());
+      NS.Bus.emit(NS.Bus.EVENTS.MY_NOTES_CHANGED, { action: 'bulk' });
+      NS.Bus.emit(NS.Bus.EVENTS.WORLD_CHANGED, { action: 'bulk' });
+      alert(NS.I18n.t('importSuccess', { n: (data.myNotes || []).length }));
+    } catch (e) { alert('Import error: ' + e.message); }
+  }
+
+  async function doSelfSave() {
+    try {
+      const r = await NS.Store.File.selfSave({
+        version: 1,
+        myNotes: NS.Domain.MyNotes.all(),
+        world: NS.Domain.World.all(),
+        settings: NS.Settings.get()
+      });
+      if (r && r.ok) status('Saved: ' + r.mode);
+    } catch (e) { alert('Self-save error: ' + e.message); }
+  }
+
+  function bindEvents() {
+    els.input.addEventListener('input', () => {
+      els.swipeHint.classList.toggle('visible', els.input.value.trim().length > 0);
+    });
+
+    // Swipe up to publish
+    let touchY = 0;
+    els.input.addEventListener('touchstart', e => { touchY = e.touches[0].clientY; });
+    els.input.addEventListener('touchend', e => {
+      if (touchY - e.changedTouches[0].clientY > 60 && els.input.value.trim()) {
+        e.preventDefault();
+        saveNote(true);
+      }
+    });
+
+    els.saveBtn.addEventListener('click', e => saveNote(e.shiftKey));
+    els.input.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        saveNote(e.shiftKey);
+      }
+    });
+
+    els.input.addEventListener('input', NS.Util.debounce(searchFlow, 300));
+    els.historySearch.addEventListener('input', NS.Util.debounce(searchHistory, 300));
+
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const view = btn.dataset.view;
+        if (view === 'history') {
+          document.getElementById('flowView').classList.remove('active');
+          document.getElementById('historyView').classList.add('active');
+          renderHistory();
+        } else {
+          document.getElementById('historyView').classList.remove('active');
+          document.getElementById('flowView').classList.add('active');
+        }
+      });
+    });
+
+    // Delegated clicks: waves, edit, delete
+    document.addEventListener('click', e => {
+      const waveBtn = e.target.closest('.wave-btn');
+      if (waveBtn) {
+        const id = waveBtn.dataset.id;
+        const action = waveBtn.dataset.action;
+        const list = NS.Store.Local.world;
+        const n = list.find(x => x.id === id);
+        if (!n) return;
+        const newWaves = action === 'up' ? (n.waves || 0) + 1 : Math.max(0, (n.waves || 0) - 1);
+        NS.Domain.World.wave(id, action === 'up' ? 1 : -1);
+        NS.Network.sendWave(id, newWaves);
+        searchFlow();
+        return;
+      }
+
+      const editBtn = e.target.closest('.edit-btn');
+      if (editBtn) {
+        const item = editBtn.closest('.archive-item');
+        const note = NS.Domain.MyNotes.all().find(n => n.id === item.dataset.id);
+        if (note) {
+          item.querySelector('.text').innerHTML = '<textarea class="edit-textarea" style="width:100%;min-height:60px">' + NS.Util.esc(note.text) + '</textarea>';
+          item.querySelector('.actions').innerHTML =
+            '<button class="save-edit-btn" data-id="' + note.id + '">' + NS.I18n.t('save') + '</button>' +
+            '<button class="cancel-edit-btn" data-id="' + note.id + '">' + NS.I18n.t('cancel') + '</button>';
+        }
+        return;
+      }
+      const saveEditBtn = e.target.closest('.save-edit-btn');
+      if (saveEditBtn) {
+        const item = saveEditBtn.closest('.archive-item');
+        const ta = item.querySelector('.edit-textarea');
+        if (ta && ta.value.trim()) NS.Domain.MyNotes.update(saveEditBtn.dataset.id, ta.value.trim());
+        renderHistory();
+        return;
+      }
+      const cancelBtn = e.target.closest('.cancel-edit-btn');
+      if (cancelBtn) { renderHistory(); return; }
+
+      const deleteBtn = e.target.closest('.delete-btn');
+      if (deleteBtn) {
+        if (confirm(NS.I18n.t('confirmDelete'))) {
+          const id = deleteBtn.dataset.id;
+          NS.Domain.MyNotes.remove(id);
+          NS.Domain.World.removeByLocalId(id);
+          renderHistory();
+          searchFlow();
+        }
+        return;
+      }
+    });
+
+    els.settingsTrigger.addEventListener('click', openSettings);
+    els.overlay.addEventListener('click', closeSettings);
+
+    els.thresholdSl.addEventListener('input', () => {
+      els.thresholdVal.textContent = parseFloat(els.thresholdSl.value).toFixed(2);
+    });
+    els.serendipitySl.addEventListener('input', () => {
+      els.serendipityVal.textContent = parseFloat(els.serendipitySl.value).toFixed(2);
+    });
+
+    els.applyBtn.addEventListener('click', () => { applySettings(false); closeSettings(); });
+    els.resetBtn.addEventListener('click', resetAll);
+    els.rebuildBtn.addEventListener('click', rebuildVectors);
+    els.exportBtn.addEventListener('click', doExport);
+    els.importBtn.addEventListener('click', () => els.importFile.click());
+    els.selfSaveBtn.addEventListener('click', doSelfSave);
+    els.importFile.addEventListener('change', e => {
+      if (e.target.files[0]) { doImport(); e.target.value = ''; }
+    });
+
+    els.thresholdSl.addEventListener('change', applySettings);
+    els.serendipitySl.addEventListener('change', applySettings);
+    els.minWavesSel.addEventListener('change', () => applySettings(false));
+    els.maxResSel.addEventListener('change', () => applySettings(false));
+    els.langSelect.addEventListener('change', applySettings);
+    els.themeSelect.addEventListener('change', applySettings);
+  }
+
+  function init() {
+    bindEvents();
+    syncSettingsUI();
+    updateI18nLabels();
+  }
+
+  return {
+    init, status, diag, syncSettingsUI, updateI18nLabels,
+    renderHistory, searchFlow,
+    get els() { return els; }
+  };
+})();
+
+/* ========================================================================== */
+/* NS.App — bootstrap, wires everything                                        */
+/* ========================================================================== */
+NS.App = (() => {
+  async function main() {
+    // 1. Load settings + apply
+    const s = NS.Settings.get();
+    NS.I18n.setLang(s.lang);
+    NS.Theme.apply(s.theme);
+
+    // 2. Generate namespace if missing
+    if (!s.namespace) {
+      NS.Settings.set({ namespace: 'ns-' + NS.Util.uid().slice(3, 11) });
+    }
+
+    // 3. Restore embedded state (TiddlyWiki-style)
+    const embedded = NS.Store.File.loadEmbedded();
+    if (embedded && !NS.Store.Local.myNotes.length) {
+      if (Array.isArray(embedded.myNotes)) NS.Store.Local.myNotes = embedded.myNotes;
+      if (Array.isArray(embedded.world)) NS.Store.Local.world = embedded.world;
+    }
+
+    // 4. Diagnostics: file:// vs http
+    const isFile = location.protocol === 'file:';
+    const hasGun = typeof window.Gun !== 'undefined';
+    if (isFile) {
+      NS.UI.diag(NS.I18n.t('diagFileProtocol'), true);
+    } else if (!hasGun) {
+      NS.UI.diag(NS.I18n.t('diagNoGun'), true);
+    }
+
+    // 5. Init UI (renders immediately, model loads async)
+    NS.UI.init();
+    NS.UI.status(NS.I18n.t('modelLoading'));
+
+    // 6. Bus subscriptions
+    NS.Bus.on(NS.Bus.EVENTS.MODEL_READY, () => {
+      NS.UI.status(NS.I18n.t('ready'));
+      NS.UI.els.saveBtn.disabled = false;
+    });
+    NS.Bus.on(NS.Bus.EVENTS.MODEL_ERROR, msg => {
+      NS.UI.status(NS.I18n.t('modelError', { msg }));
+    });
+    NS.Bus.on(NS.Bus.EVENTS.MY_NOTES_CHANGED, () => {
+      if (document.getElementById('historyView').classList.contains('active')) {
+        NS.UI.renderHistory();
+      }
+    });
+    NS.Bus.on(NS.Bus.EVENTS.NETWORK_STATUS, ({ count }) => {
+      if (!isFile && hasGun && count > 0) {
+        NS.UI.diag(NS.I18n.t('diagNetOk', { n: count }));
+      }
+    });
+
+    // 7. Load model (async, non-blocking)
+    NS.Model.load()
+      .then(() => NS.Engine.rebuild(NS.Domain.MyNotes.all()))
+      .catch(e => {
+        console.error('[App] model:', e);
+        NS.Bus.emit(NS.Bus.EVENTS.MODEL_ERROR, e.message || String(e));
+      });
+
+    // 8. Init P2P (async, non-blocking)
+    if (hasGun && !isFile) {
+      try {
+        NS.Network.init(
+          NS.Settings.get().relays,
+          NS.Settings.get().namespace
+        );
+      } catch (e) {
+        console.warn('[App] network:', e);
+      }
+    }
+  }
+
+  return { main };
+})();
+
+/* ========================================================================== */
+/* ENTRY                                                                       */
+/* ========================================================================== */
+NS.App.main().catch(e => console.error('[App] fatal:', e));
 </script>
 </body>
 </html>
