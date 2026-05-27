@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Noosphere Core (IDB Local + Gun World stable)</title>
+  <title>Noosphere Core (IDB Local + Gun World SET)</title>
 
   <style>
     :root{
@@ -115,12 +115,12 @@
       </div>
 
       <div class="section">
-        <div class="h">Мир (релевантные)</div>
+        <div class="h">Мир (релевантные, без моих)</div>
         <div id="worldList" class="list"></div>
       </div>
 
       <div class="section">
-        <div class="h">Смежные (для синтеза)</div>
+        <div class="h">Смежные (без моих)</div>
         <div id="serList" class="list"></div>
       </div>
     </div>
@@ -192,6 +192,7 @@
   <script type="module">
     import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
+    // Utils
     const Utils = (() => {
       const $ = (s, r=document) => r.querySelector(s);
       const esc = (s) => { const d=document.createElement('div'); d.textContent=String(s??''); return d.innerHTML; };
@@ -204,10 +205,10 @@
         on(ev, fn){ if(!this.#m.has(ev)) this.#m.set(ev,new Set()); this.#m.get(ev).add(fn); return ()=>this.#m.get(ev)?.delete(fn); }
         emit(ev, p){ for(const fn of this.#m.get(ev)??[]) { try{fn(p);}catch(e){console.error(e);} } }
       }
-      const sleep = (ms)=>new Promise(r=>setTimeout(r,ms));
-      return { $, esc, debounce, clamp, uuid, safeJSON, Emitter, sleep };
+      return { $, esc, debounce, clamp, uuid, safeJSON, Emitter };
     })();
 
+    // IDB local (KV + notes)
     const IDB = (() => {
       const DB = 'noosphere_idb_local_v1';
       const STO_KV = 'kv';
@@ -280,6 +281,7 @@
       return { kvGet, kvSet, notesPut, notesDelete, notesGetAll, ok:()=>ok };
     })();
 
+    // Settings (built-in relay)
     const Settings = (() => {
       const KEY='settings';
       const DEFAULT = {
@@ -315,6 +317,7 @@
       return { DEFAULT, sanitize, parsePeers, load, save };
     })();
 
+    // Theme
     const Theme = (() => {
       function apply(mode) {
         const dark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -323,6 +326,7 @@
       return { apply };
     })();
 
+    // Vectors
     const Vectors = (() => {
       const dot = (a,b)=>{ let d=0; for(let i=0;i<a.length;i++) d += a[i]*b[i]; return d; };
       const norm = (v)=>{ let s=0; for(let i=0;i<v.length;i++) s+=v[i]*v[i]; const m=Math.sqrt(s)||1; for(let i=0;i<v.length;i++) v[i]/=m; return v; };
@@ -333,6 +337,7 @@
       return { dot, packI8, unpackI8 };
     })();
 
+    // Embedder
     const Embedder = (() => {
       let model=null;
       async function init() { model = await pipeline('feature-extraction','Xenova/paraphrase-multilingual-MiniLM-L12-v2',{ quantized:true }); }
@@ -355,6 +360,7 @@
       return { init, ready, embed };
     })();
 
+    // Local notes (offline)
     const LocalNotes = (() => {
       function create() {
         const ee = new Utils.Emitter();
@@ -393,86 +399,63 @@
           ee.emit('change', list());
         }
 
-        async function bulkPut(newNotes) {
-          for (const x of newNotes) {
-            const id = x.id || Utils.uuid();
-            const note = {
-              id,
-              text: String(x.text ?? ''),
-              createdAt: Number(x.createdAt) || Date.now(),
-              editedAt: x.editedAt ? Number(x.editedAt) : null,
-              vPacked: typeof x.vPacked === 'string' ? x.vPacked : null,
-              publishState: String(x.publishState ?? 'none'),
-              worldId: x.worldId ? String(x.worldId) : null
-            };
-            const existing = get(id);
-            if (existing) Object.assign(existing, note);
-            else notes.unshift(note);
-            await IDB.notesPut(note);
-          }
-          notes.sort((a,b)=>b.createdAt-a.createdAt);
-          ee.emit('change', list());
-        }
-
-        return { load, list, get, add, update, remove, bulkPut, onChange:(fn)=>ee.on('change', fn) };
+        return { load, list, get, add, update, remove, onChange:(fn)=>ee.on('change', fn) };
       }
       return { create };
     })();
 
-    // ===================== World (Gun) — subscribe to NOTES directly (stable) =====================
+    // ===================== Gun World via SET (correct) =====================
     const World = (() => {
-      const ROOT = 'noosphere_world_v3'; // new root
+      // new root so both devices must use same file
+      const ROOT = 'noosphere_world_v4';
+
       function create(gun) {
         const ee = new Utils.Emitter();
-        const notes = gun.get(ROOT).get('world').get('notes');
+
+        // feed is a SET (contains links)
+        const feed = gun.get(ROOT).get('world').get('feed');
+        // notes are stored at /note/<id>
+        const noteRoot = gun.get(ROOT).get('world').get('note');
 
         const map = new Map(); // id -> note
 
         function list() { return Array.from(map.values()).sort((a,b)=>b.createdAt-a.createdAt); }
         function emit() { ee.emit('change', list()); }
 
-        // Subscribe to all notes directly
-        notes.map().on((raw, id) => {
-          if (!id || id === '_' || id === 'null') return;
-          const x = raw && typeof raw === 'object' ? raw : {};
-          if (x.deleted) { map.delete(id); emit(); return; }
+        // Subscribe to feed set
+        feed.map().on((note) => {
+          const x = note && typeof note === 'object' ? note : null;
+          if (!x) return;
+          if (!x.id) return;
+          if (x.deleted) { map.delete(x.id); emit(); return; }
           if (typeof x.text !== 'string') return;
 
-          map.set(id, {
-            id,
-            text: String(x.text ?? ''),
-            vPacked: (typeof x.vPacked === 'string') ? x.vPacked : null,
+          map.set(String(x.id), {
+            id: String(x.id),
+            text: String(x.text),
+            vPacked: typeof x.vPacked === 'string' ? x.vPacked : null,
             author: String(x.author ?? ''),
             createdAt: Number(x.createdAt) || Date.now()
           });
           emit();
         });
 
-        // Put without waiting ack (Gun sync later). But publisher will verify via once().
         function publish({ id, text, vPacked, author }) {
           const now = Date.now();
-          notes.get(id).put({ id, text, vPacked, author, createdAt: now, deleted: false });
+          const ref = noteRoot.get(id);
+          ref.put({ id, text, vPacked, author, createdAt: now, deleted:false });
+          // THIS is the critical part:
+          feed.set(ref);
           return id;
         }
 
-        function onceNote(id, timeoutMs = 1200) {
-          return new Promise((resolve) => {
-            let done = false;
-            const t = setTimeout(() => { if (!done) { done = true; resolve(null); } }, timeoutMs);
-            notes.get(id).once((d) => {
-              if (done) return;
-              clearTimeout(t);
-              done = true;
-              resolve(d);
-            });
-          });
-        }
-
-        return { list, onChange:(fn)=>ee.on('change', fn), publish, onceNote };
+        return { list, onChange:(fn)=>ee.on('change', fn), publish, ROOT };
       }
+
       return { create };
     })();
 
+    // Indexer
     const Indexer = (() => {
       function create({ local }) {
         let running = false;
@@ -487,16 +470,14 @@
               const packed = Vectors.packI8(vec);
               await local.update(n.id, { vPacked: packed });
             }
-          } finally {
-            running = false;
-          }
+          } finally { running = false; }
         }
         return { runOnce };
       }
       return { create };
     })();
 
-    // Publisher: mark "published" only after local confirmation that world note exists.
+    // Publisher
     const Publisher = (() => {
       function create({ local, world, deviceId }) {
         let running = false;
@@ -515,23 +496,12 @@
                 v = Vectors.packI8(vec);
                 await local.update(n.id, { vPacked: v });
               }
-
-              // publish (idempotent: world id = local id)
+              // publish to world set
               world.publish({ id: n.id, text: n.text, vPacked: v, author: deviceId });
-
-              // verify local gun graph sees it
-              const seen = await world.onceNote(n.id, 1400);
-              const ok = seen && typeof seen.text === 'string' && seen.text.length > 0;
-
-              if (ok) {
-                await local.update(n.id, { publishState:'published', worldId: n.id });
-              } else {
-                // keep pending; will retry
-              }
+              // mark published (set ensures discoverability for others)
+              await local.update(n.id, { publishState:'published', worldId: n.id });
             }
-          } finally {
-            running = false;
-          }
+          } finally { running = false; }
         }
 
         async function enqueue(localId) {
@@ -544,8 +514,9 @@
       return { create };
     })();
 
+    // Search (filters out own world notes)
     const Search = (() => {
-      function create({ local, world, settings }) {
+      function create({ local, world, settings, deviceId }) {
         const cache = new Map(); // id -> Float32Array
 
         function vecFromPacked(id, packed) {
@@ -580,6 +551,9 @@
           const worldHits = [];
           const serHits = [];
           for (const w of world.list()) {
+            // IMPORTANT: do not show own published notes in World
+            if (w.author === deviceId) continue;
+
             const v = vecFromPacked(w.id, w.vPacked);
             if (!v) continue;
             const score = Vectors.dot(qVec, v);
@@ -604,6 +578,7 @@
       return { create };
     })();
 
+    // UI
     const UI = (() => {
       function pill(label, state='neutral') {
         const dot = state === 'ok' ? 'ok' : state === 'warn' ? 'warn' : state === 'bad' ? 'bad' : '';
@@ -653,9 +628,10 @@
       return { pill, renderItems, renderHistory };
     })();
 
+    // Capsule
     const Capsule = (() => {
       function exportNotes(notes) {
-        const cap = { version: 2, kind: 'noosphere', createdAt: Date.now(), notes };
+        const cap = { version: 1, kind: 'noosphere', createdAt: Date.now(), notes };
         const blob = new Blob([JSON.stringify(cap)], { type:'application/json' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -674,6 +650,7 @@
       return { exportNotes, importNotes };
     })();
 
+    // App
     const App = (() => {
       const els = {
         tabFlow: Utils.$('#tabFlow'),
@@ -724,10 +701,6 @@
 
       let modelReady = false;
       let busy = false;
-      let toast = '';
-      let toastUntil = 0;
-
-      function setToast(msg, ms=1400) { toast = msg; toastUntil = Date.now() + ms; renderStatus(); }
 
       function renderStatus(errMsg = '') {
         const peersCount = Settings.parsePeers(settings.peersText).length;
@@ -743,12 +716,9 @@
           UI.pill(`pending:${pendingCount}`, pendingCount ? 'warn' : 'neutral'),
           UI.pill(`world:${worldCount}`)
         ];
-
         if (errMsg) pills.push(UI.pill(errMsg, 'bad'));
-        if (toast && Date.now() < toastUntil) pills.push(UI.pill(toast, 'ok'));
-
         els.status.innerHTML = pills.join(' ');
-        els.diag.textContent = `device:${deviceId}`;
+        els.diag.textContent = `device:${deviceId} | worldRoot:${world.ROOT}`;
       }
 
       function applyTheme() { Theme.apply(settings.theme); }
@@ -835,7 +805,6 @@
           await local.add({ text, publishState:'none', vPacked:null });
           els.thought.value = '';
           refreshFlow();
-          setToast('Сохранено офлайн');
           indexer.runOnce();
         } finally {
           busy = false;
@@ -853,7 +822,6 @@
           const id = await local.add({ text, publishState:'pending', vPacked:null });
           els.thought.value = '';
           refreshFlow();
-          setToast('Отправка в Мир…');
           await publisher.enqueue(id);
         } finally {
           busy = false;
@@ -902,14 +870,13 @@
       });
 
       async function doReindex() {
-        if (!Embedder.ready()) { setToast('Модель ещё грузится', 1600); return; }
+        if (!Embedder.ready()) return;
         for (const n of local.list()) {
           const vec = await Embedder.embed(n.text);
           const packed = Vectors.packI8(vec);
           await local.update(n.id, { vPacked: packed });
         }
         search.clear();
-        setToast('Реиндекс готов');
         renderStatus();
         refreshFlow();
         publisher.run();
@@ -924,9 +891,12 @@
       async function doExport() { Capsule.exportNotes(local.list()); }
       async function doImport(file) {
         const imported = await Capsule.importNotes(file);
-        await local.bulkPut(imported);
+        for (const n of imported) {
+          if (!n.id) n.id = Utils.uuid();
+          await IDB.notesPut(n);
+        }
+        await local.load();
         search.clear();
-        setToast(`Импорт: ${imported.length}`);
         renderHistory();
         refreshFlow();
         indexer.runOnce();
@@ -949,7 +919,7 @@
         world = World.create(gun);
         indexer = Indexer.create({ local });
         publisher = Publisher.create({ local, world, deviceId });
-        search = Search.create({ local, world, settings: () => settings });
+        search = Search.create({ local, world, settings: () => settings, deviceId });
 
         local.onChange(() => {
           renderStatus();
@@ -976,7 +946,7 @@
           }
         })();
 
-        // Retry pending every 4s (important for real network)
+        // retry pending periodically
         setInterval(() => publisher.run(), 4000);
 
         // UI events
@@ -991,13 +961,6 @@
 
         els.save.addEventListener('click', doSaveLocal);
         els.sendWorld.addEventListener('click', doSendWorld);
-
-        els.thought.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
-            doSendWorld();
-          }
-        });
 
         els.historySearch.addEventListener('input', renderHistory);
 
@@ -1025,7 +988,7 @@
         renderHistory();
         renderStatus();
 
-        window.__noosphere = { gun, local, world, settings: () => settings };
+        window.__noosphere = { gun, local, world, settings: () => settings, deviceId };
       }
 
       return { boot };
