@@ -1,6 +1,6 @@
 import { init, embed, vecToBase64 } from './embedder.js';
 import { MyNotes } from './storage.js';
-import { loadWorld, searchWorld, searchLocal, enqueueShare, getPending, exportPendingAsWorld } from './world.js';
+import { loadWorld, getWorldCache, searchWorld, searchLocal, enqueueShare, getPending, exportPendingAsWorld } from './world.js';
 
 // === DOM ===
 const $ = id => document.getElementById(id);
