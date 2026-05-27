@@ -1,1287 +1,1012 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Noosphere Core v2</title>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Noosphere Core (IDB Local + Gun World MAP)</title>
 
-    <style>
-        :root {
-            --bg: #f8fafc;
-            --surface: #fff;
-            --text: #0f172a;
-            --muted: #64748b;
-            --border: #e2e8f0;
-            --accent: #4f46e5;
-            --accent2: #4338ca;
-            --danger: #ef4444;
-            --ok: #16a34a;
-            --warn: #f59e0b;
-            --r: 14px;
-        }
+  <style>
+    :root{
+      --bg:#f8fafc; --surface:#fff; --text:#0f172a; --muted:#64748b;
+      --border:#e2e8f0; --accent:#4f46e5; --accent2:#4338ca;
+      --danger:#ef4444; --ok:#16a34a; --warn:#f59e0b;
+      --r:14px;
+    }
+    body.dark{
+      --bg:#0b1220; --surface:#111c2f; --text:#eef2ff; --muted:#94a3b8; --border:#22324f;
+      --accent:#818cf8; --accent2:#6366f1;
+    }
+    *{ box-sizing:border-box; margin:0; padding:0; }
+    body{ font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); display:flex; justify-content:center; padding:12px; }
+    .app{ width:100%; max-width:760px; display:flex; flex-direction:column; gap:10px; }
 
-        body.dark {
-            --bg: #0b1220;
-            --surface: #111c2f;
-            --text: #eef2ff;
-            --muted: #94a3b8;
-            --border: #22324f;
-            --accent: #818cf8;
-            --accent2: #6366f1;
-        }
+    .topbar{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    .tabs{ display:flex; gap:8px; }
+    .tab{ border:1px solid var(--border); background:transparent; color:var(--muted); padding:8px 12px; border-radius:12px; font-weight:800; cursor:pointer; }
+    .tab.active{ background:var(--accent); color:#fff; border-color:var(--accent); }
+    .gear{ width:40px; height:40px; border-radius:999px; border:1px solid var(--border); background:var(--surface); cursor:pointer; font-weight:900; }
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+    .view{ display:none; }
+    .view.active{ display:block; }
 
-        body {
-            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            display: flex;
-            justify-content: center;
-            padding: 12px;
-        }
+    .box{ background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:12px; }
+    textarea{ width:100%; min-height:92px; resize:none; outline:none; border:none; background:transparent; color:var(--text); font-size:16px; line-height:1.4; }
+    textarea::placeholder{ color:var(--muted); opacity:0.8; }
 
-        .app {
-            width: 100%;
-            max-width: 760px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
+    .row{ display:flex; gap:8px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin-top:10px; }
+    .btns{ display:flex; gap:8px; margin-left:auto; }
+    .btn{ border:none; border-radius:12px; padding:10px 12px; cursor:pointer; font-weight:900; background:var(--accent); color:#fff; }
+    .btn:hover{ background:var(--accent2); }
+    .btn:disabled{ opacity:.45; pointer-events:none; }
+    .btn.ghost{ background:transparent; color:var(--muted); border:1px solid var(--border); }
+    .btn.danger{ background:var(--danger); }
 
-        .topbar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-        }
+    .status{ font-size:12px; color:var(--muted); display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+    .pill{ border:1px solid var(--border); border-radius:999px; padding:2px 8px; font-weight:900; display:inline-flex; gap:6px; align-items:center; }
+    .dot{ width:8px; height:8px; border-radius:50%; background:var(--muted); display:inline-block; }
+    .dot.ok{ background:var(--ok); } .dot.warn{ background:var(--warn); } .dot.bad{ background:var(--danger); }
 
-        .tabs {
-            display: flex;
-            gap: 8px;
-        }
+    .section{ margin-top:10px; }
+    .h{ font-size:12px; color:var(--muted); font-weight:950; text-transform:uppercase; letter-spacing:.06em; margin:10px 0 6px; }
+    .list{ display:flex; flex-direction:column; gap:8px; }
+    .item{ background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:10px 12px; }
+    .item .text{ white-space:pre-wrap; word-break:break-word; }
+    .item .meta{ margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--muted); align-items:center; }
+    .badge{ font-weight:950; border:1px solid var(--border); border-radius:999px; padding:2px 8px; }
+    .badge.pending{ border-color:rgba(245,158,11,0.5); color:var(--warn); }
+    .badge.world{ border-color:rgba(22,163,74,0.5); color:var(--ok); }
 
-        .tab {
-            border: 1px solid var(--border);
-            background: transparent;
-            color: var(--muted);
-            padding: 8px 12px;
-            border-radius: 12px;
-            font-weight: 800;
-            cursor: pointer;
-        }
+    .empty{ text-align:center; color:var(--muted); font-style:italic; padding:12px; border:1px dashed var(--border); border-radius:var(--r); background:var(--surface); }
+    .search{ width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:var(--r); background:var(--surface); color:var(--text); outline:none; }
 
-        .tab.active {
-            background: var(--accent);
-            color: #fff;
-            border-color: var(--accent);
-        }
+    .overlay{ position:fixed; inset:0; background:rgba(0,0,0,0.35); display:none; z-index:9; }
+    .overlay.open{ display:block; }
+    .panel{
+      position:fixed; top:0; right:0; width:420px; max-width:92vw; height:100%;
+      background:var(--surface); border-left:1px solid var(--border);
+      padding:12px; z-index:10; transform:translateX(100%); transition:transform .2s ease;
+      overflow:auto;
+    }
+    .panel.open{ transform:translateX(0); }
+    .field{ margin:10px 0; display:flex; flex-direction:column; gap:6px; }
+    .field label{ font-size:12px; color:var(--muted); font-weight:950; }
+    select, input[type="range"], textarea.panel-ta{ width:100%; }
+    select, textarea.panel-ta{
+      border:1px solid var(--border); border-radius:12px; padding:10px 12px;
+      background:var(--surface); color:var(--text); outline:none;
+    }
+    textarea.panel-ta{ min-height:90px; resize:vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .tiny{ font-size:12px; color:var(--muted); }
+  </style>
 
-        .gear {
-            width: 40px;
-            height: 40px;
-            border-radius: 999px;
-            border: 1px solid var(--border);
-            background: var(--surface);
-            cursor: pointer;
-            font-weight: 900;
-        }
-
-        .view {
-            display: none;
-        }
-
-        .view.active {
-            display: block;
-        }
-
-        .box {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--r);
-            padding: 12px;
-        }
-
-        textarea {
-            width: 100%;
-            min-height: 92px;
-            resize: none;
-            outline: none;
-            border: none;
-            background: transparent;
-            color: var(--text);
-            font-size: 16px;
-            line-height: 1.4;
-        }
-
-        textarea::placeholder {
-            color: var(--muted);
-            opacity: 0.8;
-        }
-
-        .row {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            margin-top: 10px;
-        }
-
-        .btns {
-            display: flex;
-            gap: 8px;
-            margin-left: auto;
-        }
-
-        .btn {
-            border: none;
-            border-radius: 12px;
-            padding: 10px 12px;
-            cursor: pointer;
-            font-weight: 900;
-            background: var(--accent);
-            color: #fff;
-        }
-
-        .btn:hover {
-            background: var(--accent2);
-        }
-
-        .btn:disabled {
-            opacity: .45;
-            pointer-events: none;
-        }
-
-        .btn.ghost {
-            background: transparent;
-            color: var(--muted);
-            border: 1px solid var(--border);
-        }
-
-        .btn.danger {
-            background: var(--danger);
-        }
-
-        .status {
-            font-size: 12px;
-            color: var(--muted);
-            display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-
-        .pill {
-            border: 1px solid var(--border);
-            border-radius: 999px;
-            padding: 2px 8px;
-            font-weight: 900;
-            display: inline-flex;
-            gap: 6px;
-            align-items: center;
-        }
-
-        .dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: var(--muted);
-            display: inline-block;
-        }
-
-        .dot.ok {
-            background: var(--ok);
-        }
-
-        .dot.warn {
-            background: var(--warn);
-        }
-
-        .dot.bad {
-            background: var(--danger);
-        }
-
-        .section {
-            margin-top: 10px;
-        }
-
-        .h {
-            font-size: 12px;
-            color: var(--muted);
-            font-weight: 950;
-            text-transform: uppercase;
-            letter-spacing: .06em;
-            margin: 10px 0 6px;
-        }
-
-        .list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-
-        .item {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: var(--r);
-            padding: 10px 12px;
-        }
-
-        .item .text {
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
-
-        .item .meta {
-            margin-top: 8px;
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-            font-size: 12px;
-            color: var(--muted);
-            align-items: center;
-        }
-
-        .badge {
-            font-weight: 950;
-            border: 1px solid var(--border);
-            border-radius: 999px;
-            padding: 2px 8px;
-        }
-
-        .badge.pending {
-            border-color: rgba(245, 158, 11, 0.5);
-            color: var(--warn);
-        }
-
-        .badge.world {
-            border-color: rgba(22, 163, 74, 0.5);
-            color: var(--ok);
-        }
-
-        .empty {
-            text-align: center;
-            color: var(--muted);
-            font-style: italic;
-            padding: 12px;
-            border: 1px dashed var(--border);
-            border-radius: var(--r);
-            background: var(--surface);
-        }
-
-        .search {
-            width: 100%;
-            padding: 10px 12px;
-            border: 1px solid var(--border);
-            border-radius: var(--r);
-            background: var(--surface);
-            color: var(--text);
-            outline: none;
-        }
-
-        .overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.35);
-            display: none;
-            z-index: 9;
-        }
-
-        .overlay.open {
-            display: block;
-        }
-
-        .panel {
-            position: fixed;
-            top: 0;
-            right: 0;
-            width: 420px;
-            max-width: 92vw;
-            height: 100%;
-            background: var(--surface);
-            border-left: 1px solid var(--border);
-            padding: 12px;
-            z-index: 10;
-            transform: translateX(100%);
-            transition: transform .2s ease;
-            overflow: auto;
-        }
-
-        .panel.open {
-            transform: translateX(0);
-        }
-
-        .field {
-            margin: 10px 0;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        .field label {
-            font-size: 12px;
-            color: var(--muted);
-            font-weight: 950;
-        }
-
-        select,
-        input[type="range"],
-        textarea.panel-ta {
-            width: 100%;
-        }
-
-        select,
-        textarea.panel-ta {
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 10px 12px;
-            background: var(--surface);
-            color: var(--text);
-            outline: none;
-        }
-
-        textarea.panel-ta {
-            min-height: 90px;
-            resize: vertical;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-        }
-
-        .tiny {
-            font-size: 12px;
-            color: var(--muted);
-        }
-    </style>
-
-    <!-- GunDB (всегда подгружаем, но проверяем наличие) -->
-    <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/gun/sea.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/gun/lib/rindexed.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/gun/lib/then.js"></script>
+  <!-- GunDB -->
+  <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gun/sea.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gun/lib/rindexed.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/gun/lib/then.js"></script>
 </head>
 
 <body>
-    <div class="app">
-        <div class="topbar">
-            <div class="tabs">
-                <button class="tab active" id="tabFlow">Поток</button>
-                <button class="tab" id="tabHistory">История</button>
-            </div>
-            <button class="gear" id="openSettings">⚙</button>
-        </div>
-
-        <div class="view active" id="flowView">
-            <div class="box">
-                <textarea id="thought" placeholder="Поделитесь мыслью..."></textarea>
-                <div class="row">
-                    <div class="status" id="status"></div>
-                    <div class="btns">
-                        <button class="btn ghost" id="save">Сохранить</button>
-                        <button class="btn" id="sendWorld" disabled>Сохранить + в Мир</button>
-                    </div>
-                </div>
-                <div class="tiny" style="margin-top:8px;">Свайп вверх по полю ввода = «Сохранить + в Мир» (когда поле не прокручено)</div>
-            </div>
-
-            <div class="section">
-                <div class="h">Мои релевантные</div>
-                <div id="localList" class="list"></div>
-            </div>
-
-            <div class="section">
-                <div class="h">Мир (релевантные, без моих)</div>
-                <div id="worldList" class="list"></div>
-            </div>
-
-            <div class="section">
-                <div class="h">Смежные (без моих)</div>
-                <div id="serList" class="list"></div>
-            </div>
-        </div>
-
-        <div class="view" id="historyView">
-            <input id="historySearch" class="search" placeholder="Поиск по истории..." />
-            <div style="height:10px;"></div>
-            <div id="historyList" class="list"></div>
-        </div>
+  <div class="app">
+    <div class="topbar">
+      <div class="tabs">
+        <button class="tab active" id="tabFlow">Поток</button>
+        <button class="tab" id="tabHistory">История</button>
+      </div>
+      <button class="gear" id="openSettings">⚙</button>
     </div>
 
-    <div class="overlay" id="overlay"></div>
-    <div class="panel" id="panel">
-        <h2 style="margin-bottom:6px;">Настройки</h2>
-        <div class="tiny" id="diag"></div>
-
-        <div class="field">
-            <label>Тема</label>
-            <select id="theme">
-                <option value="auto">Авто</option>
-                <option value="light">День</option>
-                <option value="dark">Ночь</option>
-            </select>
+    <div class="view active" id="flowView">
+      <div class="box">
+        <textarea id="thought" placeholder="Поделитесь мыслью..."></textarea>
+        <div class="row">
+          <div class="status" id="status"></div>
+          <div class="btns">
+            <button class="btn ghost" id="save">Сохранить</button>
+            <button class="btn" id="sendWorld" disabled>Сохранить + в Мир</button>
+          </div>
         </div>
+        <div class="tiny" style="margin-top:8px;">Свайп вверх по полю ввода = «Сохранить + в Мир»</div>
+      </div>
 
-        <div class="field">
-            <label>Порог релевантности</label>
-            <div style="display:flex; gap:10px; align-items:center;">
-                <input type="range" id="threshold" min="0" max="1" step="0.01" />
-                <span id="thresholdV" style="min-width:42px; font-weight:950; color:var(--accent);">0.25</span>
-            </div>
-        </div>
+      <div class="section">
+        <div class="h">Мои релевантные</div>
+        <div id="localList" class="list"></div>
+      </div>
 
-        <div class="field">
-            <label>Дельта смежности</label>
-            <div style="display:flex; gap:10px; align-items:center;">
-                <input type="range" id="serDelta" min="0" max="0.5" step="0.01" />
-                <span id="serDeltaV" style="min-width:42px; font-weight:950; color:var(--accent);">0.15</span>
-            </div>
-        </div>
+      <div class="section">
+        <div class="h">Мир (релевантные, без моих)</div>
+        <div id="worldList" class="list"></div>
+      </div>
 
-        <div class="field">
-            <label>Макс. карточек</label>
-            <select id="maxResults">
-                <option value="3">3</option>
-                <option value="5">5</option>
-                <option value="10">10</option>
-            </select>
-        </div>
-
-        <div class="field">
-            <label>Gun relay peers (по одному URL на строку)</label>
-            <textarea id="peersText" class="panel-ta" spellcheck="false"></textarea>
-            <div class="tiny">Рабочий пример: https://gun-us.herokuapp.com/gun</div>
-        </div>
-
-        <div class="field">
-            <button class="btn ghost" id="export">Экспорт</button>
-            <button class="btn ghost" id="import">Импорт</button>
-            <input type="file" id="importFile" accept=".json,.capsule" style="display:none;" />
-        </div>
-
-        <div class="field">
-            <button class="btn ghost" id="reindex">Реиндекс (векторы)</button>
-            <button class="btn danger" id="resetDevice">Сбросить всё (IDB + device)</button>
-        </div>
+      <div class="section">
+        <div class="h">Смежные (без моих)</div>
+        <div id="serList" class="list"></div>
+      </div>
     </div>
 
-    <script type="module">
-        import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.mjs';
+    <div class="view" id="historyView">
+      <input id="historySearch" class="search" placeholder="Поиск по истории..." />
+      <div style="height:10px;"></div>
+      <div id="historyList" class="list"></div>
+    </div>
+  </div>
 
-        /* ========== UTILS ========== */
-        const Utils = (() => {
-            const $ = (s, r = document) => r.querySelector(s);
-            const esc = (s) => { const d = document.createElement('div'); d.textContent = String(s ?? ''); return d.innerHTML; };
-            const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
-            const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
-            const uuid = () => {
-                if (crypto?.randomUUID) return crypto.randomUUID();
-                return 'id_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
-            };
-            const safeJSON = (txt, fb) => { try { return JSON.parse(txt); } catch { return fb; } };
-            class Emitter {
-                #m = new Map();
-                on(ev, fn) { if (!this.#m.has(ev)) this.#m.set(ev, new Set()); this.#m.get(ev).add(fn); return () => this.#m.get(ev)?.delete(fn); }
-                emit(ev, p) { for (const fn of this.#m.get(ev) ?? []) { try { fn(p); } catch (e) { console.error(e); } } }
+  <div class="overlay" id="overlay"></div>
+  <div class="panel" id="panel">
+    <h2 style="margin-bottom:6px;">Настройки</h2>
+    <div class="tiny" id="diag"></div>
+
+    <div class="field">
+      <label>Тема</label>
+      <select id="theme">
+        <option value="auto">Авто</option>
+        <option value="light">День</option>
+        <option value="dark">Ночь</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Порог релевантности</label>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <input type="range" id="threshold" min="0" max="1" step="0.01" />
+        <span id="thresholdV" style="min-width:42px; font-weight:950; color:var(--accent);">0.25</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Дельта смежности</label>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <input type="range" id="serDelta" min="0" max="0.5" step="0.01" />
+        <span id="serDeltaV" style="min-width:42px; font-weight:950; color:var(--accent);">0.15</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Макс. карточек</label>
+      <select id="maxResults">
+        <option value="3">3</option>
+        <option value="5">5</option>
+        <option value="10">10</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label>Gun relay peers (по одному URL на строку)</label>
+      <textarea id="peersText" class="panel-ta" spellcheck="false"></textarea>
+      <div class="tiny">Встроено: https://relay.peer.ooo/gun</div>
+    </div>
+
+    <div class="field">
+      <button class="btn ghost" id="export">Экспорт</button>
+      <button class="btn ghost" id="import">Импорт</button>
+      <input type="file" id="importFile" accept=".json,.capsule" style="display:none;" />
+    </div>
+
+    <div class="field">
+      <button class="btn ghost" id="reindex">Реиндекс (векторы)</button>
+      <button class="btn danger" id="resetDevice">Сбросить устройство</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+
+    // Utils
+    const Utils = (() => {
+      const $ = (s, r=document) => r.querySelector(s);
+      const esc = (s) => { const d=document.createElement('div'); d.textContent=String(s??''); return d.innerHTML; };
+      const debounce = (fn, ms) => { let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
+      const clamp = (x,a,b)=>Math.max(a,Math.min(b,x));
+      const uuid = ()=>crypto.randomUUID();
+      const safeJSON = (txt, fb)=>{ try{return JSON.parse(txt);}catch{return fb;} };
+      class Emitter{
+        #m=new Map();
+        on(ev, fn){ if(!this.#m.has(ev)) this.#m.set(ev,new Set()); this.#m.get(ev).add(fn); return ()=>this.#m.get(ev)?.delete(fn); }
+        emit(ev, p){ for(const fn of this.#m.get(ev)??[]) { try{fn(p);}catch(e){console.error(e);} } }
+      }
+      return { $, esc, debounce, clamp, uuid, safeJSON, Emitter };
+    })();
+
+    // IDB
+    const IDB = (() => {
+      const DB = 'noosphere_idb_local_v1';
+      const STO_KV = 'kv';
+      const STO_NOTES = 'notes';
+      let ok = true;
+
+      function open() {
+        return new Promise((resolve, reject) => {
+          const req = indexedDB.open(DB, 1);
+          req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(STO_KV)) db.createObjectStore(STO_KV);
+            if (!db.objectStoreNames.contains(STO_NOTES)) {
+              const st = db.createObjectStore(STO_NOTES, { keyPath: 'id' });
+              st.createIndex('createdAt', 'createdAt');
             }
-            return { $, esc, debounce, clamp, uuid, safeJSON, Emitter };
-        })();
-
-        /* ========== IDB ========== */
-        const IDB = (() => {
-            const DB_NAME = 'noosphere_idb_v2';
-            const STORE_KV = 'kv';
-            const STORE_NOTES = 'notes';
-            let ok = true;
-
-            function open() {
-                return new Promise((resolve, reject) => {
-                    const req = indexedDB.open(DB_NAME, 1);
-                    req.onupgradeneeded = () => {
-                        const db = req.result;
-                        if (!db.objectStoreNames.contains(STORE_KV)) db.createObjectStore(STORE_KV);
-                        if (!db.objectStoreNames.contains(STORE_NOTES)) {
-                            const st = db.createObjectStore(STORE_NOTES, { keyPath: 'id' });
-                            st.createIndex('createdAt', 'createdAt');
-                        }
-                    };
-                    req.onsuccess = () => resolve(req.result);
-                    req.onerror = () => reject(req.error);
-                });
-            }
-
-            async function kvGet(key) { try { const db = await open(); return await new Promise((resolve, reject) => { const tx = db.transaction(STORE_KV, 'readonly'); const st = tx.objectStore(STORE_KV); const r = st.get(key); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); }); } catch { ok = false; return undefined; } }
-            async function kvSet(key, val) { try { const db = await open(); return await new Promise((resolve, reject) => { const tx = db.transaction(STORE_KV, 'readwrite'); const st = tx.objectStore(STORE_KV); const r = st.put(val, key); r.onsuccess = () => resolve(true); r.onerror = () => reject(r.error); }); } catch { ok = false; return false; } }
-
-            async function notesPut(note) { try { const db = await open(); return await new Promise((resolve, reject) => { const tx = db.transaction(STORE_NOTES, 'readwrite'); const st = tx.objectStore(STORE_NOTES); const r = st.put(note); r.onsuccess = () => resolve(true); r.onerror = () => reject(r.error); }); } catch { ok = false; return false; } }
-            async function notesDelete(id) { try { const db = await open(); return await new Promise((resolve, reject) => { const tx = db.transaction(STORE_NOTES, 'readwrite'); const st = tx.objectStore(STORE_NOTES); const r = st.delete(id); r.onsuccess = () => resolve(true); r.onerror = () => reject(r.error); }); } catch { ok = false; return false; } }
-            async function notesGetAll() { try { const db = await open(); return await new Promise((resolve, reject) => { const tx = db.transaction(STORE_NOTES, 'readonly'); const st = tx.objectStore(STORE_NOTES); const r = st.getAll(); r.onsuccess = () => resolve(r.result || []); r.onerror = () => reject(r.error); }); } catch { ok = false; return []; } }
-
-            async function clearAll() {
-                try {
-                    const db = await open();
-                    await new Promise((resolve, reject) => {
-                        const tx = db.transaction([STORE_KV, STORE_NOTES], 'readwrite');
-                        tx.objectStore(STORE_KV).clear();
-                        tx.objectStore(STORE_NOTES).clear();
-                        tx.oncomplete = resolve;
-                        tx.onerror = reject;
-                    });
-                } catch { ok = false; }
-            }
-
-            return { kvGet, kvSet, notesPut, notesDelete, notesGetAll, clearAll, ok: () => ok };
-        })();
-
-        /* ========== SETTINGS ========== */
-        const Settings = (() => {
-            const KEY = 'settings';
-            const DEFAULT = {
-                theme: 'auto',
-                threshold: 0.25,
-                serDelta: 0.15,
-                maxResults: 5,
-                peersText: 'https://relay.peer.ooo/gun'
-            };
-
-            const sanitize = (raw) => {
-                const x = raw && typeof raw === 'object' ? raw : {};
-                return {
-                    theme: (x.theme === 'auto' || x.theme === 'light' || x.theme === 'dark') ? x.theme : DEFAULT.theme,
-                    threshold: Utils.clamp(Number(x.threshold ?? DEFAULT.threshold), 0, 1),
-                    serDelta: Utils.clamp(Number(x.serDelta ?? DEFAULT.serDelta), 0, 0.5),
-                    maxResults: Math.max(1, Number(x.maxResults ?? DEFAULT.maxResults) | 0),
-                    peersText: (typeof x.peersText === 'string') ? x.peersText : DEFAULT.peersText
-                };
-            };
-
-            const parsePeers = (peersText) => String(peersText ?? '').split('\n').map(s => s.trim()).filter(Boolean);
-
-            async function load() { const raw = await IDB.kvGet(KEY); return sanitize(raw ?? DEFAULT); }
-            async function save(s) { await IDB.kvSet(KEY, sanitize(s)); }
-
-            return { DEFAULT, sanitize, parsePeers, load, save };
-        })();
-
-        /* ========== THEME ========== */
-        const Theme = (() => {
-            function apply(mode) {
-                const dark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
-                document.body.classList.toggle('dark', !!dark);
-            }
-            return { apply };
-        })();
-
-        /* ========== VECTORS ========== */
-        const Vectors = (() => {
-            const dot = (a, b) => { let d = 0; for (let i = 0; i < a.length; i++) d += a[i] * b[i]; return d; };
-            const norm = (v) => { let s = 0; for (let i = 0; i < v.length; i++) s += v[i] * v[i]; const m = Math.sqrt(s) || 1; for (let i = 0; i < v.length; i++) v[i] /= m; return v; };
-            const b64enc = (u8) => { let s = ''; const CH = 0x8000; for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode(...u8.subarray(i, i + CH)); return btoa(s); };
-            const b64dec = (b64) => { const bin = atob(b64); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return u8; };
-            const packI8 = (f32) => { const v = new Float32Array(f32); norm(v); const i8 = new Int8Array(v.length); for (let i = 0; i < v.length; i++) i8[i] = Math.max(-127, Math.min(127, Math.round(v[i] * 127))); return b64enc(new Uint8Array(i8.buffer)); };
-            const unpackI8 = (b64) => { const u8 = b64dec(b64); const i8 = new Int8Array(u8.buffer); const v = new Float32Array(i8.length); for (let i = 0; i < i8.length; i++) v[i] = i8[i] / 127; return norm(v); };
-            return { dot, packI8, unpackI8 };
-        })();
-
-        /* ========== EMBEDDER ========== */
-        const Embedder = (() => {
-            let model = null;
-            let progress = 0;
-            const listeners = new Set();
-
-            function onProgress(cb) { listeners.add(cb); return () => listeners.delete(cb); }
-            function report(p) { progress = p; for (const cb of listeners) cb(p); }
-
-            async function init() {
-                model = await pipeline(
-                    'feature-extraction',
-                    'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
-                    {
-                        quantized: true,
-                        progress_callback: (info) => {
-                            if (info.status === 'progress' && info.progress) {
-                                report(Math.round(info.progress * 100));
-                            }
-                        }
-                    }
-                );
-                report(100);
-            }
-
-            const ready = () => !!model;
-
-            async function embed(text) {
-                const out = await model([text], { pooling: 'mean', normalize: true });
-                // out.data - Float32Array длиной dims
-                return new Float32Array(out.data);
-            }
-
-            return { init, ready, embed, progress: () => progress, onProgress };
-        })();
-
-        /* ========== LOCAL NOTES ========== */
-        const LocalNotes = (() => {
-            function create() {
-                const ee = new Utils.Emitter();
-                let notes = [];
-
-                async function load() {
-                    notes = (await IDB.notesGetAll()) || [];
-                    notes.sort((a, b) => b.createdAt - a.createdAt);
-                    ee.emit('change', list());
-                }
-
-                function list() { return notes.slice(); }
-                function get(id) { return notes.find(n => n.id === id) ?? null; }
-
-                async function add({ text, publishState = 'none', vPacked = null }) {
-                    const id = Utils.uuid();
-                    const now = Date.now();
-                    const note = { id, text, createdAt: now, editedAt: null, vPacked, publishState, worldId: null };
-                    notes.unshift(note);
-                    await IDB.notesPut(note);
-                    ee.emit('change', list());
-                    return id;
-                }
-
-                async function update(id, patch) {
-                    const n = get(id);
-                    if (!n) return;
-                    Object.assign(n, patch);
-                    await IDB.notesPut(n);
-                    ee.emit('change', list());
-                }
-
-                async function remove(id) {
-                    notes = notes.filter(n => n.id !== id);
-                    await IDB.notesDelete(id);
-                    ee.emit('change', list());
-                }
-
-                return { load, list, get, add, update, remove, onChange: (fn) => ee.on('change', fn) };
-            }
-            return { create };
-        })();
-
-        /* ========== WORLD (Gun SET) ========== */
-        const World = (() => {
-            const ROOT = 'noosphere_world_v4';
-
-            function create(gun) {
-                const ee = new Utils.Emitter();
-                const feed = gun.get(ROOT).get('world').get('feed');
-                const noteRoot = gun.get(ROOT).get('world').get('note');
-                const map = new Map();
-
-                function list() { return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt); }
-                function emit() { ee.emit('change', list()); }
-
-                feed.map().on((note) => {
-                    const x = note && typeof note === 'object' ? note : null;
-                    if (!x) return;
-                    if (!x.id) return;
-                    if (x.deleted) {
-                        map.delete(String(x.id));
-                        emit();
-                        return;
-                    }
-                    if (typeof x.text !== 'string') return;
-                    map.set(String(x.id), {
-                        id: String(x.id),
-                        text: String(x.text),
-                        vPacked: typeof x.vPacked === 'string' ? x.vPacked : null,
-                        author: String(x.author ?? ''),
-                        createdAt: Number(x.createdAt) || Date.now()
-                    });
-                    emit();
-                });
-
-                // Если Gun не загружен (офлайн), feed.map().on просто не вызовется, map останется пустой – ок.
-
-                function publish({ id, text, vPacked, author }) {
-                    const now = Date.now();
-                    const ref = noteRoot.get(id);
-                    // put в note хранилище
-                    ref.put({ id, text, vPacked, author, createdAt: now, deleted: false });
-                    // set в feed – критично!
-                    feed.set(ref);
-                    return id;
-                }
-
-                function unpublish(id) {
-                    const ref = noteRoot.get(id);
-                    ref.put({ deleted: true });
-                    feed.unset(ref);
-                    map.delete(id);
-                    emit();
-                }
-
-                return { list, onChange: (fn) => ee.on('change', fn), publish, unpublish, ROOT };
-            }
-
-            return { create };
-        })();
-
-        /* ========== INDEXER ========== */
-        const Indexer = (() => {
-            function create({ local }) {
-                let running = false;
-                async function runOnce() {
-                    if (running) return;
-                    if (!Embedder.ready()) return;
-                    running = true;
-                    try {
-                        for (const n of local.list()) {
-                            if (n.vPacked) continue;
-                            const vec = await Embedder.embed(n.text);
-                            const packed = Vectors.packI8(vec);
-                            await local.update(n.id, { vPacked: packed });
-                        }
-                    } finally { running = false; }
-                }
-                return { runOnce };
-            }
-            return { create };
-        })();
-
-        /* ========== PUBLISHER ========== */
-        const Publisher = (() => {
-            function create({ local, world, deviceId }) {
-                let running = false;
-
-                async function run() {
-                    if (running) return;
-                    running = true;
-                    try {
-                        if (!Embedder.ready()) return;
-
-                        const pending = local.list().filter(n => n.publishState === 'pending');
-                        for (const n of pending) {
-                            let v = n.vPacked;
-                            if (!v) {
-                                const vec = await Embedder.embed(n.text);
-                                v = Vectors.packI8(vec);
-                                await local.update(n.id, { vPacked: v });
-                            }
-                            world.publish({ id: n.id, text: n.text, vPacked: v, author: deviceId });
-                            await local.update(n.id, { publishState: 'published', worldId: n.id });
-                        }
-                    } finally {
-                        running = false;
-                        // Планируем следующий запуск, если остались pending
-                        if (local.list().some(n => n.publishState === 'pending')) {
-                            setTimeout(run, 2000);
-                        }
-                    }
-                }
-
-                async function enqueue(localId) {
-                    await local.update(localId, { publishState: 'pending' });
-                    run();
-                }
-
-                return { run, enqueue };
-            }
-            return { create };
-        })();
-
-        /* ========== SEARCH ========== */
-        const Search = (() => {
-            function create({ local, world, settings, deviceId }) {
-                const cache = new Map();
-
-                function vecFromPacked(id, packed) {
-                    if (!packed) return null;
-                    if (cache.has(id)) return cache.get(id);
-                    try { const v = Vectors.unpackI8(packed); cache.set(id, v); return v; } catch { return null; }
-                }
-
-                function clear() { cache.clear(); }
-
-                async function searchAll(queryText) {
-                    const q = String(queryText ?? '').trim();
-                    if (!q) return { mode: 'empty', local: [], world: [], ser: [] };
-                    if (!Embedder.ready()) return { mode: 'model_loading', local: [], world: [], ser: [] };
-
-                    const s = settings();
-                    const thr = s.threshold;
-                    const low = Math.max(0, thr - s.serDelta);
-                    const max = s.maxResults;
-                    const qVec = await Embedder.embed(q);
-
-                    const localHits = [];
-                    for (const n of local.list()) {
-                        const v = vecFromPacked(n.id, n.vPacked);
-                        if (!v) continue;
-                        const score = Vectors.dot(qVec, v);
-                        if (score >= thr) localHits.push({ id: n.id, text: n.text, score, createdAt: n.createdAt });
-                    }
-                    localHits.sort((a, b) => b.score - a.score);
-
-                    const worldHits = [];
-                    const serHits = [];
-                    for (const w of world.list()) {
-                        if (w.author === deviceId) continue;
-                        const v = vecFromPacked(w.id, w.vPacked);
-                        if (!v) continue;
-                        const score = Vectors.dot(qVec, v);
-                        if (score >= thr) worldHits.push({ id: w.id, text: w.text, score, createdAt: w.createdAt, author: w.author });
-                        else if (score >= low) serHits.push({ id: w.id, text: w.text, score, createdAt: w.createdAt, author: w.author });
-                    }
-                    worldHits.sort((a, b) => b.score - a.score);
-                    serHits.sort((a, b) => b.score - a.score);
-
-                    return {
-                        mode: 'ok',
-                        local: localHits.slice(0, max),
-                        world: worldHits.slice(0, max),
-                        ser: serHits.slice(0, max)
-                    };
-                }
-
-                function historyFilter(q) {
-                    const t = String(q ?? '').trim().toLowerCase();
-                    const all = local.list();
-                    if (!t) return all;
-                    return all.filter(n => n.text.toLowerCase().includes(t));
-                }
-
-                return { searchAll, historyFilter, clear };
-            }
-            return { create };
-        })();
-
-        /* ========== UI ========== */
-        const UI = (() => {
-            function pill(label, state = 'neutral') {
-                const dot = state === 'ok' ? 'ok' : state === 'warn' ? 'warn' : state === 'bad' ? 'bad' : '';
-                return `<span class="pill"><span class="dot ${dot}"></span>${Utils.esc(label)}</span>`;
-            }
-
-            function renderItems(container, items, { emptyText, kind }) {
-                if (!items.length) { container.innerHTML = `<div class="empty">${Utils.esc(emptyText)}</div>`; return; }
-                container.innerHTML = items.map(it => {
-                    const metaRight = kind === 'world'
-                        ? `<span>author:${Utils.esc(String(it.author || '').slice(0, 8))}</span>`
-                        : `<span>${new Date(it.createdAt).toLocaleString()}</span>`;
-                    return `
-                        <div class="item">
-                            <div class="text">${Utils.esc(it.text)}</div>
-                            <div class="meta">
-                                <span class="badge">${it.score.toFixed(2)}</span>
-                                ${metaRight}
-                            </div>
-                        </div>`;
-                }).join('');
-            }
-
-            function renderHistory(container, notes) {
-                if (!notes.length) { container.innerHTML = `<div class="empty">Нет заметок</div>`; return; }
-                container.innerHTML = notes.map(n => {
-                    const pub = n.publishState === 'pending'
-                        ? `<span class="badge pending">pending</span>`
-                        : (n.publishState === 'published' ? `<span class="badge world">world</span>` : '');
-                    return `
-                        <div class="item" data-id="${n.id}">
-                            <div class="text">${Utils.esc(n.text)}</div>
-                            <div class="meta">
-                                <span>${new Date(n.createdAt).toLocaleString()}</span>
-                                ${pub}
-                                <span style="margin-left:auto; display:flex; gap:8px;">
-                                    <button class="btn ghost" data-action="edit" data-id="${n.id}" style="padding:6px 10px;">ред.</button>
-                                    <button class="btn ghost" data-action="del" data-id="${n.id}" style="padding:6px 10px; border-color:rgba(239,68,68,0.35); color:var(--danger);">удал.</button>
-                                </span>
-                            </div>
-                        </div>`;
-                }).join('');
-            }
-
-            return { pill, renderItems, renderHistory };
-        })();
-
-        /* ========== CAPSULE ========== */
-        const Capsule = (() => {
-            function exportNotes(notes) {
-                const cap = { version: 2, kind: 'noosphere', createdAt: Date.now(), notes };
-                const blob = new Blob([JSON.stringify(cap)], { type: 'application/json' });
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = 'noosphere.capsule.json';
-                a.click();
-                URL.revokeObjectURL(a.href);
-            }
-
-            async function importNotes(file) {
-                const txt = await file.text();
-                const cap = Utils.safeJSON(txt, null);
-                if (!cap || !Array.isArray(cap.notes)) throw new Error('bad capsule');
-                // Сбрасываем publishState на 'pending', чтобы перепубликовать при необходимости
-                for (const n of cap.notes) {
-                    if (!n.id) n.id = Utils.uuid();
-                    if (n.publishState === 'published') n.publishState = 'pending';
-                }
-                return cap.notes;
-            }
-
-            return { exportNotes, importNotes };
-        })();
-
-        /* ========== APP ========== */
-        const App = (() => {
-            const els = {
-                tabFlow: Utils.$('#tabFlow'),
-                tabHistory: Utils.$('#tabHistory'),
-                flowView: Utils.$('#flowView'),
-                historyView: Utils.$('#historyView'),
-                openSettings: Utils.$('#openSettings'),
-                overlay: Utils.$('#overlay'),
-                panel: Utils.$('#panel'),
-                thought: Utils.$('#thought'),
-                save: Utils.$('#save'),
-                sendWorld: Utils.$('#sendWorld'),
-                status: Utils.$('#status'),
-                localList: Utils.$('#localList'),
-                worldList: Utils.$('#worldList'),
-                serList: Utils.$('#serList'),
-                historySearch: Utils.$('#historySearch'),
-                historyList: Utils.$('#historyList'),
-                diag: Utils.$('#diag'),
-                theme: Utils.$('#theme'),
-                threshold: Utils.$('#threshold'),
-                thresholdV: Utils.$('#thresholdV'),
-                serDelta: Utils.$('#serDelta'),
-                serDeltaV: Utils.$('#serDeltaV'),
-                maxResults: Utils.$('#maxResults'),
-                peersText: Utils.$('#peersText'),
-                export: Utils.$('#export'),
-                import: Utils.$('#import'),
-                importFile: Utils.$('#importFile'),
-                reindex: Utils.$('#reindex'),
-                resetDevice: Utils.$('#resetDevice'),
-            };
-
-            let deviceId;
-            let settings;
-            let gun;
-            let local;
-            let world;
-            let indexer;
-            let publisher;
-            let search;
-            let modelReady = false;
-
-            function renderStatus(errMsg = '') {
-                const peersCount = Settings.parsePeers(settings.peersText).length;
-                const localCount = local.list().length;
-                const pendingCount = local.list().filter(n => n.publishState === 'pending').length;
-                const worldCount = world.list().length;
-                const modelProgress = Embedder.progress();
-
-                const pills = [
-                    UI.pill(`IDB:${IDB.ok() ? 'ok' : 'fail'}`, IDB.ok() ? 'ok' : 'bad'),
-                    UI.pill(`relay:${peersCount}`, peersCount ? 'ok' : 'warn'),
-                    UI.pill(`model:${modelReady ? 'ok' : (modelProgress > 0 ? modelProgress + '%' : 'load')}`, modelReady ? 'ok' : 'warn'),
-                    UI.pill(`local:${localCount}`),
-                    UI.pill(`pending:${pendingCount}`, pendingCount ? 'warn' : 'neutral'),
-                    UI.pill(`world:${worldCount}`),
-                ];
-                if (errMsg) pills.push(UI.pill(errMsg, 'bad'));
-                els.status.innerHTML = pills.join(' ');
-                els.diag.textContent = `device:${deviceId} | worldRoot:${world.ROOT}`;
-            }
-
-            function applyTheme() { Theme.apply(settings.theme); }
-
-            function setTab(which) {
-                const flow = which === 'flow';
-                els.tabFlow.classList.toggle('active', flow);
-                els.tabHistory.classList.toggle('active', !flow);
-                els.flowView.classList.toggle('active', flow);
-                els.historyView.classList.toggle('active', !flow);
-                if (!flow) renderHistory();
-            }
-
-            function openPanel() { els.overlay.classList.add('open'); els.panel.classList.add('open'); }
-            function closePanel() { els.overlay.classList.remove('open'); els.panel.classList.remove('open'); }
-
-            function settingsToUI() {
-                els.theme.value = settings.theme;
-                els.threshold.value = String(settings.threshold);
-                els.thresholdV.textContent = settings.threshold.toFixed(2);
-                els.serDelta.value = String(settings.serDelta);
-                els.serDeltaV.textContent = settings.serDelta.toFixed(2);
-                els.maxResults.value = String(settings.maxResults);
-                els.peersText.value = settings.peersText;
-            }
-
-            async function uiToSettingsApply() {
-                settings = Settings.sanitize({
-                    theme: els.theme.value,
-                    threshold: Number(els.threshold.value),
-                    serDelta: Number(els.serDelta.value),
-                    maxResults: Number(els.maxResults.value),
-                    peersText: els.peersText.value
-                });
-                await Settings.save(settings);
-                applyTheme();
-                if (gun && typeof gun.opt === 'function') {
-                    gun.opt({ peers: Settings.parsePeers(settings.peersText) });
-                }
-                search.clear();
-                renderStatus();
-                refreshFlow();
-                publisher.run();
-            }
-
-            let seq = 0;
-            const refreshFlow = Utils.debounce(async () => {
-                const my = ++seq;
-                const q = els.thought.value.trim();
-
-                if (!q) {
-                    UI.renderItems(els.localList, [], { emptyText: 'Введите текст для поиска.', kind: 'local' });
-                    UI.renderItems(els.worldList, [], { emptyText: 'Введите текст для поиска.', kind: 'world' });
-                    UI.renderItems(els.serList, [], { emptyText: 'Введите текст для поиска.', kind: 'world' });
-                    return;
-                }
-
-                const res = await search.searchAll(q);
-                if (my !== seq) return;
-
-                if (res.mode === 'model_loading') {
-                    UI.renderItems(els.localList, [], { emptyText: 'Модель грузится… ' + Embedder.progress() + '%', kind: 'local' });
-                    UI.renderItems(els.worldList, [], { emptyText: 'Модель грузится…', kind: 'world' });
-                    UI.renderItems(els.serList, [], { emptyText: 'Модель грузится…', kind: 'world' });
-                    return;
-                }
-
-                UI.renderItems(els.localList, res.local, { emptyText: 'Нет личных совпадений.', kind: 'local' });
-                UI.renderItems(els.worldList, res.world, { emptyText: 'Нет мировых совпадений.', kind: 'world' });
-                UI.renderItems(els.serList, res.ser, { emptyText: 'Нет смежных совпадений.', kind: 'world' });
-            }, 250);
-
-            const renderHistory = () => {
-                const q = els.historySearch.value.trim().toLowerCase();
-                const list = search.historyFilter(q);
-                UI.renderHistory(els.historyList, list);
-            };
-
-            async function doSaveLocal() {
-                const text = els.thought.value.trim();
-                if (!text) return;
-                await local.add({ text, publishState: 'none', vPacked: null });
-                els.thought.value = '';
-                refreshFlow();
-                indexer.runOnce();
-                renderStatus();
-            }
-
-            async function doSendWorld() {
-                const text = els.thought.value.trim();
-                if (!text) return;
-                const id = await local.add({ text, publishState: 'pending', vPacked: null });
-                els.thought.value = '';
-                refreshFlow();
-                await publisher.enqueue(id);
-                renderStatus();
-            }
-
-            // Свайп вверх, только если textarea не прокручена
-            let touchY = 0;
-            function bindSwipeUp() {
-                els.thought.addEventListener('touchstart', (e) => {
-                    touchY = e.touches?.[0]?.clientY ?? 0;
-                }, { passive: true });
-
-                els.thought.addEventListener('touchend', (e) => {
-                    const endY = e.changedTouches?.[0]?.clientY ?? 0;
-                    if (touchY - endY > 60 && els.thought.scrollTop <= 0) {
-                        e.preventDefault();
-                        doSendWorld();
-                    }
-                }, { passive: false });
-            }
-
-            // Удаление из мира при удалении локальной заметки
-            local?.onChange?.(() => {
-                // не требуется, handled in remove callback
-            });
-
-            document.addEventListener('click', async (e) => {
-                const btn = e.target.closest?.('button[data-action]');
-                if (!btn) return;
-                const action = btn.dataset.action;
-                const id = btn.dataset.id;
-
-                if (action === 'del') {
-                    // Если заметка была опубликована, удаляем из мира
-                    const n = local.get(id);
-                    if (n && (n.publishState === 'published' || n.publishState === 'pending')) {
-                        world.unpublish(id);
-                    }
-                    await local.remove(id);
-                    renderHistory();
-                    renderStatus();
-                    return;
-                }
-
-                if (action === 'edit') {
-                    const n = local.get(id);
-                    if (!n) return;
-                    const newText = prompt('Редактировать:', n.text);
-                    if (newText == null) return;
-                    const t = newText.trim();
-                    if (!t) return;
-                    // Обновляем, сбрасываем вектор и, если была опубликована, помечаем как pending
-                    const newState = (n.publishState === 'published' || n.publishState === 'pending') ? 'pending' : n.publishState;
-                    await local.update(id, { text: t, editedAt: Date.now(), vPacked: null, publishState: newState });
-                    indexer.runOnce();
-                    publisher.run();
-                    renderHistory();
-                    renderStatus();
-                }
-            });
-
-            async function doReindex() {
-                if (!Embedder.ready()) return;
-                for (const n of local.list()) {
-                    const vec = await Embedder.embed(n.text);
-                    const packed = Vectors.packI8(vec);
-                    await local.update(n.id, { vPacked: packed });
-                }
-                search.clear();
-                renderStatus();
-                refreshFlow();
-                publisher.run();
-            }
-
-            async function doResetDevice() {
-                if (!confirm('Полностью очистить локальные данные и сменить deviceId?')) return;
-                await IDB.clearAll();
-                // Пересоздаём deviceId
-                deviceId = Utils.uuid();
-                await IDB.kvSet('deviceId', deviceId);
-                location.reload();
-            }
-
-            async function doExport() { Capsule.exportNotes(local.list()); }
-
-            async function doImport(file) {
-                const imported = await Capsule.importNotes(file);
-                for (const n of imported) {
-                    await IDB.notesPut(n);
-                }
-                await local.load();
-                search.clear();
-                renderHistory();
-                refreshFlow();
-                indexer.runOnce();
-                publisher.run();
-            }
-
-            async function boot() {
-                deviceId = await IDB.kvGet('deviceId');
-                if (!deviceId) { deviceId = Utils.uuid(); await IDB.kvSet('deviceId', deviceId); }
-
-                settings = await Settings.load();
-                settingsToUI();
-                applyTheme();
-
-                // Инициализируем Gun, если библиотека загружена
-                if (typeof Gun !== 'undefined') {
-                    gun = Gun({ peers: Settings.parsePeers(settings.peersText), localStorage: false });
-                    // Логирование ошибок Gun
-                    gun.on('error', (err) => console.warn('Gun error:', err));
-                } else {
-                    console.warn('Gun library not loaded. Running fully offline.');
-                    gun = { opt() { }, get() { return { get() { return { map() { return { on() { } } } } } }; } };
-                }
-
-                local = LocalNotes.create();
-                await local.load();
-
-                world = World.create(gun);
-                indexer = Indexer.create({ local });
-                publisher = Publisher.create({ local, world, deviceId });
-                search = Search.create({ local, world, settings: () => settings, deviceId });
-
-                local.onChange(() => {
-                    renderStatus();
-                    if (els.historyView.classList.contains('active')) renderHistory();
-                });
-                world.onChange(() => { renderStatus(); refreshFlow(); });
-
-                renderStatus();
-
-                els.sendWorld.disabled = true;
-                // Загружаем модель с прогрессом
-                Embedder.onProgress((p) => {
-                    if (!modelReady) renderStatus();
-                });
-                (async () => {
-                    try {
-                        await Embedder.init();
-                        modelReady = true;
-                        els.sendWorld.disabled = false;
-                        renderStatus();
-                        indexer.runOnce();
-                        publisher.run();
-                    } catch (e) {
-                        console.error(e);
-                        modelReady = false;
-                        els.sendWorld.disabled = true;
-                        renderStatus('model error');
-                    }
-                })();
-
-                // Периодический запуск publisher (без setInterval)
-                function schedulePublisher() {
-                    setTimeout(async () => {
-                        await publisher.run();
-                        schedulePublisher();
-                    }, 4000);
-                }
-                schedulePublisher();
-
-                // UI events
-                els.tabFlow.addEventListener('click', () => setTab('flow'));
-                els.tabHistory.addEventListener('click', () => setTab('history'));
-                els.openSettings.addEventListener('click', openPanel);
-                els.overlay.addEventListener('click', closePanel);
-                els.thought.addEventListener('input', refreshFlow);
-                bindSwipeUp();
-                els.save.addEventListener('click', doSaveLocal);
-                els.sendWorld.addEventListener('click', doSendWorld);
-                els.historySearch.addEventListener('input', renderHistory);
-                els.threshold.addEventListener('input', () => els.thresholdV.textContent = Number(els.threshold.value).toFixed(2));
-                els.serDelta.addEventListener('input', () => els.serDeltaV.textContent = Number(els.serDelta.value).toFixed(2));
-                els.theme.addEventListener('change', uiToSettingsApply);
-                els.threshold.addEventListener('change', uiToSettingsApply);
-                els.serDelta.addEventListener('change', uiToSettingsApply);
-                els.maxResults.addEventListener('change', uiToSettingsApply);
-                els.peersText.addEventListener('change', uiToSettingsApply);
-                els.export.addEventListener('click', doExport);
-                els.import.addEventListener('click', () => els.importFile.click());
-                els.importFile.addEventListener('change', (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) doImport(f); });
-                els.reindex.addEventListener('click', doReindex);
-                els.resetDevice.addEventListener('click', doResetDevice);
-
-                refreshFlow();
-                renderHistory();
-                renderStatus();
-
-                window.__noosphere = { gun, local, world, settings: () => settings, deviceId };
-            }
-
-            return { boot };
-        })();
-
-        App.boot().catch(err => {
-            console.error(err);
-            alert('Fatal: ' + (err?.message ?? String(err)));
+          };
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
         });
-    </script>
+      }
+
+      async function kvGet(key) {
+        try{
+          const db = await open();
+          return await new Promise((resolve, reject) => {
+            const tx=db.transaction(STO_KV,'readonly'); const st=tx.objectStore(STO_KV);
+            const r=st.get(key); r.onsuccess=()=>resolve(r.result); r.onerror=()=>reject(r.error);
+          });
+        } catch { ok=false; return undefined; }
+      }
+      async function kvSet(key, val) {
+        try{
+          const db = await open();
+          return await new Promise((resolve, reject) => {
+            const tx=db.transaction(STO_KV,'readwrite'); const st=tx.objectStore(STO_KV);
+            const r=st.put(val, key); r.onsuccess=()=>resolve(true); r.onerror=()=>reject(r.error);
+          });
+        } catch { ok=false; return false; }
+      }
+
+      async function notesPut(note) {
+        try{
+          const db = await open();
+          return await new Promise((resolve, reject) => {
+            const tx=db.transaction(STO_NOTES,'readwrite'); const st=tx.objectStore(STO_NOTES);
+            const r=st.put(note); r.onsuccess=()=>resolve(true); r.onerror=()=>reject(r.error);
+          });
+        } catch { ok=false; return false; }
+      }
+      async function notesDelete(id) {
+        try{
+          const db = await open();
+          return await new Promise((resolve, reject) => {
+            const tx=db.transaction(STO_NOTES,'readwrite'); const st=tx.objectStore(STO_NOTES);
+            const r=st.delete(id); r.onsuccess=()=>resolve(true); r.onerror=()=>reject(r.error);
+          });
+        } catch { ok=false; return false; }
+      }
+      async function notesGetAll() {
+        try{
+          const db = await open();
+          return await new Promise((resolve, reject) => {
+            const tx=db.transaction(STO_NOTES,'readonly'); const st=tx.objectStore(STO_NOTES);
+            const r=st.getAll(); r.onsuccess=()=>resolve(r.result||[]); r.onerror=()=>reject(r.error);
+          });
+        } catch { ok=false; return []; }
+      }
+
+      return { kvGet, kvSet, notesPut, notesDelete, notesGetAll, ok:()=>ok };
+    })();
+
+    // Settings (relay встроен)
+    const Settings = (() => {
+      const KEY='settings';
+      const DEFAULT = { theme:'auto', threshold:0.25, serDelta:0.15, maxResults:5, peersText:'https://relay.peer.ooo/gun' };
+
+      const sanitize = (raw) => {
+        const x = raw && typeof raw==='object' ? raw : {};
+        return {
+          theme: (x.theme==='auto'||x.theme==='light'||x.theme==='dark') ? x.theme : DEFAULT.theme,
+          threshold: Utils.clamp(Number(x.threshold ?? DEFAULT.threshold), 0, 1),
+          serDelta: Utils.clamp(Number(x.serDelta ?? DEFAULT.serDelta), 0, 0.5),
+          maxResults: Math.max(1, Number(x.maxResults ?? DEFAULT.maxResults) | 0),
+          peersText: (typeof x.peersText==='string') ? x.peersText : DEFAULT.peersText
+        };
+      };
+      const parsePeers = (peersText) => String(peersText??'').split('\n').map(s=>s.trim()).filter(Boolean);
+
+      async function load() { return sanitize((await IDB.kvGet(KEY)) ?? DEFAULT); }
+      async function save(s) { await IDB.kvSet(KEY, sanitize(s)); }
+
+      return { sanitize, parsePeers, load, save };
+    })();
+
+    const Theme = (() => {
+      function apply(mode) {
+        const dark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.body.classList.toggle('dark', !!dark);
+      }
+      return { apply };
+    })();
+
+    // Vectors
+    const Vectors = (() => {
+      const dot = (a,b)=>{ let d=0; for(let i=0;i<a.length;i++) d+=a[i]*b[i]; return d; };
+      const norm = (v)=>{ let s=0; for(let i=0;i<v.length;i++) s+=v[i]*v[i]; const m=Math.sqrt(s)||1; for(let i=0;i<v.length;i++) v[i]/=m; return v; };
+      const b64enc = (u8)=>{ let s=''; const CH=0x8000; for(let i=0;i<u8.length;i+=CH) s+=String.fromCharCode(...u8.subarray(i,i+CH)); return btoa(s); };
+      const b64dec = (b64)=>{ const bin=atob(b64); const u8=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i); return u8; };
+      const packI8 = (f32)=>{ const v=new Float32Array(f32); norm(v); const i8=new Int8Array(v.length); for(let i=0;i<v.length;i++) i8[i]=Math.max(-127, Math.min(127, Math.round(v[i]*127))); return b64enc(new Uint8Array(i8.buffer)); };
+      const unpackI8 = (b64)=>{ const u8=b64dec(b64); const i8=new Int8Array(u8.buffer); const v=new Float32Array(i8.length); for(let i=0;i<i8.length;i++) v[i]=i8[i]/127; return norm(v); };
+      return { dot, packI8, unpackI8 };
+    })();
+
+    // Embedder
+    const Embedder = (() => {
+      let model=null;
+      async function init() { model = await pipeline('feature-extraction','Xenova/paraphrase-multilingual-MiniLM-L12-v2',{ quantized:true }); }
+      const ready = ()=>!!model;
+      async function embed(text) {
+        const out = await model([text]);
+        const { data, dims } = out;
+        const tokens=dims?.[1], hidden=dims?.[2];
+        const emb = new Float32Array(hidden);
+        for(let t=0;t<tokens;t++){
+          const base=t*hidden;
+          for(let h=0;h<hidden;h++) emb[h]+=data[base+h];
+        }
+        for(let h=0;h<hidden;h++) emb[h]/=tokens;
+        let s=0; for(let h=0;h<hidden;h++) s+=emb[h]*emb[h];
+        const m=Math.sqrt(s)||1;
+        for(let h=0;h<hidden;h++) emb[h]/=m;
+        return emb;
+      }
+      return { init, ready, embed };
+    })();
+
+    // Local notes
+    const LocalNotes = (() => {
+      function create() {
+        const ee = new Utils.Emitter();
+        let notes = [];
+
+        async function load() {
+          notes = (await IDB.notesGetAll()) || [];
+          notes.sort((a,b)=>b.createdAt-a.createdAt);
+          ee.emit('change', list());
+        }
+        function list() { return notes.slice(); }
+        function get(id) { return notes.find(n => n.id === id) ?? null; }
+
+        async function add({ text, publishState='none', vPacked=null }) {
+          const id = Utils.uuid();
+          const now = Date.now();
+          const note = { id, text, createdAt: now, editedAt: null, vPacked, publishState, worldId: null };
+          notes.unshift(note);
+          await IDB.notesPut(note);
+          ee.emit('change', list());
+          return id;
+        }
+
+        async function update(id, patch) {
+          const n = get(id);
+          if (!n) return;
+          Object.assign(n, patch);
+          await IDB.notesPut(n);
+          ee.emit('change', list());
+        }
+
+        async function remove(id) {
+          notes = notes.filter(n => n.id !== id);
+          await IDB.notesDelete(id);
+          ee.emit('change', list());
+        }
+
+        return { load, list, get, add, update, remove, onChange:(fn)=>ee.on('change', fn) };
+      }
+      return { create };
+    })();
+
+    // ===== Gun World MAP: feed.get(id).put({note: ref, ...meta}) =====
+    const World = (() => {
+      const ROOT = 'noosphere_world_prod_v1';
+
+      function create(gun) {
+        const ee = new Utils.Emitter();
+        const feed = gun.get(ROOT).get('world').get('feed');      // map id -> entry
+        const noteRoot = gun.get(ROOT).get('world').get('note');  // note/<id>
+
+        const entries = new Map(); // id -> { id, at, author, noteSoul }
+        const notes = new Map();   // id -> { id, text, vPacked, author, createdAt }
+
+        const subSoul = new Set();
+
+        function emit() {
+          // merge entries+notes when possible
+          const out = [];
+          for (const [id, n] of notes) out.push(n);
+          ee.emit('change', out.sort((a,b)=>b.createdAt-a.createdAt));
+        }
+
+        function listAll() {
+          const out = [];
+          for (const [id, n] of notes) out.push(n);
+          return out.sort((a,b)=>b.createdAt-a.createdAt);
+        }
+
+        function normalizeNote(id, raw) {
+          const x = raw && typeof raw === 'object' ? raw : {};
+          if (x.deleted) return null;
+          if (typeof x.text !== 'string') return null;
+          return {
+            id,
+            text: String(x.text),
+            vPacked: typeof x.vPacked === 'string' ? x.vPacked : null,
+            author: String(x.author ?? ''),
+            createdAt: Number(x.createdAt) || Date.now()
+          };
+        }
+
+        // Subscribe feed entries by id
+        feed.map().on((entry, id) => {
+          if (!id || id === '_' || id === 'null') return;
+          const e = entry && typeof entry === 'object' ? entry : {};
+          // entry.note is relation link { '#': soul }
+          const soul = e.note && typeof e.note === 'object' && typeof e.note['#'] === 'string' ? e.note['#'] : null;
+          if (!soul) return;
+
+          entries.set(id, { id, soul, at: Number(e.at) || 0, author: String(e.author ?? '') });
+
+          if (subSoul.has(soul)) return;
+          subSoul.add(soul);
+
+          gun.get(soul).on((raw) => {
+            const n = normalizeNote(id, raw);
+            if (!n) { notes.delete(id); emit(); return; }
+            notes.set(id, n);
+            emit();
+          });
+        });
+
+        function publish({ id, text, vPacked, author }) {
+          const now = Date.now();
+          const ref = noteRoot.get(id);
+          // write note
+          ref.put({ id, text, vPacked, author, createdAt: now, deleted:false });
+          // write feed entry under deterministic key id
+          feed.get(id).put({ id, at: now, author, note: ref });
+          return id;
+        }
+
+        return {
+          ROOT,
+          listAll,
+          onChange: (fn) => ee.on('change', fn),
+          publish
+        };
+      }
+
+      return { create };
+    })();
+
+    const Indexer = (() => {
+      function create({ local }) {
+        let running = false;
+        async function runOnce() {
+          if (running) return;
+          if (!Embedder.ready()) return;
+          running = true;
+          try {
+            for (const n of local.list()) {
+              if (n.vPacked) continue;
+              const vec = await Embedder.embed(n.text);
+              const packed = Vectors.packI8(vec);
+              await local.update(n.id, { vPacked: packed });
+            }
+          } finally { running = false; }
+        }
+        return { runOnce };
+      }
+      return { create };
+    })();
+
+    const Publisher = (() => {
+      function create({ local, world, deviceId }) {
+        let running = false;
+
+        async function run() {
+          if (running) return;
+          running = true;
+          try {
+            if (!Embedder.ready()) return;
+            const pending = local.list().filter(n => n.publishState === 'pending');
+            for (const n of pending) {
+              let v = n.vPacked;
+              if (!v) {
+                const vec = await Embedder.embed(n.text);
+                v = Vectors.packI8(vec);
+                await local.update(n.id, { vPacked: v });
+              }
+              world.publish({ id: n.id, text: n.text, vPacked: v, author: deviceId });
+              await local.update(n.id, { publishState:'published', worldId: n.id });
+            }
+          } finally { running = false; }
+        }
+
+        async function enqueue(localId) {
+          await local.update(localId, { publishState:'pending' });
+          run();
+        }
+
+        return { run, enqueue };
+      }
+      return { create };
+    })();
+
+    const Search = (() => {
+      function create({ local, world, settings, deviceId }) {
+        const cache = new Map(); // id -> Float32Array
+
+        function vecFromPacked(id, packed) {
+          if (!packed) return null;
+          if (cache.has(id)) return cache.get(id);
+          try { const v = Vectors.unpackI8(packed); cache.set(id, v); return v; } catch { return null; }
+        }
+
+        function clear() { cache.clear(); }
+
+        async function searchAll(queryText) {
+          const q = String(queryText ?? '').trim();
+          if (!q) return { mode:'empty', local:[], world:[], ser:[] };
+          if (!Embedder.ready()) return { mode:'model_loading', local:[], world:[], ser:[] };
+
+          const s = settings();
+          const thr = s.threshold;
+          const low = Math.max(0, thr - s.serDelta);
+          const max = s.maxResults;
+
+          const qVec = await Embedder.embed(q);
+
+          const localHits = [];
+          for (const n of local.list()) {
+            const v = vecFromPacked(n.id, n.vPacked);
+            if (!v) continue;
+            const score = Vectors.dot(qVec, v);
+            if (score >= thr) localHits.push({ id:n.id, text:n.text, score, createdAt:n.createdAt });
+          }
+          localHits.sort((a,b)=>b.score-a.score);
+
+          const worldHits = [];
+          const serHits = [];
+          for (const w of world.listAll()) {
+            // hide own published in world
+            if (w.author === deviceId) continue;
+
+            const v = vecFromPacked(w.id, w.vPacked);
+            if (!v) continue;
+            const score = Vectors.dot(qVec, v);
+            if (score >= thr) worldHits.push({ id:w.id, text:w.text, score, createdAt:w.createdAt, author:w.author });
+            else if (score >= low) serHits.push({ id:w.id, text:w.text, score, createdAt:w.createdAt, author:w.author });
+          }
+          worldHits.sort((a,b)=>b.score-a.score);
+          serHits.sort((a,b)=>b.score-a.score);
+
+          return { mode:'ok', local: localHits.slice(0, max), world: worldHits.slice(0, max), ser: serHits.slice(0, max) };
+        }
+
+        function historyFilter(q) {
+          const t = String(q ?? '').trim().toLowerCase();
+          const all = local.list();
+          if (!t) return all;
+          return all.filter(n => n.text.toLowerCase().includes(t));
+        }
+
+        return { searchAll, historyFilter, clear };
+      }
+      return { create };
+    })();
+
+    const UI = (() => {
+      function pill(label, state='neutral') {
+        const dot = state === 'ok' ? 'ok' : state === 'warn' ? 'warn' : state === 'bad' ? 'bad' : '';
+        return `<span class="pill"><span class="dot ${dot}"></span>${Utils.esc(label)}</span>`;
+      }
+
+      function renderItems(container, items, { emptyText, kind }) {
+        if (!items.length) { container.innerHTML = `<div class="empty">${Utils.esc(emptyText)}</div>`; return; }
+        container.innerHTML = items.map(it => {
+          const metaRight = kind === 'world'
+            ? `<span>author:${Utils.esc(String(it.author||'').slice(0,8))}</span>`
+            : `<span>${new Date(it.createdAt).toLocaleString()}</span>`;
+          return `
+            <div class="item">
+              <div class="text">${Utils.esc(it.text)}</div>
+              <div class="meta">
+                <span class="badge">${it.score.toFixed(2)}</span>
+                ${metaRight}
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      function renderHistory(container, notes) {
+        if (!notes.length) { container.innerHTML = `<div class="empty">Нет заметок</div>`; return; }
+        container.innerHTML = notes.map(n => {
+          const pub = n.publishState === 'pending'
+            ? `<span class="badge pending">pending</span>`
+            : (n.publishState === 'published' ? `<span class="badge world">world</span>` : '');
+          return `
+            <div class="item" data-id="${n.id}">
+              <div class="text">${Utils.esc(n.text)}</div>
+              <div class="meta">
+                <span>${new Date(n.createdAt).toLocaleString()}</span>
+                ${pub}
+                <span style="margin-left:auto; display:flex; gap:8px;">
+                  <button class="btn ghost" data-action="edit" data-id="${n.id}" style="padding:6px 10px;">ред.</button>
+                  <button class="btn ghost" data-action="del" data-id="${n.id}" style="padding:6px 10px; border-color:rgba(239,68,68,0.35); color:var(--danger);">удал.</button>
+                </span>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      return { pill, renderItems, renderHistory };
+    })();
+
+    const Capsule = (() => {
+      function exportNotes(notes) {
+        const cap = { version: 1, kind: 'noosphere', createdAt: Date.now(), notes };
+        const blob = new Blob([JSON.stringify(cap)], { type:'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'noosphere.capsule.json';
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+
+      async function importNotes(file) {
+        const txt = await file.text();
+        const cap = Utils.safeJSON(txt, null);
+        if (!cap || !Array.isArray(cap.notes)) throw new Error('bad capsule');
+        return cap.notes;
+      }
+
+      return { exportNotes, importNotes };
+    })();
+
+    const App = (() => {
+      const els = {
+        tabFlow: Utils.$('#tabFlow'),
+        tabHistory: Utils.$('#tabHistory'),
+        flowView: Utils.$('#flowView'),
+        historyView: Utils.$('#historyView'),
+
+        openSettings: Utils.$('#openSettings'),
+        overlay: Utils.$('#overlay'),
+        panel: Utils.$('#panel'),
+
+        thought: Utils.$('#thought'),
+        save: Utils.$('#save'),
+        sendWorld: Utils.$('#sendWorld'),
+        status: Utils.$('#status'),
+
+        localList: Utils.$('#localList'),
+        worldList: Utils.$('#worldList'),
+        serList: Utils.$('#serList'),
+
+        historySearch: Utils.$('#historySearch'),
+        historyList: Utils.$('#historyList'),
+
+        diag: Utils.$('#diag'),
+        theme: Utils.$('#theme'),
+        threshold: Utils.$('#threshold'),
+        thresholdV: Utils.$('#thresholdV'),
+        serDelta: Utils.$('#serDelta'),
+        serDeltaV: Utils.$('#serDeltaV'),
+        maxResults: Utils.$('#maxResults'),
+        peersText: Utils.$('#peersText'),
+
+        export: Utils.$('#export'),
+        import: Utils.$('#import'),
+        importFile: Utils.$('#importFile'),
+        reindex: Utils.$('#reindex'),
+        resetDevice: Utils.$('#resetDevice'),
+      };
+
+      let deviceId;
+      let settings;
+      let gun;
+      let local;
+      let world;
+      let indexer;
+      let publisher;
+      let search;
+
+      let modelReady = false;
+      let busy = false;
+
+      function renderStatus(errMsg = '') {
+        const peersCount = Settings.parsePeers(settings.peersText).length;
+        const localCount = local.list().length;
+        const pendingCount = local.list().filter(n => n.publishState === 'pending').length;
+
+        const worldAll = world.listAll().length;
+        const worldForeign = world.listAll().filter(n => n.author !== deviceId).length;
+
+        const pills = [
+          UI.pill(`IDB:${IDB.ok() ? 'ok' : 'fail'}`, IDB.ok() ? 'ok' : 'bad'),
+          UI.pill(`relay:${peersCount}`, peersCount ? 'ok' : 'warn'),
+          UI.pill(`model:${modelReady ? 'ok' : 'load'}`, modelReady ? 'ok' : 'warn'),
+          UI.pill(`local:${localCount}`),
+          UI.pill(`pending:${pendingCount}`, pendingCount ? 'warn' : 'neutral'),
+          UI.pill(`worldAll:${worldAll}`),
+          UI.pill(`worldForeign:${worldForeign}`)
+        ];
+
+        if (errMsg) pills.push(UI.pill(errMsg, 'bad'));
+        els.status.innerHTML = pills.join(' ');
+        els.diag.textContent = `device:${deviceId} | worldRoot:${world.ROOT}`;
+      }
+
+      function applyTheme() { Theme.apply(settings.theme); }
+
+      function setTab(which) {
+        const flow = which === 'flow';
+        els.tabFlow.classList.toggle('active', flow);
+        els.tabHistory.classList.toggle('active', !flow);
+        els.flowView.classList.toggle('active', flow);
+        els.historyView.classList.toggle('active', !flow);
+        if (!flow) renderHistory();
+      }
+
+      function openPanel() { els.overlay.classList.add('open'); els.panel.classList.add('open'); }
+      function closePanel() { els.overlay.classList.remove('open'); els.panel.classList.remove('open'); }
+
+      function settingsToUI() {
+        els.theme.value = settings.theme;
+        els.threshold.value = String(settings.threshold);
+        els.thresholdV.textContent = settings.threshold.toFixed(2);
+        els.serDelta.value = String(settings.serDelta);
+        els.serDeltaV.textContent = settings.serDelta.toFixed(2);
+        els.maxResults.value = String(settings.maxResults);
+        els.peersText.value = settings.peersText;
+      }
+
+      async function uiToSettingsApply() {
+        settings = Settings.sanitize({
+          theme: els.theme.value,
+          threshold: Number(els.threshold.value),
+          serDelta: Number(els.serDelta.value),
+          maxResults: Number(els.maxResults.value),
+          peersText: els.peersText.value
+        });
+        await Settings.save(settings);
+        applyTheme();
+        gun.opt({ peers: Settings.parsePeers(settings.peersText) });
+        search.clear();
+        renderStatus();
+        refreshFlow();
+        publisher.run();
+      }
+
+      let seq = 0;
+      const refreshFlow = Utils.debounce(async() => {
+        const my = ++seq;
+        const q = els.thought.value.trim();
+
+        if (!q) {
+          UI.renderItems(els.localList, [], { emptyText: 'Введите текст для поиска.', kind:'local' });
+          UI.renderItems(els.worldList, [], { emptyText: 'Введите текст для поиска.', kind:'world' });
+          UI.renderItems(els.serList, [], { emptyText: 'Введите текст для поиска.', kind:'world' });
+          return;
+        }
+
+        const res = await search.searchAll(q);
+        if (my !== seq) return;
+
+        if (res.mode === 'model_loading') {
+          UI.renderItems(els.localList, [], { emptyText: 'Модель грузится…', kind:'local' });
+          UI.renderItems(els.worldList, [], { emptyText: 'Модель грузится…', kind:'world' });
+          UI.renderItems(els.serList, [], { emptyText: 'Модель грузится…', kind:'world' });
+          return;
+        }
+
+        UI.renderItems(els.localList, res.local, { emptyText: 'Нет личных совпадений.', kind:'local' });
+        UI.renderItems(els.worldList, res.world, { emptyText: 'Нет мировых совпадений.', kind:'world' });
+        UI.renderItems(els.serList, res.ser, { emptyText: 'Нет смежных совпадений.', kind:'world' });
+      }, 250);
+
+      const renderHistory = () => {
+        const q = els.historySearch.value.trim().toLowerCase();
+        const list = search.historyFilter(q);
+        UI.renderHistory(els.historyList, list);
+      };
+
+      async function doSaveLocal() {
+        if (busy) return;
+        const text = els.thought.value.trim();
+        if (!text) return;
+
+        busy = true;
+        try {
+          await local.add({ text, publishState:'none', vPacked:null });
+          els.thought.value = '';
+          refreshFlow();
+          indexer.runOnce();
+        } finally {
+          busy = false;
+          renderStatus();
+        }
+      }
+
+      async function doSendWorld() {
+        if (busy) return;
+        const text = els.thought.value.trim();
+        if (!text) return;
+
+        busy = true;
+        try {
+          const id = await local.add({ text, publishState:'pending', vPacked:null });
+          els.thought.value = '';
+          refreshFlow();
+          await publisher.enqueue(id);
+        } finally {
+          busy = false;
+          renderStatus();
+        }
+      }
+
+      let touchY = 0;
+      function bindSwipeUp() {
+        els.thought.addEventListener('touchstart', (e) => { touchY = e.touches?.[0]?.clientY ?? 0; }, { passive:true });
+        els.thought.addEventListener('touchend', (e) => {
+          const endY = e.changedTouches?.[0]?.clientY ?? 0;
+          if (touchY - endY > 60) {
+            e.preventDefault();
+            doSendWorld();
+          }
+        }, { passive:false });
+      }
+
+      document.addEventListener('click', async(e) => {
+        const btn = e.target.closest?.('button[data-action]');
+        if (!btn) return;
+        const action = btn.dataset.action;
+        const id = btn.dataset.id;
+
+        if (action === 'del') {
+          await local.remove(id);
+          renderHistory();
+          renderStatus();
+          return;
+        }
+
+        if (action === 'edit') {
+          const n = local.get(id);
+          if (!n) return;
+          const newText = prompt('Редактировать:', n.text);
+          if (newText == null) return;
+          const t = newText.trim();
+          if (!t) return;
+          await local.update(id, { text: t, editedAt: Date.now(), vPacked: null, publishState: n.publishState === 'published' ? 'pending' : n.publishState });
+          indexer.runOnce();
+          publisher.run();
+          renderHistory();
+          renderStatus();
+        }
+      });
+
+      async function doReindex() {
+        if (!Embedder.ready()) return;
+        for (const n of local.list()) {
+          const vec = await Embedder.embed(n.text);
+          const packed = Vectors.packI8(vec);
+          await local.update(n.id, { vPacked: packed });
+        }
+        search.clear();
+        renderStatus();
+        refreshFlow();
+        publisher.run();
+      }
+
+      async function doResetDevice() {
+        if (!confirm('Сбросить устройство? Будет новый deviceId.')) return;
+        await IDB.kvSet('deviceId', Utils.uuid());
+        location.reload();
+      }
+
+      async function doExport() { Capsule.exportNotes(local.list()); }
+      async function doImport(file) {
+        const imported = await Capsule.importNotes(file);
+        for (const n of imported) {
+          if (!n.id) n.id = Utils.uuid();
+          await IDB.notesPut(n);
+        }
+        await local.load();
+        search.clear();
+        renderHistory();
+        refreshFlow();
+        indexer.runOnce();
+        publisher.run();
+      }
+
+      async function boot() {
+        deviceId = await IDB.kvGet('deviceId');
+        if (!deviceId) { deviceId = Utils.uuid(); await IDB.kvSet('deviceId', deviceId); }
+
+        settings = await Settings.load();
+        settingsToUI();
+        applyTheme();
+
+        gun = Gun({ peers: Settings.parsePeers(settings.peersText), localStorage:false });
+
+        local = LocalNotes.create();
+        await local.load();
+
+        world = World.create(gun);
+        indexer = Indexer.create({ local });
+        publisher = Publisher.create({ local, world, deviceId });
+        search = Search.create({ local, world, settings: () => settings, deviceId });
+
+        local.onChange(() => {
+          renderStatus();
+          if (els.historyView.classList.contains('active')) renderHistory();
+        });
+        world.onChange(() => { renderStatus(); refreshFlow(); });
+
+        renderStatus();
+
+        els.sendWorld.disabled = true;
+        (async() => {
+          try{
+            await Embedder.init();
+            modelReady = true;
+            els.sendWorld.disabled = false;
+            renderStatus();
+            indexer.runOnce();
+            publisher.run();
+          } catch(e) {
+            console.error(e);
+            modelReady = false;
+            els.sendWorld.disabled = true;
+            renderStatus('model error');
+          }
+        })();
+
+        setInterval(() => publisher.run(), 4000);
+
+        els.tabFlow.addEventListener('click', () => setTab('flow'));
+        els.tabHistory.addEventListener('click', () => setTab('history'));
+
+        els.openSettings.addEventListener('click', openPanel);
+        els.overlay.addEventListener('click', closePanel);
+
+        els.thought.addEventListener('input', refreshFlow);
+        bindSwipeUp();
+
+        els.save.addEventListener('click', doSaveLocal);
+        els.sendWorld.addEventListener('click', doSendWorld);
+
+        els.historySearch.addEventListener('input', renderHistory);
+
+        els.threshold.addEventListener('input', () => els.thresholdV.textContent = Number(els.threshold.value).toFixed(2));
+        els.serDelta.addEventListener('input', () => els.serDeltaV.textContent = Number(els.serDelta.value).toFixed(2));
+
+        els.theme.addEventListener('change', uiToSettingsApply);
+        els.threshold.addEventListener('change', uiToSettingsApply);
+        els.serDelta.addEventListener('change', uiToSettingsApply);
+        els.maxResults.addEventListener('change', uiToSettingsApply);
+        els.peersText.addEventListener('change', uiToSettingsApply);
+
+        els.export.addEventListener('click', doExport);
+        els.import.addEventListener('click', () => els.importFile.click());
+        els.importFile.addEventListener('change', (e) => {
+          const f = e.target.files?.[0];
+          e.target.value = '';
+          if (f) doImport(f);
+        });
+
+        els.reindex.addEventListener('click', doReindex);
+        els.resetDevice.addEventListener('click', doResetDevice);
+
+        refreshFlow();
+        renderHistory();
+        renderStatus();
+
+        window.__noosphere = { gun, local, world, settings: () => settings, deviceId };
+      }
+
+      return { boot };
+    })();
+
+    App.boot().catch(err => {
+      console.error(err);
+      alert('Fatal: ' + (err?.message ?? String(err)));
+    });
+  </script>
 </body>
 </html>
