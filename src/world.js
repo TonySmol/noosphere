@@ -1,11 +1,9 @@
 import { CONFIG } from './config.js';
-import { vecToBase64, vecFromBase64 } from './embedder.js';
-import { embed } from './embedder.js';
+import { vecToBase64, vecFromBase64, embed } from './embedder.js';
 
 const PENDING_KEY = 'noosphere_pending_shares';
 let cachedWorld = null;
 
-// Загрузка мировых заметток из GitHub (read-only)
 export async function loadWorld() {
   try {
     const res = await fetch(CONFIG.worldRawUrl + '?t=' + Date.now());
@@ -31,21 +29,31 @@ export function getWorldCache() {
   return cachedWorld?.notes || [];
 }
 
-// Поиск по миру (brute-force по векторам)
 export async function searchWorld(queryVec, limit = CONFIG.search.limit) {
   const notes = getWorldCache();
-  const scored = notes.map(n => ({
-    ...n,
-    vec: vecFromBase64(n.vec),
-    score: cosine(queryVec, vecFromBase64(n.vec))
-  }));
-  return scored
-    .filter(r => r.score >= CONFIG.search.threshold)
+
+  const scored = notes.map(n => {
+    const vec = vecFromBase64(n.vec);
+    const score = cosine(queryVec, vec);
+    return { ...n, vec, score };
+  });
+
+  const relevantThreshold = CONFIG.search.threshold;
+  const serendipityThreshold = relevantThreshold - CONFIG.serendipityDelta;
+
+  const relevant = scored
+    .filter(r => r.score >= relevantThreshold)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
+
+  const serendipity = scored
+    .filter(r => r.score >= serendipityThreshold && r.score < relevantThreshold)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+
+  return { relevant, serendipity };
 }
 
-// Локальный поиск по личным заметкам
 export function searchLocal(queryVec, myNotes, limit = CONFIG.search.limit) {
   const scored = myNotes
     .filter(n => n.vec)
@@ -62,7 +70,6 @@ function cosine(a, b) {
   return s;
 }
 
-// Очередь на отправку в мир (честный мок)
 export function enqueueShare(note) {
   const q = JSON.parse(localStorage.getItem(PENDING_KEY) || '[]');
   q.push({
@@ -84,13 +91,11 @@ export function clearPending() {
   localStorage.setItem(PENDING_KEY, '[]');
 }
 
-// Экспорт очереди в формат world.json для ручного мержа
 export async function exportPendingAsWorld() {
   const pending = getPending();
   if (!pending.length) { alert('Очередь пуста'); return; }
-  
+
   const newNotes = await Promise.all(pending.map(async p => {
-    // Если вектор ещё не готов — посчитать
     let vec = p.vec;
     if (!vec) {
       vec = await embed(p.fullText);
@@ -103,8 +108,7 @@ export async function exportPendingAsWorld() {
       waves: 0
     };
   }));
-  
-  // Скачиваем как JSON
+
   const blob = new Blob(
     [JSON.stringify({ notes: newNotes }, null, 2)],
     { type: 'application/json' }
