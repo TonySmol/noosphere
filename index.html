@@ -206,11 +206,11 @@ const tKeys = {
     rebuildVectors: 'Пересоздать векторы', resetAll: 'Сбросить всё', apply: 'Применить',
     modelInfo: 'Модель: MiniLM (25 МБ)',
     historyPlaceholder: 'Поиск по истории...', emptyHistory: 'Нет заметок',
-    swipeHint: 'смахните вверх для публикации',
+    swipeHint: 'смахните вверх для публикации в мир',
     tabFlow: 'Поток', tabHistory: 'История',
     worldOnline: 'Мир: подключен', worldOffline: 'Мир: офлайн',
-    publishedOnline: 'Опубликовано в мире',
-    publishedLocal: 'Сохранено локально (мир недоступен)'
+    publishedOnline: '✦ Опубликовано в мире',
+    publishedLocal: '✓ Сохранено локально (свайп вверх для публикации)'
   },
   en: {
     inputPlaceholder: 'Share a thought...', saveBtn: 'Send',
@@ -230,11 +230,11 @@ const tKeys = {
     rebuildVectors: 'Rebuild vectors', resetAll: 'Reset all', apply: 'Apply',
     modelInfo: 'Model: MiniLM (25 MB)',
     historyPlaceholder: 'Search history...', emptyHistory: 'No notes',
-    swipeHint: 'swipe up to publish',
+    swipeHint: 'swipe up to publish to world',
     tabFlow: 'Flow', tabHistory: 'History',
     worldOnline: 'World: online', worldOffline: 'World: offline',
-    publishedOnline: 'Published to world',
-    publishedLocal: 'Saved locally (world offline)'
+    publishedOnline: '✦ Published to world',
+    publishedLocal: '✓ Saved locally (swipe up to publish)'
   }
 };
 let lang = 'ru';
@@ -263,7 +263,7 @@ function applyTheme(mode) {
 }
 
 // ========================================================================
-// 4. TOAST (ненавязчивые уведомления)
+// 4. TOAST
 // ========================================================================
 let toastTimer;
 function toast(msg, duration = 2500) {
@@ -307,10 +307,10 @@ const MyNotes = {
 };
 
 // ========================================================================
-// 7. QDRANT АДАПТЕР (с retry, timeout, graceful degradation)
+// 7. QDRANT АДАПТЕР
 // ========================================================================
 const Qdrant = {
-  online: null, // null = неизвестно, true/false = проверено
+  online: null,
 
   async _fetch(path, method = 'GET', body = null) {
     const url = Settings.getProxyUrl().replace(/\/$/, '') + path;
@@ -444,7 +444,6 @@ const World = {
   save() { localStorage.setItem(CONFIG.STORAGE_KEYS.world, JSON.stringify(this.notes)); },
 
   async add(vectorArray, text, localId = null) {
-    // Всегда сохраняем локально (резерв)
     const localNote = {
       id: 'g_' + crypto.randomUUID(),
       vec: vectorArray, waves: 0,
@@ -454,7 +453,6 @@ const World = {
     this.notes.unshift(localNote);
     this.save();
 
-    // Пытаемся опубликовать в Qdrant
     let publishedOnline = false;
     if (Qdrant.online !== false) {
       try {
@@ -494,7 +492,6 @@ const World = {
   async search(qVec) {
     const low = Settings.threshold - Settings.serendipityDelta;
 
-    // Пытаемся через Qdrant
     if (Qdrant.online !== false) {
       try {
         const results = await Qdrant.search(
@@ -515,7 +512,6 @@ const World = {
       }
     }
 
-    // Fallback на локальный кэш
     const rel = [], ser = [];
     for (const n of this.notes) {
       if (n.waves < Settings.minWaves) continue;
@@ -536,22 +532,29 @@ const World = {
 };
 
 // ========================================================================
-// 9. ДВИЖОК (векторизация + локальный поиск)
+// 9. ДВИЖОК (векторизация + локальный поиск) — ВЗЯТО ИЗ РАБОЧЕГО ПРОТОТИПА
 // ========================================================================
 const Vec = {
   normalize(v) {
     const m = Math.sqrt(v.reduce((s, x) => s + x * x, 0));
     return m ? new Float32Array(v.map(x => x / m)) : new Float32Array(v.length);
   },
-  cosine(a, b) { let d = 0; for (let i = 0; i < a.length; i++) d += a[i] * b[i]; return d; }
+  cosine(a, b) {
+    let d = 0;
+    for (let i = 0; i < a.length; i++) d += a[i] * b[i];
+    return d;
+  }
 };
 
 const Engine = {
-  model: null, cache: new Map(),
+  model: null,
+  cache: new Map(),
+  
   async init() {
-    this.model = await pipeline('feature-extraction', CONFIG.MODEL, { quantized: true });
+    this.model = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', { quantized: true });
     await this.reindex();
   },
+  
   async embed(text) {
     const out = await this.model([text]);
     const { data, dims } = out;
@@ -562,23 +565,42 @@ const Engine = {
     for (let h = 0; h < hidden; h++) emb[h] /= tokens;
     return Vec.normalize(emb);
   },
+  
   async reindex() {
     this.cache.clear();
     for (const n of MyNotes.data) {
       try { await this.cacheNote(n.id, n.text); } catch {}
     }
   },
+  
   async cacheNote(id, text) {
     if (!this.cache.has(id)) this.cache.set(id, await this.embed(text));
   },
+  
   async searchLocal(qVec) {
     const res = [];
     for (const n of MyNotes.data) {
-      const v = this.cache.get(n.id); if (!v) continue;
+      const v = this.cache.get(n.id);
+      if (!v) continue;
       const s = Vec.cosine(qVec, v);
       if (s > Settings.threshold) res.push({ ...n, score: s });
     }
     return res.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults);
+  },
+  
+  async searchWorld(qVec) {
+    const rel = [], ser = [], low = Settings.threshold - Settings.serendipityDelta;
+    for (const n of World.notes) {
+      if (n.waves < Settings.minWaves) continue;
+      const v = new Float32Array(n.vec);
+      const s = Vec.cosine(qVec, v);
+      if (s >= Settings.threshold) rel.push({ ...n, score: s });
+      else if (s >= low) ser.push({ ...n, score: s });
+    }
+    return {
+      rel: rel.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults),
+      ser: ser.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults)
+    };
   }
 };
 
@@ -703,11 +725,10 @@ async function saveNote(share = false) {
   const note = MyNotes.add(text);
   await Engine.cacheNote(note.id, text);
 
-  let publishResult = null;
   if (share) {
     const vec = await Engine.embed(text);
-    publishResult = await World.add(Array.from(vec), text, note.id);
-
+    const result = await World.add(Array.from(vec), text, note.id);
+    
     // Анимация звёздочки
     const container = document.getElementById('thoughtContainer');
     const rect = container.getBoundingClientRect();
@@ -717,15 +738,14 @@ async function saveNote(share = false) {
     document.body.appendChild(star);
     requestAnimationFrame(() => { star.style.transform = 'translateY(-200px) scale(0)'; star.style.opacity = '0'; });
     setTimeout(() => star.remove(), 1000);
+    
+    toast(result.publishedOnline ? t('publishedOnline') : t('publishedLocal'));
+  } else {
+    toast(t('publishedLocal'));
   }
 
   els.input.value = '';
   await searchFlow();
-
-  // Уведомление
-  if (share && publishResult) {
-    toast(publishResult.publishedOnline ? t('publishedOnline') : t('publishedLocal'));
-  }
 }
 
 // ========================================================================
@@ -740,13 +760,18 @@ els.input.addEventListener('touchstart', e => touchY = e.touches[0].clientY);
 els.input.addEventListener('touchend', e => {
   if (touchY - e.changedTouches[0].clientY > 60 && els.input.value.trim()) {
     e.preventDefault();
-    saveNote(true);
+    saveNote(true);  // Свайп вверх = публикация в мир
   }
 });
 
-els.saveBtn.addEventListener('click', e => saveNote(e.shiftKey));
+// Кнопка "Отправить" всегда сохраняет только локально (без share)
+els.saveBtn.addEventListener('click', e => saveNote(false));
+
 els.input.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveNote(e.shiftKey); }
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    saveNote(false);  // Ctrl+Enter = только локально
+  }
 });
 
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -866,7 +891,7 @@ function applySettings(skipSearch = true) {
   const newProxy = els.proxyUrlInput.value.trim();
   if (newProxy && newProxy !== Settings.getProxyUrl()) {
     Settings.setProxyUrl(newProxy);
-    Qdrant.online = null; // перепроверим при следующем запросе
+    Qdrant.online = null;
     Qdrant.checkHealth();
   }
   Settings.save();
@@ -916,7 +941,6 @@ async function rebuildVectors() {
     await Engine.init();
     els.statusMsg.textContent = t('ready');
     els.saveBtn.disabled = false;
-    // Проверяем Qdrant в фоне, не блокируя UI
     Qdrant.checkHealth();
   } catch (e) {
     els.statusMsg.textContent = 'Ошибка загрузки модели';
