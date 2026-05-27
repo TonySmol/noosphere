@@ -556,12 +556,20 @@ const Vec = {
   }
 };
 
-const Engine = {
+onst Engine = {
   model: null,
   cache: new Map(),
   
   async init() {
-    this.model = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', { quantized: true });
+    // Принудительно указываем CDN + отключаем локальный кэш модели
+    this.model = await pipeline('feature-extraction', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2', { 
+      quantized: true,
+      progress_callback: (p) => console.log('Model:', p.status, p.file, Math.round(p.progress || 0) + '%'),
+      // Эти параметры заставляют грузить с CDN
+      cache_dir: null,
+      local_files_only: false
+    });
+    console.log('✅ Модель загружена, размерность:', (await this.embed('test')).length);
     await this.reindex();
   },
   
@@ -971,13 +979,15 @@ async function rebuildVectors() {
   els.statusMsg.innerHTML = `<span class="spinner"></span> ${t('modelLoading')}`;
 
   try {
-    await Engine.init();
-    els.statusMsg.textContent = t('ready');
-    Qdrant.checkHealth();
-  } catch (e) {
-    els.statusMsg.textContent = 'Ошибка загрузки модели';
-    console.error(e);
-  }
+  console.log('Начинаем загрузку модели...');
+  await Engine.init();
+  console.log('Модель готова');
+  els.statusMsg.textContent = t('ready');
+  Qdrant.checkHealth().then(ok => console.log('Qdrant:', ok ? 'online' : 'offline'));
+} catch (e) {
+  console.error('❌ Ошибка модели:', e);
+  els.statusMsg.textContent = 'Ошибка: ' + e.message;
+}
 
   // Увеличенный debounce (800мс) — меньше запросов к Qdrant
   els.input.addEventListener('input', debounce(searchFlow, 800));
