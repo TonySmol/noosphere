@@ -1,8 +1,8 @@
 import { pipeline } from '@xenova/transformers';
 
 // ⚠️ ВСТАВЬ СВОЙ QDRANT KEY И URL НИЖЕ
-const QDRANT_URL = 'https://YOUR-CLUSTER.qdrant.tech';
-const QDRANT_KEY = 'your-api-key-here';
+const QDRANT_URL = 'https://515693ca-83f2-4a67-ba52-d44d507d8cc0.europe-west3-0.gcp.cloud.qdrant.io';
+const QDRANT_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIiwic3ViamVjdCI6ImFwaS1rZXk6OGY1ZGI4Y2ItNWNkYi00MWZlLThjMjgtNGRmM2JkY2U1YzUxIn0.Vv4Xi9L_YrcFcHGcPB4EclGXGXzO1XtUzjl4AYutiPc';
 const COLLECTION = 'noosphere';
 
 const $ = id => document.getElementById(id);
