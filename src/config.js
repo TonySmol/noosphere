@@ -9,5 +9,6 @@ export const CONFIG = {
     threshold: 0.3,
     limit: 5
   },
+  serendipityDelta: 0.15,
   excerptLen: 500
 };
