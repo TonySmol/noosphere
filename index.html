@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Noosphere Core (IDB Local + Gun World SET link-resolve)</title>
+  <title>Noosphere Core (IDB Local + Gun World MAP)</title>
 
   <style>
     :root{
@@ -192,6 +192,7 @@
   <script type="module">
     import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
+    // Utils
     const Utils = (() => {
       const $ = (s, r=document) => r.querySelector(s);
       const esc = (s) => { const d=document.createElement('div'); d.textContent=String(s??''); return d.innerHTML; };
@@ -207,6 +208,7 @@
       return { $, esc, debounce, clamp, uuid, safeJSON, Emitter };
     })();
 
+    // IDB
     const IDB = (() => {
       const DB = 'noosphere_idb_local_v1';
       const STO_KV = 'kv';
@@ -279,15 +281,10 @@
       return { kvGet, kvSet, notesPut, notesDelete, notesGetAll, ok:()=>ok };
     })();
 
+    // Settings (relay встроен)
     const Settings = (() => {
       const KEY='settings';
-      const DEFAULT = {
-        theme:'auto',
-        threshold:0.25,
-        serDelta:0.15,
-        maxResults:5,
-        peersText:'https://relay.peer.ooo/gun'
-      };
+      const DEFAULT = { theme:'auto', threshold:0.25, serDelta:0.15, maxResults:5, peersText:'https://relay.peer.ooo/gun' };
 
       const sanitize = (raw) => {
         const x = raw && typeof raw==='object' ? raw : {};
@@ -299,19 +296,12 @@
           peersText: (typeof x.peersText==='string') ? x.peersText : DEFAULT.peersText
         };
       };
+      const parsePeers = (peersText) => String(peersText??'').split('\n').map(s=>s.trim()).filter(Boolean);
 
-      const parsePeers = (peersText) =>
-        String(peersText??'').split('\n').map(s=>s.trim()).filter(Boolean);
+      async function load() { return sanitize((await IDB.kvGet(KEY)) ?? DEFAULT); }
+      async function save(s) { await IDB.kvSet(KEY, sanitize(s)); }
 
-      async function load() {
-        const raw = await IDB.kvGet(KEY);
-        return sanitize(raw ?? DEFAULT);
-      }
-      async function save(s) {
-        await IDB.kvSet(KEY, sanitize(s));
-      }
-
-      return { DEFAULT, sanitize, parsePeers, load, save };
+      return { sanitize, parsePeers, load, save };
     })();
 
     const Theme = (() => {
@@ -322,8 +312,9 @@
       return { apply };
     })();
 
+    // Vectors
     const Vectors = (() => {
-      const dot = (a,b)=>{ let d=0; for(let i=0;i<a.length;i++) d += a[i]*b[i]; return d; };
+      const dot = (a,b)=>{ let d=0; for(let i=0;i<a.length;i++) d+=a[i]*b[i]; return d; };
       const norm = (v)=>{ let s=0; for(let i=0;i<v.length;i++) s+=v[i]*v[i]; const m=Math.sqrt(s)||1; for(let i=0;i<v.length;i++) v[i]/=m; return v; };
       const b64enc = (u8)=>{ let s=''; const CH=0x8000; for(let i=0;i<u8.length;i+=CH) s+=String.fromCharCode(...u8.subarray(i,i+CH)); return btoa(s); };
       const b64dec = (b64)=>{ const bin=atob(b64); const u8=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i); return u8; };
@@ -332,6 +323,7 @@
       return { dot, packI8, unpackI8 };
     })();
 
+    // Embedder
     const Embedder = (() => {
       let model=null;
       async function init() { model = await pipeline('feature-extraction','Xenova/paraphrase-multilingual-MiniLM-L12-v2',{ quantized:true }); }
@@ -343,17 +335,18 @@
         const emb = new Float32Array(hidden);
         for(let t=0;t<tokens;t++){
           const base=t*hidden;
-          for(let h=0;h<hidden;h++) emb[h] += data[base+h];
+          for(let h=0;h<hidden;h++) emb[h]+=data[base+h];
         }
-        for(let h=0;h<hidden;h++) emb[h] /= tokens;
-        let s=0; for(let h=0;h<hidden;h++) s += emb[h]*emb[h];
+        for(let h=0;h<hidden;h++) emb[h]/=tokens;
+        let s=0; for(let h=0;h<hidden;h++) s+=emb[h]*emb[h];
         const m=Math.sqrt(s)||1;
-        for(let h=0;h<hidden;h++) emb[h] /= m;
+        for(let h=0;h<hidden;h++) emb[h]/=m;
         return emb;
       }
       return { init, ready, embed };
     })();
 
+    // Local notes
     const LocalNotes = (() => {
       function create() {
         const ee = new Utils.Emitter();
@@ -364,7 +357,6 @@
           notes.sort((a,b)=>b.createdAt-a.createdAt);
           ee.emit('change', list());
         }
-
         function list() { return notes.slice(); }
         function get(id) { return notes.find(n => n.id === id) ?? null; }
 
@@ -397,23 +389,34 @@
       return { create };
     })();
 
-    // ===== World via SET with link resolving (FIX) =====
+    // ===== Gun World MAP: feed.get(id).put({note: ref, ...meta}) =====
     const World = (() => {
-      const ROOT = 'noosphere_world_v5'; // bump to avoid old garbage
+      const ROOT = 'noosphere_world_prod_v1';
 
       function create(gun) {
         const ee = new Utils.Emitter();
-        const feed = gun.get(ROOT).get('world').get('feed');     // SET
-        const noteRoot = gun.get(ROOT).get('world').get('note'); // notes by id
+        const feed = gun.get(ROOT).get('world').get('feed');      // map id -> entry
+        const noteRoot = gun.get(ROOT).get('world').get('note');  // note/<id>
 
-        const byId = new Map();         // id -> note
-        const subSouls = new Set();     // soul -> subscribed
-        const subIds = new Set();       // id -> subscribed
+        const entries = new Map(); // id -> { id, at, author, noteSoul }
+        const notes = new Map();   // id -> { id, text, vPacked, author, createdAt }
 
-        function list() { return Array.from(byId.values()).sort((a,b)=>b.createdAt-a.createdAt); }
-        function emit() { ee.emit('change', list()); }
+        const subSoul = new Set();
 
-        function normalize(id, raw) {
+        function emit() {
+          // merge entries+notes when possible
+          const out = [];
+          for (const [id, n] of notes) out.push(n);
+          ee.emit('change', out.sort((a,b)=>b.createdAt-a.createdAt));
+        }
+
+        function listAll() {
+          const out = [];
+          for (const [id, n] of notes) out.push(n);
+          return out.sort((a,b)=>b.createdAt-a.createdAt);
+        }
+
+        function normalizeNote(id, raw) {
           const x = raw && typeof raw === 'object' ? raw : {};
           if (x.deleted) return null;
           if (typeof x.text !== 'string') return null;
@@ -426,23 +429,23 @@
           };
         }
 
-        // resolve link -> subscribe to note soul
-        feed.map().on((val) => {
-          // val is often link: { '#': soul }
-          const soul = val && typeof val === 'object' && typeof val['#'] === 'string' ? val['#'] : null;
+        // Subscribe feed entries by id
+        feed.map().on((entry, id) => {
+          if (!id || id === '_' || id === 'null') return;
+          const e = entry && typeof entry === 'object' ? entry : {};
+          // entry.note is relation link { '#': soul }
+          const soul = e.note && typeof e.note === 'object' && typeof e.note['#'] === 'string' ? e.note['#'] : null;
           if (!soul) return;
-          if (subSouls.has(soul)) return;
-          subSouls.add(soul);
+
+          entries.set(id, { id, soul, at: Number(e.at) || 0, author: String(e.author ?? '') });
+
+          if (subSoul.has(soul)) return;
+          subSoul.add(soul);
 
           gun.get(soul).on((raw) => {
-            // get id from raw.id (best) or parse from soul
-            const rid = raw && typeof raw === 'object' && typeof raw.id === 'string' ? raw.id : soul.split('/').pop();
-            if (!rid) return;
-
-            const n = normalize(rid, raw);
-            if (!n) { byId.delete(rid); emit(); return; }
-
-            byId.set(rid, n);
+            const n = normalizeNote(id, raw);
+            if (!n) { notes.delete(id); emit(); return; }
+            notes.set(id, n);
             emit();
           });
         });
@@ -450,12 +453,19 @@
         function publish({ id, text, vPacked, author }) {
           const now = Date.now();
           const ref = noteRoot.get(id);
+          // write note
           ref.put({ id, text, vPacked, author, createdAt: now, deleted:false });
-          feed.set(ref); // makes it discoverable
+          // write feed entry under deterministic key id
+          feed.get(id).put({ id, at: now, author, note: ref });
           return id;
         }
 
-        return { ROOT, list, onChange:(fn)=>ee.on('change', fn), publish };
+        return {
+          ROOT,
+          listAll,
+          onChange: (fn) => ee.on('change', fn),
+          publish
+        };
       }
 
       return { create };
@@ -491,7 +501,6 @@
           running = true;
           try {
             if (!Embedder.ready()) return;
-
             const pending = local.list().filter(n => n.publishState === 'pending');
             for (const n of pending) {
               let v = n.vPacked;
@@ -519,11 +528,13 @@
     const Search = (() => {
       function create({ local, world, settings, deviceId }) {
         const cache = new Map(); // id -> Float32Array
+
         function vecFromPacked(id, packed) {
           if (!packed) return null;
           if (cache.has(id)) return cache.get(id);
           try { const v = Vectors.unpackI8(packed); cache.set(id, v); return v; } catch { return null; }
         }
+
         function clear() { cache.clear(); }
 
         async function searchAll(queryText) {
@@ -549,8 +560,10 @@
 
           const worldHits = [];
           const serHits = [];
-          for (const w of world.list()) {
-            if (w.author === deviceId) continue; // hide own in world results
+          for (const w of world.listAll()) {
+            // hide own published in world
+            if (w.author === deviceId) continue;
+
             const v = vecFromPacked(w.id, w.vPacked);
             if (!v) continue;
             const score = Vectors.dot(qVec, v);
@@ -580,6 +593,7 @@
         const dot = state === 'ok' ? 'ok' : state === 'warn' ? 'warn' : state === 'bad' ? 'bad' : '';
         return `<span class="pill"><span class="dot ${dot}"></span>${Utils.esc(label)}</span>`;
       }
+
       function renderItems(container, items, { emptyText, kind }) {
         if (!items.length) { container.innerHTML = `<div class="empty">${Utils.esc(emptyText)}</div>`; return; }
         container.innerHTML = items.map(it => {
@@ -597,6 +611,7 @@
           `;
         }).join('');
       }
+
       function renderHistory(container, notes) {
         if (!notes.length) { container.innerHTML = `<div class="empty">Нет заметок</div>`; return; }
         container.innerHTML = notes.map(n => {
@@ -618,6 +633,7 @@
           `;
         }).join('');
       }
+
       return { pill, renderItems, renderHistory };
     })();
 
@@ -631,12 +647,14 @@
         a.click();
         URL.revokeObjectURL(a.href);
       }
+
       async function importNotes(file) {
         const txt = await file.text();
         const cap = Utils.safeJSON(txt, null);
         if (!cap || !Array.isArray(cap.notes)) throw new Error('bad capsule');
         return cap.notes;
       }
+
       return { exportNotes, importNotes };
     })();
 
@@ -695,7 +713,9 @@
         const peersCount = Settings.parsePeers(settings.peersText).length;
         const localCount = local.list().length;
         const pendingCount = local.list().filter(n => n.publishState === 'pending').length;
-        const worldCount = world.list().length;
+
+        const worldAll = world.listAll().length;
+        const worldForeign = world.listAll().filter(n => n.author !== deviceId).length;
 
         const pills = [
           UI.pill(`IDB:${IDB.ok() ? 'ok' : 'fail'}`, IDB.ok() ? 'ok' : 'bad'),
@@ -703,8 +723,10 @@
           UI.pill(`model:${modelReady ? 'ok' : 'load'}`, modelReady ? 'ok' : 'warn'),
           UI.pill(`local:${localCount}`),
           UI.pill(`pending:${pendingCount}`, pendingCount ? 'warn' : 'neutral'),
-          UI.pill(`world:${worldCount}`)
+          UI.pill(`worldAll:${worldAll}`),
+          UI.pill(`worldForeign:${worldForeign}`)
         ];
+
         if (errMsg) pills.push(UI.pill(errMsg, 'bad'));
         els.status.innerHTML = pills.join(' ');
         els.diag.textContent = `device:${deviceId} | worldRoot:${world.ROOT}`;
