@@ -14,10 +14,9 @@ export async function embed(text) {
   if (!model) throw new Error('Модель не готова');
   const out = await model(text);
   const raw = Array.from(out.data);
-  return normalize(raw);  // ← НОРМАЛИЗАЦИЯ
+  return normalize(raw);
 }
 
-// Нормализация вектора (L2 norm)
 export function normalize(vec) {
   const magnitude = Math.sqrt(vec.reduce((sum, x) => sum + x * x, 0));
   if (magnitude === 0) return vec;
