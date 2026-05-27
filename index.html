@@ -19,10 +19,10 @@
     .tabs { display: flex; gap: 0.5rem; justify-content: center; margin-bottom: 0.25rem; }
     .tab-btn { padding: 0.5rem 1.5rem; border-radius: 12px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer; font-weight: 500; transition: all 0.2s; }
     .tab-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
-    .thought-input { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; box-shadow: var(--shadow); }
+    .thought-input { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; box-shadow: var(--shadow); transition: box-shadow 0.3s; }
     textarea { width: 100%; border: none; background: transparent; font-size: 1.1rem; font-family: inherit; resize: none; outline: none; color: var(--text); min-height: 90px; }
     textarea::placeholder { color: var(--text-secondary); opacity: 0.7; }
-    .input-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; flex-wrap: wrap; gap: 0.5rem; }
+    .input-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem; }
     .btn { padding: 0.6rem 1.4rem; border-radius: 12px; font-weight: 600; border: none; cursor: pointer; background: var(--accent); color: white; font-size: 0.9rem; transition: all 0.2s; }
     .btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
     .btn:disabled { opacity: 0.4; pointer-events: none; }
@@ -41,7 +41,7 @@
     .carousel { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; gap: 0.75rem; padding-bottom: 0.5rem; }
     .carousel::-webkit-scrollbar { height: 4px; }
     .carousel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-    .card { flex: 0 0 calc(100% - 1.5rem); scroll-snap-align: start; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; box-shadow: var(--shadow); animation: fadeInUp 0.4s ease both; }
+    .card { flex: 0 0 calc(100% - 1.5rem); scroll-snap-align: start; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; box-shadow: var(--shadow); transition: transform 0.3s, box-shadow 0.3s; animation: fadeInUp 0.4s ease both; }
     @keyframes fadeInUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     .card.charged { border-color: var(--wave); box-shadow: 0 0 0 1px var(--wave); }
     .card-text { font-size: 0.95rem; line-height: 1.5; margin-bottom: 0.5rem; white-space: pre-wrap; word-break: break-word; }
@@ -66,14 +66,19 @@
     .overlay.open { display: block; }
     .setting-row { margin-bottom: 1rem; display: flex; flex-direction: column; gap: 0.2rem; }
     .setting-row label { font-size: 0.85rem; color: var(--text-secondary); }
+    .setting-row input[type="text"], .setting-row input[type="url"] { padding: 0.5rem; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text); font-size: 0.85rem; font-family: monospace; }
     .range-display { display: flex; align-items: center; gap: 0.5rem; }
     .range-display span { min-width: 3rem; font-weight: 600; color: var(--accent); }
     .settings-actions { display: flex; flex-direction: column; gap: 0.75rem; margin: 1.5rem 0; }
     .settings-actions .btn { width: 100%; justify-content: center; }
     .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--text-secondary); border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .online-indicator { font-size: 0.7rem; padding: 2px 8px; border-radius: 8px; background: rgba(16,185,129,0.15); color: #10b981; margin-left: 0.5rem; }
-    .online-indicator.offline { background: rgba(239,68,68,0.15); color: #ef4444; }
+    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.4rem; vertical-align: middle; }
+    .status-dot.online { background: #10b981; box-shadow: 0 0 4px #10b981; }
+    .status-dot.offline { background: #ef4444; }
+    .status-dot.unknown { background: #94a3b8; }
+    .toast { position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%); background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 0.75rem 1.25rem; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 100; font-size: 0.9rem; opacity: 0; transition: opacity 0.3s, transform 0.3s; pointer-events: none; }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
   </style>
 </head>
 <body>
@@ -140,46 +145,47 @@
     <select id="maxResultsSelect"><option value="3">3</option><option value="5" selected>5</option><option value="10">10</option></select>
   </div>
   <div class="setting-row">
-    <label>URL прокси Qdrant</label>
-    <input type="text" id="proxyUrlInput" style="padding:0.5rem; border:1px solid var(--border); border-radius:8px; background:transparent; color:var(--text); font-size:0.8rem;" placeholder="https://...workers.dev">
+    <label><span id="statusDot" class="status-dot unknown"></span> Прокси Qdrant</label>
+    <input type="url" id="proxyUrlInput" placeholder="https://...workers.dev">
   </div>
   <div class="settings-actions">
     <button id="exportCapsuleBtn" class="btn btn-ghost">Скачать капсулу</button>
     <button id="importCapsuleBtn" class="btn btn-ghost">Импортировать капсулу</button>
     <input type="file" id="importFileInput" accept=".capsule,.json" style="display:none;">
     <button id="rebuildVectorsBtn" class="btn btn-ghost">Пересоздать векторы</button>
-    <button id="syncWorldBtn" class="btn btn-ghost">Синхронизировать мир</button>
   </div>
   <div style="display:flex; gap:0.5rem; margin:1rem 0;">
     <button id="resetSettingsBtn" class="btn btn-ghost" style="flex:1;">Сбросить всё</button>
     <button id="applySettingsBtn" class="btn" style="flex:1;">Применить</button>
   </div>
   <p style="font-size:0.75rem;color:var(--text-secondary);">Модель: MiniLM (25 МБ)</p>
-  <p style="font-size:0.75rem;color:var(--text-secondary);">Мир: <span id="worldSource">—</span> <span id="onlineIndicator" class="online-indicator offline">offline</span></p>
 </div>
+<div class="toast" id="toast"></div>
 
 <script type="module">
 import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-// =====================================================================
+// ========================================================================
 // 1. КОНФИГУРАЦИЯ
-// =====================================================================
+// ========================================================================
 const CONFIG = {
   COLLECTION: 'noosphere',
   MODEL: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
   DEFAULT_PROXY: 'https://hidden-unit-1b90.as1994g.workers.dev',
-  REQUEST_TIMEOUT_MS: 8000,
+  REQUEST_TIMEOUT_MS: 15000,
+  MAX_RETRIES: 2,
+  RETRY_DELAYS: [1000, 3000],
   STORAGE_KEYS: {
-    myNotes: 'noosphere_mynotes',
-    world: 'noosphere_world',
-    settings: 'noosphere_settings',
+    myNotes: 'noosphere_mynotes_v2',
+    world: 'noosphere_world_v2',
+    settings: 'noosphere_settings_v2',
     proxyUrl: 'noosphere_proxy_url'
   }
 };
 
-// =====================================================================
-// 2. ЛОКАЛИЗАЦИЯ (i18n)
-// =====================================================================
+// ========================================================================
+// 2. ЛОКАЛИЗАЦИЯ
+// ========================================================================
 const tKeys = {
   ru: {
     inputPlaceholder: 'Поделитесь мыслью...', saveBtn: 'Отправить',
@@ -188,19 +194,23 @@ const tKeys = {
     edit: 'ред.', save: 'сохр.', cancel: 'отм.', delete: 'удал.',
     noteEdited: '(изм.)', today: 'Сегодня', yesterday: 'Вчера',
     confirmDelete: 'Удалить заметку?',
-    importSuccess: 'Импортировано {n} заметок.', rebuildDone: 'Векторы пересозданы',
+    importSuccess: 'Импортировано {n} заметок.',
+    rebuildDone: 'Векторы пересозданы',
     resetConfirm: 'Сбросить все заметки и настройки?',
     modelLoading: 'Загрузка модели...', ready: 'Готов',
-    settingsTitle: 'Настройки', theme: 'Тема',
+    settingsTitle: 'Настройки', language: 'Язык / Language',
+    theme: 'Тема', themeAuto: 'Авто', themeLight: 'День', themeDark: 'Ночь',
     threshold: 'Порог релевантности', serendipity: 'Дельта смежности',
+    minWaves: 'Мин. волн', maxCards: 'Макс. карточек',
     exportCapsule: 'Скачать капсулу', importCapsule: 'Импортировать капсулу',
-    rebuildVectors: 'Пересоздать векторы', syncWorld: 'Синхронизировать мир',
-    resetAll: 'Сбросить всё', apply: 'Применить',
+    rebuildVectors: 'Пересоздать векторы', resetAll: 'Сбросить всё', apply: 'Применить',
+    modelInfo: 'Модель: MiniLM (25 МБ)',
     historyPlaceholder: 'Поиск по истории...', emptyHistory: 'Нет заметок',
     swipeHint: 'смахните вверх для публикации',
     tabFlow: 'Поток', tabHistory: 'История',
-    worldOnline: 'Qdrant (онлайн)', worldOffline: 'локально',
-    publishedOnline: '✓ Опубликовано в мир', publishedLocal: '✓ Сохранено локально (мир недоступен)'
+    worldOnline: 'Мир: подключен', worldOffline: 'Мир: офлайн',
+    publishedOnline: 'Опубликовано в мире',
+    publishedLocal: 'Сохранено локально (мир недоступен)'
   },
   en: {
     inputPlaceholder: 'Share a thought...', saveBtn: 'Send',
@@ -212,16 +222,19 @@ const tKeys = {
     importSuccess: 'Imported {n} notes.', rebuildDone: 'Vectors rebuilt',
     resetConfirm: 'Reset all notes and settings?',
     modelLoading: 'Loading model...', ready: 'Ready',
-    settingsTitle: 'Settings', theme: 'Theme',
+    settingsTitle: 'Settings', language: 'Language',
+    theme: 'Theme', themeAuto: 'Auto', themeLight: 'Light', themeDark: 'Dark',
     threshold: 'Relevance threshold', serendipity: 'Serendipity delta',
+    minWaves: 'Min waves', maxCards: 'Max cards',
     exportCapsule: 'Download capsule', importCapsule: 'Import capsule',
-    rebuildVectors: 'Rebuild vectors', syncWorld: 'Sync world',
-    resetAll: 'Reset all', apply: 'Apply',
+    rebuildVectors: 'Rebuild vectors', resetAll: 'Reset all', apply: 'Apply',
+    modelInfo: 'Model: MiniLM (25 MB)',
     historyPlaceholder: 'Search history...', emptyHistory: 'No notes',
     swipeHint: 'swipe up to publish',
     tabFlow: 'Flow', tabHistory: 'History',
-    worldOnline: 'Qdrant (online)', worldOffline: 'local',
-    publishedOnline: '✓ Published to world', publishedLocal: '✓ Saved locally (world offline)'
+    worldOnline: 'World: online', worldOffline: 'World: offline',
+    publishedOnline: 'Published to world',
+    publishedLocal: 'Saved locally (world offline)'
   }
 };
 let lang = 'ru';
@@ -229,33 +242,54 @@ function t(key, replace) {
   const str = tKeys[lang]?.[key] ?? tKeys['ru'][key] ?? key;
   return replace ? str.replace(/\{(\w+)\}/g, (_, k) => replace[k] ?? '') : str;
 }
+function updateUI() {
+  document.getElementById('personalTitle').textContent = t('personalTitle');
+  document.getElementById('relevantTitle').textContent = t('worldTitle');
+  document.getElementById('serendipityTitle').textContent = t('serendipityTitle');
+  document.getElementById('saveBtn').textContent = t('saveBtn');
+  document.getElementById('swipeHintText').textContent = t('swipeHint');
+  document.getElementById('historySearchInput').placeholder = t('historyPlaceholder');
+  if (els.statusMsg && els.statusMsg.textContent !== '') els.statusMsg.textContent = t('ready');
+  document.querySelector('.tab-btn[data-view="flow"]').textContent = t('tabFlow');
+  document.querySelector('.tab-btn[data-view="history"]').textContent = t('tabHistory');
+  if (document.getElementById('historyView').classList.contains('active')) renderHistory();
+}
 
-// =====================================================================
+// ========================================================================
 // 3. ТЕМА
-// =====================================================================
+// ========================================================================
 function applyTheme(mode) {
   document.body.classList.toggle('dark', mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches));
 }
 
-// =====================================================================
-// 4. НАСТРОЙКИ
-// =====================================================================
-const DEFAULT_SETTINGS = {
-  threshold: 0.25, serendipityDelta: 0.15, minWaves: 1,
-  maxResults: 5, theme: 'auto', lang: 'ru'
-};
-const Settings = { ...DEFAULT_SETTINGS };
+// ========================================================================
+// 4. TOAST (ненавязчивые уведомления)
+// ========================================================================
+let toastTimer;
+function toast(msg, duration = 2500) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), duration);
+}
+
+// ========================================================================
+// 5. НАСТРОЙКИ
+// ========================================================================
+const DEFAULT = { threshold: 0.25, serendipityDelta: 0.15, minWaves: 1, maxResults: 5, theme: 'auto', lang: 'ru' };
+const Settings = { ...DEFAULT };
 Settings.load = () => {
-  try { Object.assign(Settings, DEFAULT_SETTINGS, JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.settings) || '{}')); }
-  catch { Object.assign(Settings, DEFAULT_SETTINGS); }
+  try { Object.assign(Settings, DEFAULT, JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.settings) || '{}')); }
+  catch { Object.assign(Settings, DEFAULT); }
 };
 Settings.save = () => localStorage.setItem(CONFIG.STORAGE_KEYS.settings, JSON.stringify(Settings));
 Settings.getProxyUrl = () => localStorage.getItem(CONFIG.STORAGE_KEYS.proxyUrl) || CONFIG.DEFAULT_PROXY;
 Settings.setProxyUrl = (url) => localStorage.setItem(CONFIG.STORAGE_KEYS.proxyUrl, url);
 
-// =====================================================================
-// 5. ХРАНИЛИЩЕ ЛОКАЛЬНЫХ ЗАМЕТОК
-// =====================================================================
+// ========================================================================
+// 6. ХРАНИЛИЩЕ ЛОКАЛЬНЫХ ЗАМЕТОК
+// ========================================================================
 const MyNotes = {
   data: [],
   load() { try { this.data = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.myNotes) || '[]'); } catch { this.data = []; } },
@@ -272,15 +306,14 @@ const MyNotes = {
   clear() { this.data = []; this.save(); }
 };
 
-// =====================================================================
-// 6. АДАПТЕР QDRANT (через прокси)
-// =====================================================================
+// ========================================================================
+// 7. QDRANT АДАПТЕР (с retry, timeout, graceful degradation)
+// ========================================================================
 const Qdrant = {
-  _online: false,
-  isOnline() { return this._online; },
+  online: null, // null = неизвестно, true/false = проверено
 
-  async _req(path, method = 'GET', body = null) {
-    const url = Settings.getProxyUrl() + path;
+  async _fetch(path, method = 'GET', body = null) {
+    const url = Settings.getProxyUrl().replace(/\/$/, '') + path;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), CONFIG.REQUEST_TIMEOUT_MS);
     try {
@@ -291,83 +324,118 @@ const Qdrant = {
         signal: controller.signal
       });
       clearTimeout(timeoutId);
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${text.slice(0, 100)}`);
+      }
       return await res.json();
     } finally {
       clearTimeout(timeoutId);
     }
   },
 
+  async _withRetry(fn) {
+    let lastError;
+    for (let i = 0; i <= CONFIG.MAX_RETRIES; i++) {
+      try {
+        return await fn();
+      } catch (e) {
+        lastError = e;
+        if (i < CONFIG.MAX_RETRIES) {
+          await new Promise(r => setTimeout(r, CONFIG.RETRY_DELAYS[i] || 1000));
+        }
+      }
+    }
+    throw lastError;
+  },
+
   async checkHealth() {
     try {
-      await this._req(`/collections/${CONFIG.COLLECTION}`);
-      this._online = true;
+      await this._fetch(`/collections/${CONFIG.COLLECTION}`);
+      this.online = true;
+      updateStatusDot(true);
       return true;
-    } catch {
-      this._online = false;
+    } catch (e) {
+      console.warn('Qdrant health check failed:', e.message);
+      this.online = false;
+      updateStatusDot(false);
       return false;
     }
   },
 
   async upsert(vector, text, localId) {
-    const id = crypto.randomUUID();
-    await this._req(`/collections/${CONFIG.COLLECTION}/points`, 'PUT', {
-      points: [{
-        id,
-        vector,
-        payload: {
-          excerpt: text.slice(0, 300),
-          waves: 0,
-          timestamp: Date.now(),
-          localId
-        }
-      }]
+    if (this.online === false) throw new Error('offline');
+    return this._withRetry(async () => {
+      const id = crypto.randomUUID();
+      await this._fetch(`/collections/${CONFIG.COLLECTION}/points`, 'PUT', {
+        points: [{
+          id, vector,
+          payload: { excerpt: text.slice(0, 300), waves: 0, timestamp: Date.now(), localId }
+        }]
+      });
+      return id;
     });
-    return id;
   },
 
   async search(vector, limit, minScore, minWaves = 0) {
-    const filter = minWaves > 0
-      ? { must: [{ key: 'waves', range: { gte: minWaves } }] }
-      : undefined;
-    const data = await this._req(`/collections/${CONFIG.COLLECTION}/points/search`, 'POST', {
-      vector, limit, score_threshold: minScore, with_payload: true, filter
+    if (this.online === false) throw new Error('offline');
+    return this._withRetry(async () => {
+      const filter = minWaves > 0
+        ? { must: [{ key: 'waves', range: { gte: minWaves } }] }
+        : undefined;
+      const data = await this._fetch(`/collections/${CONFIG.COLLECTION}/points/search`, 'POST', {
+        vector, limit, score_threshold: minScore, with_payload: true, filter
+      });
+      return (data.result || []).map(r => ({
+        id: String(r.id),
+        score: r.score,
+        waves: r.payload?.waves ?? 0,
+        excerpt: r.payload?.excerpt || '',
+        localId: r.payload?.localId || null
+      }));
     });
-    return (data.result || []).map(r => ({
-      id: String(r.id),
-      score: r.score,
-      waves: r.payload?.waves || 0,
-      excerpt: r.payload?.excerpt || '',
-      localId: r.payload?.localId || null
-    }));
   },
 
   async waveUp(id) {
-    await this._req(`/collections/${CONFIG.COLLECTION}/points/payload`, 'POST', {
-      payload: { waves: { '+=': 1 } }, points: [id]
-    });
+    if (this.online === false) return;
+    try {
+      await this._fetch(`/collections/${CONFIG.COLLECTION}/points/payload`, 'POST', {
+        payload: { waves: { '+=': 1 } }, points: [id]
+      });
+    } catch (e) { console.warn('waveUp failed:', e.message); }
   },
 
   async waveDown(id) {
-    await this._req(`/collections/${CONFIG.COLLECTION}/points/payload`, 'POST', {
-      payload: { waves: { '+=': -1 } }, points: [id]
-    });
+    if (this.online === false) return;
+    try {
+      await this._fetch(`/collections/${CONFIG.COLLECTION}/points/payload`, 'POST', {
+        payload: { waves: { '+=': -1 } }, points: [id]
+      });
+    } catch (e) { console.warn('waveDown failed:', e.message); }
   },
 
   async removeByLocalId(localId) {
+    if (this.online === false) return;
     try {
-      await this._req(`/collections/${CONFIG.COLLECTION}/points/delete`, 'POST', {
+      await this._fetch(`/collections/${CONFIG.COLLECTION}/points/delete`, 'POST', {
         filter: { must: [{ key: 'localId', match: { value: localId } }] }
       });
-    } catch (e) { console.warn('Qdrant remove failed:', e); }
+    } catch (e) { console.warn('removeByLocalId failed:', e.message); }
   }
 };
 
-// =====================================================================
-// 7. ГИБРИДНОЕ ХРАНИЛИЩЕ МИРА (Qdrant + localStorage fallback)
-// =====================================================================
+function updateStatusDot(online) {
+  const dot = document.getElementById('statusDot');
+  if (!dot) return;
+  dot.classList.remove('online', 'offline', 'unknown');
+  dot.classList.add(online ? 'online' : 'offline');
+}
+
+// ========================================================================
+// 8. ГИБРИДНОЕ ХРАНИЛИЩЕ МИРА
+// ========================================================================
 const World = {
-  notes: [],  // локальный кэш (используется если Qdrant offline)
+  notes: [],
   load() {
     try { this.notes = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEYS.world) || '[]'); }
     catch { this.notes = []; }
@@ -376,56 +444,58 @@ const World = {
   save() { localStorage.setItem(CONFIG.STORAGE_KEYS.world, JSON.stringify(this.notes)); },
 
   async add(vectorArray, text, localId = null) {
-    // Всегда сохраняем локально как резерв
+    // Всегда сохраняем локально (резерв)
     const localNote = {
       id: 'g_' + crypto.randomUUID(),
       vec: vectorArray, waves: 0,
       excerpt: text.slice(0, 150),
       localId, timestamp: Date.now()
     };
-    this.notes.unshift(localNote); this.save();
+    this.notes.unshift(localNote);
+    this.save();
 
-    // Пытаемся отправить в Qdrant
-    if (Qdrant.isOnline()) {
+    // Пытаемся опубликовать в Qdrant
+    let publishedOnline = false;
+    if (Qdrant.online !== false) {
       try {
         const qdrantId = await Qdrant.upsert(vectorArray, text, localId);
-        localNote.id = qdrantId;  // обновляем ID на серверный
+        localNote.id = qdrantId;
         this.save();
-        return { mode: 'online', id: qdrantId };
+        publishedOnline = true;
+        Qdrant.online = true;
+        updateStatusDot(true);
       } catch (e) {
-        console.warn('Qdrant upsert failed, using local:', e);
+        console.warn('Qdrant upsert failed:', e.message);
+        Qdrant.online = false;
+        updateStatusDot(false);
       }
     }
-    return { mode: 'local', id: localNote.id };
+    return { publishedOnline };
   },
 
   async removeByLocalId(localId) {
-    this.notes = this.notes.filter(n => n.localId !== localId); this.save();
-    if (Qdrant.isOnline()) {
-      try { await Qdrant.removeByLocalId(localId); } catch {}
-    }
+    this.notes = this.notes.filter(n => n.localId !== localId);
+    this.save();
+    if (Qdrant.online !== false) await Qdrant.removeByLocalId(localId);
   },
 
   async waveUp(id) {
-    if (Qdrant.isOnline()) {
-      try { await Qdrant.waveUp(id); } catch {}
-    }
-    const n = this.notes.find(n => n.id === id);
+    const n = this.notes.find(x => x.id === id);
     if (n) { n.waves++; this.save(); }
+    if (Qdrant.online !== false) await Qdrant.waveUp(id);
   },
 
   async waveDown(id) {
-    if (Qdrant.isOnline()) {
-      try { await Qdrant.waveDown(id); } catch {}
-    }
-    const n = this.notes.find(n => n.id === id);
+    const n = this.notes.find(x => x.id === id);
     if (n && n.waves > 0) { n.waves--; this.save(); }
+    if (Qdrant.online !== false) await Qdrant.waveDown(id);
   },
 
-  // Поиск: онлайн — через Qdrant, офлайн — по локальному кэшу
   async search(qVec) {
     const low = Settings.threshold - Settings.serendipityDelta;
-    if (Qdrant.isOnline()) {
+
+    // Пытаемся через Qdrant
+    if (Qdrant.online !== false) {
       try {
         const results = await Qdrant.search(
           Array.from(qVec),
@@ -433,37 +503,41 @@ const World = {
           low,
           Settings.minWaves
         );
+        Qdrant.online = true;
+        updateStatusDot(true);
         const rel = results.filter(r => r.score >= Settings.threshold).slice(0, Settings.maxResults);
         const ser = results.filter(r => r.score >= low && r.score < Settings.threshold).slice(0, Settings.maxResults);
-        return { rel, ser };
+        return { rel, ser, source: 'online' };
       } catch (e) {
-        console.warn('Qdrant search failed, using local cache:', e);
+        console.warn('Qdrant search failed, falling back to local:', e.message);
+        Qdrant.online = false;
+        updateStatusDot(false);
       }
     }
-    return this._searchLocal(qVec);
-  },
 
-  _searchLocal(qVec) {
-    const rel = [], ser = [], low = Settings.threshold - Settings.serendipityDelta;
+    // Fallback на локальный кэш
+    const rel = [], ser = [];
     for (const n of this.notes) {
       if (n.waves < Settings.minWaves) continue;
       const v = new Float32Array(n.vec);
-      let s = 0; for (let i = 0; i < qVec.length; i++) s += qVec[i] * v[i];
+      let s = 0;
+      for (let i = 0; i < qVec.length; i++) s += qVec[i] * v[i];
       if (s >= Settings.threshold) rel.push({ ...n, score: s });
       else if (s >= low) ser.push({ ...n, score: s });
     }
     return {
       rel: rel.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults),
-      ser: ser.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults)
+      ser: ser.sort((a, b) => b.score - a.score).slice(0, Settings.maxResults),
+      source: 'local'
     };
   },
 
   clear() { this.notes = []; this.save(); }
 };
 
-// =====================================================================
-// 8. ДВИЖОК (векторизация + локальный поиск)
-// =====================================================================
+// ========================================================================
+// 9. ДВИЖОК (векторизация + локальный поиск)
+// ========================================================================
 const Vec = {
   normalize(v) {
     const m = Math.sqrt(v.reduce((s, x) => s + x * x, 0));
@@ -488,8 +562,15 @@ const Engine = {
     for (let h = 0; h < hidden; h++) emb[h] /= tokens;
     return Vec.normalize(emb);
   },
-  async reindex() { this.cache.clear(); for (const n of MyNotes.data) try { await this.cacheNote(n.id, n.text); } catch {} },
-  async cacheNote(id, text) { if (!this.cache.has(id)) this.cache.set(id, await this.embed(text)); },
+  async reindex() {
+    this.cache.clear();
+    for (const n of MyNotes.data) {
+      try { await this.cacheNote(n.id, n.text); } catch {}
+    }
+  },
+  async cacheNote(id, text) {
+    if (!this.cache.has(id)) this.cache.set(id, await this.embed(text));
+  },
   async searchLocal(qVec) {
     const res = [];
     for (const n of MyNotes.data) {
@@ -501,9 +582,9 @@ const Engine = {
   }
 };
 
-// =====================================================================
-// 9. UI
-// =====================================================================
+// ========================================================================
+// 10. UI
+// ========================================================================
 const $ = s => document.querySelector(s);
 const els = {
   input: $('#thoughtInput'), saveBtn: $('#saveBtn'), statusMsg: $('#statusMsg'),
@@ -519,9 +600,8 @@ const els = {
   langSelect: $('#langSelect'), themeSelect: $('#themeSelect'),
   proxyUrlInput: $('#proxyUrlInput'),
   applyBtn: $('#applySettingsBtn'), resetBtn: $('#resetSettingsBtn'),
-  rebuildBtn: $('#rebuildVectorsBtn'), syncBtn: $('#syncWorldBtn'),
-  exportBtn: $('#exportCapsuleBtn'), importBtn: $('#importCapsuleBtn'), importFile: $('#importFileInput'),
-  worldSource: $('#worldSource'), onlineIndicator: $('#onlineIndicator')
+  rebuildBtn: $('#rebuildVectorsBtn'),
+  exportBtn: $('#exportCapsuleBtn'), importBtn: $('#importCapsuleBtn'), importFile: $('#importFileInput')
 };
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
@@ -585,29 +665,20 @@ function renderHistory(filtered = null) {
   els.historyContent.innerHTML = html;
 }
 
-function updateOnlineIndicator() {
-  const online = Qdrant.isOnline();
-  els.onlineIndicator.textContent = online ? 'online' : 'offline';
-  els.onlineIndicator.classList.toggle('offline', !online);
-  els.worldSource.textContent = online ? t('worldOnline') : t('worldOffline');
+async function searchHistory() {
+  const q = els.historySearch.value.trim();
+  if (!q) { renderHistory(); return; }
+  const qVec = await Engine.embed(q);
+  const scored = MyNotes.data.map(note => {
+    const v = Engine.cache.get(note.id);
+    return v ? { ...note, score: Vec.cosine(qVec, v) } : null;
+  }).filter(n => n && n.score > Settings.threshold).sort((a, b) => b.score - a.score);
+  renderHistory(scored);
 }
 
-function updateUI() {
-  document.getElementById('personalTitle').textContent = t('personalTitle');
-  document.getElementById('relevantTitle').textContent = t('worldTitle');
-  document.getElementById('serendipityTitle').textContent = t('serendipityTitle');
-  document.getElementById('saveBtn').textContent = t('saveBtn');
-  document.getElementById('swipeHintText').textContent = t('swipeHint');
-  document.getElementById('historySearchInput').placeholder = t('historyPlaceholder');
-  document.querySelector('.tab-btn[data-view="flow"]').textContent = t('tabFlow');
-  document.querySelector('.tab-btn[data-view="history"]').textContent = t('tabHistory');
-  updateOnlineIndicator();
-  if (document.getElementById('historyView').classList.contains('active')) renderHistory();
-}
-
-// =====================================================================
-// 10. ЛОГИКА ПОТОКА
-// =====================================================================
+// ========================================================================
+// 11. ЛОГИКА ПОТОКА
+// ========================================================================
 async function searchFlow() {
   const q = els.input.value.trim();
   if (!q) {
@@ -626,27 +697,18 @@ async function searchFlow() {
   renderCarousel(els.serendipityCards, world.ser, true);
 }
 
-async function searchHistory() {
-  const q = els.historySearch.value.trim();
-  if (!q) { renderHistory(); return; }
-  const qVec = await Engine.embed(q);
-  const scored = MyNotes.data.map(note => {
-    const v = Engine.cache.get(note.id);
-    return v ? { ...note, score: Vec.cosine(qVec, v) } : null;
-  }).filter(n => n && n.score > Settings.threshold).sort((a, b) => b.score - a.score);
-  renderHistory(scored);
-}
-
 async function saveNote(share = false) {
   const text = els.input.value.trim();
   if (!text) return;
   const note = MyNotes.add(text);
   await Engine.cacheNote(note.id, text);
-  let publishStatus = null;
+
+  let publishResult = null;
   if (share) {
     const vec = await Engine.embed(text);
-    publishStatus = await World.add(Array.from(vec), text, note.id);
-    // анимация звёздочки
+    publishResult = await World.add(Array.from(vec), text, note.id);
+
+    // Анимация звёздочки
     const container = document.getElementById('thoughtContainer');
     const rect = container.getBoundingClientRect();
     const star = document.createElement('div');
@@ -656,18 +718,19 @@ async function saveNote(share = false) {
     requestAnimationFrame(() => { star.style.transform = 'translateY(-200px) scale(0)'; star.style.opacity = '0'; });
     setTimeout(() => star.remove(), 1000);
   }
+
   els.input.value = '';
   await searchFlow();
-  // Статус после сохранения
-  if (share && publishStatus) {
-    els.statusMsg.textContent = publishStatus.mode === 'online' ? t('publishedOnline') : t('publishedLocal');
-    updateOnlineIndicator();
+
+  // Уведомление
+  if (share && publishResult) {
+    toast(publishResult.publishedOnline ? t('publishedOnline') : t('publishedLocal'));
   }
 }
 
-// =====================================================================
-// 11. ЖЕСТЫ И ВКЛАДКИ
-// =====================================================================
+// ========================================================================
+// 12. ЖЕСТЫ И ВКЛАДКИ
+// ========================================================================
 els.input.addEventListener('input', () => {
   els.swipeHint.classList.toggle('visible', els.input.value.trim().length > 0);
 });
@@ -676,7 +739,8 @@ let touchY = 0;
 els.input.addEventListener('touchstart', e => touchY = e.touches[0].clientY);
 els.input.addEventListener('touchend', e => {
   if (touchY - e.changedTouches[0].clientY > 60 && els.input.value.trim()) {
-    e.preventDefault(); saveNote(true);
+    e.preventDefault();
+    saveNote(true);
   }
 });
 
@@ -701,9 +765,9 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
   });
 });
 
-// =====================================================================
-// 12. КЛИКИ (волны, редактирование, удаление)
-// =====================================================================
+// ========================================================================
+// 13. КЛИКИ (волны, редактирование, удаление)
+// ========================================================================
 document.addEventListener('click', async e => {
   const waveBtn = e.target.closest('.wave-btn');
   if (waveBtn) {
@@ -753,15 +817,16 @@ document.addEventListener('click', async e => {
   }
 });
 
-// =====================================================================
-// 13. КАПСУЛЫ (экспорт/импорт)
-// =====================================================================
+// ========================================================================
+// 14. КАПСУЛЫ
+// ========================================================================
 function exportCapsule() {
   const capsule = { version: 1, notes: MyNotes.data.map(n => ({ id: n.id, text: n.text, date: n.date, editedAt: n.editedAt })) };
   const blob = new Blob([JSON.stringify(capsule)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'noosphere.capsule'; a.click();
+  a.download = 'noosphere.capsule';
+  a.click();
 }
 async function importCapsule(file) {
   try {
@@ -772,13 +837,13 @@ async function importCapsule(file) {
     for (const n of newNotes) MyNotes.add(n.text, n.id, n.date, n.editedAt);
     for (const n of newNotes) await Engine.cacheNote(n.id, n.text);
     renderHistory(); searchFlow();
-    alert(t('importSuccess', { n: newNotes.length }));
-  } catch (e) { alert('Ошибка: ' + e.message); }
+    toast(t('importSuccess', { n: newNotes.length }));
+  } catch (e) { toast('Ошибка: ' + e.message); }
 }
 
-// =====================================================================
-// 14. НАСТРОЙКИ UI
-// =====================================================================
+// ========================================================================
+// 15. НАСТРОЙКИ UI
+// ========================================================================
 function syncSettingsUI() {
   els.thresholdSl.value = Settings.threshold;
   els.thresholdVal.textContent = Settings.threshold.toFixed(2);
@@ -798,7 +863,12 @@ function applySettings(skipSearch = true) {
   Settings.maxResults = +els.maxResSel.value;
   Settings.theme = els.themeSelect.value;
   Settings.lang = els.langSelect.value;
-  Settings.setProxyUrl(els.proxyUrlInput.value.trim() || CONFIG.DEFAULT_PROXY);
+  const newProxy = els.proxyUrlInput.value.trim();
+  if (newProxy && newProxy !== Settings.getProxyUrl()) {
+    Settings.setProxyUrl(newProxy);
+    Qdrant.online = null; // перепроверим при следующем запросе
+    Qdrant.checkHealth();
+  }
   Settings.save();
   if (lang !== Settings.lang) { lang = Settings.lang; updateUI(); }
   applyTheme(Settings.theme);
@@ -808,9 +878,11 @@ function applySettings(skipSearch = true) {
 function resetAll() {
   if (!confirm(t('resetConfirm'))) return;
   MyNotes.clear(); World.clear(); Engine.cache.clear();
-  Object.assign(Settings, DEFAULT_SETTINGS);
+  Object.assign(Settings, DEFAULT);
   Settings.save();
-  syncSettingsUI(); lang = Settings.lang; updateUI();
+  syncSettingsUI();
+  lang = Settings.lang;
+  updateUI();
   applyTheme(Settings.theme);
   els.input.value = '';
   searchFlow(); renderHistory();
@@ -818,26 +890,18 @@ function resetAll() {
 }
 
 async function rebuildVectors() {
-  els.rebuildBtn.disabled = true; els.rebuildBtn.textContent = '...';
+  els.rebuildBtn.disabled = true;
+  els.rebuildBtn.textContent = '...';
   await Engine.reindex();
   els.rebuildBtn.textContent = t('rebuildVectors');
   els.rebuildBtn.disabled = false;
   els.overlay.classList.remove('open'); els.panel.classList.remove('open');
-  alert(t('rebuildDone'));
+  toast(t('rebuildDone'));
 }
 
-async function syncWorld() {
-  els.syncBtn.disabled = true; els.syncBtn.textContent = '...';
-  const ok = await Qdrant.checkHealth();
-  updateOnlineIndicator();
-  els.syncBtn.textContent = t('syncWorld');
-  els.syncBtn.disabled = false;
-  els.statusMsg.textContent = ok ? '✓ Мир доступен' : '✗ Мир недоступен, работаем локально';
-}
-
-// =====================================================================
-// 15. СТАРТ
-// =====================================================================
+// ========================================================================
+// 16. СТАРТ
+// ========================================================================
 (async () => {
   Settings.load(); MyNotes.load(); World.load();
   lang = Settings.lang;
@@ -850,17 +914,10 @@ async function syncWorld() {
 
   try {
     await Engine.init();
-    // Проверяем доступность Qdrant в фоне
-    Qdrant.checkHealth().then(ok => {
-      updateOnlineIndicator();
-      els.statusMsg.textContent = t('ready');
-      els.saveBtn.disabled = false;
-    });
-    // Кнопку включаем сразу, не ждём Qdrant
-    setTimeout(() => {
-      els.statusMsg.textContent = t('ready');
-      els.saveBtn.disabled = false;
-    }, 500);
+    els.statusMsg.textContent = t('ready');
+    els.saveBtn.disabled = false;
+    // Проверяем Qdrant в фоне, не блокируя UI
+    Qdrant.checkHealth();
   } catch (e) {
     els.statusMsg.textContent = 'Ошибка загрузки модели';
     console.error(e);
@@ -874,7 +931,6 @@ async function syncWorld() {
   els.applyBtn.addEventListener('click', () => { applySettings(false); els.overlay.classList.remove('open'); els.panel.classList.remove('open'); });
   els.resetBtn.addEventListener('click', resetAll);
   els.rebuildBtn.addEventListener('click', rebuildVectors);
-  els.syncBtn.addEventListener('click', syncWorld);
   els.exportBtn.addEventListener('click', exportCapsule);
   els.importBtn.addEventListener('click', () => els.importFile.click());
   els.importFile.addEventListener('change', e => { if (e.target.files[0]) { importCapsule(e.target.files[0]); e.target.value = ''; } });
@@ -887,7 +943,13 @@ async function syncWorld() {
   els.historySearch.addEventListener('input', debounce(searchHistory, 300));
 })();
 
-function debounce(fn, ms) { let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); }; }
+function debounce(fn, ms) {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn(...args), ms);
+  };
+}
 </script>
 </body>
 </html>
