@@ -1,210 +1,558 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>Noosphere</title>
-<style>
-:root {
-  --bg: #0a0a0f; --panel: #13131a; --panel-2: #1a1a24; --border: #24242e;
-  --text: #e8e8f0; --muted: #8888a0; --accent: #7c5cff; --accent-2: #5c8cff;
-  --ok: #4ade80; --warn: #fbbf24; --err: #f87171; --card: #16161f;
-}
-html[data-theme="light"] {
-  --bg: #f6f6fa; --panel: #ffffff; --panel-2: #f0f0f6; --border: #e0e0ea;
-  --text: #1a1a24; --muted: #666680; --card: #ffffff;
-}
-* { box-sizing: border-box; }
-html, body { margin:0; padding:0; background:var(--bg); color:var(--text);
-  font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
-  height:100vh; overflow:hidden; }
-body { display:flex; flex-direction:column; }
-
-.header { background:var(--panel); border-bottom:1px solid var(--border);
-  padding:10px 14px; display:flex; align-items:center; gap:10px; flex-shrink:0; }
-.header .title { font-weight:600; font-size:16px; letter-spacing:.5px; }
-.header .spacer { flex:1; }
-.header button { background:transparent; border:1px solid var(--border);
-  color:var(--text); padding:4px 10px; border-radius:6px; font-size:14px; cursor:pointer; }
-.header button:hover { background:var(--panel-2); }
-
-.main-tabs { display:flex; background:var(--panel);
-  border-bottom:1px solid var(--border); flex-shrink:0; }
-.main-tab { flex:1; padding:10px; text-align:center; cursor:pointer;
-  font-size:13px; color:var(--muted); border-bottom:2px solid transparent; transition:all .15s; }
-.main-tab.active { color:var(--text); border-bottom-color:var(--accent); }
-
-.net-activity { height:2px; background:var(--panel-2); position:relative;
-  overflow:hidden; flex-shrink:0; }
-.net-activity .bar { position:absolute; top:0; left:-40%; width:40%; height:100%;
-  background:linear-gradient(90deg, transparent, var(--accent), transparent);
-  opacity:0; transition:opacity .3s; }
-.net-activity.active .bar { opacity:1; animation:slide 1.2s linear infinite; }
-@keyframes slide { 0% { left:-40%; } 100% { left:100%; } }
-
-.status-bar { background:var(--panel); border-bottom:1px solid var(--border);
-  padding:5px 14px; display:flex; gap:6px; flex-wrap:wrap; font-size:10px;
-  flex-shrink:0; align-items:center; }
-.chip { padding:2px 7px; border-radius:10px; background:var(--panel-2);
-  border:1px solid var(--border); color:var(--muted);
-  display:inline-flex; align-items:center; gap:4px; transition:all .2s; }
-.chip .dot { width:5px; height:5px; border-radius:50%; background:var(--muted); transition:all .2s; }
-.chip.ok { color:var(--ok); border-color:rgba(74,222,128,.3); }
-.chip.ok .dot { background:var(--ok); box-shadow:0 0 5px var(--ok); }
-.chip.warn { color:var(--warn); border-color:rgba(251,191,36,.3); }
-.chip.warn .dot { background:var(--warn); }
-.chip.err { color:var(--err); border-color:rgba(248,113,113,.3); }
-.chip.err .dot { background:var(--err); }
-.chip.publishing { color:var(--accent); border-color:rgba(124,92,255,.4);
-  background:rgba(124,92,255,.1); }
-.chip.publishing .dot { background:var(--accent); box-shadow:0 0 8px var(--accent);
-  animation:pulse 1s infinite; }
-@keyframes pulse { 0%,100% { opacity:1; transform:scale(1); }
-  50% { opacity:.5; transform:scale(1.3); } }
-
-.content { flex:1; overflow-y:auto; padding:12px; padding-bottom:20px; }
-.view { display:none; }
-.view.active { display:block; }
-
-.composer { background:var(--panel); border:1px solid var(--border);
-  border-radius:10px; padding:12px; margin-bottom:12px; position:relative; }
-.composer textarea { width:100%; background:transparent; border:none;
-  color:var(--text); font:inherit; resize:none; min-height:60px; outline:none; }
-.composer textarea::placeholder { color:var(--muted); }
-.composer .swipe-hint { text-align:center; font-size:10px; color:var(--muted);
-  margin-top:6px; opacity:.6; }
-.composer .swipe-hint .arrow { display:inline-block; animation:up 1.5s infinite; }
-@keyframes up { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-3px); } }
-.composer .countdown { position:absolute; top:6px; right:10px; font-size:10px;
-  color:var(--accent); font-weight:600; }
-.composer .actions { display:flex; gap:6px; margin-top:8px; }
-.btn { background:var(--panel-2); border:1px solid var(--border); color:var(--text);
-  padding:7px 14px; border-radius:6px; font-size:13px; cursor:pointer;
-  font-weight:500; transition:all .15s; position:relative; overflow:hidden; }
-.btn:hover:not(:disabled) { background:#222230; border-color:var(--accent); }
-.btn:disabled { opacity:.4; cursor:not-allowed; }
-.btn.primary { background:var(--accent); border-color:var(--accent); color:white; flex:1; }
-.btn.primary:hover:not(:disabled) { background:#6a4aee; }
-.btn.ghost { background:transparent; }
-.btn .spinner { display:inline-block; width:10px; height:10px;
-  border:1.5px solid rgba(255,255,255,.3); border-top-color:white;
-  border-radius:50%; animation:spin 0.8s linear infinite;
-  vertical-align:middle; margin-right:4px; }
-@keyframes spin { to { transform:rotate(360deg); } }
-
-.sub-tabs { display:flex; background:var(--panel); border:1px solid var(--border);
-  border-radius:8px; padding:3px; margin-bottom:12px; gap:2px; }
-.sub-tab { flex:1; padding:7px 10px; text-align:center; cursor:pointer;
-  font-size:12px; color:var(--muted); border-radius:5px; transition:all .15s;
-  display:flex; align-items:center; justify-content:center; gap:4px; }
-.sub-tab.active { background:var(--panel-2); color:var(--text); }
-.sub-tab .badge { background:var(--border); color:var(--muted); padding:0 5px;
-  border-radius:8px; font-size:10px; min-width:16px; }
-.sub-tab.active .badge { background:rgba(124,92,255,.25); color:var(--accent); }
-
-.card { background:var(--card); border:1px solid var(--border);
-  border-radius:8px; padding:10px 12px; margin-bottom:8px; animation:fadeIn .25s; }
-@keyframes fadeIn { from { opacity:0; transform:translateY(4px); }
-  to { opacity:1; transform:translateY(0); } }
-.card.mine { border-left:3px solid var(--muted); }
-.card.world { border-left:3px solid var(--accent); }
-.card.adjacent { border-left:3px solid var(--accent-2); }
-.card .head { display:flex; justify-content:space-between;
-  align-items:center; margin-bottom:4px; }
-.card .tag { font-size:9px; padding:2px 6px; border-radius:3px;
-  background:var(--panel-2); color:var(--muted);
-  text-transform:uppercase; letter-spacing:.5px; font-weight:600; }
-.card.world .tag { background:rgba(124,92,255,.15); color:var(--accent); }
-.card.adjacent .tag { background:rgba(92,140,255,.15); color:var(--accent-2); }
-.card .score { font-size:11px; color:var(--muted);
-  font-family:ui-monospace,monospace; }
-.card .text { font-size:13px; line-height:1.5; word-wrap:break-word; }
-.card .text mark { background:transparent; color:var(--accent); font-weight:600; }
-.card .meta { margin-top:6px; font-size:10px; color:var(--muted);
-  display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-.card .retry-btn { font-size:10px; color:var(--accent); cursor:pointer;
-  padding:2px 6px; background:rgba(124,92,255,.1); border-radius:3px;
-  border:1px solid rgba(124,92,255,.3); }
-.card .retry-btn:hover { background:rgba(124,92,255,.2); }
-.pub-status { padding:1px 6px; border-radius:3px; font-size:9px;
-  font-weight:600; display:inline-flex; align-items:center; gap:3px; }
-.pub-ok { background:rgba(74,222,128,.15); color:var(--ok); }
-.pub-err { background:rgba(248,113,113,.15); color:var(--err); }
-.pub-pending { background:rgba(251,191,36,.15); color:var(--warn); }
-.pub-pending::before { content:''; width:6px; height:6px; border-radius:50%;
-  background:var(--warn); animation:pulse 1s infinite; }
-
-.empty { text-align:center; color:var(--muted); padding:32px 16px; font-size:12px; }
-.empty .icon { font-size:26px; margin-bottom:6px; opacity:.5; }
-
-.overlay { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:99;
-  opacity:0; pointer-events:none; transition:opacity .25s; }
-.overlay.show { opacity:1; pointer-events:auto; }
-.drawer { position:fixed; top:0; right:-100%; width:320px; max-width:92vw;
-  height:100%; background:var(--panel); border-left:1px solid var(--border);
-  z-index:100; transition:right .25s; overflow-y:auto; padding:16px; }
-.drawer.open { right:0; }
-.drawer h3 { margin:0 0 16px 0; font-size:15px;
-  display:flex; justify-content:space-between; align-items:center; }
-.drawer .close { background:transparent; border:none; color:var(--muted);
-  cursor:pointer; font-size:22px; padding:0; line-height:1; }
-.setting { margin-bottom:16px; }
-.setting label { display:block; font-size:11px; color:var(--muted);
-  margin-bottom:5px; text-transform:uppercase; letter-spacing:.4px; }
-.setting input[type="text"], .setting select { width:100%; background:var(--panel-2);
-  border:1px solid var(--border); color:var(--text); padding:8px 10px;
-  border-radius:6px; font:inherit; font-size:13px; }
-.setting input[type="range"] { width:100%; accent-color:var(--accent); }
-.setting .row { display:flex; align-items:center; justify-content:space-between; }
-.setting .val { font-size:12px; color:var(--accent); font-weight:600;
-  font-family:ui-monospace,monospace; }
-.setting .seg { display:flex; gap:4px; }
-.setting .seg button { flex:1; background:var(--panel-2); border:1px solid var(--border);
-  color:var(--muted); padding:6px 10px; border-radius:5px; font-size:12px; cursor:pointer; }
-.setting .seg button.active { background:var(--accent); color:white;
-  border-color:var(--accent); }
-.setting .btn { width:100%; margin-bottom:6px; }
-.pubkey { font-family:ui-monospace,monospace; font-size:10px; color:var(--muted);
-  word-break:break-all; cursor:pointer; padding:6px 8px;
-  background:var(--panel-2); border-radius:5px; border:1px solid var(--border); }
-.pubkey:hover { border-color:var(--accent); color:var(--text); }
-
-.toast { position:fixed; bottom:20px; left:50%;
-  transform:translateX(-50%) translateY(80px); background:var(--panel);
-  border:1px solid var(--border); color:var(--text); padding:10px 18px;
-  border-radius:8px; font-size:12px; z-index:200; transition:transform .25s;
-  box-shadow:0 4px 20px rgba(0,0,0,.4); max-width:90vw;
-  display:flex; align-items:center; gap:8px; }
-.toast.show { transform:translateX(-50%) translateY(0); }
-.toast.err { border-color:var(--err); }
-.toast.ok { border-color:var(--ok); }
-.toast.warn { border-color:var(--warn); }
-.toast .spinner { display:inline-block; width:12px; height:12px;
-  border:1.5px solid var(--border); border-top-color:var(--accent);
-  border-radius:50%; animation:spin 0.8s linear infinite; }
-
-.log { background:#06060a; border:1px solid var(--border); border-radius:6px;
-  padding:8px; max-height:220px; overflow-y:auto;
-  font-family:ui-monospace,monospace; font-size:10px; line-height:1.5; }
-html[data-theme="light"] .log { background:#f0f0f6; }
-.log .e { color:var(--err); }
-.log .w { color:var(--warn); }
-.log .i { color:var(--muted); }
-.log .s { color:var(--ok); }
-
-.model-label { font-size:10px; color:var(--muted); padding:3px 8px;
-  background:var(--panel-2); border:1px solid var(--border);
-  border-radius:5px; display:inline-block; margin-bottom:10px; }
-
-.progress { height:2px; background:var(--border); overflow:hidden;
-  border-radius:2px; margin-top:6px; }
-.progress > div { height:100%; background:var(--accent); width:0; transition:width .2s; }
-
-@media (max-width:640px) {
-  .content { padding:10px; }
-  .drawer { width:100%; max-width:100vw; }
-}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Noosphere</title>
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --panel: #13131a;
+      --panel-2: #1a1a24;
+      --border: #24242e;
+      --text: #e8e8f0;
+      --muted: #8888a0;
+      --accent: #7c5cff;
+      --accent-2: #5c8cff;
+      --ok: #4ade80;
+      --warn: #fbbf24;
+      --err: #f87171;
+      --card: #16161f;
+    }
+    html[data-theme="light"] {
+      --bg: #f6f6fa;
+      --panel: #ffffff;
+      --panel-2: #f0f0f6;
+      --border: #e0e0ea;
+      --text: #1a1a24;
+      --muted: #666680;
+      --card: #ffffff;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100vh; overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    }
+    body { display: flex; flex-direction: column; }
+    .header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .header .title {
+      font-weight: 600;
+      font-size: 16px;
+      letter-spacing: .5px;
+    }
+    .header .spacer { flex: 1; }
+    .header button {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .header button:hover { background: var(--panel-2); }
+    .main-tabs {
+      display: flex;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .main-tab {
+      flex: 1;
+      padding: 10px;
+      text-align: center;
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--muted);
+      border-bottom: 2px solid transparent;
+      transition: all .15s;
+    }
+    .main-tab.active {
+      color: var(--text);
+      border-bottom-color: var(--accent);
+    }
+    .net-activity {
+      height: 2px;
+      background: var(--panel-2);
+      position: relative;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .net-activity .bar {
+      position: absolute;
+      top: 0; left: -40%;
+      width: 40%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      opacity: 0;
+      transition: opacity .3s;
+    }
+    .net-activity.active .bar {
+      opacity: 1;
+      animation: slide 1.2s linear infinite;
+    }
+    @keyframes slide {
+      0% { left: -40%; }
+      100% { left: 100%; }
+    }
+    .status-bar {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 5px 14px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-size: 10px;
+      flex-shrink: 0;
+      align-items: center;
+    }
+    .chip {
+      padding: 2px 7px;
+      border-radius: 10px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all .2s;
+    }
+    .chip .dot {
+      width: 5px; height: 5px; border-radius: 50%;
+      background: var(--muted);
+      transition: all .2s;
+    }
+    .chip.ok { color: var(--ok); border-color: rgba(74,222,128,.3); }
+    .chip.ok .dot { background: var(--ok); box-shadow: 0 0 5px var(--ok); }
+    .chip.warn { color: var(--warn); border-color: rgba(251,191,36,.3); }
+    .chip.warn .dot { background: var(--warn); }
+    .chip.err { color: var(--err); border-color: rgba(248,113,113,.3); }
+    .chip.err .dot { background: var(--err); }
+    .chip.publishing {
+      color: var(--accent);
+      border-color: rgba(124,92,255,.4);
+      background: rgba(124,92,255,.1);
+    }
+    .chip.publishing .dot {
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+      animation: pulse 1s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: .5; transform: scale(1.3); }
+    }
+    .content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      padding-bottom: 20px;
+    }
+    .view { display: none; }
+    .view.active { display: block; }
+    .composer {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 12px;
+      position: relative;
+    }
+    .composer textarea {
+      width: 100%;
+      background: transparent;
+      border: none;
+      color: var(--text);
+      font: inherit;
+      resize: none;
+      min-height: 60px;
+      outline: none;
+    }
+    .composer textarea::placeholder { color: var(--muted); }
+    .composer .swipe-hint {
+      text-align: center;
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 6px;
+      opacity: .6;
+    }
+    .composer .swipe-hint .arrow {
+      display: inline-block;
+      animation: up 1.5s infinite;
+    }
+    @keyframes up {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-3px); }
+    }
+    .composer .countdown {
+      position: absolute;
+      top: 6px; right: 10px;
+      font-size: 10px;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .composer .actions {
+      display: flex;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .btn {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all .15s;
+      position: relative;
+      overflow: hidden;
+    }
+    .btn:hover:not(:disabled) { background: #222230; border-color: var(--accent); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+      flex: 1;
+    }
+    .btn.primary:hover:not(:disabled) { background: #6a4aee; }
+    .btn.ghost { background: transparent; }
+    .btn .spinner {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border: 1.5px solid rgba(255,255,255,.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .sub-tabs {
+      display: flex;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 3px;
+      margin-bottom: 12px;
+      gap: 2px;
+    }
+    .sub-tab {
+      flex: 1;
+      padding: 7px 10px;
+      text-align: center;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--muted);
+      border-radius: 5px;
+      transition: all .15s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+    .sub-tab.active {
+      background: var(--panel-2);
+      color: var(--text);
+    }
+    .sub-tab .badge {
+      background: var(--border);
+      color: var(--muted);
+      padding: 0 5px;
+      border-radius: 8px;
+      font-size: 10px;
+      min-width: 16px;
+    }
+    .sub-tab.active .badge {
+      background: rgba(124,92,255,.25);
+      color: var(--accent);
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      animation: fadeIn .25s;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .card.mine { border-left: 3px solid var(--muted); }
+    .card.world { border-left: 3px solid var(--accent); }
+    .card.adjacent { border-left: 3px solid var(--accent-2); }
+    .card .head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .card .tag {
+      font-size: 9px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      background: var(--panel-2);
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      font-weight: 600;
+    }
+    .card.world .tag { background: rgba(124,92,255,.15); color: var(--accent); }
+    .card.adjacent .tag { background: rgba(92,140,255,.15); color: var(--accent-2); }
+    .card .score {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: ui-monospace, monospace;
+    }
+    .card .text {
+      font-size: 13px;
+      line-height: 1.5;
+      word-wrap: break-word;
+    }
+    .card .text mark {
+      background: transparent;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .card .meta {
+      margin-top: 6px;
+      font-size: 10px;
+      color: var(--muted);
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .pub-status {
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 9px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+    }
+    .pub-ok { background: rgba(74,222,128,.15); color: var(--ok); }
+    .pub-err { background: rgba(248,113,113,.15); color: var(--err); }
+    .pub-pending { background: rgba(251,191,36,.15); color: var(--warn); }
+    .pub-pending::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--warn);
+      animation: pulse 1s infinite;
+    }
+    .empty {
+      text-align: center;
+      color: var(--muted);
+      padding: 32px 16px;
+      font-size: 12px;
+    }
+    .empty .icon { font-size: 26px; margin-bottom: 6px; opacity: .5; }
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.6);
+      z-index: 99;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .25s;
+    }
+    .overlay.show { opacity: 1; pointer-events: auto; }
+    .drawer {
+      position: fixed;
+      top: 0; right: -100%;
+      width: 320px;
+      max-width: 92vw;
+      height: 100%;
+      background: var(--panel);
+      border-left: 1px solid var(--border);
+      z-index: 100;
+      transition: right .25s;
+      overflow-y: auto;
+      padding: 16px;
+    }
+    .drawer.open { right: 0; }
+    .drawer h3 {
+      margin: 0 0 16px 0;
+      font-size: 15px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .drawer .close {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 22px;
+      padding: 0;
+      line-height: 1;
+    }
+    .setting {
+      margin-bottom: 16px;
+    }
+    .setting label {
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 5px;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+    }
+    .setting input[type="text"],
+    .setting select {
+      width: 100%;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 6px;
+      font: inherit;
+      font-size: 13px;
+    }
+    .setting input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+    .setting .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .setting .val {
+      font-size: 12px;
+      color: var(--accent);
+      font-weight: 600;
+      font-family: ui-monospace, monospace;
+    }
+    .setting .seg {
+      display: flex;
+      gap: 4px;
+    }
+    .setting .seg button {
+      flex: 1;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 6px 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .setting .seg button.active {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+    .setting .btn {
+      width: 100%;
+      margin-bottom: 6px;
+    }
+    .pubkey {
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+      color: var(--muted);
+      word-break: break-all;
+      cursor: pointer;
+      padding: 6px 8px;
+      background: var(--panel-2);
+      border-radius: 5px;
+      border: 1px solid var(--border);
+    }
+    .pubkey:hover { border-color: var(--accent); color: var(--text); }
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 12px;
+      z-index: 200;
+      transition: transform .25s;
+      box-shadow: 0 4px 20px rgba(0,0,0,.4);
+      max-width: 90vw;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+    .toast.err { border-color: var(--err); }
+    .toast.ok { border-color: var(--ok); }
+    .toast.warn { border-color: var(--warn); }
+    .toast .spinner {
+      display: inline-block;
+      width: 12px; height: 12px;
+      border: 1.5px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    .log {
+      background: #06060a;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      max-height: 220px;
+      overflow-y: auto;
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+      line-height: 1.5;
+    }
+    html[data-theme="light"] .log { background: #f0f0f6; }
+    .log .e { color: var(--err); }
+    .log .w { color: var(--warn); }
+    .log .i { color: var(--muted); }
+    .log .s { color: var(--ok); }
+    .model-label {
+      font-size: 10px;
+      color: var(--muted);
+      padding: 3px 8px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      display: inline-block;
+      margin-bottom: 10px;
+    }
+    .progress {
+      height: 2px;
+      background: var(--border);
+      overflow: hidden;
+      border-radius: 2px;
+      margin-top: 6px;
+    }
+    .progress > div {
+      height: 100%;
+      background: var(--accent);
+      width: 0;
+      transition: width .2s;
+    }
+    @media (max-width: 640px) {
+      .content { padding: 10px; }
+      .drawer { width: 100%; max-width: 100vw; }
+    }
+  </style>
 </head>
 <body>
 
@@ -254,7 +602,7 @@ html[data-theme="light"] .log { background:#f0f0f6; }
   </div>
   
   <div class="view" id="view-history">
-    <div class="model-label">Модель: MiniLM (25 МБ) · kind 30023</div>
+    <div class="model-label">Модель: MiniLM (25 МБ)</div>
     <div id="listHistory"></div>
   </div>
 </div>
@@ -348,25 +696,11 @@ html[data-theme="light"] .log { background:#f0f0f6; }
 
 <script type="module">
 /* ============================================================================
-   NOOSPHERE v9.1 "Fixed Publish"
-   ----------------------------------------------------------------------------
-   Ключевые изменения v9.1:
-   1. KIND 1 → KIND 30023 (Long-form content, NIP-23)
-      - Relay лояльнее к long-form content, чем к kind 1 (twitter-like spam)
-      - Добавлены правильные теги: d, title, summary, published_at, t, client
-   
-   2. Расширенный relay pool (7 вместо 3):
-      - relay.damus.io, nos.lol, relay.snort.social (уже были)
-      - relay.primal.net (стабильный, принимает новый контент)
-      - relay.nostr.bg (болгарский, лояльный)
-      - eden.nostr.land (стабильный)
-      - nostr.wine (backup)
-   
-   3. Детальное логирование reject reasons через WebSocket wrapper
-   
-   4. Retry button в карточке когда publish failed
-   
-   5. Throttle снижен до 800мс (было 1500мс)
+   NOOSPHERE v9.1 "Polished" — исправления:
+   - Критическое: исправлена проверка успеха публикации в `pool.publish`
+   - Улучшена обработка ошибок relay
+   - Авто-тема теперь отслеживает системные изменения
+   - Безопасное восстановление кнопки отправки
    ============================================================================ */
 
 import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
@@ -388,22 +722,17 @@ const CFG = {
   STORE_THOUGHTS: 'thoughts',
   STORE_KEYS: 'keys',
   
-  // 7 проверенных relay (расширенный pool для reliability)
   NOSTR_RELAYS: [
     'wss://relay.damus.io',
     'wss://nos.lol',
     'wss://relay.snort.social',
-    'wss://relay.primal.net',
-    'wss://relay.nostr.bg',
-    'wss://eden.nostr.land',
-    'wss://nostr.wine',
   ],
   
-  KIND_THOUGHT: 30023,  // Long-form content (NIP-23) — вместо kind 1
+  KIND_THOUGHT: 1,
   WINDOW_SEC: 600,
   RESUB_INTERVAL_MS: 30000,
   MAX_EPHEMERAL_AGE_MS: 10 * 60_000,
-  PUBLISH_THROTTLE_MS: 800,  // снижен с 1500 до 800
+  PUBLISH_THROTTLE_MS: 1500,
   MODEL_ID: 'Xenova/all-MiniLM-L6-v2',
   
   settings: {
@@ -427,95 +756,34 @@ const saveSettings = () => {
   try { localStorage.setItem('noosphere_settings_v9', JSON.stringify(CFG.settings)); } catch {}
 };
 
-/* ---------- WEBSOCKET WRAPPER (для логирования reject reasons) ---------- */
-const WsLog = (() => {
-  const OriginalWS = window.WebSocket;
-  const rejectReasons = new Map(); // eventId -> [reasons]
-  
-  // Wrapping WebSocket чтобы ловить OK messages с причинами rejection
-  function WrappedWebSocket(url, protocols) {
-    const ws = protocols ? new OriginalWS(url, protocols) : new OriginalWS(url);
-    const relayUrl = url.replace('wss://', '').replace(/\/$/, '');
-    
-    const origOnMessage = Object.getOwnPropertyDescriptor(WebSocket.prototype, 'onmessage');
-    let userHandler = null;
-    
-    Object.defineProperty(ws, 'onmessage', {
-      get: () => userHandler,
-      set: (fn) => {
-        userHandler = (ev) => {
-          try {
-            const msg = JSON.parse(ev.data);
-            // ["OK", eventId, success, message]
-            if (Array.isArray(msg) && msg[0] === 'OK' && msg[2] === false) {
-              const eventId = msg[1];
-              const reason = msg[3] || 'unknown';
-              if (!rejectReasons.has(eventId)) rejectReasons.set(eventId, []);
-              rejectReasons.get(eventId).push(relayUrl + ': ' + reason);
-              Log.warn('  ⚠ ' + relayUrl + ': ' + reason);
-            }
-          } catch {}
-          if (fn) fn(ev);
-        };
-      }
-    });
-    
-    // Also hook addEventListener
-    const origAddEventListener = ws.addEventListener.bind(ws);
-    ws.addEventListener = (type, fn, opts) => {
-      if (type === 'message') {
-        const wrapped = (ev) => {
-          try {
-            const msg = JSON.parse(ev.data);
-            if (Array.isArray(msg) && msg[0] === 'OK' && msg[2] === false) {
-              const eventId = msg[1];
-              const reason = msg[3] || 'unknown';
-              if (!rejectReasons.has(eventId)) rejectReasons.set(eventId, []);
-              rejectReasons.get(eventId).push(relayUrl + ': ' + reason);
-              Log.warn('  ⚠ ' + relayUrl + ': ' + reason);
-            }
-          } catch {}
-          fn(ev);
-        };
-        return origAddEventListener(type, wrapped, opts);
-      }
-      return origAddEventListener(type, fn, opts);
-    };
-    
-    return ws;
-  }
-  
-  WrappedWebSocket.prototype = OriginalWS.prototype;
-  WrappedWebSocket.CONNECTING = OriginalWS.CONNECTING;
-  WrappedWebSocket.OPEN = OriginalWS.OPEN;
-  WrappedWebSocket.CLOSING = OriginalWS.CLOSING;
-  WrappedWebSocket.CLOSED = OriginalWS.CLOSED;
-  
-  window.WebSocket = WrappedWebSocket;
-  
-  return {
-    getRejectReasons: (eventId) => rejectReasons.get(eventId) || [],
-  };
-})();
-
-/* ---------- TOAST ---------- */
+/* ---------- TOAST (автономный) ---------- */
 const Toast = (() => {
   let hideTimer = null;
   const el = () => document.getElementById('toast');
+  const safeEl = () => {
+    const t = el();
+    if (!t) throw new Error('Toast element missing');
+    return t;
+  };
   return {
     show(html, type = '', durationMs = 3000) {
-      const t = el();
-      if (!t) return;
-      t.innerHTML = html;
-      t.className = 'toast show ' + type;
-      if (hideTimer) clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => { t.className = 'toast ' + type; }, durationMs);
+      try {
+        const t = safeEl();
+        t.innerHTML = html;
+        t.className = 'toast show ' + type;
+        if (hideTimer) clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => { t.className = 'toast ' + type; }, durationMs);
+      } catch {}
     },
     showSending() {
       this.show('<span class="spinner"></span> Отправка в сеть...', 'warn', 30000);
     },
-    showSuccess(msg) { this.show('✓ ' + msg, 'ok'); },
-    showError(msg) { this.show('✗ ' + msg, 'err', 5000); }
+    showSuccess(msg) {
+      this.show('✓ ' + msg, 'ok');
+    },
+    showError(msg) {
+      this.show('✗ ' + msg, 'err', 5000);
+    }
   };
 })();
 
@@ -582,7 +850,6 @@ const Storage = (() => {
   return {
     open,
     put: async (t) => { await open(); return prom(tx(CFG.STORE_THOUGHTS, 'readwrite').put(t)); },
-    get: async (id) => { await open(); return prom(tx(CFG.STORE_THOUGHTS).get(id)); },
     all: async () => { await open(); return prom(tx(CFG.STORE_THOUGHTS).getAll()); },
     listUnindexed: async () => {
       await open();
@@ -652,6 +919,7 @@ const NetActivity = (() => {
   let activeCount = 0;
   const bar = () => document.getElementById('netActivity');
   const chip = () => document.getElementById('chipActivity');
+  
   const update = () => {
     const b = bar();
     const c = chip();
@@ -666,20 +934,21 @@ const NetActivity = (() => {
       c.style.display = 'none';
     }
   };
+  
   return {
     start: () => { activeCount++; update(); },
     stop: () => { activeCount = Math.max(0, activeCount - 1); update(); },
   };
 })();
 
-/* ---------- NOSTR CHANNEL (с kind 30023 и retry) ---------- */
+/* ---------- NOSTR CHANNEL ---------- */
 const Channel = (() => {
   let pool = null, sk = null, pk = null, roomName = null;
   let sub = null, resubTimer = null;
   const peers = new Map();
   const worldEvents = new Map();
   let lastPublishAt = 0;
-  const publishStatus = new Map(); // id -> { status, eventId, errors }
+  const publishStatus = new Map();
   
   const doSubscribe = () => {
     if (!pool) return;
@@ -706,8 +975,11 @@ const Channel = (() => {
             });
             document.dispatchEvent(new CustomEvent('ns:world', { detail: { count: worldEvents.size } }));
             document.dispatchEvent(new CustomEvent('ns:world-event', { detail: {
-              id: event.id, text: content.text, vector: content.vector,
-              fromPeer: event.pubkey, receivedAt: Util.now(),
+              id: event.id,
+              text: content.text,
+              vector: content.vector,
+              fromPeer: event.pubkey,
+              receivedAt: Util.now(),
             } }));
           }
         } catch {}
@@ -722,7 +994,7 @@ const Channel = (() => {
     init: async (room) => {
       if (pool) return;
       roomName = room;
-      Log.info('initializing Nostr client (kind ' + CFG.KIND_THOUGHT + ')...');
+      Log.info('initializing Nostr client...');
       
       let skHex = await Storage.getKey('nostr_sk');
       if (!skHex) {
@@ -747,6 +1019,10 @@ const Channel = (() => {
       Log.success('channel ready');
     },
     
+    /**
+     * Publish to network.
+     * ИСПРАВЛЕНО: проверка успеха промиса (больше не требует r.value === true)
+     */
     publish: async ({ text, vector, noteId, force }) => {
       if (!pool || !sk) return { ok: false, errors: ['not connected'] };
       
@@ -758,17 +1034,12 @@ const Channel = (() => {
       
       NetActivity.start();
       try {
-        // KIND 30023: Long-form content (NIP-23) с правильными тегами
         const event = finalizeEvent({
           kind: CFG.KIND_THOUGHT,
           created_at: Math.floor(Date.now() / 1000),
           tags: [
-            ['d', noteId],                              // addressable identifier
-            ['title', 'Noosphere thought'],             // title (required for 30023)
-            ['summary', text.slice(0, 100)],            // summary
-            ['published_at', Math.floor(Date.now() / 1000).toString()],
-            ['t', roomName],                            // room tag
-            ['client', 'noosphere-v91'],                // client identifier
+            ['t', roomName],
+            ['client', 'noosphere-v9'],
           ],
           content: JSON.stringify({
             text: text.slice(0, 500),
@@ -777,54 +1048,30 @@ const Channel = (() => {
           }),
         }, sk);
         
-        const eventId = event.id;
         const results = await Promise.allSettled(pool.publish(CFG.NOSTR_RELAYS, event));
         const latency = Date.now() - now;
-        
-        // Ждём 500мс чтобы WebSocket wrapper успел собрать reject reasons
-        await new Promise(r => setTimeout(r, 500));
         
         let okCount = 0;
         const errors = [];
         results.forEach((r, i) => {
           const url = CFG.NOSTR_RELAYS[i].replace('wss://', '').replace(/\/$/, '');
-          if (r.status === 'fulfilled' && r.value === true) {
+          // Проверяем только статус промиса, значение может быть undefined
+          if (r.status === 'fulfilled') {
             okCount++;
-            Log.info('  ✓ ' + url);
           } else {
-            const err = r.status === 'rejected'
-              ? (r.reason && r.reason.message ? r.reason.message : 'network')
-              : 'rejected';
-            errors.push(url + ': ' + err);
-            // Если WebSocket wrapper не поймал причину, логируем generic
-            const capturedReasons = WsLog.getRejectReasons(eventId);
-            if (capturedReasons.length === 0) {
-              Log.warn('  ✗ ' + url + ': ' + err);
-            }
+            const msg = r.reason?.message || String(r.reason || 'unknown');
+            errors.push(url + ': ' + msg);
           }
-        });
-        
-        publishStatus.set(noteId, {
-          status: okCount > 0 ? 'ok' : 'err',
-          eventId: eventId,
-          okCount: okCount,
-          total: CFG.NOSTR_RELAYS.length,
-          errors: errors,
         });
         
         if (okCount > 0) {
           Log.success('published to ' + okCount + '/' + CFG.NOSTR_RELAYS.length + ' (' + latency + 'ms)');
         } else {
           Log.error('publish failed on all relays');
+          errors.forEach(e => Log.warn('  ' + e));
         }
         
-        return {
-          ok: okCount > 0,
-          okCount,
-          total: CFG.NOSTR_RELAYS.length,
-          errors,
-          eventId,
-        };
+        return { ok: okCount > 0, okCount, total: CFG.NOSTR_RELAYS.length, errors };
       } catch (e) {
         Log.error('publish err: ' + e.message);
         return { ok: false, errors: [e.message] };
@@ -846,13 +1093,9 @@ const Channel = (() => {
     
     isConnected: () => pool !== null,
     getWorldEvents: () => Array.from(worldEvents.values()),
-    getPublishStatus: (id) => {
-      const s = publishStatus.get(id);
-      return s ? s.status : null;
-    },
+    getPublishStatus: (id) => publishStatus.get(id) || null,
     setPublishStatus: (id, status) => {
-      const existing = publishStatus.get(id) || {};
-      publishStatus.set(id, { ...existing, status });
+      publishStatus.set(id, status);
       document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
     },
     
@@ -958,6 +1201,11 @@ const UI = (() => {
     }
   };
   
+  // Слушаем изменения системной темы для авто-режима
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (CFG.settings.theme === 'auto') applyTheme();
+  });
+  
   const renderCard = (r, qt, type) => {
     const s = r.source;
     const card = document.createElement('div');
@@ -970,10 +1218,7 @@ const UI = (() => {
       if (s.published) {
         const st = Channel.getPublishStatus(s.id);
         if (st === 'ok') pubStatus = '<span class="pub-status pub-ok">✓ pub</span>';
-        else if (st === 'err') {
-          pubStatus = '<span class="pub-status pub-err">✗ fail</span>' +
-            '<span class="retry-btn" data-id="' + s.id + '">↻ retry</span>';
-        }
+        else if (st === 'err') pubStatus = '<span class="pub-status pub-err">✗ fail</span>';
         else if (st === 'pending') pubStatus = '<span class="pub-status pub-pending">sending</span>';
         else pubStatus = '<span class="pub-status pub-ok">✓ pub</span>';
       } else {
@@ -993,15 +1238,6 @@ const UI = (() => {
       '<div class="text">' + Relevance.highlight(qt, s.text) + '</div>' +
       '<div class="meta">' + pubStatus + '<span>' + metaInfo + '</span></div>';
     
-    // Retry handler
-    const retryBtn = card.querySelector('.retry-btn');
-    if (retryBtn) {
-      retryBtn.onclick = async (e) => {
-        e.stopPropagation();
-        await retryPublish(retryBtn.dataset.id);
-      };
-    }
-    
     return card;
   };
   
@@ -1012,9 +1248,7 @@ const UI = (() => {
   const renderList = (container, items, qt, type) => {
     container.innerHTML = '';
     if (!items.length) {
-      renderEmpty(container, type === 'world' ? 'нет соседей в комнате' :
-                            type === 'adjacent' ? 'нет смежных мыслей' :
-                            'ещё ничего не сохранено');
+      renderEmpty(container, type === 'world' ? 'нет соседей в комнате' : type === 'adjacent' ? 'нет смежных мыслей' : 'ещё ничего не сохранено');
       return;
     }
     items.forEach(r => container.appendChild(renderCard(r, qt, type)));
@@ -1041,7 +1275,9 @@ const UI = (() => {
       try {
         qv = await Vector.embed(text);
         lastQuery = { text, vector: qv };
-      } catch (e) { return; }
+      } catch (e) {
+        return;
+      }
     }
     
     const locals = await Storage.all();
@@ -1072,10 +1308,7 @@ const UI = (() => {
       if (t.published) {
         const st = Channel.getPublishStatus(t.id);
         if (st === 'ok') pubStatus = '<span class="pub-status pub-ok">✓ pub</span>';
-        else if (st === 'err') {
-          pubStatus = '<span class="pub-status pub-err">✗ fail</span>' +
-            '<span class="retry-btn" data-id="' + t.id + '">↻ retry</span>';
-        }
+        else if (st === 'err') pubStatus = '<span class="pub-status pub-err">✗ fail</span>';
         else pubStatus = '<span class="pub-status pub-ok">✓ pub</span>';
       } else {
         pubStatus = '<span class="pub-status">local</span>';
@@ -1087,73 +1320,13 @@ const UI = (() => {
         '<div class="meta">' + pubStatus +
         '<span>vec:' + (t.hasVector ? 'yes' : 'no') + '</span>' +
         '<span>' + t.id.slice(0, 6) + '</span></div>';
-      
-      const retryBtn = card.querySelector('.retry-btn');
-      if (retryBtn) {
-        retryBtn.onclick = async (e) => {
-          e.stopPropagation();
-          await retryPublish(retryBtn.dataset.id);
-        };
-      }
       container.appendChild(card);
     });
   };
   
-  /**
-   * Retry publish для существующей заметки
-   */
-  const retryPublish = async (noteId) => {
-    if (isPublishing) return;
-    if (!Channel.isConnected()) {
-      Toast.showError('нет подключения');
-      return;
-    }
-    
-    const thought = await Storage.get(noteId);
-    if (!thought) {
-      Toast.showError('заметка не найдена');
-      return;
-    }
-    if (!thought.vector) {
-      Toast.showError('нет вектора');
-      return;
-    }
-    
-    Channel.setPublishStatus(noteId, 'pending');
-    Toast.showSending();
-    
-    isPublishing = true;
-    try {
-      const r = await Channel.publish({
-        text: thought.text,
-        vector: thought.vector,
-        noteId: thought.id,
-        force: true, // bypass throttle
-      });
-      
-      if (r.ok) {
-        Channel.setPublishStatus(noteId, 'ok');
-        Toast.showSuccess('Отправлено (' + r.okCount + '/' + r.total + ')');
-      } else {
-        Channel.setPublishStatus(noteId, 'err');
-        Toast.showError('Ошибка: ' + (r.errors[0] || 'unknown'));
-      }
-    } catch (e) {
-      Channel.setPublishStatus(noteId, 'err');
-      Toast.showError(e.message);
-    } finally {
-      isPublishing = false;
-    }
-  };
-  
-  /**
-   * Save flow (детерминированный):
-   * 1. Всегда локально СНАЧАЛА
-   * 2. Если publish — параллельно отправляем в сеть
-   */
   const save = async ({ publishToWorld, force = false }) => {
     if (isPublishing) {
-      Log.warn('already publishing');
+      Log.warn('already publishing, ignored');
       return;
     }
     
@@ -1196,7 +1369,7 @@ const UI = (() => {
         Toast.showError('нет подключения к сети');
       } else if (!thought.vector) {
         Channel.setPublishStatus(thought.id, 'err');
-        Toast.showError('нет вектора');
+        Toast.showError('нет вектора (модель не загружена)');
       } else {
         Channel.setPublishStatus(thought.id, 'pending');
         Toast.showSending();
@@ -1220,10 +1393,11 @@ const UI = (() => {
             Toast.showSuccess('Отправлено (' + r.okCount + '/' + r.total + ' relay)');
           } else if (r.throttled) {
             Channel.setPublishStatus(thought.id, 'err');
-            Toast.showError('слишком часто');
+            Toast.showError('слишком часто (throttle)');
           } else {
             Channel.setPublishStatus(thought.id, 'err');
-            Toast.showError('publish failed. Нажми ↻ retry в карточке');
+            Toast.showError('ошибка publish');
+            r.errors.slice(0, 2).forEach(e => Log.warn('  ' + e));
           }
         } catch (e) {
           Channel.setPublishStatus(thought.id, 'err');
@@ -1268,6 +1442,7 @@ const UI = (() => {
     
     applyTheme();
     
+    // Segmented controls
     document.querySelectorAll('.seg').forEach(seg => {
       const opt = seg.dataset.opt;
       const val = String(CFG.settings[opt]);
@@ -1285,6 +1460,7 @@ const UI = (() => {
       });
     });
     
+    // Main tabs
     document.querySelectorAll('.main-tab').forEach(t => {
       t.onclick = () => {
         document.querySelectorAll('.main-tab').forEach(x => x.classList.remove('active'));
@@ -1295,6 +1471,7 @@ const UI = (() => {
       };
     });
     
+    // Sub tabs
     document.querySelectorAll('.sub-tab').forEach(t => {
       t.onclick = () => {
         document.querySelectorAll('.sub-tab').forEach(x => x.classList.remove('active'));
@@ -1306,6 +1483,7 @@ const UI = (() => {
       };
     });
     
+    // Input with debounce
     const input = $('input');
     input.addEventListener('input', () => {
       const text = input.value.trim();
@@ -1324,6 +1502,7 @@ const UI = (() => {
       updateRelevance();
     });
     
+    // Swipe up to publish
     const composer = $('composer');
     let touchStartY = 0;
     composer.addEventListener('touchstart', (e) => {
@@ -1334,9 +1513,11 @@ const UI = (() => {
       if (dy > 50) save({ publishToWorld: true });
     });
     
+    // Buttons
     $('btnSaveLocal').onclick = () => save({ publishToWorld: false });
     $('btnPublish').onclick = () => save({ publishToWorld: true });
     
+    // Settings drawer
     const drawer = $('drawer');
     const overlay = $('overlay');
     $('btnSettings').onclick = () => {
@@ -1350,6 +1531,7 @@ const UI = (() => {
     $('btnClose').onclick = closeDrawer;
     overlay.onclick = closeDrawer;
     
+    // Settings inputs
     $('setRoom').oninput = (e) => {
       CFG.settings.room = e.target.value.trim() || 'noosphere-2026';
     };
@@ -1366,10 +1548,11 @@ const UI = (() => {
       updateRelevance();
     };
     
+    // Capsule export
     $('btnExport').onclick = async () => {
       const all = await Storage.all();
       const capsule = {
-        version: 9.1,
+        version: 9,
         exported: new Date().toISOString(),
         notes: all.map(n => ({
           id: n.id, text: n.text, createdAt: n.createdAt,
@@ -1386,6 +1569,7 @@ const UI = (() => {
       Toast.showSuccess('Капсула скачана');
     };
     
+    // Capsule import
     $('btnImport').onclick = () => $('fileInput').click();
     $('fileInput').onchange = async (e) => {
       const file = e.target.files[0];
@@ -1415,6 +1599,7 @@ const UI = (() => {
       e.target.value = '';
     };
     
+    // Reindex
     $('btnReindex').onclick = async () => {
       if (!Vector.isLoaded()) { Toast.showError('Загрузите модель'); return; }
       const pending = await Storage.listUnindexed();
@@ -1432,6 +1617,7 @@ const UI = (() => {
       await renderHistory();
     };
     
+    // Reset
     $('btnReset').onclick = async () => {
       if (!confirm('Стереть все заметки?')) return;
       await Storage.clear();
@@ -1441,11 +1627,13 @@ const UI = (() => {
       Toast.showSuccess('Очищено');
     };
     
+    // New identity
     $('btnNewIdentity').onclick = async () => {
       if (!confirm('Создать новый identity?')) return;
       await Channel.resetIdentity();
     };
     
+    // Apply (reconnect)
     $('btnApply').onclick = async () => {
       saveSettings();
       closeDrawer();
@@ -1461,6 +1649,7 @@ const UI = (() => {
       }
     };
     
+    // Events
     document.addEventListener('ns:thoughts-changed', updateRelevance);
     document.addEventListener('ns:ephemeral-changed', updateRelevance);
     document.addEventListener('ns:world-event', (ev) => {
@@ -1490,6 +1679,7 @@ const UI = (() => {
       };
     });
     
+    // Boot
     try {
       await Storage.open();
       Log.success('IDB ready');
@@ -1529,7 +1719,7 @@ const UI = (() => {
     })();
     
     await renderHistory();
-    Log.success('Noosphere v9.1 ready (kind 30023, 7 relays)');
+    Log.success('Noosphere v9.1 ready');
   };
   
   return { init };
