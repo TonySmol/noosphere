@@ -509,20 +509,25 @@ ns.Ephemeral = (() => {
   return { upsert, removePeer, allResults, clear, bindPresence };
 })();
 
-/* [9] SIGNALING
-   Фикс v4.4: onlinePeers хранит {lastSeen, offlineDispatched, ttlLogged}
-   updatePeerCount диспатчит offline один раз и УДАЛЯЕТ пира из Map
+/* --------------------------------------------------------------------------
+   [9] SIGNALING
+   Фикс v4.5: mailbox использует inbox-структуру:
+     - Отправка: mailboxNode.get('inbox-<toDevice>').get(msgId).put(...)
+     - Подписка: mailboxNode.get('inbox-<myDevice>').map().on(...)
+   Это гарантирует что сообщения доставляются конкретному получателю.
    -------------------------------------------------------------------------- */
 ns.Signaling = (() => {
   const { GUN_PRESENCE_NS, GUN_SIGNALING_NS, GUN_MAILBOX_NS, GUN_RELAYS } = ns.Config;
   let gun = null;
-  let presenceNode = null, signalingNode = null, mailboxNode = null;
+  let presenceNode = null, signalingNode = null, mailboxNode = null, myInboxNode = null;
 
-  const onlinePeers = new Map(); // deviceId -> {lastSeen, offlineDispatched, ttlLogged}
+  const onlinePeers = new Map();
   const mailboxHandlers = new Map();
   const signalingHandlers = new Map();
   let recheckTimer = null;
   let coldStartUntil = 0;
+
+  const inboxKey = (devId) => `inbox-${devId}`;
 
   const init = () => new Promise(async (res, rej) => {
     try {
@@ -551,6 +556,7 @@ ns.Signaling = (() => {
 
       coldStartUntil = ns.Util.now() + ns.Config.LIMITS.PRESENCE_WARMUP_MS;
 
+      // === PRESENCE ===
       presenceNode.map().once((data, devId) => {
         if (!devId || devId === '_' || !data || typeof data !== 'object') return;
         handlePresenceUpdate(devId, Number(data.lastSeen) || 0, true);
@@ -561,6 +567,7 @@ ns.Signaling = (() => {
         handlePresenceUpdate(devId, Number(data.lastSeen) || 0, false);
       });
 
+      // === SIGNALING (SDP) ===
       signalingNode.map().on((data, msgId) => {
         if (!data || !msgId || msgId === '_' || typeof data !== 'object') return;
         if (data.to !== ns.Device.get()) return;
@@ -570,29 +577,64 @@ ns.Signaling = (() => {
         }
       });
 
-      mailboxNode.map().on((data, msgId) => {
+      // === MAILBOX (inbox-структура) ===
+      // Ждём Device.get() чтобы знать свой inbox
+      const waitForDevice = () => new Promise((resolve) => {
+        const check = () => {
+          if (ns.Device.get()) resolve();
+          else setTimeout(check, 100);
+        };
+        check();
+      });
+      await waitForDevice();
+
+      myInboxNode = mailboxNode.get(inboxKey(ns.Device.get()));
+      
+      // Подписка на свой inbox
+      myInboxNode.map().on((data, msgId) => {
         if (!data || !msgId || msgId === '_' || typeof data !== 'object') return;
         if (data.to !== ns.Device.get()) return;
+        
+        ns.Logger.info('mailbox message received', { 
+          msgId: msgId.slice(0, 12), 
+          from: (data.from || '?').slice(0, 10),
+          type: data.type || '?'
+        });
+
+        // Точечный хендлер по msgId
         const handler = mailboxHandlers.get(msgId);
         if (handler) {
           try { handler(data); } catch (e) { ns.Logger.warn('mailbox handler err', e.message); }
         }
+        
+        // Wildcard для всех response-сообщений
         if (msgId.startsWith('resp-')) {
           const wildcardHandler = mailboxHandlers.get('*response*');
           if (wildcardHandler) {
             try { wildcardHandler(data, msgId); } catch (e) {}
           }
         }
+        
+        // Wildcard для всех query-сообщений
+        if (msgId.startsWith('q-')) {
+          const queryHandler = mailboxHandlers.get('*query*');
+          if (queryHandler) {
+            try { queryHandler(data, msgId); } catch (e) {}
+          }
+        }
       });
 
-      ns.Logger.info('Signaling initialized', { relays: GUN_RELAYS, session: sessionId.slice(0, 8) });
+      ns.Logger.info('Signaling initialized', { 
+        relays: GUN_RELAYS, 
+        session: sessionId.slice(0, 8),
+        inbox: inboxKey(ns.Device.get()).slice(0, 20)
+      });
       res();
     } catch (e) { rej(e); }
   });
 
   const handlePresenceUpdate = (devId, lastSeen, isSnapshot) => {
     const wasOnline = isOnline(devId);
-    // Сбрасываем флаги — пир снова живой
     onlinePeers.set(devId, { lastSeen, offlineDispatched: false, ttlLogged: false });
     const nowOnline = isOnline(devId);
 
@@ -611,7 +653,6 @@ ns.Signaling = (() => {
     const age = ns.Util.now() - rec.lastSeen;
     const online = age < ns.Config.LIMITS.PRESENCE_TTL_MS;
     
-    // Лог один раз (флаг ttlLogged)
     if (!online && !rec.ttlLogged && age < ns.Config.LIMITS.PRESENCE_TTL_MS * 2 && age > 0) {
       rec.ttlLogged = true;
       ns.Logger.info(`peer filtered by TTL`, { 
@@ -642,7 +683,6 @@ ns.Signaling = (() => {
       if (online) {
         n++;
       } else if (!rec.offlineDispatched) {
-        // Диспатчим offline ОДИН раз
         rec.offlineDispatched = true;
         ns.Logger.info('peer went offline', { dev: devId.slice(0, 12), age: Math.round(age/1000) + 's' });
         document.dispatchEvent(new CustomEvent('ns:peer-offline', { detail: { deviceId: devId } }));
@@ -650,7 +690,6 @@ ns.Signaling = (() => {
       }
     }
     
-    // Удаляем протухших из Map (чтобы не спамить на следующем recheck)
     for (const devId of toRemove) onlinePeers.delete(devId);
     
     document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: n } }));
@@ -702,12 +741,22 @@ ns.Signaling = (() => {
     return () => signalingHandlers.delete(fromDeviceId);
   };
 
+  // КРИТИЧНО: отправка в inbox конкретного получателя
   const sendMailbox = (toDeviceId, msgId, payload) => {
-    mailboxNode.get(msgId).put({
+    if (!mailboxNode) {
+      ns.Logger.warn('sendMailbox: mailboxNode not ready');
+      return;
+    }
+    mailboxNode.get(inboxKey(toDeviceId)).get(msgId).put({
       from: ns.Device.get(),
       to: toDeviceId,
       ts: ns.Util.now(),
       ...payload,
+    });
+    ns.Logger.info('mailbox message sent', { 
+      to: toDeviceId.slice(0, 10), 
+      msgId: msgId.slice(0, 12),
+      type: payload.type || '?'
     });
   };
 
@@ -719,6 +768,12 @@ ns.Signaling = (() => {
   const onAnyResponse = (handler) => {
     mailboxHandlers.set('*response*', handler);
     return () => mailboxHandlers.delete('*response*');
+  };
+
+  // Обработчик всех входящих query (для auto-reply)
+  const onAnyQuery = (handler) => {
+    mailboxHandlers.set('*query*', handler);
+    return () => mailboxHandlers.delete('*query*');
   };
 
   const shutdown = () => {
@@ -733,22 +788,21 @@ ns.Signaling = (() => {
   return {
     init, startHeartbeat, shutdown, isOnline, getOnlinePeers,
     sendSignaling, onSignalingFrom,
-    sendMailbox, onMailboxMessage, onAnyResponse,
+    sendMailbox, onMailboxMessage, onAnyResponse, onAnyQuery,
   };
 })();
 
-/* [10] P2P
-   Фикс v4.4: 
-     - queryPeers логирует каждую попытку и транспорт
-     - Отдельный счётчик mailbox-ответов
-     - updateRtcCount обновляет pill с обоими счётчиками
+/* --------------------------------------------------------------------------
+   [10] P2P
+   Фикс v4.5:
+     - Подписка на входящие mailbox-запросы через onAnyQuery
+     - Логирование каждого шага: query received → processing → response sent
    -------------------------------------------------------------------------- */
 ns.P2P = (() => {
   const connections = new Map();
   const channels = new Map();
   const pendingQueries = new Map();
   
-  // Счётчики транспортов
   let rtcResponseCount = 0;
   let mailboxResponseCount = 0;
 
@@ -863,10 +917,27 @@ ns.P2P = (() => {
   };
 
   const handleIncomingQuery = async (fromDeviceId, msg, transport) => {
-    if (!ns.Vector.isLoaded()) return;
+    ns.Logger.info('handling incoming query', { 
+      from: fromDeviceId.slice(0, 10), 
+      queryId: (msg.queryId || '?').slice(0, 8),
+      via: transport,
+      vectorLoaded: ns.Vector.isLoaded()
+    });
+    
+    if (!ns.Vector.isLoaded()) {
+      ns.Logger.warn('query ignored: model not loaded');
+      return;
+    }
+    
     try {
       const locals = await ns.Storage.all();
       const published = locals.filter((t) => t.published && Array.isArray(t.vector));
+      
+      ns.Logger.info('processing query', { 
+        totalLocal: locals.length, 
+        publishedWithVector: published.length 
+      });
+      
       const scored = published.map((t) => ({
         text: t.text,
         id: t.id,
@@ -877,13 +948,15 @@ ns.P2P = (() => {
 
       const response = { type: 'response', queryId: msg.queryId, results: scored };
 
+      // Отвечаем через открытый RTC-канал, если есть
       const ch = channels.get(fromDeviceId);
       if (ch && ch.readyState === 'open') {
         ch.send(JSON.stringify(response));
+        ns.Logger.info('response sent via RTC', { to: fromDeviceId.slice(0, 10), results: scored.length });
       } else {
+        // Fallback через mailbox в inbox отправителя
         ns.Signaling.sendMailbox(fromDeviceId, `resp-${msg.queryId}-${ns.Device.get()}`, response);
       }
-      ns.Logger.info('responded to query', { from: fromDeviceId.slice(0, 10), results: scored.length, via: transport });
     } catch (e) {
       ns.Logger.warn('query handling failed', e.message);
     }
@@ -894,10 +967,15 @@ ns.P2P = (() => {
     if (!pending) return;
     pending.results.set(fromDeviceId, { results: msg.results || [], transport });
     
-    // Считаем транспорты
     if (transport === 'rtc') rtcResponseCount++;
     else mailboxResponseCount++;
     updateRtcCount();
+    
+    ns.Logger.info('response received', { 
+      from: fromDeviceId.slice(0, 10), 
+      via: transport, 
+      results: (msg.results || []).length 
+    });
     
     ns.Ephemeral.upsert(fromDeviceId, msg.results || [], transport);
   };
@@ -936,6 +1014,7 @@ ns.P2P = (() => {
         ns.Logger.info('query sent via RTC', { to: peerId.slice(0, 10) });
       } catch (e) {
         ns.Logger.warn(`RTC to ${peerId.slice(0, 8)} failed, using mailbox`, e.message);
+        // Отправляем query в inbox пира
         ns.Signaling.sendMailbox(peerId, `q-${queryId}-${peerId}-${ns.Util.newId()}`, query);
       }
     });
@@ -965,6 +1044,14 @@ ns.P2P = (() => {
 
   const bind = () => {
     ns.Ephemeral.bindPresence();
+    
+    // Подписка на входящие mailbox-запросы (auto-reply)
+    ns.Signaling.onAnyQuery((data, msgId) => {
+      if (data.type === 'query') {
+        handleIncomingQuery(data.from, data, 'mailbox');
+      }
+    });
+    
     document.addEventListener('ns:peer-offline', (ev) => {
       cleanup(ev.detail.deviceId);
       updateRtcCount();
