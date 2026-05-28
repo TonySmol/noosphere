@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Noosphere v4 / True P2P</title>
+<title>Noosphere v4.1 / True P2P</title>
 <style>
   :root {
     --bg:#0f1115; --panel:#161a22; --border:#242a36;
@@ -31,9 +31,9 @@
            border-radius:4px; padding:8px 12px; font:inherit; cursor:pointer; }
   button:hover:not(:disabled) { background:#272f40; }
   button.primary { background:var(--accent); color:#0b0d12; border-color:var(--accent); }
+  button.secondary { background:#2a2f3a; color:var(--accent); border-color:var(--accent); }
   button.danger  { background:#2a1a1d; color:var(--err); border-color:#3d1f22; }
   button:disabled { opacity:.5; cursor:not-allowed; }
-  label.check { display:inline-flex; align-items:center; gap:6px; color:var(--muted); }
 
   .status { display:inline-flex; gap:8px; flex-wrap:wrap; }
   .pill { padding:3px 8px; border-radius:999px; font-size:11px;
@@ -55,7 +55,6 @@
   .item .score { float:right; color:var(--muted); font-size:11px; }
   .item .meta  { color:var(--muted); font-size:10px; margin-top:4px; }
   .item mark { background:transparent; color:var(--accent); font-weight:bold; }
-  .item.fading { opacity:.4; transition:opacity .5s; }
 
   .progress { height:3px; background:#1a1f2a; border-radius:2px;
               overflow:hidden; margin-top:6px; }
@@ -72,7 +71,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>NOOSPHERE / v4 <small>true p2p · ephemeral world</small></h1>
+  <h1>NOOSPHERE / v4.1 <small>true p2p · ephemeral world</small></h1>
 
   <section class="panel">
     <div class="status" id="status">
@@ -92,13 +91,11 @@
     <h2>thought</h2>
     <textarea id="input" placeholder="type a thought... (peers will be queried live)"></textarea>
     <div class="row" style="margin-top:8px; align-items:center;">
-      <label class="check">
-        <input type="checkbox" id="publishWorld" checked />
-        <span>allow peers to query my thoughts (live)</span>
-      </label>
+      <button id="btnSave" class="secondary">Save local</button>
+      <button id="btnSaveWorld" class="primary">Save + World</button>
       <div style="flex:1"></div>
-      <button id="btnSave" class="primary">Save local</button>
     </div>
+    <div class="hint">Save local = на твоём устройстве. Save + World = локально + отвечаешь на запросы пиров (они видят в RAM).</div>
   </section>
 
   <section class="panel">
@@ -141,30 +138,23 @@
   </section>
 </div>
 
-<!-- Gun: используем ТОЛЬКО как signaling/presence. Никаких мировых заметок в графе. -->
 <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/gun/lib/radisk.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/gun/lib/rindexed.js"></script>
 
 <script type="module">
 /* ============================================================================
-   NOOSPHERE v4 — TRUE P2P, EPHEMERAL WORLD
+   NOOSPHERE v4.1 — TRUE P2P, EPHEMERAL WORLD (FIXED)
    ----------------------------------------------------------------------------
-   Архитектура (как задумано):
-     1. Заметки хранятся ТОЛЬКО на устройстве автора (IndexedDB).
-     2. Gun используется исключительно как:
-        a) presence  — кто сейчас онлайн
-        b) signaling — обмен SDP для WebRTC
-        c) mailbox   — fallback, если WebRTC не пробился через NAT
-     3. Чужие заметки никогда не пишутся на диск — только в RAM (ns.Ephemeral).
-     4. Когда пишешь мысль — клиент:
-        a) считывает локальный вектор
-        b) запрашивает у всех онлайн-пиров (через signaling): "что у тебя похожего?"
-        c) получает ответы (WebRTC DataChannel preferred, mailbox fallback)
-        d) показывает их в UI из RAM
-     5. Автор закрыл вкладку → его данные больше не отвечают → исчезают у всех.
+   Фиксы в v4.1:
+     - presence: map().once() + map().on() (ловим и snapshot, и live)
+     - peer-offline event диспатчится по TTL
+     - RTC counter обновляется реально
+     - mailbox/signaling подписка на родительском узле с фильтром по 'to'
+     - две кнопки: "Save local" и "Save + World"
+     - галочка publishWorld удалена
 
-   Секции (по зависимостям):
+   Секции:
      [1] Config  [2] Logger  [3] Util  [4] Device  [5] Storage  [6] Vector
      [7] Ephemeral  [8] Signaling  [9] P2P  [10] Relevance  [11] Sync
      [12] UI  [13] App
@@ -177,23 +167,19 @@ env.useBrowserCache    = true;
 
 const ns = (window.__ns = {});
 
-/* --------------------------------------------------------------------------
-   [1] CONFIG
-   -------------------------------------------------------------------------- */
+/* [1] CONFIG */
 ns.Config = Object.freeze({
   DB_NAME: 'noosphere_v4',
   DB_VERSION: 1,
-  STORE_THOUGHTS: 'thoughts', // только локальные
+  STORE_THOUGHTS: 'thoughts',
   STORE_META: 'meta',
 
-  // Три Gun-графа, все — служебные (заметки там не хранятся)
-  GUN_PRESENCE_NS:   'noosphere/v4/presence',    // deviceId -> {lastSeen}
-  GUN_SIGNALING_NS:  'noosphere/v4/signaling',   // deviceId/inbox -> SDP messages
-  GUN_MAILBOX_NS:    'noosphere/v4/mailbox',     // deviceId/inbox -> query/response
+  GUN_PRESENCE_NS:  'noosphere/v4/presence',
+  GUN_SIGNALING_NS: 'noosphere/v4/signaling',
+  GUN_MAILBOX_NS:   'noosphere/v4/mailbox',
 
   GUN_RELAYS: ['https://relay.peer.ooo/gun'],
 
-  // Публичные ICE серверы (Google STUN). TURN не используем — для теста ок.
   ICE_SERVERS: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
@@ -202,23 +188,21 @@ ns.Config = Object.freeze({
   LIMITS: {
     MAX_TEXT_LENGTH: 10_000,
     RENDER_CAP: 300,
-    DEBOUNCE_QUERY_MS: 600,    // запросы дорогие — дебаунс больше
-    PRESENCE_INTERVAL_MS: 30_000, // 30с — достаточно
-    PRESENCE_TTL_MS: 90_000,      // 90с без heartbeat = offline
+    DEBOUNCE_QUERY_MS: 600,
+    PRESENCE_INTERVAL_MS: 30_000,
+    PRESENCE_TTL_MS: 90_000,
+    PRESENCE_RECHECK_MS: 10_000,
     QUERY_TIMEOUT_MS: 5000,
-    MAX_PEERS_TO_QUERY: 10,    // не долбить всех подряд
+    MAX_PEERS_TO_QUERY: 10,
     MAX_RESULTS_PER_PEER: 3,
-    MAX_EPHEMERAL_AGE_MS: 5 * 60_000, // 5 мин и ответ протухает
+    MAX_EPHEMERAL_AGE_MS: 5 * 60_000,
   },
 
   VECTOR: { MODEL_ID: 'Xenova/all-MiniLM-L6-v2', DIMENSIONS: 384 },
-
   RELEVANCE: { THRESHOLD: 0.25, ADJACENCY: 0.15, MAX_CARDS: 5 },
 });
 
-/* --------------------------------------------------------------------------
-   [2] LOGGER
-   -------------------------------------------------------------------------- */
+/* [2] LOGGER */
 ns.Logger = (() => {
   const el = () => document.getElementById('log');
   const fmt = (d) => d.toISOString().slice(11, 19);
@@ -240,9 +224,7 @@ ns.Logger = (() => {
   };
 })();
 
-/* --------------------------------------------------------------------------
-   [3] UTIL
-   -------------------------------------------------------------------------- */
+/* [3] UTIL */
 ns.Util = {
   newId: () => (crypto.randomUUID
     ? crypto.randomUUID()
@@ -267,9 +249,7 @@ ns.Util = {
   },
 };
 
-/* --------------------------------------------------------------------------
-   [4] DEVICE
-   -------------------------------------------------------------------------- */
+/* [4] DEVICE */
 ns.Device = (() => {
   const META_KEY = 'deviceFingerprint';
   let fp = null;
@@ -297,10 +277,7 @@ ns.Device = (() => {
   return { init, get, reset };
 })();
 
-/* --------------------------------------------------------------------------
-   [5] STORAGE
-   Хранит ТОЛЬКО локальные заметки. Никакого source='world' больше нет.
-   -------------------------------------------------------------------------- */
+/* [5] STORAGE */
 ns.Storage = (() => {
   const { DB_NAME, DB_VERSION, STORE_THOUGHTS, STORE_META } = ns.Config;
   let db = null;
@@ -314,6 +291,7 @@ ns.Storage = (() => {
         const store = _db.createObjectStore(STORE_THOUGHTS, { keyPath: 'id' });
         store.createIndex('createdAt', 'createdAt');
         store.createIndex('hasVector', 'hasVector');
+        store.createIndex('published', 'published');
       }
       if (!_db.objectStoreNames.contains(STORE_META)) {
         _db.createObjectStore(STORE_META, { keyPath: 'key' });
@@ -358,9 +336,7 @@ ns.Storage = (() => {
   return { open, put, get, remove, all, listUnindexed, getMeta, putMeta, clearAll };
 })();
 
-/* --------------------------------------------------------------------------
-   [6] VECTOR
-   -------------------------------------------------------------------------- */
+/* [6] VECTOR */
 ns.Vector = (() => {
   let extractor = null;
   let loadPromise = null;
@@ -400,20 +376,12 @@ ns.Vector = (() => {
   return { load, embed, cosine, isLoaded };
 })();
 
-/* --------------------------------------------------------------------------
-   [7] EPHEMERAL
-   In-memory хранилище для чужих ответов. Никогда не попадает на диск.
-   При закрытии вкладки — всё исчезает (это и есть концепция).
-   -------------------------------------------------------------------------- */
+/* [7] EPHEMERAL */
 ns.Ephemeral = (() => {
-  // Map<peerDeviceId, { results: Array<{text,score,fromDevice,receivedAt}>, lastSeen }>
   const byPeer = new Map();
 
   const upsert = (peerDeviceId, results) => {
-    byPeer.set(peerDeviceId, {
-      results,
-      lastSeen: ns.Util.now(),
-    });
+    byPeer.set(peerDeviceId, { results, lastSeen: ns.Util.now() });
     prune();
     document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
   };
@@ -427,12 +395,16 @@ ns.Ephemeral = (() => {
   const prune = () => {
     const now = ns.Util.now();
     const maxAge = ns.Config.LIMITS.MAX_EPHEMERAL_AGE_MS;
+    let changed = false;
     for (const [devId, rec] of byPeer) {
-      if (now - rec.lastSeen > maxAge) byPeer.delete(devId);
+      if (now - rec.lastSeen > maxAge) {
+        byPeer.delete(devId);
+        changed = true;
+      }
     }
+    if (changed) document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
   };
 
-  // Плоский список всех текущих чужих ответов (для UI)
   const allResults = () => {
     const out = [];
     for (const [devId, rec] of byPeer) {
@@ -448,7 +420,6 @@ ns.Ephemeral = (() => {
     document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
   };
 
-  // Привязка к presence: когда пир уходит offline — его ephemeral удаляем
   const bindPresence = () => {
     document.addEventListener('ns:peer-offline', (ev) => {
       removePeer(ev.detail.deviceId);
@@ -458,25 +429,21 @@ ns.Ephemeral = (() => {
   return { upsert, removePeer, allResults, clear, bindPresence };
 })();
 
-/* --------------------------------------------------------------------------
-   [8] SIGNALING
-   Gun используется ТОЛЬКО для:
-     - presence: кто онлайн (deviceId -> lastSeen)
-     - signaling: обмен SDP (deviceId/inbox -> {from, type, payload})
-     - mailbox:   query/response (deviceId/inbox -> {queryId, type, ...})
-
-   Заметки в Gun не хранятся. Графы — служебные.
+/* [8] SIGNALING
+   Критический фикс v4.1:
+     - map().once() для снапшота + map().on() для live
+     - mailbox/signaling подписка на родительском узле с фильтром по 'to'
+     - периодический recheck TTL
    -------------------------------------------------------------------------- */
 ns.Signaling = (() => {
   const { GUN_PRESENCE_NS, GUN_SIGNALING_NS, GUN_MAILBOX_NS, GUN_RELAYS } = ns.Config;
   let gun = null;
   let presenceNode = null, signalingNode = null, mailboxNode = null;
-  let peerCount = 0;
 
-  // онлайн-пиры: Map<deviceId, { lastSeen }>
   const onlinePeers = new Map();
-  const mailboxHandlers = new Map(); // msgId -> handler
-  const signalingHandlers = new Map(); // fromDeviceId -> handler
+  const mailboxHandlers = new Map();
+  const signalingHandlers = new Map();
+  let recheckTimer = null;
 
   const init = () => new Promise((res, rej) => {
     try {
@@ -486,41 +453,63 @@ ns.Signaling = (() => {
       signalingNode = gun.get(GUN_SIGNALING_NS);
       mailboxNode   = gun.get(GUN_MAILBOX_NS);
 
-      // Подписка на presence всех устройств
-      presenceNode.map().on((data, devId) => {
-        if (!devId || devId === '_' || !data) return;
-        const lastSeen = Number(data.lastSeen) || 0;
-        const wasOnline = isOnline(devId);
-        onlinePeers.set(devId, { lastSeen });
-        const nowOnline = isOnline(devId);
-        if (!wasOnline && nowOnline && devId !== ns.Device.get()) {
-          document.dispatchEvent(new CustomEvent('ns:peer-online', { detail: { deviceId: devId } }));
-        }
-        updatePeerCount();
+      // === PRESENCE ===
+      // 1. Снапшот уже онлайн-пиров
+      presenceNode.map().once((data, devId) => {
+        if (!devId || devId === '_' || !data || typeof data !== 'object') return;
+        handlePresenceUpdate(devId, Number(data.lastSeen) || 0);
       });
 
-      // Подписка на signaling inbox (SDP offer/answer/ice)
-      signalingNode.get(myMailboxKey()).map().on((data, msgId) => {
-        if (!data || !msgId || msgId === '_') return;
+      // 2. Live-обновления
+      presenceNode.map().on((data, devId) => {
+        if (!devId || devId === '_' || !data || typeof data !== 'object') return;
+        handlePresenceUpdate(devId, Number(data.lastSeen) || 0);
+      });
+
+      // === SIGNALING (SDP) ===
+      // Подписка на родительский узел + фильтр по 'to'
+      signalingNode.map().on((data, msgId) => {
+        if (!data || !msgId || msgId === '_' || typeof data !== 'object') return;
         if (data.to !== ns.Device.get()) return;
         const handler = signalingHandlers.get(data.from);
-        if (handler) handler(data);
+        if (handler) {
+          try { handler(data); } catch (e) { ns.Logger.warn('signaling handler err', e.message); }
+        }
       });
 
-      // Подписка на mailbox (query/response)
-      mailboxNode.get(myMailboxKey()).map().on((data, msgId) => {
-        if (!data || !msgId || msgId === '_') return;
+      // === MAILBOX (query/response) ===
+      mailboxNode.map().on((data, msgId) => {
+        if (!data || !msgId || msgId === '_' || typeof data !== 'object') return;
         if (data.to !== ns.Device.get()) return;
         const handler = mailboxHandlers.get(msgId);
-        if (handler) handler(data);
+        if (handler) {
+          try { handler(data); } catch (e) { ns.Logger.warn('mailbox handler err', e.message); }
+        }
+        // Также проверяем wildcard-хендлеры (префикс 'resp-')
+        if (msgId.startsWith('resp-')) {
+          const wildcardHandler = mailboxHandlers.get('*response*');
+          if (wildcardHandler) {
+            try { wildcardHandler(data, msgId); } catch (e) {}
+          }
+        }
       });
 
-      ns.Logger.info('Signaling initialized (Gun)', { relays: GUN_RELAYS });
+      ns.Logger.info('Signaling initialized', { relays: GUN_RELAYS });
       res();
     } catch (e) { rej(e); }
   });
 
-  const myMailboxKey = () => `inbox-${ns.Device.get()}`;
+  const handlePresenceUpdate = (devId, lastSeen) => {
+    const wasOnline = isOnline(devId);
+    onlinePeers.set(devId, { lastSeen });
+    const nowOnline = isOnline(devId);
+
+    if (nowOnline && !wasOnline && devId !== ns.Device.get()) {
+      ns.Logger.info('peer came online', { dev: devId.slice(0, 12) });
+      document.dispatchEvent(new CustomEvent('ns:peer-online', { detail: { deviceId: devId } }));
+    }
+    updatePeerCount();
+  };
 
   const isOnline = (devId) => {
     if (devId === ns.Device.get()) return true;
@@ -531,10 +520,20 @@ ns.Signaling = (() => {
 
   const updatePeerCount = () => {
     let n = 0;
+    const nowOff = [];
     for (const [devId] of onlinePeers) {
-      if (devId !== ns.Device.get() && isOnline(devId)) n++;
+      if (devId === ns.Device.get()) continue;
+      if (isOnline(devId)) n++;
+      else nowOff.push(devId);
     }
-    peerCount = n;
+    // Диспатчим offline для тех, кто только что протух
+    for (const devId of nowOff) {
+      if (onlinePeers.has(devId) && onlinePeers.get(devId).lastSeen > 0) {
+        // Помечаем что уже обработали offline
+        onlinePeers.get(devId).offlineDispatched = true;
+        document.dispatchEvent(new CustomEvent('ns:peer-offline', { detail: { deviceId: devId } }));
+      }
+    }
     document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: n } }));
   };
 
@@ -546,22 +545,29 @@ ns.Signaling = (() => {
     return out;
   };
 
-  // Периодическая публикация своего presence
   let heartbeatTimer = null;
   const startHeartbeat = () => {
     if (heartbeatTimer) return;
     const tick = () => {
+      if (!ns.Device.get()) {
+        heartbeatTimer = setTimeout(tick, ns.Config.LIMITS.PRESENCE_INTERVAL_MS);
+        return;
+      }
       presenceNode.get(ns.Device.get()).put({ lastSeen: ns.Util.now() });
-      updatePeerCount(); // заодно пересчитаем
+      updatePeerCount();
       heartbeatTimer = setTimeout(tick, ns.Config.LIMITS.PRESENCE_INTERVAL_MS);
     };
     tick();
+
+    // Периодический recheck для обнаружения offline
+    recheckTimer = setInterval(updatePeerCount, ns.Config.LIMITS.PRESENCE_RECHECK_MS);
+
+    ns.Logger.info('presence heartbeat started');
   };
 
-  // Отправка signaling-сообщения (SDP) конкретному пиру
   const sendSignaling = (toDeviceId, payload) => {
     const msgId = ns.Util.newId();
-    signalingNode.get(`inbox-${toDeviceId}`).get(msgId).put({
+    signalingNode.get(msgId).put({
       from: ns.Device.get(),
       to: toDeviceId,
       ts: ns.Util.now(),
@@ -569,15 +575,13 @@ ns.Signaling = (() => {
     });
   };
 
-  // Подписка на signaling от конкретного пира
   const onSignalingFrom = (fromDeviceId, handler) => {
     signalingHandlers.set(fromDeviceId, handler);
     return () => signalingHandlers.delete(fromDeviceId);
   };
 
-  // Отправка mailbox-сообщения (query/response)
   const sendMailbox = (toDeviceId, msgId, payload) => {
-    mailboxNode.get(`inbox-${toDeviceId}`).get(msgId).put({
+    mailboxNode.get(msgId).put({
       from: ns.Device.get(),
       to: toDeviceId,
       ts: ns.Util.now(),
@@ -585,55 +589,56 @@ ns.Signaling = (() => {
     });
   };
 
-  // Регистрация обработчика входящего mailbox сообщения
   const onMailboxMessage = (msgId, handler) => {
     mailboxHandlers.set(msgId, handler);
     return () => mailboxHandlers.delete(msgId);
   };
 
+  // Wildcard хендлер для всех response-сообщений
+  const onAnyResponse = (handler) => {
+    mailboxHandlers.set('*response*', handler);
+    return () => mailboxHandlers.delete('*response*');
+  };
+
   return {
     init, startHeartbeat, isOnline, getOnlinePeers,
     sendSignaling, onSignalingFrom,
-    sendMailbox, onMailboxMessage,
-    getPeerCount: () => peerCount,
+    sendMailbox, onMailboxMessage, onAnyResponse,
   };
 })();
 
-/* --------------------------------------------------------------------------
-   [9] P2P
-   WebRTC DataChannel — preferred путь для query/response.
-   Fallback — Gun mailbox (если RTC не пробился).
-
-   Протокол:
-     Query (от меня): { type: 'query', queryId, vector: Float32[], limit }
-     Response:        { type: 'response', queryId, results: [{text,score}] }
-
-   Мы НЕ храним результаты в IDB — только в ns.Ephemeral (RAM).
+/* [9] P2P — WebRTC + mailbox fallback
+   Добавлен счётчик активных RTC-каналов для pill.
    -------------------------------------------------------------------------- */
 ns.P2P = (() => {
-  // Map<peerDeviceId, RTCPeerConnection>
   const connections = new Map();
-  // Map<peerDeviceId, RTCDataChannel>
   const channels = new Map();
-  // pending queries: Map<queryId, { resolve, results: Map<peerDeviceId, results[]>, timer }>
   const pendingQueries = new Map();
 
-  const ensureConnection = async (peerDeviceId, asInitiator) => {
-    if (channels.has(peerDeviceId) && channels.get(peerDeviceId).readyState === 'open') {
-      return channels.get(peerDeviceId);
+  const updateRtcCount = () => {
+    let n = 0;
+    for (const [, ch] of channels) if (ch.readyState === 'open') n++;
+    document.dispatchEvent(new CustomEvent('ns:rtc', { detail: { count: n } }));
+  };
+
+  const ensureConnection = (peerDeviceId, asInitiator) => {
+    const existing = channels.get(peerDeviceId);
+    if (existing && existing.readyState === 'open') {
+      return Promise.resolve(existing);
     }
 
-    return new Promise(async (resolve, reject) => {
+    return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
+        cleanup(peerDeviceId);
         reject(new Error('RTC setup timeout'));
-      }, 8000);
+      }, 10000);
 
       try {
+        // Закрываем предыдущее соединение, если было
+        cleanup(peerDeviceId);
+
         const pc = new RTCPeerConnection({ iceServers: ns.Config.ICE_SERVERS });
         connections.set(peerDeviceId, pc);
-
-        // Unsubscribe от предыдущего signaling для этого пира
-        let unsubSignaling = null;
 
         pc.onicecandidate = (ev) => {
           if (ev.candidate) {
@@ -654,24 +659,31 @@ ns.P2P = (() => {
           clearTimeout(timeout);
           channels.set(peerDeviceId, dc);
           dc.onmessage = (ev) => handleIncomingMessage(peerDeviceId, ev.data);
-          dc.onclose = () => cleanup(peerDeviceId);
+          dc.onclose = () => {
+            cleanup(peerDeviceId);
+            updateRtcCount();
+          };
+          updateRtcCount();
+          ns.Logger.info('RTC channel open', { to: peerDeviceId.slice(0, 10) });
           resolve(dc);
         };
 
         if (asInitiator) {
           const dc = pc.createDataChannel('noosphere', { ordered: false });
           dc.onopen = () => onDataChannelOpen(dc);
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          ns.Signaling.sendSignaling(peerDeviceId, {
-            type: 'offer',
-            sdp: offer,
+          pc.createOffer().then(async (offer) => {
+            await pc.setLocalDescription(offer);
+            ns.Signaling.sendSignaling(peerDeviceId, { type: 'offer', sdp: offer });
+          }).catch((e) => {
+            clearTimeout(timeout);
+            cleanup(peerDeviceId);
+            reject(e);
           });
         } else {
           pc.ondatachannel = (ev) => onDataChannelOpen(ev.channel);
         }
 
-        unsubSignaling = ns.Signaling.onSignalingFrom(peerDeviceId, async (msg) => {
+        ns.Signaling.onSignalingFrom(peerDeviceId, async (msg) => {
           try {
             if (msg.type === 'offer') {
               await pc.setRemoteDescription(msg.sdp);
@@ -681,7 +693,7 @@ ns.P2P = (() => {
             } else if (msg.type === 'answer') {
               await pc.setRemoteDescription(msg.sdp);
             } else if (msg.type === 'ice' && msg.candidate) {
-              await pc.addIceCandidate(msg.candidate);
+              try { await pc.addIceCandidate(msg.candidate); } catch {}
             }
           } catch (e) {
             ns.Logger.warn('signaling handling failed', e.message);
@@ -689,6 +701,7 @@ ns.P2P = (() => {
         });
       } catch (e) {
         clearTimeout(timeout);
+        cleanup(peerDeviceId);
         reject(e);
       }
     });
@@ -697,33 +710,27 @@ ns.P2P = (() => {
   const cleanup = (peerDeviceId) => {
     const pc = connections.get(peerDeviceId);
     if (pc) { try { pc.close(); } catch {} connections.delete(peerDeviceId); }
-    channels.delete(peerDeviceId);
+    const ch = channels.get(peerDeviceId);
+    if (ch) { try { ch.close(); } catch {} channels.delete(peerDeviceId); }
   };
 
-  // Обработка входящего сообщения от пира (запрос или ответ)
   const handleIncomingMessage = (fromDeviceId, rawData) => {
     try {
-      const msg = JSON.parse(rawData);
-      if (msg.type === 'query') {
-        handleIncomingQuery(fromDeviceId, msg);
-      } else if (msg.type === 'response') {
-        handleIncomingResponse(fromDeviceId, msg);
-      }
+      const msg = typeof rawData === 'string' ? JSON.parse(rawData) : JSON.parse(new TextDecoder().decode(rawData));
+      if (msg.type === 'query') handleIncomingQuery(fromDeviceId, msg);
+      else if (msg.type === 'response') handleIncomingResponse(fromDeviceId, msg);
     } catch (e) {
       ns.Logger.warn('incoming message parse failed', e.message);
     }
   };
 
-  // Кто-то спрашивает нас — ищем в своём локальном IDB
   const handleIncomingQuery = async (fromDeviceId, msg) => {
-    const allowQueries = document.getElementById('publishWorld')?.checked;
-    if (!allowQueries) return; // пользователь выключил "allow peers to query"
     if (!ns.Vector.isLoaded()) return;
-
     try {
       const locals = await ns.Storage.all();
-      const indexed = locals.filter((t) => Array.isArray(t.vector));
-      const scored = indexed.map((t) => ({
+      // Отвечаем только заметками с флагом published=true (Save + World)
+      const published = locals.filter((t) => t.published && Array.isArray(t.vector));
+      const scored = published.map((t) => ({
         text: t.text,
         id: t.id,
         score: ns.Vector.cosine(msg.vector, t.vector),
@@ -731,18 +738,12 @@ ns.P2P = (() => {
          .sort((a, b) => b.score - a.score)
          .slice(0, msg.limit || 3);
 
-      const response = {
-        type: 'response',
-        queryId: msg.queryId,
-        results: scored,
-      };
+      const response = { type: 'response', queryId: msg.queryId, results: scored };
 
-      // Отвечаем через открытый канал если есть
       const ch = channels.get(fromDeviceId);
       if (ch && ch.readyState === 'open') {
         ch.send(JSON.stringify(response));
       } else {
-        // fallback через Gun mailbox
         ns.Signaling.sendMailbox(fromDeviceId, `resp-${msg.queryId}-${ns.Device.get()}`, response);
       }
     } catch (e) {
@@ -754,17 +755,9 @@ ns.P2P = (() => {
     const pending = pendingQueries.get(msg.queryId);
     if (!pending) return;
     pending.results.set(fromDeviceId, msg.results || []);
-    // Обновляем ephemeral
     ns.Ephemeral.upsert(fromDeviceId, msg.results || []);
   };
 
-  // Подписываемся на входящие mailbox-ответы (fallback когда RTC нет)
-  const bindMailboxResponses = () => {
-    // Используем wildcard через регистрацию хендлера на любой msgId с префиксом 'resp-'
-    // Реализация: в ns.Signaling нет wildcard, поэтому регистрируем по мере отправки запросов
-  };
-
-  // Публичный API: разослать query всем онлайн-пирам
   const queryPeers = async (vector, { limit = 3, timeoutMs = ns.Config.LIMITS.QUERY_TIMEOUT_MS } = {}) => {
     if (!Array.isArray(vector)) throw new Error('vector required');
     const peers = ns.Signaling.getOnlinePeers()
@@ -777,43 +770,35 @@ ns.P2P = (() => {
     const queryId = ns.Util.newId();
     const query = { type: 'query', queryId, vector, limit };
 
-    const pending = {
-      resolve: null,
-      results: new Map(),
-      timer: null,
-    };
+    const pending = { results: new Map(), timer: null };
     pendingQueries.set(queryId, pending);
 
-    // Регистрируем mailbox-хендлер для fallback-ответов от каждого пира
-    const mailboxUnsubs = peers.map((peerId) => {
-      const msgId = `resp-${queryId}-${peerId}`;
-      return ns.Signaling.onMailboxMessage(msgId, (data) => {
-        handleIncomingResponse(peerId, data);
-      });
+    // Регистрируем wildcard-хендлер для всех ответов
+    const unsubResponse = ns.Signaling.onAnyResponse((data, msgId) => {
+      if (data.queryId === queryId) {
+        handleIncomingResponse(data.from, data);
+      }
     });
 
-    // Отправляем query каждому пиру (RTC preferred, mailbox fallback)
     const sendPromises = peers.map(async (peerId) => {
       try {
         const ch = await ns.Util.withTimeout(
           ensureConnection(peerId, true),
           4000,
-          'RTC timeout'
+          'RTC setup timeout'
         );
         ch.send(JSON.stringify(query));
       } catch (e) {
-        // fallback — шлём через Gun mailbox
-        ns.Logger.warn(`RTC to ${peerId.slice(0, 8)} failed, using mailbox fallback`, e.message);
-        ns.Signaling.sendMailbox(peerId, `q-${queryId}-${ns.Util.newId()}`, query);
+        ns.Logger.warn(`RTC to ${peerId.slice(0, 8)} failed, using mailbox`, e.message);
+        ns.Signaling.sendMailbox(peerId, `q-${queryId}-${peerId}-${ns.Util.newId()}`, query);
       }
     });
 
     await Promise.allSettled(sendPromises);
 
-    // Ждём сбора ответов с таймаутом
     return new Promise((resolve) => {
       pending.timer = setTimeout(() => {
-        mailboxUnsubs.forEach((unsub) => unsub());
+        unsubResponse();
         const collected = [];
         for (const [peerId, results] of pending.results) {
           for (const r of results) collected.push({ ...r, fromDevice: peerId });
@@ -825,20 +810,19 @@ ns.P2P = (() => {
     });
   };
 
-  // Инициализация: реагируем на новые peer-online события, но не коннектимся превентивно
   const bind = () => {
     ns.Ephemeral.bindPresence();
+    // При peer-offline закрываем RTC
+    document.addEventListener('ns:peer-offline', (ev) => {
+      cleanup(ev.detail.deviceId);
+      updateRtcCount();
+    });
   };
 
-  return { bind, queryPeers };
+  return { bind, queryPeers, updateRtcCount };
 })();
 
-/* --------------------------------------------------------------------------
-   [10] RELEVANCE
-   Теперь работает с двумя источниками:
-     - свои заметки из IDB (persistent)
-     - чужие ответы из ns.Ephemeral (RAM)
-   -------------------------------------------------------------------------- */
+/* [10] RELEVANCE */
 ns.Relevance = (() => {
   const { THRESHOLD, ADJACENCY, MAX_CARDS } = ns.Config.RELEVANCE;
   const escapeHtml = ns.Util.escapeHtml;
@@ -878,48 +862,17 @@ ns.Relevance = (() => {
          + escapeHtml(matchText.slice(b.end));
   };
 
-  // Собираем результаты из двух источников и раскладываем по трём колонкам
-  const split = (queryText, localThoughts, ephemeralResults) => {
-    const mine = [], world = [], adjacent = [];
-
-    // 1. Мои локальные — считаем similarity к query
-    if (queryText && ns.Vector.isLoaded()) {
-      const localRank = localThoughts
-        .filter((t) => Array.isArray(t.vector))
-        .map((t) => ({
-          thought: t,
-          score: ns.Vector.cosine(t.vector, null) || 0, // заполнится ниже
-        }));
-      // пересчитаем правильно
-      const qv = null; // мы не можем тут его вычислить — он в UI
-    }
-
-    // Принимаем queryVector через аргумент (см. UI.updateLiveRelevance)
-    return { mine, world, adjacent };
-  };
-
-  // Главная функция ранжирования: получает queryVector и оба источника
-  const rankAll = (queryVec, queryText, localThoughts, ephemeralResults) => {
+  const rankAll = (queryVec, localThoughts, ephemeralResults) => {
     if (!queryVec) return { mine: [], world: [], adjacent: [] };
 
-    // Мои локальные
     const localScored = localThoughts
       .filter((t) => Array.isArray(t.vector))
-      .map((t) => ({
-        kind: 'local',
-        source: t,
-        score: ns.Vector.cosine(queryVec, t.vector),
-      }))
+      .map((t) => ({ kind: 'local', source: t, score: ns.Vector.cosine(queryVec, t.vector) }))
       .filter((r) => r.score > THRESHOLD - ADJACENCY)
       .sort((a, b) => b.score - a.score);
 
-    // Чужие (уже пришли с score от пира — используем как есть)
     const worldScored = ephemeralResults
-      .map((r) => ({
-        kind: 'world',
-        source: r,
-        score: Number(r.score) || 0,
-      }))
+      .map((r) => ({ kind: 'world', source: r, score: Number(r.score) || 0 }))
       .filter((r) => r.score > THRESHOLD - ADJACENCY)
       .sort((a, b) => b.score - a.score);
 
@@ -939,20 +892,15 @@ ns.Relevance = (() => {
         if (adjacent.length < MAX_CARDS) adjacent.push(r);
       }
     }
-
-    // Для adjacent берём лучшее из оставшегося (уже отсортированы)
     return { mine, world, adjacent };
   };
 
   return { rankAll, highlightFragment };
 })();
 
-/* --------------------------------------------------------------------------
-   [11] SYNC
-   Упрощён: только saveLocal + reindex. Никакого ingestWorld (нет мирового графа).
-   -------------------------------------------------------------------------- */
+/* [11] SYNC — добавлен флаг publishToWorld */
 ns.Sync = (() => {
-  const saveLocal = async ({ text }) => {
+  const saveLocal = async ({ text, publishToWorld = false }) => {
     const clean = ns.Util.normalizeText(text);
     if (!clean) throw new Error('Empty thought');
 
@@ -960,6 +908,7 @@ ns.Sync = (() => {
       id: ns.Util.newId(), text: clean,
       createdAt: ns.Util.now(), updatedAt: ns.Util.now(),
       vector: null, hasVector: 0,
+      published: !!publishToWorld,
     };
 
     if (ns.Vector.isLoaded()) {
@@ -970,7 +919,7 @@ ns.Sync = (() => {
     }
 
     await ns.Storage.put(thought);
-    ns.Logger.info('saved local', { id: thought.id });
+    ns.Logger.info('saved local', { id: thought.id, published: thought.published });
     document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
     return thought;
   };
@@ -995,14 +944,12 @@ ns.Sync = (() => {
   return { saveLocal, reindexAll };
 })();
 
-/* --------------------------------------------------------------------------
-   [12] UI
-   -------------------------------------------------------------------------- */
+/* [12] UI */
 ns.UI = (() => {
   const refs = {};
 
   const cache = () => {
-    ['input','publishWorld','btnSave','btnLoadModel','btnReindex','btnSeed',
+    ['input','btnSave','btnSaveWorld','btnLoadModel','btnReindex','btnSeed',
      'btnQueryNow','btnReset','listMine','listWorld','listAdjacent',
      'listAll','status','modelProgress','deviceId']
       .forEach((id) => { refs[id] = document.getElementById(id); });
@@ -1041,7 +988,7 @@ ns.UI = (() => {
       const meta = document.createElement('div');
       meta.className = 'meta';
       meta.textContent =
-        `local | ${new Date(t.createdAt).toISOString().slice(0,16)} | vec:${t.hasVector ? 'yes' : 'no'} | ${t.id.slice(0,8)}`;
+        `${t.published ? 'world-shared' : 'local-only'} | ${new Date(t.createdAt).toISOString().slice(0,16)} | vec:${t.hasVector ? 'yes' : 'no'} | ${t.id.slice(0,8)}`;
       row.appendChild(score); row.appendChild(body); row.appendChild(meta);
       container.appendChild(row);
     }
@@ -1084,7 +1031,7 @@ ns.UI = (() => {
     }
     for (const r of items) {
       const isLocal = r.kind === 'local';
-      const text = isLocal ? r.source.text : r.source.text;
+      const text = r.source.text;
       const row = document.createElement('div');
       row.className = `item ${isLocal ? 'local' : 'world ephemeral'}`;
       const score = document.createElement('span');
@@ -1094,11 +1041,8 @@ ns.UI = (() => {
       body.innerHTML = ns.Relevance.highlightFragment(queryText, text);
       const meta = document.createElement('div');
       meta.className = 'meta';
-      if (isLocal) {
-        meta.textContent = `local adjacent | ${r.source.id.slice(0,8)}`;
-      } else {
-        meta.textContent = `world adjacent | from:${(r.source.fromDevice || '?').slice(0,10)}`;
-      }
+      if (isLocal) meta.textContent = `local adjacent | ${r.source.id.slice(0,8)}`;
+      else meta.textContent = `world adjacent | from:${(r.source.fromDevice || '?').slice(0,10)}`;
       row.appendChild(score); row.appendChild(body); row.appendChild(meta);
       container.appendChild(row);
     }
@@ -1117,7 +1061,6 @@ ns.UI = (() => {
     const eph = ns.Ephemeral.allResults();
 
     if (!text) {
-      // Пустое поле: показываем последние свои + ленту чужих (если есть)
       renderLocalList(refs.listMine,
         locals.filter(t => t.hasVector)
               .sort((a,b) => b.createdAt - a.createdAt)
@@ -1136,15 +1079,12 @@ ns.UI = (() => {
 
     try {
       const qv = await ns.Vector.embed(text);
-      // Запрашиваем у пиров параллельно с локальным поиском
       const peersOnline = ns.Signaling.getOnlinePeers().length;
       if (peersOnline > 0) {
-        // асинхронно, не ждём
         ns.P2P.queryPeers(qv, { limit: ns.Config.RELEVANCE.MAX_CARDS })
           .catch((e) => ns.Logger.warn('queryPeers failed', e.message));
       }
-
-      const { mine, world, adjacent } = ns.Relevance.rankAll(qv, text, locals, eph);
+      const { mine, world, adjacent } = ns.Relevance.rankAll(qv, locals, eph);
       renderLocalList(refs.listMine, mine, text);
       renderWorldList(refs.listWorld, world, text);
       renderMixedList(refs.listAdjacent, adjacent, text);
@@ -1166,7 +1106,7 @@ ns.UI = (() => {
       const meta = document.createElement('div');
       meta.className = 'meta';
       meta.textContent =
-        `${new Date(t.createdAt).toISOString().slice(0,16)} | vec:${t.hasVector ? 'yes' : 'no'} | ${t.id.slice(0,8)}`;
+        `${new Date(t.createdAt).toISOString().slice(0,16)} | ${t.published ? 'world-shared' : 'local-only'} | vec:${t.hasVector ? 'yes' : 'no'} | ${t.id.slice(0,8)}`;
       row.appendChild(body); row.appendChild(meta);
       refs.listAll.appendChild(row);
     }
@@ -1181,20 +1121,27 @@ ns.UI = (() => {
   };
 
   const bind = () => {
-    const debouncedUpdate = ns.Util.debounce(
-      updateLiveRelevance,
-      ns.Config.LIMITS.DEBOUNCE_QUERY_MS
-    );
+    const debouncedUpdate = ns.Util.debounce(updateLiveRelevance, ns.Config.LIMITS.DEBOUNCE_QUERY_MS);
     refs.input.addEventListener('input', debouncedUpdate);
 
     refs.btnSave.addEventListener('click', async () => {
       try {
-        refs.btnSave.disabled = true;
-        await ns.Sync.saveLocal({ text: refs.input.value });
+        refs.btnSave.disabled = refs.btnSaveWorld.disabled = true;
+        await ns.Sync.saveLocal({ text: refs.input.value, publishToWorld: false });
         refs.input.value = '';
         await refresh();
       } catch (e) { ns.Logger.error('save failed', e.message); }
-      finally { refs.btnSave.disabled = false; }
+      finally { refs.btnSave.disabled = refs.btnSaveWorld.disabled = false; }
+    });
+
+    refs.btnSaveWorld.addEventListener('click', async () => {
+      try {
+        refs.btnSave.disabled = refs.btnSaveWorld.disabled = true;
+        await ns.Sync.saveLocal({ text: refs.input.value, publishToWorld: true });
+        refs.input.value = '';
+        await refresh();
+      } catch (e) { ns.Logger.error('save failed', e.message); }
+      finally { refs.btnSave.disabled = refs.btnSaveWorld.disabled = false; }
     });
 
     refs.btnLoadModel.addEventListener('click', async () => {
@@ -1236,7 +1183,8 @@ ns.UI = (() => {
         'Иногда нужно просто записать, чтобы понять.',
         'Связи между идеями важнее самих идей.',
       ];
-      for (const s of samples) await ns.Sync.saveLocal({ text: s });
+      // По умолчанию seed'им с published=true, чтобы пир видел
+      for (const s of samples) await ns.Sync.saveLocal({ text: s, publishToWorld: true });
       await refresh();
     });
 
@@ -1245,8 +1193,7 @@ ns.UI = (() => {
       const text = refs.input.value.trim() || 'sample query';
       try {
         const qv = await ns.Vector.embed(text);
-        const results = await ns.P2P.queryPeers(qv);
-        ns.Logger.info('manual query done', { results: results.length });
+        await ns.P2P.queryPeers(qv);
         await refresh();
       } catch (e) { ns.Logger.error('manual query failed', e.message); }
     });
@@ -1266,8 +1213,14 @@ ns.UI = (() => {
     document.addEventListener('ns:peers', (ev) => {
       setPill('peers', `ONLINE: ${ev.detail.count}`, ev.detail.count ? 'ok' : 'warn');
     });
+    document.addEventListener('ns:rtc', (ev) => {
+      setPill('rtc', `RTC: ${ev.detail.count}`, ev.detail.count ? 'ok' : 'warn');
+    });
     document.addEventListener('ns:peer-online', (ev) => {
       ns.Logger.info('peer online', { dev: ev.detail.deviceId.slice(0, 12) });
+    });
+    document.addEventListener('ns:peer-offline', (ev) => {
+      ns.Logger.info('peer offline', { dev: ev.detail.deviceId.slice(0, 12) });
     });
   };
 
@@ -1275,10 +1228,7 @@ ns.UI = (() => {
   return { init, refresh, setPill, showDeviceId };
 })();
 
-/* --------------------------------------------------------------------------
-   [13] APP
-   Boot: Storage -> Device -> UI -> Signaling -> Presence heartbeat -> P2P bind
-   -------------------------------------------------------------------------- */
+/* [13] APP */
 ns.App = (() => {
   const boot = async () => {
     ns.UI.init();
