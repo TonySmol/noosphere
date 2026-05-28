@@ -27,12 +27,15 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .pill{padding:3px 8px;border-radius:999px;font-size:11px;background:#1a1f2a;border:1px solid var(--border);color:var(--muted)}
 .pill.ok{color:var(--ok);border-color:#1f3d2a}.pill.warn{color:var(--warn);border-color:#3d3220}
 .pill.err{color:var(--err);border-color:#3d1f22}.pill.think{color:var(--accent);border-color:var(--accent)}
+.pill.pub{color:var(--accent);border-color:var(--accent)}
 .list{display:flex;flex-direction:column;gap:6px;min-height:60px}
 .item{background:#0b0d12;border:1px solid var(--border);border-radius:4px;padding:8px 10px}
 .item.local{border-left:3px solid #555}.item.world{border-left:3px solid var(--accent)}
 .item.ephemeral::before{content:"NOSTR";font-size:9px;color:var(--accent);padding:1px 4px;border:1px solid var(--accent);border-radius:2px;margin-right:6px}
 .item .score{float:right;color:var(--muted);font-size:11px}
 .item .meta{color:var(--muted);font-size:10px;margin-top:4px}
+.item .pub-status{font-size:10px;margin-left:6px}
+.pub-ok{color:var(--ok)}.pub-err{color:var(--err)}.pub-pending{color:var(--warn)}
 .item mark{background:transparent;color:var(--accent);font-weight:bold}
 .progress{height:3px;background:#1a1f2a;border-radius:2px;overflow:hidden;margin-top:6px}
 .progress>div{height:100%;background:var(--accent);width:0;transition:width .2s}
@@ -43,11 +46,15 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .room-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
 .room-row label{font-size:11px;color:var(--muted);white-space:nowrap}
 .room-row input{flex:1;min-width:120px}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--err);color:white;padding:10px 20px;border-radius:6px;font-size:12px;z-index:9999;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.show{opacity:1}
+.pubkey{font-family:ui-monospace,monospace;font-size:10px;color:var(--muted);cursor:pointer}
+.pubkey:hover{color:var(--accent)}
 </style>
 </head>
 <body>
 <div class="wrap">
-<h1>NOOSPHERE <small>v5.2 · Direct Nostr · kind 1 · fixed</small></h1>
+<h1>NOOSPHERE <small>v5.3 · polished · publish status visible</small></h1>
 
 <section class="panel">
   <div class="room-row">
@@ -64,14 +71,17 @@ button:disabled{opacity:.5;cursor:not-allowed}
     <span class="pill" data-key="world">WORLD: 0</span>
     <span class="pill" data-key="think" style="display:none">...</span>
   </div>
+  <div id="pubkeyRow" style="margin-top:6px;display:none">
+    <span class="pubkey" id="pubkeyDisplay" title="Click to copy"></span>
+  </div>
   <div class="progress"><div id="modelProgress"></div></div>
   <div class="hint">
-    <b>v5.2 (фикс):</b>
-    • <code>pool.publish</code> → <code>Promise.allSettled</code> (был краш)<br>
-    • Убран heartbeat (вызывал rate-limit)<br>
-    • Kind 30078 → kind 1 (не addressable, каждый event уникален)<br>
-    • Нет query/response: все events приходят через subscribe, релевантность локально<br>
-    Открой на ТЕЛЕФОНЕ и на ПК, одинаковый room, Connect. Пиши на одном — на втором через 1-3 сек появится сосед в WORLD.
+    <b>v5.3 polish:</b>
+    • Throttle снижен до 800мс (было 1500)<br>
+    • Видно статус публикации каждой заметки (✓/✗/...)<br>
+    • Детальные ошибки relay в логе<br>
+    • Pubkey виден — кликни чтобы скопировать<br>
+    • Toast при ошибках publish
   </div>
 </section>
 
@@ -81,6 +91,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
   <div class="row" style="margin-top:8px;">
     <button id="btnSave" class="secondary">Сохранить локально</button>
     <button id="btnSaveWorld" class="primary">Сохранить + в Мир</button>
+    <button id="btnForcePublish" class="danger">Force publish (игнорить throttle)</button>
   </div>
 </section>
 
@@ -100,6 +111,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
     <button id="btnReindex">Reindex</button>
     <button id="btnSeed">Seed 5</button>
     <button id="btnReset" class="danger">Reset</button>
+    <button id="btnResetKey" class="danger">New Identity</button>
   </div>
 </section>
 
@@ -114,36 +126,24 @@ button:disabled{opacity:.5;cursor:not-allowed}
 </section>
 </div>
 
+<div class="toast" id="toast"></div>
+
 <script type="module">
 /* ============================================================================
-   NOOSPHERE v5.2 — DIRECT NOSTR (ИСПРАВЛЕНО)
+   NOOSPHERE v5.3 — POLISHED
    ----------------------------------------------------------------------------
-   Фиксы v5.2:
-   1. pool.publish(...) возвращает Promise<boolean>[] (массив!).
-      Теперь: Promise.allSettled(pool.publish(...)) → не крашится.
-   
-   2. Heartbeat УБРАН полностью — он вызывал rate-limit на relay.
-      Nostr relay держат WebSocket открытым сами, keepalive не нужен.
-   
-   3. Kind 30078 (addressable) → kind 1 (regular text note).
-      Addressable events с тем же 'd' tag заменяются — поэтому терялись peers.
-      Kind 1 с '#t' tag — каждый event уникален, все peers видны.
-   
-   4. Query/Response через Nostr УБРАН.
-      Теперь все events приходят через subscribe → релевантность считается
-      локально из RAM (быстро, без сетевых round-trip).
-   
-   5. Throttle публикации: не чаще 1 event в 1.5 секунды.
-   
-   Архитектура (теперь простая и рабочая):
-     - Publish: kind 1 event с тегом ['t', roomName], content = JSON{text, vector}
-     - Subscribe: kinds=[1], '#t'=[roomName], since=now-5min
-     - При получении чужого event → сохраняем в RAM с вектором
-     - При вводе → debounce 4s → считаем query vector → cosine vs все в RAM
-     - Re-subscribe каждые 30 секунд с обновлённым since (чтобы не терять events)
+   Полировки v5.3 (к рабочей v5.2):
+   1. Throttle: 1500мс → 800мс (быстрее UX)
+   2. Статус публикации виден в списке заметок: ✓/✗/... 
+   3. Детальные логи ошибок каждого relay (причина отказа)
+   4. Toast при ошибках publish (красная плашка внизу)
+   5. Pubkey виден в UI, клик = copy
+   6. Force publish button (игнорирует throttle)
+   7. New Identity button (сбросить ключи если pubkey "забанен")
+   8. Показываем latency publish (сколько мс от save до ok)
    
    Секции:
-     [1] Config  [2] Logger  [3] Util  [4] Storage  [5] Vector
+     [1] Config  [2] Logger+Toast  [3] Util  [4] Storage  [5] Vector
      [6] Nostr Channel  [7] Ephemeral  [8] Relevance  [9] Sync  [10] UI  [11] App
    ============================================================================ */
 
@@ -151,7 +151,7 @@ import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1
 import * as nostrMod from 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
 
 const pipeline = tfMod.pipeline || (tfMod.default && tfMod.default.pipeline);
-const tfEnv = tfMod.env || (tfMod.default && tfMod.default.env);
+const tfEnv = tfMod.env || (tfMod.default && tfEnv.default.env);
 const { SimplePool, finalizeEvent, generateSecretKey, getPublicKey } = nostrMod;
 
 if (!pipeline) throw new Error('transformers pipeline not found');
@@ -179,9 +179,9 @@ ns.Config = Object.freeze({
     'wss://relay.snort.social',
   ],
   
-  KIND_THOUGHT: 1,        // regular text note (NOT addressable)
-  WINDOW_SEC: 300,        // 5 минут — окно свежести events
-  RESUB_INTERVAL_MS: 30000, // обновлять subscribe каждые 30 сек
+  KIND_THOUGHT: 1,
+  WINDOW_SEC: 300,
+  RESUB_INTERVAL_MS: 30000,
   
   LIMITS: {
     MAX_TEXT_LENGTH: 10_000,
@@ -189,7 +189,7 @@ ns.Config = Object.freeze({
     DEBOUNCE_MS: 4000,
     MAX_RESULTS_PER_PEER: 5,
     MAX_EPHEMERAL_AGE_MS: 5 * 60_000,
-    PUBLISH_THROTTLE_MS: 1500,
+    PUBLISH_THROTTLE_MS: 800,  // было 1500, теперь быстрее
   },
   
   VECTOR: { MODEL_ID: 'Xenova/all-MiniLM-L6-v2' },
@@ -197,8 +197,25 @@ ns.Config = Object.freeze({
 });
 
 /* --------------------------------------------------------------------------
-   [2] LOGGER
+   [2] LOGGER + TOAST
    -------------------------------------------------------------------------- */
+ns.Toast = (() => {
+  const el = () => document.getElementById('toast');
+  let hideTimer = null;
+  return {
+    show(msg, durationMs = 4000) {
+      const t = el();
+      if (!t) return;
+      t.textContent = msg;
+      t.classList.add('show');
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => {
+        t.classList.remove('show');
+      }, durationMs);
+    }
+  };
+})();
+
 ns.Logger = (() => {
   const el = () => document.getElementById('log');
   const fmt = (d) => d.toISOString().slice(11, 19);
@@ -296,13 +313,14 @@ ns.Storage = (() => {
   const clear = async () => { await open(); await prom(tx(STORE_THOUGHTS, 'readwrite').clear()); };
   
   const putKey = async (k, v) => { await open(); return prom(tx(STORE_KEYS, 'readwrite').put({ k, v })); };
+  const delKey = async (k) => { await open(); return prom(tx(STORE_KEYS, 'readwrite').delete(k)); };
   const getKey = async (k) => {
     await open();
     const result = await prom(tx(STORE_KEYS).get(k));
     return result ? result.v : null;
   };
   
-  return { open, put, all, listUnindexed, clear, putKey, getKey };
+  return { open, put, all, listUnindexed, clear, putKey, getKey, delKey };
 })();
 
 /* --------------------------------------------------------------------------
@@ -351,7 +369,7 @@ ns.Vector = (() => {
 })();
 
 /* --------------------------------------------------------------------------
-   [6] NOSTR CHANNEL (kind 1, regular events, без heartbeat)
+   [6] NOSTR CHANNEL (с детальными логами ошибок)
    -------------------------------------------------------------------------- */
 ns.Channel = (() => {
   let pool = null;
@@ -360,9 +378,11 @@ ns.Channel = (() => {
   let roomName = null;
   let sub = null;
   let resubTimer = null;
-  const peers = new Map();      // pubkey -> lastSeen (ms)
-  const worldEvents = new Map(); // eventId -> { pubkey, text, vector, ts }
+  const peers = new Map();
+  const worldEvents = new Map();
   let lastPublishAt = 0;
+  // publish status callbacks
+  let onPublishStatus = null;
   
   const init = async (room) => {
     if (pool) return;
@@ -370,7 +390,6 @@ ns.Channel = (() => {
     
     ns.Logger.info('initializing Nostr client...');
     
-    // Load or generate keys
     let skHex = await ns.Storage.getKey('nostr_sk');
     if (!skHex) {
       const newSk = generateSecretKey();
@@ -384,14 +403,15 @@ ns.Channel = (() => {
     ns.Util.selfId = pk.slice(0, 16);
     ns.Logger.success('pubkey: ' + pk.slice(0, 16) + '...');
     
+    // show pubkey in UI
+    document.dispatchEvent(new CustomEvent('ns:pubkey', { detail: { pk } }));
+    
     pool = new SimplePool();
     
     ns.Logger.info('connecting to relays: ' + ns.Config.NOSTR_RELAYS.join(', '));
     
-    // Subscribe to room events
     doSubscribe();
     
-    // Re-subscribe каждые 30 секунд с новым since
     resubTimer = setInterval(() => {
       doSubscribe();
     }, ns.Config.RESUB_INTERVAL_MS);
@@ -403,7 +423,6 @@ ns.Channel = (() => {
     if (!pool) return;
     const since = Math.floor(Date.now() / 1000) - ns.Config.WINDOW_SEC;
     
-    // Закрываем предыдущую подписку
     if (sub) {
       try { sub.close(); } catch {}
       sub = null;
@@ -425,13 +444,11 @@ ns.Channel = (() => {
   };
   
   const handleEvent = (event) => {
-    if (event.pubkey === pk) return;  // skip own events
+    if (event.pubkey === pk) return;
     
-    // peers
     peers.set(event.pubkey, ns.Util.now());
     updatePeerCount();
     
-    // parse content
     try {
       const content = JSON.parse(event.content);
       if (content.text && Array.isArray(content.vector)) {
@@ -443,26 +460,34 @@ ns.Channel = (() => {
           eventId: event.id,
         });
         
-        // upsert into Ephemeral для UI
         ns.Ephemeral.upsert(event.pubkey, {
           id: event.id,
           text: content.text,
           vector: content.vector,
         });
       }
-    } catch (e) {
-      // silent: event is not ours
-    }
+    } catch (e) {}
   };
   
-  const publishThought = async (text, vector, noteId) => {
-    if (!pool || !sk) return false;
+  /**
+   * Publish thought to Nostr
+   * @param {Object} opts - { text, vector, noteId, force }
+   * @returns {Promise<{ok: boolean, latencyMs: number, okCount: number, total: number, errors: string[]}>}
+   */
+  const publishThought = async (opts) => {
+    const { text, vector, noteId, force } = opts;
+    const tStart = Date.now();
     
-    // Throttle: не чаще 1 event в 1.5 секунды (защита от rate-limit)
+    if (!pool || !sk) {
+      return { ok: false, latencyMs: 0, okCount: 0, total: 0, errors: ['not connected'] };
+    }
+    
+    // Throttle check
     const now = Date.now();
-    if (now - lastPublishAt < ns.Config.LIMITS.PUBLISH_THROTTLE_MS) {
-      ns.Logger.warn('publish throttled (wait 1.5s between events)');
-      return false;
+    if (!force && now - lastPublishAt < ns.Config.LIMITS.PUBLISH_THROTTLE_MS) {
+      const wait = ns.Config.LIMITS.PUBLISH_THROTTLE_MS - (now - lastPublishAt);
+      ns.Logger.warn('publish throttled (wait ' + wait + 'ms or use Force publish)');
+      return { ok: false, latencyMs: 0, okCount: 0, total: 0, errors: ['throttled'] };
     }
     lastPublishAt = now;
     
@@ -471,7 +496,7 @@ ns.Channel = (() => {
         kind: ns.Config.KIND_THOUGHT,
         created_at: Math.floor(Date.now() / 1000),
         tags: [
-          ['t', roomName],    // room identifier (обычный tag, не addressable)
+          ['t', roomName],
           ['client', 'noosphere'],
         ],
         content: JSON.stringify({
@@ -481,34 +506,63 @@ ns.Channel = (() => {
         }),
       }, sk);
       
-      // ВАЖНО: pool.publish возвращает Promise<boolean>[] (массив!)
+      // ВАЖНО: pool.publish возвращает Promise<boolean>[]
       const results = await Promise.allSettled(pool.publish(ns.Config.NOSTR_RELAYS, event));
-      const okCount = results.filter(r => r.status === 'fulfilled' && r.value === true).length;
-      const errCount = results.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && r.value !== true)).length;
+      const latency = Date.now() - tStart;
       
-      if (okCount > 0) {
-        ns.Logger.success('published to ' + okCount + '/' + ns.Config.NOSTR_RELAYS.length + ' relays' + (errCount > 0 ? ' (' + errCount + ' failed)' : ''));
+      const errors = [];
+      let okCount = 0;
+      
+      results.forEach((r, i) => {
+        const relayUrl = ns.Config.NOSTR_RELAYS[i];
+        const relayShort = relayUrl.replace('wss://', '').replace('/', '');
         
-        // Логируем ошибки для дебага (но не падаем)
-        results.forEach((r, i) => {
+        if (r.status === 'fulfilled' && r.value === true) {
+          okCount++;
+          ns.Logger.info('  ✓ ' + relayShort + ' (' + latency + 'ms)');
+        } else {
+          let errMsg = 'unknown';
           if (r.status === 'rejected') {
-            ns.Logger.warn('relay ' + ns.Config.NOSTR_RELAYS[i] + ': ' + (r.reason && r.reason.message ? r.reason.message : 'rejected'));
+            errMsg = r.reason && r.reason.message ? r.reason.message : 'rejected';
+          } else if (r.status === 'fulfilled' && r.value !== true) {
+            // relay вернул false — значит отклонил
+            errMsg = typeof r.value === 'string' ? r.value : 'rejected by relay';
           }
-        });
-        
-        return true;
+          errors.push(relayShort + ': ' + errMsg);
+          ns.Logger.warn('  ✗ ' + relayShort + ': ' + errMsg);
+        }
+      });
+      
+      const allOk = okCount === ns.Config.NOSTR_RELAYS.length;
+      const someOk = okCount > 0;
+      
+      if (someOk) {
+        ns.Logger.success('published to ' + okCount + '/' + ns.Config.NOSTR_RELAYS.length + ' relays in ' + latency + 'ms');
       } else {
-        ns.Logger.error('publish failed on all relays');
-        results.forEach((r, i) => {
-          const err = r.status === 'rejected' ? r.reason : (r.value === false ? 'rejected by relay' : null);
-          if (err) ns.Logger.warn('  ' + ns.Config.NOSTR_RELAYS[i] + ': ' + (err.message || String(err)));
-        });
-        return false;
+        ns.Logger.error('publish failed on ALL relays (' + latency + 'ms)');
+        ns.Toast.show('⚠️ Publish failed: ' + errors[0]);
       }
+      
+      return {
+        ok: someOk,
+        allOk: allOk,
+        latencyMs: latency,
+        okCount: okCount,
+        total: ns.Config.NOSTR_RELAYS.length,
+        errors: errors,
+      };
     } catch (e) {
-      ns.Logger.warn('publish err', e.message);
-      return false;
+      const latency = Date.now() - tStart;
+      ns.Logger.error('publish err: ' + e.message);
+      ns.Toast.show('⚠️ Publish error: ' + e.message);
+      return { ok: false, latencyMs: latency, okCount: 0, total: ns.Config.NOSTR_RELAYS.length, errors: [e.message] };
     }
+  };
+  
+  const resetIdentity = async () => {
+    await ns.Storage.delKey('nostr_sk');
+    ns.Logger.warn('identity reset — reload page');
+    location.reload();
   };
   
   const leave = () => {
@@ -543,11 +597,11 @@ ns.Channel = (() => {
     document.dispatchEvent(new CustomEvent('ns:world', { detail: { count: worldEvents.size } }));
   };
   
-  return { init, leave, isConnected, publishThought, getActivePeers };
+  return { init, leave, isConnected, publishThought, getActivePeers, resetIdentity };
 })();
 
 /* --------------------------------------------------------------------------
-   [7] EPHEMERAL (чужие events в RAM)
+   [7] EPHEMERAL
    -------------------------------------------------------------------------- */
 ns.Ephemeral = (() => {
   const byPeer = new Map();
@@ -662,10 +716,15 @@ ns.Relevance = (() => {
 })();
 
 /* --------------------------------------------------------------------------
-   [9] SYNC
+   [9] SYNC (с publish status tracking)
    -------------------------------------------------------------------------- */
 ns.Sync = (() => {
-  const saveLocal = async ({ text, publishToWorld }) => {
+  // Track publish status per note
+  const publishStatus = new Map();  // noteId -> 'pending' | 'ok' | 'err' | 'throttled'
+  
+  const getPublishStatus = (noteId) => publishStatus.get(noteId) || null;
+  
+  const saveLocal = async ({ text, publishToWorld, force = false }) => {
     const clean = ns.Util.normalizeText(text);
     if (!clean) throw new Error('Empty');
     const thought = {
@@ -687,11 +746,35 @@ ns.Sync = (() => {
     }
     await ns.Storage.put(thought);
     ns.Logger.info('saved', { id: thought.id.slice(0, 8), published: thought.published });
-    document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
     
-    if (publishToWorld && thought.vector && ns.Channel.isConnected()) {
-      await ns.Channel.publishThought(clean, thought.vector, thought.id);
+    // publish status: pending → ok/err
+    if (publishToWorld) {
+      publishStatus.set(thought.id, 'pending');
+      document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
+      
+      if (thought.vector && ns.Channel.isConnected()) {
+        const result = await ns.Channel.publishThought({
+          text: clean,
+          vector: thought.vector,
+          noteId: thought.id,
+          force: force,
+        });
+        
+        if (result.ok) {
+          publishStatus.set(thought.id, 'ok');
+        } else if (result.errors[0] === 'throttled') {
+          publishStatus.set(thought.id, 'throttled');
+        } else {
+          publishStatus.set(thought.id, 'err');
+        }
+      } else if (!ns.Channel.isConnected()) {
+        publishStatus.set(thought.id, 'err');
+      } else if (!thought.vector) {
+        publishStatus.set(thought.id, 'err');
+      }
     }
+    
+    document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
     return thought;
   };
   
@@ -715,7 +798,7 @@ ns.Sync = (() => {
     document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
   };
   
-  return { saveLocal, reindexAll };
+  return { saveLocal, reindexAll, getPublishStatus };
 })();
 
 /* --------------------------------------------------------------------------
@@ -726,7 +809,7 @@ ns.UI = (() => {
   let lastQuery = { text: null, vector: null };
   
   const cache = () => {
-    ['input','btnSave','btnSaveWorld','btnLoadModel','btnReindex','btnSeed','btnReset','btnConnect','btnDisconnect','roomInput','listMine','listWorld','listAdjacent','listAll','status','modelProgress']
+    ['input','btnSave','btnSaveWorld','btnForcePublish','btnLoadModel','btnReindex','btnSeed','btnReset','btnResetKey','btnConnect','btnDisconnect','roomInput','listMine','listWorld','listAdjacent','listAll','status','modelProgress','pubkeyRow','pubkeyDisplay']
       .forEach((id) => { refs[id] = document.getElementById(id); });
   };
   
@@ -734,7 +817,7 @@ ns.UI = (() => {
     const el = refs.status.querySelector('[data-key="' + k + '"]');
     if (!el) return;
     el.textContent = t;
-    el.classList.remove('ok','warn','err','think');
+    el.classList.remove('ok','warn','err','think','pub');
     if (s) el.classList.add(s);
   };
   
@@ -773,7 +856,20 @@ ns.UI = (() => {
       body.innerHTML = ns.Relevance.highlightFragment(qt, t.text);
       const meta = document.createElement('div');
       meta.className = 'meta';
-      meta.textContent = (t.published ? 'world-shared' : 'local') + ' · ' + new Date(t.createdAt).toISOString().slice(0,16) + ' · ' + t.id.slice(0,6);
+      
+      let pubStatus = '';
+      if (t.published) {
+        const st = ns.Sync.getPublishStatus(t.id);
+        if (st === 'ok') pubStatus = '<span class="pub-status pub-ok">✓ published</span>';
+        else if (st === 'err') pubStatus = '<span class="pub-status pub-err">✗ failed</span>';
+        else if (st === 'throttled') pubStatus = '<span class="pub-status pub-err">⚠ throttled</span>';
+        else if (st === 'pending') pubStatus = '<span class="pub-status pub-pending">... publishing</span>';
+        else pubStatus = '<span class="pub-status pub-ok">✓ world-shared</span>';
+      } else {
+        pubStatus = '<span class="pub-status">local</span>';
+      }
+      
+      meta.innerHTML = pubStatus + ' · ' + new Date(t.createdAt).toISOString().slice(0,16) + ' · ' + t.id.slice(0,6);
       row.appendChild(score);
       row.appendChild(body);
       row.appendChild(meta);
@@ -890,7 +986,17 @@ ns.UI = (() => {
       body.textContent = t.text;
       const meta = document.createElement('div');
       meta.className = 'meta';
-      meta.textContent = new Date(t.createdAt).toISOString().slice(0,16) + ' · ' + (t.published ? 'world' : 'local') + ' · vec:' + (t.hasVector ? 'yes' : 'no') + ' · ' + t.id.slice(0,6);
+      
+      let pubStatus = '';
+      if (t.published) {
+        const st = ns.Sync.getPublishStatus(t.id);
+        if (st === 'ok') pubStatus = '<span class="pub-status pub-ok">✓</span>';
+        else if (st === 'err') pubStatus = '<span class="pub-status pub-err">✗</span>';
+        else if (st === 'throttled') pubStatus = '<span class="pub-status pub-err">⚠</span>';
+        else pubStatus = '<span class="pub-status pub-ok">✓</span>';
+      }
+      
+      meta.innerHTML = new Date(t.createdAt).toISOString().slice(0,16) + ' · ' + (t.published ? 'world' : 'local') + ' ' + pubStatus + ' · vec:' + (t.hasVector ? 'yes' : 'no') + ' · ' + t.id.slice(0,6);
       row.appendChild(body);
       row.appendChild(meta);
       refs.listAll.appendChild(row);
@@ -926,6 +1032,7 @@ ns.UI = (() => {
     const disableSavers = (v) => {
       refs.btnSave.disabled = v;
       refs.btnSaveWorld.disabled = v;
+      refs.btnForcePublish.disabled = v;
     };
     
     refs.btnSave.addEventListener('click', async () => {
@@ -951,6 +1058,23 @@ ns.UI = (() => {
         await renderAll();
       } catch (e) {
         ns.Logger.error('save fail', e.message);
+      } finally {
+        disableSavers(false);
+      }
+    });
+    
+    refs.btnForcePublish.addEventListener('click', async () => {
+      const text = refs.input.value.trim();
+      if (!text) { ns.Logger.warn('empty text'); return; }
+      if (!ns.Channel.isConnected()) { ns.Logger.warn('not connected'); return; }
+      try {
+        disableSavers(true);
+        await ns.Sync.saveLocal({ text: text, publishToWorld: true, force: true });
+        refs.input.value = '';
+        clearAll();
+        await renderAll();
+      } catch (e) {
+        ns.Logger.error('force publish fail', e.message);
       } finally {
         disableSavers(false);
       }
@@ -1000,7 +1124,11 @@ ns.UI = (() => {
         'Иногда нужно просто записать, чтобы понять.',
         'Связи между идеями важнее самих идей.',
       ];
-      for (const s of samples) await ns.Sync.saveLocal({ text: s, publishToWorld: true });
+      for (const s of samples) {
+        await ns.Sync.saveLocal({ text: s, publishToWorld: true });
+        // wait between publishes to avoid throttle
+        await new Promise(r => setTimeout(r, 900));
+      }
       invalidateCache();
       await renderAll();
     });
@@ -1017,6 +1145,11 @@ ns.UI = (() => {
       } catch (e) {
         ns.Logger.error('reset fail', e.message);
       }
+    });
+    
+    refs.btnResetKey.addEventListener('click', async () => {
+      if (!confirm('Пересоздать Nostr identity? (старый pubkey будет утерян, соседи его больше не увидят)')) return;
+      await ns.Channel.resetIdentity();
     });
     
     refs.btnConnect.addEventListener('click', async () => {
@@ -1045,6 +1178,19 @@ ns.UI = (() => {
       refs.btnDisconnect.disabled = true;
       refs.roomInput.disabled = false;
       ns.Ephemeral.clear();
+    });
+    
+    // Pubkey display
+    document.addEventListener('ns:pubkey', (ev) => {
+      const pk = ev.detail.pk;
+      refs.pubkeyRow.style.display = '';
+      refs.pubkeyDisplay.textContent = 'npub: ' + pk;
+      refs.pubkeyDisplay.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(pk);
+          ns.Toast.show('✓ Pubkey copied');
+        } catch {}
+      };
     });
     
     document.addEventListener('ns:thoughts-changed', async () => {
@@ -1089,8 +1235,8 @@ ns.App = (() => {
       return;
     }
     await ns.UI.refresh();
-    ns.Logger.success('app ready. Enter room, click Connect, open same on 2nd device.');
-    ns.Logger.info('v5.2: kind 1 events, no heartbeat, Promise.allSettled on publish');
+    ns.Logger.success('v5.3 polished. Connect, Load model, write on one tab, see on another.');
+    ns.Logger.info('publish status shown as ✓/✗/... next to each note');
   };
   return { boot };
 })();
