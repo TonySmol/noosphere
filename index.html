@@ -3,11 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Noosphere — local-only notebook + embeddings + Trystero P2P</title>
-
-  <!-- чтобы браузер не спамил 404 favicon -->
+  <title>Noosphere — local-only + embeddings + Trystero P2P</title>
   <link rel="icon" href="data:," />
-
   <style>
     :root{
       --bg:#0f1115; --panel:#161a22; --border:#242a36;
@@ -50,13 +47,12 @@
     .log .e{color:var(--err)} .log .w{color:var(--warn)} .log .i{color:var(--muted)}
     .empty{color:var(--muted);font-size:12px;padding:6px}
     .hint{font-size:11px;color:var(--muted);font-style:italic;margin-top:6px}
-    .mono{font-family:ui-monospace,Menlo,monospace}
   </style>
 </head>
 
 <body>
 <div class="wrap">
-  <h1>NOOSPHERE <small>single HTML · local-only IDB · embeddings · Trystero P2P</small></h1>
+  <h1>NOOSPHERE <small>single HTML · IDB local only · embeddings · Trystero P2P</small></h1>
 
   <section class="panel">
     <div class="status" id="status">
@@ -70,8 +66,9 @@
     </div>
     <div class="progress"><div id="modelProgress"></div></div>
     <div class="hint">
-      Важно: открывай через <b>https://</b> или <b>http://localhost</b> (не file://).
-      Открой 2 вкладки/2 устройства с одним ROOM — появятся PEERS и WORLD-результаты (в RAM).
+      Запуск: <b>https://</b> или <b>http://localhost</b> (не file://).
+      ROOM задаётся через <code>?room=xxx</code> или <code>#xxx</code>.
+      Чтобы WORLD работал: открой 2 вкладки/2 устройства с одним ROOM, нажми <b>Load MiniLM</b>, сделай <b>Save + World</b> на одном.
     </div>
   </section>
 
@@ -87,8 +84,7 @@
       <button id="btnReset" class="danger">Reset</button>
     </div>
     <div class="hint">
-      Save local = заметка только у тебя. Save + World = ты будешь отдавать <u>только topK сниппеты</u> на запросы peers, пока онлайн.
-      Ничего “чужого” не сохраняется.
+      Save + World = ты отвечаешь на запросы peers (только topK сниппеты). Получатель ничего не сохраняет.
     </div>
   </section>
 
@@ -111,7 +107,7 @@
   </section>
 
   <section class="panel">
-    <h2>my notes (persisted on disk)</h2>
+    <h2>my notes (persisted)</h2>
     <div class="list" id="listAll"></div>
   </section>
 
@@ -123,16 +119,18 @@
 
 <script type="module">
 /* ============================================================================
-   NOOSPHERE — SINGLE HTML
+   NOOSPHERE — SINGLE HTML (исправлено)
    ----------------------------------------------------------------------------
-   Главная цель: без “мерджа кусков”.
-   Один HTML, внутри:
-     - IndexedDB (локально)
-     - embeddings (transformers.js)
-     - P2P через Trystero (torrent adapter)
-     - WORLD-заметки: только пока peer онлайн (в RAM, без записи на диск)
-   ============================================================================ */
+   Что исправлено относительно твоего лога:
+   1) esm.sh 404 по trystero/torrent — не используем его как основной источник.
+      Теперь грузим Trystero с jspm.dev по НОВОМУ пакету @trystero-p2p/torrent.
+   2) Ошибка tracker.files.fm у тебя появилась потому что ты передавал неправильный ключ
+      (trackers), а trystero ожидал trackerUrls => брал дефолтные трекеры.
+      Здесь используем trackerUrls, и дефолтные не нужны.
 
+   ВАЖНО: если ВСЕ wss trackers блокируются твоей сетью/адблоком — PEERS не появятся,
+   это уже не код, а окружение.
+   ============================================================================ */
 
 /* ---------------------------------------------------------------------------
    [0] CONFIG
@@ -141,18 +139,16 @@ const ns = {}
 ns.Config = Object.freeze({
   DB: { name: 'noosphere_single_html', version: 1, store: 'notes' },
 
-  // ROOM можно поменять через ?room=xxx или через #xxx
   DEFAULT_ROOM: 'noosphere-room-1',
-  APP_ID: 'noosphere-single-html-v1',
+  APP_ID: 'noosphere-single-html-v2',
 
-  // Trackers для trystero/torrent
-  TRACKERS: [
+  // Укажем трекеры явно (и именно через trackerUrls)
+  TRACKER_URLS: [
     'wss://tracker.openwebtorrent.com',
     'wss://tracker.btorrent.xyz',
     'wss://tracker.fastcast.nz',
   ],
 
-  // ICE (STUN) — помогает находить прямые соединения
   RTC: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
 
   MODEL_ID: 'Xenova/all-MiniLM-L6-v2',
@@ -170,28 +166,23 @@ ns.Config = Object.freeze({
     EPHEMERAL_TTL_MS: 5 * 60_000,
   },
 
-  SER: { min: 0.12, max: 0.33 }, // low-corr диапазон для serendipity
+  SER: { min: 0.12, max: 0.33 },
 })
-
 
 /* ---------------------------------------------------------------------------
    [1] UI + LOGGER
 --------------------------------------------------------------------------- */
 ns.UI = (() => {
   const $ = (id) => document.getElementById(id)
-
   const refs = {
     input: $('input'),
-
     listMine: $('listMine'),
     listWorld: $('listWorld'),
     listSer: $('listSer'),
     listAll: $('listAll'),
-
     status: $('status'),
     modelProgress: $('modelProgress'),
     log: $('log'),
-
     btnLoadModel: $('btnLoadModel'),
     btnSave: $('btnSave'),
     btnSaveWorld: $('btnSaveWorld'),
@@ -265,9 +256,8 @@ ns.UI = (() => {
   return { refs, setPill, setThink, setProgress, logLine, itemHtml, renderList }
 })()
 
-
 /* ---------------------------------------------------------------------------
-   [2] UTIL
+   [2] UTIL + ROOM
 --------------------------------------------------------------------------- */
 ns.Util = {
   now: () => Date.now(),
@@ -290,10 +280,8 @@ ns.Room = (() => {
   return room
 })()
 
-
 /* ---------------------------------------------------------------------------
-   [3] STORAGE (IndexedDB, без внешних либ)
-   note = { id, text, createdAt, updatedAt, published, vector, hasVector }
+   [3] STORAGE (IndexedDB)
 --------------------------------------------------------------------------- */
 ns.Storage = (() => {
   const { name, version, store } = ns.Config.DB
@@ -347,12 +335,10 @@ ns.Storage = (() => {
   return { open, put, getAll, clear, listUnindexed }
 })()
 
-
 /* ---------------------------------------------------------------------------
    [4] VECTOR (transformers.js)
 --------------------------------------------------------------------------- */
 ns.Vector = (() => {
-  // transformers.js импортируем модулем
   let extractor = null
   let loading = null
 
@@ -360,9 +346,7 @@ ns.Vector = (() => {
     if (extractor) return extractor
     if (loading) return loading
 
-    // импорт прямо тут (чтобы файл был один)
     const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js')
-
     env.allowLocalModels = false
     env.useBrowserCache = true
 
@@ -388,7 +372,7 @@ ns.Vector = (() => {
   const embed = async (text) => {
     if (!extractor) throw new Error('MODEL_NOT_LOADED')
     const out = await extractor(text, { pooling: 'mean', normalize: true })
-    return out.data // Float32Array
+    return out.data // Float32Array normalized
   }
 
   const dot = (a, b) => {
@@ -401,42 +385,37 @@ ns.Vector = (() => {
   return { load, embed, dot, isLoaded: () => extractor !== null }
 })()
 
-
 /* ---------------------------------------------------------------------------
-   [5] IN-MEMORY STATE (чтобы быстро ранжировать и отвечать на P2P)
+   [5] STATE (notes in RAM)
 --------------------------------------------------------------------------- */
 ns.State = (() => {
-  const state = {
-    notes: [],        // persisted notes
-    indexed: 0,       // how many have vectors
-  }
+  const state = { notes: [], indexed: 0 }
 
   const reload = async () => {
     state.notes = await ns.Storage.getAll()
     state.indexed = state.notes.filter(n => n && n.hasVector && n.vector).length
-    ns.UI.setPill('indexed', `INDEXED: ${state.indexed}/${state.notes.length}`, (state.notes.length && state.indexed === state.notes.length) ? 'ok' : 'warn')
+    ns.UI.setPill(
+      'indexed',
+      `INDEXED: ${state.indexed}/${state.notes.length}`,
+      (state.notes.length && state.indexed === state.notes.length) ? 'ok' : 'warn'
+    )
   }
 
   return { state, reload }
 })()
 
-
 /* ---------------------------------------------------------------------------
-   [6] EPHEMERAL (WORLD результаты в RAM, TTL)
+   [6] EPHEMERAL WORLD cache (RAM only)
 --------------------------------------------------------------------------- */
 ns.Ephemeral = (() => {
-  const byPeer = new Map() // peerId -> { lastSeen, results: [] }
+  const byPeer = new Map()
 
-  const upsert = (peerId, results) => {
-    byPeer.set(peerId, { lastSeen: ns.Util.now(), results: results || [] })
-  }
+  const upsert = (peerId, results) => byPeer.set(peerId, { lastSeen: ns.Util.now(), results: results || [] })
 
   const prune = () => {
     const ttl = ns.Config.LIMITS.EPHEMERAL_TTL_MS
     const t = ns.Util.now()
-    for (const [peerId, rec] of byPeer) {
-      if (t - rec.lastSeen > ttl) byPeer.delete(peerId)
-    }
+    for (const [peerId, rec] of byPeer) if (t - rec.lastSeen > ttl) byPeer.delete(peerId)
   }
 
   const allResults = () => {
@@ -449,13 +428,11 @@ ns.Ephemeral = (() => {
   }
 
   const clear = () => byPeer.clear()
-
   return { upsert, allResults, clear, prune }
 })()
 
-
 /* ---------------------------------------------------------------------------
-   [7] RELEVANCE (локально / мир / serendipity)
+   [7] RELEVANCE
 --------------------------------------------------------------------------- */
 ns.Relevance = (() => {
   const rankLocalTop = (queryVec, topK) => {
@@ -471,11 +448,10 @@ ns.Relevance = (() => {
       ephemeral: false,
       text: ns.Util.snippet(note.text, ns.Config.LIMITS.SNIPPET),
       score,
-      meta: `${note.published ? 'world' : 'local'} · ${new Date(note.createdAt).toISOString().slice(0,16)} · ${note.id.slice(0,6)}`,
+      meta: `${note.published ? 'world' : 'local'} · ${new Date(note.createdAt).toISOString().slice(0,16)} · ${note.id.slice(0,6)}`
     }))
   }
 
-  // low-corr candidates from local notes (для serendipity)
   const rankLocalLowCorr = (queryVec, { min, max, limit }) => {
     const pool = []
     for (const n of ns.State.state.notes) {
@@ -489,7 +465,7 @@ ns.Relevance = (() => {
       ephemeral: false,
       text: ns.Util.snippet(note.text, ns.Config.LIMITS.SNIPPET),
       score,
-      meta: `${note.published ? 'world' : 'local'} · low-corr · ${note.id.slice(0,6)}`,
+      meta: `${note.published ? 'world' : 'local'} · low-corr · ${note.id.slice(0,6)}`
     }))
   }
 
@@ -508,38 +484,44 @@ ns.Relevance = (() => {
   return { rankLocalTop, rankLocalLowCorr, serendipityMix }
 })()
 
-
 /* ---------------------------------------------------------------------------
-   [8] TRYSTERO LOADER (по-умному: пробуем несколько CDN)
-   Почему так: чтобы не упираться в 404, как у тебя.
+   [8] TRYSTERO LOADER (без 404 по esm.sh, основной источник jspm)
 --------------------------------------------------------------------------- */
 ns.TrysteroLoader = (() => {
+  // Главное: используем новый пакет @trystero-p2p/torrent (как и просит warning).
+  // jspm.dev у тебя уже реально грузится.
   const candidates = [
-    // обычно работает
-    'https://esm.sh/trystero@0.17.1/torrent?bundle&target=es2022',
-    'https://esm.sh/trystero/torrent?bundle&target=es2022',
+    'https://jspm.dev/@trystero-p2p/torrent',
+    'https://cdn.skypack.dev/@trystero-p2p/torrent',
+    'https://esm.run/@trystero-p2p/torrent',
 
-    // запасные
+    // fallback на старый, если вдруг новый не доступен
     'https://jspm.dev/trystero/torrent',
-    'https://cdn.skypack.dev/trystero/torrent',
-    'https://esm.run/trystero/torrent',
   ]
+
+  const resolveJoinRoom = (mod) => {
+    // разные CDN/версии могут экспортировать по-разному
+    if (typeof mod?.joinRoom === 'function') return mod.joinRoom
+    if (typeof mod?.default === 'function') return mod.default
+    if (typeof mod?.default?.joinRoom === 'function') return mod.default.joinRoom
+    return null
+  }
 
   const loadJoinRoom = async () => {
     const errors = []
     for (const url of candidates) {
       try {
         const mod = await import(url)
-        if (typeof mod.joinRoom !== 'function') throw new Error('joinRoom not found')
+        const joinRoom = resolveJoinRoom(mod)
+        if (!joinRoom) throw new Error('joinRoom export not found')
         ns.UI.logLine('i', 'Trystero loaded', url)
-        return mod.joinRoom
+        return joinRoom
       } catch (e) {
         errors.push({ url, err: String(e?.message || e) })
         ns.UI.logLine('w', 'Trystero import failed', { url, err: String(e?.message || e) })
       }
     }
-    const msg = 'Cannot import trystero/torrent from CDNs. Try другой интернет/без adblock или поставь npm+vite.'
-    const err = new Error(msg)
+    const err = new Error('Cannot import Trystero from CDNs')
     err.details = errors
     throw err
   }
@@ -547,12 +529,11 @@ ns.TrysteroLoader = (() => {
   return { loadJoinRoom }
 })()
 
-
 /* ---------------------------------------------------------------------------
-   [9] P2P (Trystero/torrent)
+   [9] P2P
    Протокол:
-     ns:q:req { v:1, requestId, vec:Array<number>, k:number }
-     ns:q:res { v:1, requestId, results:[{text,score,noteId}] }
+     req: { v:1, requestId, vec:Array<number>, k:number }
+     res: { v:1, requestId, results:[{noteId,text,score}] }
 --------------------------------------------------------------------------- */
 ns.P2P = (() => {
   const peers = new Set()
@@ -562,7 +543,7 @@ ns.P2P = (() => {
   let sendReq = null, onReq = null
   let sendRes = null, onRes = null
 
-  const pending = new Map() // requestId -> { deadline, results: [] }
+  const pending = new Map()
 
   const refreshPeers = () => {
     ns.UI.setPill('peers', `PEERS: ${peers.size}`, peers.size ? 'ok' : 'warn')
@@ -572,10 +553,18 @@ ns.P2P = (() => {
     ns.UI.setPill('p2p', 'P2P: loading...', 'warn')
     joinRoomFn = await ns.TrysteroLoader.loadJoinRoom()
 
-    room = joinRoomFn(
-      { appId: ns.Config.APP_ID, trackers: ns.Config.TRACKERS, rtcConfig: ns.Config.RTC },
-      ns.Room
-    )
+    // КЛЮЧЕВОЕ: trackerUrls (а не trackers). Именно из-за этого у тебя лез tracker.files.fm.
+    const opts = {
+      appId: ns.Config.APP_ID,
+      rtcConfig: ns.Config.RTC,
+      trackerUrls: ns.Config.TRACKER_URLS,
+      // на всякий случай: некоторым версиям/форкам может быть нужен другой ключ
+      trackers: ns.Config.TRACKER_URLS,
+    }
+
+    ns.UI.logLine('i', 'P2P opts', { room: ns.Room, trackerUrls: ns.Config.TRACKER_URLS })
+
+    room = joinRoomFn(opts, ns.Room)
 
     ;[sendReq, onReq] = room.makeAction('ns:q:req')
     ;[sendRes, onRes] = room.makeAction('ns:q:res')
@@ -591,7 +580,6 @@ ns.P2P = (() => {
       ns.UI.logLine('w', 'peer leave', peerId)
     })
 
-    // incoming query -> answer ONLY published notes
     onReq(async (payload, peerId) => {
       try {
         if (!payload || payload.v !== 1) return
@@ -602,7 +590,6 @@ ns.P2P = (() => {
 
         const qv = new Float32Array(vecArr)
 
-        // отвечаем только published + hasVector
         const pool = []
         for (const n of ns.State.state.notes) {
           if (!n?.published || !n?.hasVector || !n.vector) continue
@@ -622,7 +609,6 @@ ns.P2P = (() => {
       }
     })
 
-    // incoming responses -> collect into pending and into ephemeral RAM
     onRes((payload, peerId) => {
       if (!payload || payload.v !== 1) return
       const { requestId, results } = payload
@@ -638,15 +624,12 @@ ns.P2P = (() => {
       }))
 
       p.results.push(...normalized)
-
-      // обновляем RAM-кеш “мира” по peer
       ns.Ephemeral.upsert(peerId, normalized)
     })
 
     ns.UI.setPill('p2p', 'P2P: online', 'ok')
     refreshPeers()
 
-    // sweeper pending
     const sweep = () => {
       const t = ns.Util.now()
       for (const [id, p] of pending) if (t >= p.deadline) pending.delete(id)
@@ -663,23 +646,18 @@ ns.P2P = (() => {
     const deadline = ns.Util.now() + (timeoutMs ?? ns.Config.LIMITS.QUERY_TIMEOUT_MS)
     pending.set(requestId, { deadline, results: [] })
 
-    // Отправляем Array<number>, чтобы structured clone не чудил.
     sendReq({ v: 1, requestId, vec: Array.from(queryVec), k: k ?? ns.Config.LIMITS.WORLD_TOPK })
-
     await new Promise(r => setTimeout(r, timeoutMs ?? ns.Config.LIMITS.QUERY_TIMEOUT_MS))
 
     const p = pending.get(requestId)
-    const results = (p?.results || [])
+    return (p?.results || [])
       .filter(x => x.text)
       .sort((a, b) => b.score - a.score)
       .slice(0, ns.Config.LIMITS.WORLD_TOPK)
-
-    return results
   }
 
   return { init, queryWorld, peersCount: () => peers.size }
 })()
-
 
 /* ---------------------------------------------------------------------------
    [10] RENDER
@@ -698,29 +676,16 @@ ns.Render = (() => {
   }
 
   const renderLive = ({ local, world, ser }) => {
-    ns.UI.renderList(
-      ns.UI.refs.listMine,
-      (local || []).map(x => ns.UI.itemHtml(x)),
-      '(empty)'
-    )
-    ns.UI.renderList(
-      ns.UI.refs.listWorld,
-      (world || []).map(x => ns.UI.itemHtml(x)),
-      ns.P2P.peersCount() ? '(no matches)' : '(no peers)'
-    )
-    ns.UI.renderList(
-      ns.UI.refs.listSer,
-      (ser || []).map(x => ns.UI.itemHtml(x)),
-      '(empty)'
-    )
+    ns.UI.renderList(ns.UI.refs.listMine, (local || []).map(ns.UI.itemHtml), '(empty)')
+    ns.UI.renderList(ns.UI.refs.listWorld, (world || []).map(ns.UI.itemHtml), ns.P2P.peersCount() ? '(no matches)' : '(no peers)')
+    ns.UI.renderList(ns.UI.refs.listSer, (ser || []).map(ns.UI.itemHtml), '(empty)')
   }
 
   return { renderAllNotes, renderLive }
 })()
 
-
 /* ---------------------------------------------------------------------------
-   [11] LIVE UPDATE (debounced)
+   [11] LIVE UPDATE
 --------------------------------------------------------------------------- */
 ns.Live = (() => {
   let lastQuery = { text: null, vec: null }
@@ -743,10 +708,7 @@ ns.Live = (() => {
     ns.UI.setThink(true, 'embedding...')
     let qv
     if (lastQuery.text === text && lastQuery.vec) qv = lastQuery.vec
-    else {
-      qv = await ns.Vector.embed(text)
-      lastQuery = { text, vec: qv }
-    }
+    else { qv = await ns.Vector.embed(text); lastQuery = { text, vec: qv } }
 
     ns.UI.setThink(true, 'rank local...')
     const local = ns.Relevance.rankLocalTop(qv, ns.Config.LIMITS.LOCAL_TOPK)
@@ -754,12 +716,12 @@ ns.Live = (() => {
     ns.UI.setThink(true, 'query peers...')
     const world = await ns.P2P.queryWorld(qv, { timeoutMs: ns.Config.LIMITS.QUERY_TIMEOUT_MS })
 
-    // serendipity = low corr local + low corr world
     const localLow = ns.Relevance.rankLocalLowCorr(qv, {
       min: ns.Config.SER.min,
       max: ns.Config.SER.max,
       limit: ns.Config.LIMITS.SER_TOPK
     })
+
     const worldLow = (ns.Ephemeral.allResults() || [])
       .filter(x => typeof x.score === 'number' && x.score >= ns.Config.SER.min && x.score <= ns.Config.SER.max)
       .sort((a, b) => (a.score - b.score) + (Math.random() - 0.5) * 0.03)
@@ -782,9 +744,8 @@ ns.Live = (() => {
   return { compute, debounced, invalidate }
 })()
 
-
 /* ---------------------------------------------------------------------------
-   [12] ACTIONS (save / reindex / seed / reset)
+   [12] ACTIONS
 --------------------------------------------------------------------------- */
 ns.Actions = (() => {
   const save = async ({ publish }) => {
@@ -817,11 +778,7 @@ ns.Actions = (() => {
   }
 
   const reindexMissing = async () => {
-    if (!ns.Vector.isLoaded()) {
-      ns.UI.logLine('w', 'Load model first')
-      return
-    }
-
+    if (!ns.Vector.isLoaded()) { ns.UI.logLine('w', 'Load model first'); return }
     const pending = await ns.Storage.listUnindexed()
     for (let i = 0; i < pending.length; i++) {
       const n = pending[i]
@@ -871,7 +828,6 @@ ns.Actions = (() => {
   return { save, reindexMissing, seed5, reset }
 })()
 
-
 /* ---------------------------------------------------------------------------
    [13] BOOT
 --------------------------------------------------------------------------- */
@@ -879,11 +835,7 @@ ns.App = (() => {
   const bind = () => {
     ns.UI.refs.input.addEventListener('input', () => {
       const t = ns.UI.refs.input.value.trim()
-      if (!t) {
-        ns.Live.invalidate()
-        ns.Live.compute()
-        return
-      }
+      if (!t) { ns.Live.invalidate(); ns.Live.compute(); return }
       ns.UI.setThink(true, 'waiting pause...')
       ns.Live.debounced()
     })
@@ -902,8 +854,6 @@ ns.App = (() => {
         ns.UI.setProgress(100)
         ns.UI.setPill('model', 'MODEL: ready', 'ok')
         ns.UI.logLine('i', 'model loaded')
-
-        // после загрузки модели можно сразу пересчитать live
         ns.Live.invalidate()
         await ns.Live.compute()
       } catch (e) {
@@ -958,15 +908,12 @@ ns.App = (() => {
     ns.UI.setPill('p2p', 'P2P: boot...', 'warn')
     ns.UI.setPill('peers', 'PEERS: 0', 'warn')
 
-    // грузим notes в память
     await ns.State.reload()
     await ns.Render.renderAllNotes()
     await ns.Live.compute()
 
-    // биндим UI
     bind()
 
-    // поднимаем P2P (важно: делаем после UI, чтобы видеть логи)
     try {
       await ns.P2P.init()
     } catch (e) {
