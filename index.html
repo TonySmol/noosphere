@@ -1,340 +1,80 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Noosphere · Trystero Tester (по документации)</title>
-<style>
-:root{--bg:#0b0d12;--fg:#d8dde6;--mut:#6b7280;--acc:#7cc4ff;--ok:#58d68d;--wn:#f5b041;--er:#ec7063;--pan:#12161f;--br:#1f2631;font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:var(--fg);background:var(--bg)}
-*{box-sizing:border-box;margin:0;padding:0}body{padding:12px;max-width:860px;margin:0 auto;min-height:100vh}
-h1{font-size:17px;margin-bottom:12px;color:var(--acc)}h2{font-size:11px;margin:10px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:1px}
-.pan{background:var(--pan);border:1px solid var(--br);border-radius:9px;padding:11px;margin-bottom:10px}
-button{background:#1a2030;color:var(--fg);border:1px solid var(--br);border-radius:6px;padding:8px 12px;cursor:pointer;font-size:13px;font-weight:500;transition:all .15s}
-button:hover:not(:disabled){background:#243049;border-color:var(--acc)}button:disabled{opacity:.4;cursor:not-allowed}
-button.pri{background:#1e3a5f;border-color:var(--acc);color:var(--acc)}button.dng{background:#3a1e24;border-color:var(--er)}
-input,textarea{background:#0f1420;color:var(--fg);border:1px solid var(--br);border-radius:6px;padding:8px 10px;font-size:13px;width:100%;font-family:inherit}
-textarea{resize:vertical;min-height:60px;line-height:1.4}input:focus,textarea:focus{outline:none;border-color:var(--acc)}
-.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.row>*{flex:1;min-width:0}
-.kv{display:flex;justify-content:space-between;padding:3px 0;font-size:12px;border-bottom:1px dashed #1a1f2a}
-.kv span:last-child{color:var(--acc);font-weight:500}
-.badge{display:inline-block;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px}
-.b-ok{background:#1e3a2a;color:var(--ok)}.b-wn{background:#3a2e1e;color:var(--wn)}.b-er{background:#3a1e24;color:var(--er)}.b-in{background:#1e2a3a;color:var(--acc)}
-.peer{padding:7px 10px;background:#0f1420;border-radius:5px;margin:3px 0;font-size:11px;display:flex;justify-content:space-between;align-items:center}
-.peer.ok{border-left:3px solid var(--ok)}.peer.wn{border-left:3px solid var(--wn)}
-.msg{padding:8px 10px;background:#0f1420;border-left:3px solid var(--acc);margin:4px 0;font-size:12px;border-radius:4px;word-break:break-word}
-.msg.in{border-left-color:var(--ok)}.msg.out{border-left-color:var(--wn)}.msg .m{color:var(--mut);font-size:10px;margin-top:3px}
-#log{font-family:ui-monospace,Menlo,monospace;font-size:10px;line-height:1.5;max-height:300px;overflow:auto;background:#06080c;padding:8px;border-radius:6px;border:1px solid var(--br);white-space:pre-wrap;word-break:break-all}
-.log-t{color:var(--mut);margin-right:6px}.log-i{color:var(--acc)}.log-w{color:var(--wn)}.log-e{color:var(--er)}.log-s{color:var(--ok)}
-.hint{color:var(--mut);font-size:11px;font-style:italic;margin-top:4px;line-height:1.4}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Trystero P2P test</title>
+  <link rel="icon" href="data:," />
+  <style>
+    body{font:14px ui-monospace,Menlo,monospace;padding:16px}
+    input,button{font:inherit;padding:8px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+    pre{background:#111;color:#ddd;padding:10px;border-radius:8px;min-height:180px;overflow:auto}
+    .pill{display:inline-block;padding:2px 8px;border:1px solid #ccc;border-radius:999px}
+  </style>
 </head>
 <body>
+  <h1>Trystero P2P test</h1>
 
-<h1>◈ Noosphere · Trystero (по документации)</h1>
-
-<div class="pan">
-  <h2>Strategy</h2>
   <div class="row">
-    <button class="pri" data-strat="nostr">Nostr (default)</button>
-    <button data-strat="mqtt">MQTT</button>
-    <button data-strat="torrent">BitTorrent</button>
+    <span class="pill">peers: <span id="peers">0</span></span>
+    <span class="pill">room: <span id="roomName"></span></span>
   </div>
-  <p class="hint">Nostr: децентрализовано, сотни реле. MQTT: IoT инфра. BitTorrent: торрент трекеры.</p>
-</div>
 
-<div class="pan">
-  <h2>Connection</h2>
-  <input id="inpRoom" placeholder="room name" value="noosphere-test-2026">
-  <div class="row" style="margin-top:6px">
-    <button id="btnConn" class="pri">Connect</button>
-    <button id="btnDisc" class="dng" disabled>Disconnect</button>
-  </div>
-  <div class="kv"><span>status</span><span id="stConn"><span class="badge b-wn">idle</span></span></div>
-  <div class="kv"><span>self peer id</span><span id="stPid">—</span></div>
-  <div class="kv"><span>strategy</span><span id="stStrat">—</span></div>
-  <div class="kv"><span>peers online</span><span id="stPeers">0</span></div>
-</div>
-
-<div class="pan">
-  <h2>Send Message</h2>
-  <textarea id="inpMsg" placeholder="type message…">hello from device</textarea>
-  <button id="btnSend" disabled>Send to all peers</button>
-</div>
-
-<div class="pan">
-  <h2>Peers</h2>
-  <div id="peerList"><i class="hint">no peers connected</i></div>
-</div>
-
-<div class="pan">
-  <h2>Messages</h2>
-  <div class="row"><button id="btnClearMsg">Clear</button></div>
-  <div id="msgList" style="max-height:200px;overflow:auto"><i class="hint">no messages yet</i></div>
-</div>
-
-<div class="pan">
-  <h2>Event Log</h2>
   <div class="row">
-    <button id="btnClearLog">Clear log</button>
-    <label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px;flex:0 0 auto">
-      <input type="checkbox" id="chkAuto" checked style="width:auto"> auto-scroll
-    </label>
+    <input id="msg" placeholder="message..." style="flex:1;min-width:240px" />
+    <button id="send">Send broadcast</button>
   </div>
-  <div id="log"></div>
-</div>
+
+  <pre id="log"></pre>
 
 <script type="module">
-/* ============================================================
-   ПО ДОКУМЕНТАЦИИ TRYSTERO:
-   https://github.com/dmotz/trystero
-   
-   Import paths:
-   - import {joinRoom} from 'trystero'  // Nostr default
-   - import {joinRoom} from '@trystero-p2p/mqtt'
-   - import {joinRoom} from '@trystero-p2p/torrent'
-   
-   CDN:
-   - import {joinRoom} from 'https://esm.run/trystero'
-   - import {joinRoom} from 'https://esm.run/@trystero-p2p/mqtt'
-   - import {joinRoom} from 'https://esm.run/@trystero-p2p/torrent'
-   ============================================================ */
+  // ВАЖНО: импорт именно /torrent
+  import { joinRoom } from 'https://cdn.jsdelivr.net/npm/trystero@0.17.1/torrent/+esm';
 
-const CFG = {
-  APP_ID: 'noosphere-trystero-docs-v1',
-  STRATS: {
-    nostr:   'https://esm.run/trystero',
-    mqtt:    'https://esm.run/@trystero-p2p/mqtt',
-    torrent: 'https://esm.run/@trystero-p2p/torrent',
-  },
-};
+  const APP_ID = 'noosphere-demo';
+  const ROOM = 'my-room-123'; // одинаково везде
+  document.getElementById('roomName').textContent = ROOM;
 
-const Log = {
-  el: () => document.getElementById('log'),
-  write(level, ...args){
-    const ts = new Date().toISOString().slice(11,23);
-    const text = args.map(a => {
-      if(a instanceof Error) return a.message;
-      if(typeof a === 'object' && a !== null) { try { return JSON.stringify(a).slice(0,200); } catch { return String(a); } }
-      return String(a);
-    }).join(' ');
-    const line = document.createElement('div');
-    line.innerHTML = `<span class="log-t">${ts}</span><span class="log-${level}">[${level.toUpperCase()}]</span> ${text.replace(/</g,'&lt;')}`;
-    const el = this.el();
-    if(el){ el.appendChild(line); if(document.getElementById('chkAuto').checked) el.scrollTop = 1e9; }
-  },
-  i:(...a)=>Log.write('i',...a), w:(...a)=>Log.write('w',...a),
-  e:(...a)=>Log.write('e',...a), s:(...a)=>Log.write('s',...a),
-};
+  const TRACKERS = [
+    'wss://tracker.openwebtorrent.com',
+    'wss://tracker.btorrent.xyz',
+    'wss://tracker.fastcast.nz',
+  ];
 
-const State = {
-  strat: 'nostr',
-  room: null,
-  selfId: null,
-  peers: new Map(),
-  messages: [],
-  sendMsg: null,
-};
+  // иногда помогает явно указать STUN
+  const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 
-const Transport = {
-  async connect(strat, roomName){
-    const cdnUrl = CFG.STRATS[strat];
-    Log.i('loading from:', cdnUrl);
-    
-    let mod;
+  const logEl = document.getElementById('log');
+  const peersEl = document.getElementById('peers');
+  const log = (...a) => { logEl.textContent += a.map(x => typeof x==='string'?x:JSON.stringify(x)).join(' ') + '\n'; logEl.scrollTop = logEl.scrollHeight; };
+
+  const room = joinRoom({ appId: APP_ID, trackers: TRACKERS, rtcConfig }, ROOM);
+
+  const refreshPeers = () => {
+    // getPeers есть в новых версиях; если нет — просто не покажет число
     try {
-      mod = await import(/* @vite-ignore */ cdnUrl);
-      Log.s('module loaded');
-    } catch(e){
-      Log.e('module load failed:', e.message);
-      throw new Error('CDN load failed: ' + e.message);
-    }
+      const peers = room.getPeers?.() || [];
+      peersEl.textContent = String(peers.length);
+    } catch {}
+  };
 
-    Log.i('joining room:', roomName);
-    const config = { appId: CFG.APP_ID };
-    
-    try {
-      State.room = mod.joinRoom(config, roomName);
-      State.selfId = mod.selfId || State.room.selfId;
-      Log.s('joined. self id:', State.selfId);
-    } catch(e){
-      Log.e('joinRoom failed:', e.message);
-      throw e;
-    }
+  room.onPeerJoin?.((peerId) => { log('peer join', peerId); refreshPeers(); });
+  room.onPeerLeave?.((peerId) => { log('peer leave', peerId); refreshPeers(); });
 
-    // По документации: room.makeAction('name')
-    const msgAction = State.room.makeAction('message');
-    State.sendMsg = msgAction[0];  // send function
-    
-    // По документации: action.onMessage = callback
-    msgAction[0].onMessage = (data, info) => {
-      const peerId = info?.peerId || 'unknown';
-      Log.s('msg from', peerId.slice(0,16) + ':', String(data).slice(0,40));
-      UI.addMessage('in', peerId, String(data));
-    };
+  const [sendMsg, onMsg] = room.makeAction('chat');
+  onMsg((data, peerId) => log('from', peerId, '=>', data));
 
-    // По документации: room.onPeerJoin = callback
-    State.room.onPeerJoin = (peerId) => {
-      State.peers.set(peerId, { joinedAt: Date.now() });
-      Log.s('peer JOINED:', peerId.slice(0,24));
-      UI.refreshPeers();
-    };
+  document.getElementById('send').onclick = () => {
+    const v = document.getElementById('msg').value.trim();
+    if (!v) return;
+    sendMsg({ text: v, t: Date.now() }); // broadcast всем
+    log('you =>', v);
+    document.getElementById('msg').value = '';
+  };
 
-    // По документации: room.onPeerLeave = callback
-    State.room.onPeerLeave = (peerId) => {
-      State.peers.delete(peerId);
-      Log.w('peer LEFT:', peerId.slice(0,24));
-      UI.refreshPeers();
-    };
-  },
-
-  disconnect(){
-    if(State.room){
-      try { State.room.leave(); } catch(e){}
-    }
-    State.room = null;
-    State.selfId = null;
-    State.peers.clear();
-    State.sendMsg = null;
-  },
-
-  sendToAll(text){
-    if(!State.sendMsg) return 0;
-    const ids = [...State.peers.keys()];
-    if(!ids.length) return 0;
-    let sent = 0;
-    for(const id of ids){
-      try {
-        // По документации: send(data, {target: peerId})
-        State.sendMsg(text, { target: id });
-        sent++;
-      } catch(e){ Log.e('send fail to', id.slice(0,10), e.message); }
-    }
-    return sent;
-  },
-};
-
-const UI = {
-  init(){
-    document.querySelectorAll('[data-strat]').forEach(btn => {
-      btn.onclick = () => {
-        if(!document.getElementById('btnDisc').disabled){
-          Log.w('disconnect first');
-          return;
-        }
-        document.querySelectorAll('[data-strat]').forEach(b => b.classList.remove('pri'));
-        btn.classList.add('pri');
-        State.strat = btn.dataset.strat;
-        document.getElementById('stStrat').textContent = State.strat;
-        Log.i('strategy:', State.strat);
-      };
-    });
-
-    document.getElementById('btnConn').onclick = this.onConnect.bind(this);
-    document.getElementById('btnDisc').onclick = this.onDisconnect.bind(this);
-    document.getElementById('btnSend').onclick = this.onSend.bind(this);
-    document.getElementById('btnClearMsg').onclick = () => {
-      State.messages = [];
-      document.getElementById('msgList').innerHTML = '<i class="hint">no messages yet</i>';
-    };
-    document.getElementById('btnClearLog').onclick = () => { document.getElementById('log').innerHTML = ''; };
-    document.getElementById('inpMsg').addEventListener('keydown', e => {
-      if(e.key === 'Enter' && !e.shiftKey && !document.getElementById('btnSend').disabled){
-        e.preventDefault();
-        this.onSend();
-      }
-    });
-  },
-
-  async onConnect(){
-    const roomName = document.getElementById('inpRoom').value.trim();
-    if(!roomName){ Log.e('room name empty'); return; }
-    const btn = document.getElementById('btnConn');
-    btn.disabled = true;
-    btn.textContent = 'Connecting…';
-    try {
-      await Transport.connect(State.strat, roomName);
-      document.getElementById('btnDisc').disabled = false;
-      document.getElementById('btnSend').disabled = false;
-      document.getElementById('stConn').innerHTML = '<span class="badge b-ok">connected</span>';
-      document.getElementById('stPid').textContent = State.selfId.slice(0,24) + '…';
-      document.getElementById('stStrat').textContent = State.strat;
-      Log.s('=== CONNECT READY ===');
-      Log.i('open same URL on another device, same room name, click Connect');
-    } catch(e){
-      Log.e('connect failed:', e);
-      document.getElementById('stConn').innerHTML = '<span class="badge b-er">error</span>';
-    }
-    btn.disabled = false;
-    btn.textContent = 'Connect';
-  },
-
-  onDisconnect(){
-    Transport.disconnect();
-    document.getElementById('btnConn').disabled = false;
-    document.getElementById('btnDisc').disabled = true;
-    document.getElementById('btnSend').disabled = true;
-    document.getElementById('stConn').innerHTML = '<span class="badge b-wn">idle</span>';
-    document.getElementById('stPid').textContent = '—';
-    document.getElementById('stPeers').textContent = '0';
-    document.getElementById('peerList').innerHTML = '<i class="hint">no peers connected</i>';
-    Log.w('disconnected');
-  },
-
-  onSend(){
-    const text = document.getElementById('inpMsg').value.trim();
-    if(!text){ Log.w('empty message'); return; }
-    const sent = Transport.sendToAll(text);
-    Log.i('sent to', sent, 'peer(s):', text.slice(0,40));
-    if(sent > 0) UI.addMessage('out', 'broadcast', text);
-  },
-
-  refreshPeers(){
-    document.getElementById('stPeers').textContent = State.peers.size;
-    const box = document.getElementById('peerList');
-    if(!State.peers.size){
-      box.innerHTML = '<i class="hint">no peers connected</i>';
-      return;
-    }
-    box.innerHTML = '';
-    for(const [pid, info] of State.peers){
-      const age = Math.round((Date.now() - info.joinedAt)/1000);
-      const d = document.createElement('div');
-      d.className = 'peer ok';
-      d.innerHTML = `<span><b>${pid.slice(0,20)}…</b></span><span class="badge b-in">age ${age}s</span>`;
-      box.appendChild(d);
-    }
-  },
-
-  addMessage(dir, peerId, text){
-    const m = { dir, peerId, text, ts: Date.now() };
-    State.messages.push(m);
-    if(State.messages.length > 200) State.messages.shift();
-    const box = document.getElementById('msgList');
-    if(box.querySelector('i')) box.innerHTML = '';
-    const d = document.createElement('div');
-    d.className = 'msg ' + dir;
-    const when = new Date(m.ts).toLocaleTimeString();
-    const who = dir === 'in' ? 'from ' + peerId.slice(0,16) + '…' : 'to ' + peerId;
-    d.innerHTML = `<b>${dir === 'in' ? '← IN' : '→ OUT'}</b> ${who}<div class="m">${when}</div>${text.replace(/</g,'&lt;')}`;
-    box.insertBefore(d, box.firstChild);
-    while(box.children.length > 50) box.removeChild(box.lastChild);
-  },
-};
-
-(async function boot(){
-  UI.init();
-  Log.s('boot OK');
-  Log.i('strategy: Nostr (default)');
-  Log.i('CDN: esm.run (по документации Trystero)');
-  Log.i('steps:');
-  Log.i('  1) select strategy (Nostr recommended)');
-  Log.i('  2) enter room name');
-  Log.i('  3) click Connect');
-  Log.i('  4) open same URL on another device');
-  Log.i('  5) same room name, click Connect');
-  Log.i('  6) wait 5-15s for peer discovery');
-  Log.i('  7) type message, press Send');
-})();
+  log('ready. open this page in 2 tabs/devices with same ROOM');
+  refreshPeers();
 </script>
 </body>
 </html>
