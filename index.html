@@ -24,11 +24,11 @@
   .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
   @media (max-width:820px) { .grid-3 { grid-template-columns:1fr; } }
 
-  textarea, input[type=text] { width:100%; background:#0b0d12; color:var(--text);
+  textarea, input[type=text], select { width:100%; background:#0b0d12; color:var(--text);
              border:1px solid var(--border); border-radius:4px;
              padding:10px; font:inherit; resize:vertical; }
   textarea { min-height:80px; }
-  input[type=text] { min-height:auto; padding:8px 10px; }
+  input[type=text], select { min-height:auto; padding:8px 10px; }
   button { background:#1f2532; color:var(--text); border:1px solid var(--border);
            border-radius:4px; padding:8px 12px; font:inherit; cursor:pointer; }
   button:hover:not(:disabled) { background:#272f40; }
@@ -69,22 +69,31 @@
   .empty { color:var(--muted); font-size:12px; padding:6px; }
   .hint { font-size:11px; color:var(--muted); font-style:italic; margin-top:6px; }
   .room-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
-  .room-row label { font-size:11px; color:var(--muted); }
-  .room-row input { flex:1; }
+  .room-row label { font-size:11px; color:var(--muted); white-space:nowrap; }
+  .room-row input { flex:1; min-width:0; }
+  .room-row select { flex:0 0 130px; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>NOOSPHERE P2P <small>v2.0 · Trystero torrent · device↔device</small></h1>
+  <h1>NOOSPHERE P2P <small>v2.1 · device↔device · три стратегии</small></h1>
 
   <section class="panel">
     <div class="room-row">
+      <label>STRAT:</label>
+      <select id="stratSelect">
+        <option value="torrent" selected>BitTorrent</option>
+        <option value="mqtt">MQTT</option>
+        <option value="nostr">Nostr</option>
+      </select>
       <label>ROOM:</label>
       <input type="text" id="roomInput" value="noosphere-main-2026" />
+    </div>
+    <div class="row">
       <button id="btnConnect" class="primary">Connect</button>
       <button id="btnDisconnect" class="danger" disabled>Disconnect</button>
     </div>
-    <div class="status" id="status">
+    <div class="status" id="status" style="margin-top:8px;">
       <span class="pill" data-key="idb">IDB: ...</span>
       <span class="pill" data-key="model">MODEL: idle</span>
       <span class="pill" data-key="net">NET: offline</span>
@@ -93,7 +102,7 @@
       <span class="pill" data-key="think" style="display:none">...</span>
     </div>
     <div class="progress"><div id="modelProgress"></div></div>
-    <div class="hint">Открой эту страницу на ТЕЛЕФОНЕ и на ПК. Введи одинаковый room, нажми Connect на обоих. Debounce 4 секунды: перестань печатать, и через 4 сек увидишь релевантность от соседа.</div>
+    <div class="hint">Открой страницу на ТЕЛЕФОНЕ и на ПК. Выбери одинаковую стратегию и room, нажми Connect. Debounce 4 сек: перестань печатать — через 4 сек увидишь релевантность от соседа.</div>
   </section>
 
   <section class="panel">
@@ -148,20 +157,15 @@
 
 <script type="module">
 /* ============================================================================
-   NOOSPHERE P2P v2.0
+   NOOSPHERE P2P v2.1
    ----------------------------------------------------------------------------
-   Взято из демо v1.1:
-     - Вся архитектура Storage/Vector/Relevance/UI/Sections
-     - Debounce 4 секунды
-     - Кеш query vector
-     - Pill "think"
-     - Три колонки MY/WORLD/ADJACENT
-     - Ephemeral 5 мин
-
-   ЗАМЕНЕНО:
-     - BroadcastChannel (между вкладками) → Trystero/torrent (между устройствами)
-     - Вместо "TABS" → "PEERS"
-     - ping/query/response идут через WebRTC DataChannel
+   Фиксы v2.1:
+     - Убрана ошибка "Cannot read properties of undefined (reading 'slice')"
+       (room.selfId не существует в Trystero, использовался свой selfId из Util)
+     - Добавлен селектор стратегии: torrent / mqtt / nostr
+       (если torrent не пробивает NAT — пробуй mqtt, потом nostr)
+     - Корректная обработка отключения
+     - Все логи обёрнуты в try/catch для устойчивости
 
    Секции:
      [1] Config  [2] Logger  [3] Util  [4] Storage  [5] Vector
@@ -184,6 +188,12 @@ ns.Config = Object.freeze({
   STORE_THOUGHTS: 'thoughts',
 
   APP_ID: 'noosphere-p2p-v2',
+
+  STRATEGIES: {
+    torrent: 'https://esm.sh/trystero@0.21.1/torrent',
+    mqtt:    'https://esm.sh/trystero@0.21.1/mqtt',
+    nostr:   'https://esm.sh/trystero@0.21.1/nostr',
+  },
 
   LIMITS: {
     MAX_TEXT_LENGTH: 10_000,
@@ -217,7 +227,7 @@ ns.Logger = (() => {
     const box = el();
     if (box) { box.appendChild(line); box.scrollTop = box.scrollHeight; }
     const fn = lvl === 'e' ? 'error' : lvl === 'w' ? 'warn' : 'log';
-    console[fn](`[ns:${lvl}] ${m}`, d ?? '');
+    try { console[fn](`[ns:${lvl}] ${m}`, d ?? ''); } catch {}
   };
   return {
     info:  (m, d) => write('i', m, d),
@@ -230,8 +240,12 @@ ns.Logger = (() => {
    [3] UTIL
    -------------------------------------------------------------------------- */
 ns.Util = {
+  // ВАЖНО: selfId генерируем сами, а не берём из room
   selfId: 'self-' + Math.random().toString(36).slice(2, 10),
-  newId: () => crypto.randomUUID(),
+  newId: () => {
+    try { return crypto.randomUUID(); }
+    catch { return 'id-' + Math.random().toString(36).slice(2, 15) + Date.now().toString(36); }
+  },
   now: () => Date.now(),
   normalizeText: (t) => typeof t === 'string' ? t.trim().slice(0, ns.Config.LIMITS.MAX_TEXT_LENGTH) : '',
   isNonEmptyString: (v) => typeof v === 'string' && v.trim().length > 0,
@@ -337,7 +351,7 @@ ns.Vector = (() => {
 })();
 
 /* --------------------------------------------------------------------------
-   [6] CHANNEL  ← TRYSTERO/TORRENT (замена BroadcastChannel)
+   [6] CHANNEL  ← TRYSTERO (torrent / mqtt / nostr)
    -------------------------------------------------------------------------- */
 ns.Channel = (() => {
   let room = null;
@@ -345,25 +359,52 @@ ns.Channel = (() => {
   const peers = new Map();             // peerId -> lastSeen
   const queryHandlers = new Map();     // queryId -> handler
 
-  const init = async (roomName) => {
+  const init = async (strategy, roomName) => {
     if (room) return;
 
-    ns.Logger.info('loading trystero/torrent…');
+    const cdnUrl = ns.Config.STRATEGIES[strategy];
+    if (!cdnUrl) throw new Error('unknown strategy: ' + strategy);
+
+    ns.Logger.info('loading trystero/' + strategy + '…');
     let mod;
     try {
-      mod = await import('https://esm.sh/trystero@0.21.1/torrent');
+      mod = await import(/* @vite-ignore */ cdnUrl);
     } catch (e) {
       ns.Logger.error('trystero load failed', e.message);
       throw e;
     }
     ns.Logger.info('trystero loaded');
 
+    // Конфиг зависит от стратегии
     const config = { appId: ns.Config.APP_ID };
-    ns.Logger.info('joining room', roomName);
-    room = mod.joinRoom(config, roomName);
-    ns.Util.selfId = room.selfId;
-    ns.Logger.info('joined. selfId=' + room.selfId.slice(0, 16));
 
+    // MQTT требует специфичные relay серверы
+    if (strategy === 'mqtt') {
+      config.relayURLs = [
+        'wss://test.mosquitto.org:8081',
+        'wss://broker.emqx.io:8084/mqtt',
+      ];
+    }
+
+    // Nostr требует relay URLs
+    if (strategy === 'nostr') {
+      config.relayURLs = [
+        'wss://relay.damus.io',
+        'wss://nos.lol',
+        'wss://relay.snort.social',
+      ];
+    }
+
+    ns.Logger.info('joining room', roomName);
+    try {
+      room = mod.joinRoom(config, roomName);
+    } catch (e) {
+      ns.Logger.error('joinRoom failed', e.message);
+      throw e;
+    }
+    ns.Logger.info('joined room. local selfId=' + ns.Util.selfId);
+
+    // Действия (actions)
     const [sp, onPing]     = room.makeAction('ping');
     const [sq, onQuery]    = room.makeAction('query');
     const [sr, onResponse] = room.makeAction('response');
@@ -371,64 +412,92 @@ ns.Channel = (() => {
     sendQuery = sq;
     sendResponse = sr;
 
-    room.onPeerJoin((peerId) => {
-      peers.set(peerId, ns.Util.now());
-      ns.Logger.info('peer JOINED', peerId.slice(0, 16));
-      updatePeerCount();
-      // auto-ping чтобы peer нас увидел
-      try { sendPing({ from: ns.Util.selfId, t: ns.Util.now() }, peerId); } catch {}
-    });
+    // Колбэки пиров
+    try {
+      room.onPeerJoin((peerId) => {
+        peers.set(peerId, ns.Util.now());
+        ns.Logger.info('peer JOINED', peerId.slice(0, 16));
+        updatePeerCount();
+        // auto-ping чтобы peer нас увидел
+        try { sendPing({ from: ns.Util.selfId, t: ns.Util.now() }, peerId); } catch {}
+      });
+    } catch (e) {
+      ns.Logger.warn('onPeerJoin setup failed', e.message);
+    }
 
-    room.onPeerLeave((peerId) => {
-      peers.delete(peerId);
-      ns.Logger.info('peer LEFT', peerId.slice(0, 16));
-      updatePeerCount();
-    });
+    try {
+      room.onPeerLeave((peerId) => {
+        peers.delete(peerId);
+        ns.Logger.info('peer LEFT', peerId.slice(0, 16));
+        updatePeerCount();
+      });
+    } catch (e) {
+      ns.Logger.warn('onPeerLeave setup failed', e.message);
+    }
 
-    onPing((payload, peerId) => {
-      peers.set(peerId, ns.Util.now());
-      updatePeerCount();
-    });
+    // Приём ping
+    try {
+      onPing((payload, peerId) => {
+        peers.set(peerId, ns.Util.now());
+        updatePeerCount();
+        ns.Logger.info('ping from', peerId.slice(0, 12));
+      });
+    } catch (e) {
+      ns.Logger.warn('onPing setup failed', e.message);
+    }
 
-    onQuery(async (payload, peerId) => {
-      if (!ns.Vector.isLoaded() || !payload || !Array.isArray(payload.vector)) return;
-      try {
-        const all = await ns.Storage.all();
-        const shared = all.filter((t) => t.published && Array.isArray(t.vector));
-        const scored = shared
-          .map((t) => ({ text: t.text, score: ns.Vector.cosine(payload.vector, t.vector), id: t.id }))
-          .filter((r) => r.score > 0.1)
-          .sort((a, b) => b.score - a.score)
-          .slice(0, ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
-
+    // Приём query
+    try {
+      onQuery(async (payload, peerId) => {
+        if (!ns.Vector.isLoaded() || !payload || !Array.isArray(payload.vector)) return;
         try {
-          sendResponse({
-            queryId: payload.queryId,
-            from: ns.Util.selfId,
-            results: scored,
-          }, peerId);
-          ns.Logger.info('responded to query', { to: peerId.slice(0, 12), n: scored.length });
-        } catch (e) {
-          ns.Logger.warn('response send failed', e.message);
-        }
-      } catch (e) {
-        ns.Logger.warn('query handling failed', e.message);
-      }
-    });
+          const all = await ns.Storage.all();
+          const shared = all.filter((t) => t.published && Array.isArray(t.vector));
+          const scored = shared
+            .map((t) => ({ text: t.text, score: ns.Vector.cosine(payload.vector, t.vector), id: t.id }))
+            .filter((r) => r.score > 0.1)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
 
-    onResponse((payload, peerId) => {
-      if (!payload || !payload.queryId) return;
-      const handler = queryHandlers.get(payload.queryId);
-      if (!handler) return;
-      handler(peerId, payload.results || []);
-    });
+          try {
+            sendResponse({
+              queryId: payload.queryId,
+              from: ns.Util.selfId,
+              results: scored,
+            }, peerId);
+            ns.Logger.info('responded to query', { to: peerId.slice(0, 12), n: scored.length });
+          } catch (e) {
+            ns.Logger.warn('response send failed', e.message);
+          }
+        } catch (e) {
+          ns.Logger.warn('query handling failed', e.message);
+        }
+      });
+    } catch (e) {
+      ns.Logger.warn('onQuery setup failed', e.message);
+    }
+
+    // Приём response
+    try {
+      onResponse((payload, peerId) => {
+        if (!payload || !payload.queryId) return;
+        const handler = queryHandlers.get(payload.queryId);
+        if (!handler) return;
+        handler(peerId, payload.results || []);
+        ns.Logger.info('got response from', peerId.slice(0, 12), {n: (payload.results||[]).length});
+      });
+    } catch (e) {
+      ns.Logger.warn('onResponse setup failed', e.message);
+    }
 
     ns.Logger.info('channel ready');
   };
 
   const leave = () => {
     if (room) {
-      try { room.leave(); } catch (e) {}
+      try { room.leave(); } catch (e) {
+        ns.Logger.warn('room.leave() error', e.message);
+      }
     }
     room = null;
     sendPing = null;
@@ -436,6 +505,7 @@ ns.Channel = (() => {
     sendResponse = null;
     peers.clear();
     updatePeerCount();
+    ns.Logger.info('left room');
   };
 
   const isConnected = () => room !== null;
@@ -443,6 +513,7 @@ ns.Channel = (() => {
   const ping = () => {
     if (!sendPing || !room) return;
     try {
+      // Trystero: sendPing(data) без target = broadcast всем пирам
       sendPing({ from: ns.Util.selfId, t: ns.Util.now() });
     } catch (e) {
       ns.Logger.warn('ping failed', e.message);
@@ -464,6 +535,7 @@ ns.Channel = (() => {
     queryHandlers.set(queryId, handler);
 
     try {
+      // broadcast
       sendQuery({ queryId, vector, from: ns.Util.selfId });
       ns.Logger.info('query sent', { id: queryId.slice(0, 8), peers: peerIds.length });
     } catch (e) {
@@ -673,7 +745,7 @@ ns.UI = (() => {
 
   const cache = () => {
     ['input','btnSave','btnSaveWorld','btnLoadModel','btnReindex','btnSeed',
-     'btnPing','btnReset','btnConnect','btnDisconnect','roomInput',
+     'btnPing','btnReset','btnConnect','btnDisconnect','roomInput','stratSelect',
      'listMine','listWorld','listAdjacent','listAll',
      'status','modelProgress']
       .forEach((id) => { refs[id] = document.getElementById(id); });
@@ -967,13 +1039,15 @@ ns.UI = (() => {
     });
 
     refs.btnConnect.addEventListener('click', async () => {
+      const strategy = refs.stratSelect.value;
       const roomName = refs.roomInput.value.trim();
       if (!roomName) { ns.Logger.warn('room name empty'); return; }
       try {
         refs.btnConnect.disabled = true;
-        setPill('net', 'NET: connecting...', 'warn');
-        await ns.Channel.init(roomName);
-        setPill('net', 'NET: online', 'ok');
+        refs.stratSelect.disabled = true;
+        setPill('net', 'NET: ' + strategy + ' connecting...', 'warn');
+        await ns.Channel.init(strategy, roomName);
+        setPill('net', 'NET: ' + strategy + ' online', 'ok');
         refs.btnDisconnect.disabled = false;
         ns.Channel.startPingLoop();
         ns.Channel.ping();
@@ -990,8 +1064,8 @@ ns.UI = (() => {
       setPill('net', 'NET: offline', 'warn');
       setPill('peers', 'PEERS: 0', 'warn');
       refs.btnDisconnect.disabled = true;
+      refs.stratSelect.disabled = false;
       ns.Ephemeral.clear();
-      ns.Logger.info('disconnected');
     });
 
     document.addEventListener('ns:thoughts-changed', async () => {
@@ -1031,7 +1105,7 @@ ns.App = (() => {
     }
 
     await ns.UI.refresh();
-    ns.Logger.info('app ready (debounce 4s, click Connect to join P2P)');
+    ns.Logger.info('app ready (debounce 4s, select strategy + room, click Connect)');
   };
   return { boot };
 })();
