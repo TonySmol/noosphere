@@ -53,7 +53,7 @@
 
   .list { display:flex; flex-direction:column; gap:6px; min-height:50px; }
   .item { background:var(--bg); border:1px solid var(--border);
-          border-radius:4px; padding:8px 10px; font-size:13px; position:relative; }
+          border-radius:4px; padding:8px 10px; font-size:13px; }
   .item.local { border-left:3px solid #555; }
   .item.world { border-left:3px solid var(--accent); }
   .item.world::before {
@@ -73,8 +73,8 @@
   .log .e { color:var(--err); } .log .w { color:var(--warn); } .log .i { color:var(--muted); }
 
   .empty { color:var(--muted); font-size:12px; padding:6px; }
-  .hint { font-size:11px; color:var(--muted); font-style:italic; margin-top:6px; }
   .device-id { font-size:10px; color:var(--muted); margin-top:6px; word-break:break-all; }
+  .hint { font-size:11px; color:var(--muted); font-style:italic; margin-top:6px; }
 
   .swipe-zone { position:relative; border:1px dashed transparent; transition:border-color .2s; }
   .swipe-zone.active { border-color:var(--accent); }
@@ -96,13 +96,13 @@
   <h1>
     NOOMIUM
     <span class="lang" id="langSwitch">EN</span>
-    <small data-i18n="tagline">pure p2p · no servers</small>
+    <small data-i18n="tagline">pure p2p · own relay</small>
   </h1>
 
   <section class="panel">
     <div class="status" id="status">
       <span class="pill" data-key="idb">IDB: ...</span>
-      <span class="pill" data-key="p2p">P2P: ...</span>
+      <span class="pill" data-key="relay">RELAY: ...</span>
       <span class="pill" data-key="peers">PEERS: 0</span>
       <span class="pill" data-key="model">MODEL: idle</span>
       <span class="pill" data-key="indexed">INDEXED: 0</span>
@@ -110,12 +110,12 @@
     </div>
     <div class="device-id" id="deviceId">peer: ...</div>
     <div class="progress"><div id="modelProgress"></div></div>
-    <div class="hint" data-i18n="hint">Никаких серверов. Signaling через публичные BitTorrent-трекеры, данные — напрямую между устройствами через WebRTC. Чужие заметки живут 5 минут в RAM.</div>
+    <div class="hint" data-i18n="hint">Твой WebSocket relay. Заметки хранятся только у тебя, вектор уходит на relay → ретранслируется пирам → они отвечают своими top-N → ты видишь в RAM 5 минут.</div>
   </section>
 
   <section class="panel swipe-zone" id="swipeZone">
     <h2 data-i18n="thought">мысль</h2>
-    <span class="swipe-hint" data-i18n="swipeHint">свайп вверх = в Мир</span>
+    <span class="swipe-hint" data-i18n="swipeHint">свайп вверх = Сохранить + в Мир</span>
     <textarea id="input" placeholder="напечатай мысль..."></textarea>
     <div class="row" style="margin-top:8px;">
       <button id="btnSave" class="secondary" data-i18n="saveLocal">Сохранить</button>
@@ -169,6 +169,10 @@
             <option value="10">10</option>
           </select>
         </label>
+        <label style="grid-column: 1 / -1;">
+          <span data-i18n="relayUrl">WebSocket relay URL</span>
+          <input type="text" id="setRelayUrl" placeholder="wss://your-relay.com" />
+        </label>
       </div>
       <div class="row" style="margin-top:10px;">
         <button id="btnApplySettings" class="primary" data-i18n="apply">Применить</button>
@@ -197,31 +201,14 @@
   </section>
 </div>
 
-<!-- WebTorrent для браузера -->
-<script src="https://cdn.jsdelivr.net/npm/webtorrent@2.5.7/webtorrent.min.js"></script>
-
 <script type="module">
 /* ============================================================================
-   NOOMIUM v2.0 — PURE P2P VIA WEBTORRENT
+   NOOMIUM v3.0 CLIENT — WebSocket relay
    ----------------------------------------------------------------------------
-   Архитектура (финальная, честная):
-     1. Storage (IDB) — только твои локальные заметки + векторы.
-     2. Vector (MiniLM) — с кешем Cache API.
-     3. P2P (WebTorrent) — децентрализованная сеть:
-        - signaling через публичные BitTorrent-трекеры (tracker.opentrackr.org и др.)
-        - данные через WebRTC DataChannel (напрямую между пирами)
-        - НИЧЕГО на трекерах не хранится (они только знакомят пиров)
-     4. Ephemeral (RAM) — чужие ответы живут 5 минут, потом исчезают.
-     5. Debounce 4s, кеш queryVector, очистка при пустом поле.
-
-   Протокол (через wire.use extension):
-     query:    { type:'q', id, vector, limit }
-     response: { type:'r', id, results:[{text, score}] }
-
    Секции:
      [1] Config  [2] I18n  [3] Logger  [4] Util  [5] Storage  [6] Vector
-     [7] Mesh (WebTorrent)  [8] Ephemeral  [9] Relevance  [10] Sync
-     [11] Capsule  [12] UI  [13] App
+     [7] Relay  [8] Ephemeral  [9] Relevance  [10] Sync  [11] Capsule
+     [12] Settings  [13] UI  [14] App
    ============================================================================ */
 
 import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
@@ -233,32 +220,21 @@ const ns = (window.__ns = {});
 
 /* [1] CONFIG */
 ns.Config = Object.freeze({
-  DB_NAME: 'noomium_v2',
+  DB_NAME: 'noomium_v3',
   DB_VERSION: 1,
   STORE_THOUGHTS: 'thoughts',
   STORE_META: 'meta',
-
-  // WebTorrent "комната": infoHash вычисляется из этого имени
-  // Все кто использует это имя — попадают в одну P2P-сеть
-  ROOM_NAME: 'noomium_public_v2',
-
-  // Публичные BitTorrent-трекеры для signaling (работают 15+ лет)
-  TRACKERS: [
-    'wss://tracker.openwebtorrent.com',
-    'wss://tracker.files.fm:7073/announce',
-    'wss://tracker.btorrent.xyz',
-  ],
-
+  DEFAULT_RELAY_URL: 'wss://YOUR_RELAY_DOMAIN_HERE', // ← ЗАМЕНИТЬ!
   LIMITS: {
     MAX_TEXT_LENGTH: 10_000,
     RENDER_CAP: 300,
     DEBOUNCE_MS: 4000,
-    QUERY_TIMEOUT_MS: 4000,
+    QUERY_TIMEOUT_MS: 3000,
     MAX_RESULTS_PER_PEER: 5,
     MAX_EPHEMERAL_AGE_MS: 5 * 60_000,
     CACHE_PROBE_MS: 500,
+    RECONNECT_MS: 3000,
   },
-
   VECTOR: { MODEL_ID: 'Xenova/all-MiniLM-L6-v2' },
 });
 
@@ -266,28 +242,30 @@ ns.Config = Object.freeze({
 ns.I18n = (() => {
   const dict = {
     ru: {
-      tagline: 'чистый p2p · без серверов',
-      hint: 'Никаких серверов. Signaling через публичные BitTorrent-трекеры, данные напрямую между устройствами.',
-      thought: 'мысль', swipeHint: 'свайп вверх = в Мир',
+      tagline: 'чистый p2p · свой relay',
+      hint: 'Твой WebSocket relay. Заметки только у тебя, вектор уходит на relay, пиры отвечают из RAM.',
+      thought: 'мысль', swipeHint: 'свайп вверх = Сохранить + в Мир',
       saveLocal: 'Сохранить', saveWorld: 'Сохранить + в Мир',
       relevance: 'живая релевантность',
       colMine: 'MY', colWorld: 'WORLD (RAM)', colAdjacent: 'ADJACENT',
       settings: 'настройки', theme: 'Тема', auto: 'Авто', dark: 'Тёмная', light: 'Светлая',
       threshold: 'Порог', adjacency: 'Дельта смежности', maxCards: 'Макс. карточек',
+      relayUrl: 'WebSocket relay URL',
       apply: 'Применить', loadModel: 'Загрузить MiniLM', reindex: 'Реиндекс',
       seed5: 'Seed 5', queryNow: 'Запросить сеть',
       export: 'Экспорт', import: 'Импорт', reset: 'Сброс',
       myThoughts: 'мои мысли', eventLog: 'лог',
     },
     en: {
-      tagline: 'pure p2p · no servers',
-      hint: 'No servers. Signaling via public BitTorrent trackers, data direct between devices.',
-      thought: 'thought', swipeHint: 'swipe up = to World',
+      tagline: 'pure p2p · own relay',
+      hint: 'Your WebSocket relay. Notes stay local, vector goes to relay, peers respond from RAM.',
+      thought: 'thought', swipeHint: 'swipe up = Save + World',
       saveLocal: 'Save local', saveWorld: 'Save + World',
       relevance: 'live relevance',
       colMine: 'MY', colWorld: 'WORLD (RAM)', colAdjacent: 'ADJACENT',
       settings: 'settings', theme: 'Theme', auto: 'Auto', dark: 'Dark', light: 'Light',
       threshold: 'Threshold', adjacency: 'Adjacency', maxCards: 'Max cards',
+      relayUrl: 'WebSocket relay URL',
       apply: 'Apply', loadModel: 'Load MiniLM', reindex: 'Reindex',
       seed5: 'Seed 5', queryNow: 'Query network',
       export: 'Export', import: 'Import', reset: 'Reset',
@@ -343,13 +321,6 @@ ns.Util = {
     return d;
   },
   escapeHtml: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
-  // Детерминированный infoHash из имени комнаты (20 байт = 40 hex)
-  async roomInfoHash(name) {
-    const data = new TextEncoder().encode(name);
-    const hash = await crypto.subtle.digest('SHA-1', data);
-    return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
-  },
-  bufToHex: (buf) => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join(''),
 };
 
 /* [5] STORAGE */
@@ -416,7 +387,7 @@ ns.Vector = (() => {
       progress_callback: (p) => {
         progressFired = true;
         if (p.status === 'progress' && p.total) {
-          onProgress?.({ loaded: p.loaded, total: p.total, fromCache: false });
+          onProgress?.({ loaded: p.loaded, total: p.total });
         }
       },
     }).then((ex) => {
@@ -449,124 +420,107 @@ ns.Vector = (() => {
   return { load, embed, cosine, isLoaded };
 })();
 
-/* --------------------------------------------------------------------------
-   [7] MESH (WebTorrent P2P)
-   Это ключевой модуль — настоящий P2P без серверов.
-
-   Как работает:
-     1. WebTorrent client создаёт torrent с infoHash = SHA-1("noomium_public_v2")
-     2. WebTorrent подключается к публичным tracker-ам (tracker.opentrackr.org и др.)
-     3. Tracker возвращает список других пиров в этой "раздаче"
-     4. WebTorrent устанавливает WebRTC с каждым пиром
-     5. Через wire extension (NoomiumProtocol) шлём свои query/response
-
-   Ничего не хранится на трекерах — только IP для знакомства пиров.
+/* [7] RELAY (WebSocket)
+   Схема:
+     connect → send hello → receive peers list
+     send query {vector} → relay broadcast → other peers compute locally →
+     other peers send response {to: me} → relay delivers to me
    -------------------------------------------------------------------------- */
-ns.Mesh = (() => {
-  let client = null;
-  let torrent = null;
-  const peers = new Map();        // peerId -> { wire, joinedAt }
-  const queryHandlers = new Map(); // queryId -> { resolve, results }
+ns.Relay = (() => {
+  let ws = null;
+  let reconnectTimer = null;
+  let url = null;
+  const peers = new Set();
+  const queryHandlers = new Map(); // queryId -> handler
   let queryIdCounter = 0;
 
-  // Кастомный протокол поверх BitTorrent wire
-  const NoomiumProtocol = () => {
-    const name = 'noomium_v2';
-    class Extension {
-      constructor(wire) {
-        this.wire = wire;
-        this._peerId = null;
-      }
-      onHandshake(infoHash, peerId) {
-        this._peerId = ns.Util.bufToHex(peerId).slice(0, 16);
-      }
-      onExtendedHandshake() {
-        // Отправляем свой peerId пирe
-        if (this.wire.extended[name]) {
-          this.send({ type: 'hello', peerId: ns.Util.peerId });
-        }
-      }
-      onMessage(buf) {
-        try {
-          const msg = JSON.parse(new TextDecoder().decode(buf));
-          handleMessage(msg, this._peerId || '?');
-        } catch (e) {
-          // молча — может быть служебное
-        }
-      }
-      send(msg) {
-        try {
-          this.wire.extended[name].send(new TextEncoder().encode(JSON.stringify(msg)));
-        } catch (e) {
-          ns.Logger.warn('send failed', e.message);
-        }
-      }
+  const connect = (relayUrl) => {
+    url = relayUrl;
+    if (ws) {
+      try { ws.close(); } catch {}
     }
-    Extension.prototype.name = name;
-    return Extension;
-  };
-
-  const ProtocolClass = NoomiumProtocol();
-
-  const handleMessage = (msg, fromPeerId) => {
-    if (!msg || typeof msg !== 'object') return;
-    switch (msg.type) {
-      case 'hello':
-        // пир представился
-        if (fromPeerId && !peers.has(fromPeerId)) {
-          peers.set(fromPeerId, { joinedAt: ns.Util.now() });
-          ns.Logger.info('peer connected', { peer: fromPeerId.slice(0, 12), total: peers.size });
-          updatePeerCount();
-        }
-        break;
-      case 'q':
-        handleQuery(msg, fromPeerId);
-        break;
-      case 'r':
-        handleResponse(msg, fromPeerId);
-        break;
-    }
-  };
-
-  const handleQuery = async (msg, fromPeerId) => {
-    if (!msg.id || !Array.isArray(msg.vector)) return;
-    if (!ns.Vector.isLoaded()) return;
     try {
-      const all = await ns.Storage.all();
-      const shared = all.filter((t) => t.published && Array.isArray(t.vector));
-      const scored = shared
-        .map((t) => ({ text: t.text, score: ns.Vector.cosine(msg.vector, t.vector) }))
-        .filter((r) => r.score > 0.1)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, msg.limit || ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
-
-      // Отвечаем всем (broadcast), не point-to-point, т.к. в mesh-сети
-      // проще вещать, а получатель фильтрует по queryId
-      broadcast({ type: 'r', id: msg.id, from: ns.Util.peerId, results: scored });
-      ns.Logger.info('responded', { to: fromPeerId.slice(0, 12), n: scored.length });
+      ws = new WebSocket(url);
     } catch (e) {
-      ns.Logger.warn('query handling failed', e.message);
+      ns.Logger.error('WebSocket create failed', e.message);
+      scheduleReconnect();
+      return;
     }
+
+    ws.onopen = () => {
+      ns.Logger.info('relay connected', { url });
+      document.dispatchEvent(new CustomEvent('ns:relay-status', { detail: { status: 'ok' } }));
+      // Представиться
+      send({ type: 'hello', peerId: ns.Util.peerId });
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    };
+
+    ws.onclose = () => {
+      ns.Logger.warn('relay disconnected');
+      document.dispatchEvent(new CustomEvent('ns:relay-status', { detail: { status: 'err' } }));
+      peers.clear();
+      updatePeerCount();
+      scheduleReconnect();
+    };
+
+    ws.onerror = (e) => {
+      ns.Logger.error('relay error', e.message || 'unknown');
+    };
+
+    ws.onmessage = (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (!msg || typeof msg !== 'object' || !msg.type) return;
+
+      switch (msg.type) {
+        case 'peers':
+          peers.clear();
+          (msg.peers || []).forEach(p => peers.add(p));
+          ns.Logger.info('peers snapshot', { count: peers.size });
+          updatePeerCount();
+          break;
+
+        case 'peer-joined':
+          if (msg.peerId) { peers.add(msg.peerId); updatePeerCount(); }
+          break;
+
+        case 'peer-left':
+          if (msg.peerId) {
+            peers.delete(msg.peerId);
+            ns.Ephemeral.removePeer(msg.peerId);
+            updatePeerCount();
+          }
+          break;
+
+        case 'query':
+          handleIncomingQuery(msg);
+          break;
+
+        case 'response':
+          handleIncomingResponse(msg);
+          break;
+      }
+    };
   };
 
-  const handleResponse = (msg, fromPeerId) => {
-    if (!msg.id) return;
-    const handler = queryHandlers.get(msg.id);
-    if (!handler) return;
-    const realFrom = msg.from || fromPeerId;
-    handler.results.set(realFrom, msg.results || []);
-    ns.Ephemeral.upsert(realFrom, msg.results || []);
-    ns.Logger.info('response received', { from: realFrom.slice(0, 12), n: (msg.results || []).length });
+  const scheduleReconnect = () => {
+    if (reconnectTimer) return;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (url) {
+        ns.Logger.info('reconnecting...');
+        connect(url);
+      }
+    }, ns.Config.LIMITS.RECONNECT_MS);
   };
 
-  const broadcast = (msg) => {
-    if (!torrent) return;
-    for (const wire of torrent.wires) {
-      try {
-        if (wire.extended && wire.extended[ProtocolClass.prototype.name]) {
-          wire.extended[ProtocolClass.prototype.name].send(msg);
-        }
-      } catch (e) {}
+  const send = (msg) => {
+    if (!ws || ws.readyState !== 1) return false;
+    try {
+      ws.send(JSON.stringify(msg));
+      return true;
+    } catch (e) {
+      return false;
     }
   };
 
@@ -574,87 +528,62 @@ ns.Mesh = (() => {
     document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: peers.size } }));
   };
 
-  const init = async () => {
-    if (typeof WebTorrent === 'undefined') throw new Error('WebTorrent not loaded');
-    const infoHash = await ns.Util.roomInfoHash(ns.Config.ROOM_NAME);
-    const magnetURI = `magnet:?xt=urn:btih:${infoHash}&dn=${encodeURIComponent(ns.Config.ROOM_NAME)}` +
-      ns.Config.TRACKERS.map(t => `&tr=${encodeURIComponent(t)}`).join('');
+  // Кто-то спросил меня → считаю локально и отвечаю
+  const handleIncomingQuery = async (msg) => {
+    if (!msg.queryId || !Array.isArray(msg.vector) || !msg.from) return;
+    if (!ns.Vector.isLoaded()) return;
+    try {
+      const all = await ns.Storage.all();
+      const shared = all.filter(t => t.published && Array.isArray(t.vector));
+      const scored = shared
+        .map(t => ({ text: t.text, score: ns.Vector.cosine(msg.vector, t.vector) }))
+        .filter(r => r.score > 0.1)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, msg.limit || ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
 
-    client = new WebTorrent();
-
-    client.on('error', (err) => {
-      ns.Logger.error('WebTorrent error', err.message);
-    });
-
-    torrent = client.add(magnetURI, {
-      announce: ns.Config.TRACKERS,
-    });
-
-    // Регистрируем свой протокол
-    torrent.on('wire', (wire) => {
-      wire.use(ProtocolClass);
-    });
-
-    torrent.on('infoHash', () => {
-      ns.Logger.info('mesh joined', {
-        infoHash: infoHash.slice(0, 16) + '...',
-        trackers: ns.Config.TRACKERS.length,
+      send({
+        type: 'response',
+        to: msg.from,
+        queryId: msg.queryId,
+        results: scored,
       });
-    });
-
-    torrent.on('warning', (err) => {
-      ns.Logger.warn('torrent warning', err.message);
-    });
-
-    // Периодически обновляем список пиров
-    setInterval(() => {
-      if (!torrent) return;
-      const now = ns.Util.now();
-      // Оставляем только "живых" — тех от кого были сообщения за 5 мин
-      // (упрощённо: просто по wire connections)
-      const currentCount = torrent.wires.length;
-      if (currentCount !== peers.size) {
-        // синхронизируем
-        peers.clear();
-        for (let i = 0; i < currentCount; i++) {
-          peers.set('anon-' + i, { joinedAt: now });
-        }
-        updatePeerCount();
+      if (scored.length > 0) {
+        ns.Logger.info('responded to peer', { to: msg.from.slice(0, 12), n: scored.length });
       }
-    }, 5000);
-
-    // Ждём первой wire (первого пира)
-    return new Promise((resolve) => {
-      const onWire = () => {
-        ns.Logger.info('first wire established');
-        torrent.off('wire', onWire);
-        resolve();
-      };
-      torrent.on('wire', onWire);
-      // Если через 15 сек никто не появился — всё равно продолжаем
-      setTimeout(() => {
-        torrent.off('wire', onWire);
-        resolve();
-      }, 15000);
-    });
+    } catch (e) {
+      ns.Logger.warn('query handling failed', e.message);
+    }
   };
 
+  // Мне пришёл ответ
+  const handleIncomingResponse = (msg) => {
+    if (!msg.queryId) return;
+    const handler = queryHandlers.get(msg.queryId);
+    if (!handler) return;
+    const fromPeer = msg.from || '?';
+    handler.results.set(fromPeer, msg.results || []);
+    ns.Ephemeral.upsert(fromPeer, msg.results || []);
+    ns.Logger.info('response received', { from: fromPeer.slice(0, 12), n: (msg.results || []).length });
+  };
+
+  // Публичный API: разослать query
   const query = async (vector, { timeoutMs = ns.Config.LIMITS.QUERY_TIMEOUT_MS, limit = ns.Config.LIMITS.MAX_RESULTS_PER_PEER } = {}) => {
-    if (!torrent || !ns.Vector.isLoaded()) return [];
-    const wireCount = torrent.wires.length;
-    if (wireCount === 0) {
-      ns.Logger.info('query skipped: no wires');
+    if (!ws || ws.readyState !== 1) {
+      ns.Logger.warn('query skipped: not connected');
       return [];
     }
-
+    if (peers.size === 0) {
+      ns.Logger.info('query skipped: no peers');
+      return [];
+    }
     const queryId = `q-${++queryIdCounter}-${ns.Util.now()}`;
     const handler = { results: new Map() };
     queryHandlers.set(queryId, handler);
 
-    broadcast({ type: 'q', id: queryId, vector, limit });
-    ns.Logger.info('query broadcasted', { id: queryId.slice(0, 12), wires: wireCount });
+    send({ type: 'query', queryId, vector, limit });
+    ns.Logger.info('query sent', { id: queryId.slice(0, 12), peers: peers.size });
 
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       setTimeout(() => {
         queryHandlers.delete(queryId);
         const collected = [];
@@ -667,23 +596,10 @@ ns.Mesh = (() => {
     });
   };
 
-  const getPeerCount = () => {
-    if (!torrent) return 0;
-    return torrent.wires.length;
-  };
+  const getPeerCount = () => peers.size;
+  const isConnected = () => ws && ws.readyState === 1;
 
-  const destroy = () => {
-    if (torrent) {
-      try { torrent.destroy(); } catch (e) {}
-      torrent = null;
-    }
-    if (client) {
-      try { client.destroy(); } catch (e) {}
-      client = null;
-    }
-  };
-
-  return { init, query, getPeerCount, destroy };
+  return { connect, query, getPeerCount, isConnected };
 })();
 
 /* [8] EPHEMERAL */
@@ -758,15 +674,15 @@ ns.Relevance = (() => {
   };
   const rankAll = (queryVec, localThoughts, ephemeralResults) => {
     if (!queryVec) return { mine: [], world: [], adjacent: [] };
-    const s = ns.Settings?.get?.() || { threshold: 0.25, adjacency: 0.15, maxCards: 5 };
+    const s = ns.Settings.get();
     const localScored = localThoughts
-      .filter((t) => Array.isArray(t.vector))
-      .map((t) => ({ kind: 'local', source: t, score: ns.Vector.cosine(queryVec, t.vector) }))
-      .filter((r) => r.score > s.threshold - s.adjacency)
+      .filter(t => Array.isArray(t.vector))
+      .map(t => ({ kind: 'local', source: t, score: ns.Vector.cosine(queryVec, t.vector) }))
+      .filter(r => r.score > s.threshold - s.adjacency)
       .sort((a, b) => b.score - a.score);
     const worldScored = ephemeralResults
-      .map((r) => ({ kind: 'world', source: r, score: Number(r.score) || 0 }))
-      .filter((r) => r.score > s.threshold - s.adjacency)
+      .map(r => ({ kind: 'world', source: r, score: Number(r.score) || 0 }))
+      .filter(r => r.score > s.threshold - s.adjacency)
       .sort((a, b) => b.score - a.score);
     const mine = [], world = [], adjacent = [];
     for (const r of localScored) {
@@ -828,7 +744,7 @@ ns.Capsule = (() => {
   const exportAll = async () => {
     const all = await ns.Storage.all();
     const capsule = {
-      version: 'noomium_v2',
+      version: 'noomium_v3',
       exportedAt: new Date().toISOString(),
       peerId: ns.Util.peerId,
       thoughts: all,
@@ -844,26 +760,27 @@ ns.Capsule = (() => {
     const text = await file.text();
     const capsule = JSON.parse(text);
     if (!capsule || !Array.isArray(capsule.thoughts)) throw new Error('Invalid capsule');
-    let imported = 0;
     const all = await ns.Storage.all();
     const existingIds = new Set(all.map(t => t.id));
+    let imported = 0;
     for (const t of capsule.thoughts) {
       if (existingIds.has(t.id)) continue;
       await ns.Storage.put(t);
       imported++;
     }
-    ns.Logger.info('capsule imported', { imported, total: capsule.thoughts.length });
+    ns.Logger.info('capsule imported', { imported });
     document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
   };
   return { exportAll, importFile };
 })();
 
-/* [12] UI */
+/* [12] SETTINGS */
 ns.Settings = (() => {
   const META_KEY = 'userSettings';
   let cache = {
     theme: 'auto', lang: 'ru',
     threshold: 0.25, adjacency: 0.15, maxCards: 5,
+    relayUrl: ns.Config.DEFAULT_RELAY_URL,
   };
   const load = async (storage) => {
     try {
@@ -881,6 +798,7 @@ ns.Settings = (() => {
   return { load, save, get };
 })();
 
+/* [13] UI */
 ns.UI = (() => {
   const refs = {};
   let lastQuery = { text: null, vector: null };
@@ -890,8 +808,8 @@ ns.UI = (() => {
      'btnQueryNow','btnExport','btnImport','importFile','btnReset','btnApplySettings',
      'listMine','listWorld','listAdjacent','listAll','status','modelProgress',
      'deviceId','langSwitch','swipeZone','setTheme','setThreshold','setAdjacency',
-     'setMaxCards']
-      .forEach((id) => { refs[id] = document.getElementById(id); });
+     'setMaxCards','setRelayUrl']
+      .forEach(id => { refs[id] = document.getElementById(id); });
   };
 
   const setPill = (k, t, s = '') => {
@@ -955,7 +873,7 @@ ns.UI = (() => {
     if (!items.length) {
       const d = document.createElement('div');
       d.className = 'empty';
-      const n = ns.Mesh.getPeerCount();
+      const n = ns.Relay.getPeerCount();
       d.textContent = n ? `(no matches from ${n} peer(s))` : '(no peers online)';
       container.appendChild(d); return;
     }
@@ -1033,17 +951,14 @@ ns.UI = (() => {
     }
 
     setThink(true, 'запрашиваю сеть...');
-    const peersOnline = ns.Mesh.getPeerCount();
+    const peersOnline = ns.Relay.getPeerCount();
     if (peersOnline > 0) {
-      try {
-        await ns.Mesh.query(qv);
-      } catch (e) {
-        ns.Logger.warn('mesh query failed', e.message);
-      }
+      try { await ns.Relay.query(qv); }
+      catch (e) { ns.Logger.warn('relay query failed', e.message); }
     }
 
     const all = await ns.Storage.all();
-    const locals = all.filter((t) => t.source === 'local');
+    const locals = all.filter(t => t.source === 'local');
     const eph = ns.Ephemeral.allResults();
     const { mine, world, adjacent } = ns.Relevance.rankAll(qv, locals, eph);
     renderLocalList(refs.listMine, mine, text);
@@ -1056,7 +971,7 @@ ns.UI = (() => {
 
   const renderAll = async () => {
     const all = await ns.Storage.all();
-    const locals = all.filter((t) => t.source === 'local')
+    const locals = all.filter(t => t.source === 'local')
                       .sort((a, b) => b.createdAt - a.createdAt)
                       .slice(0, ns.Config.LIMITS.RENDER_CAP);
     refs.listAll.innerHTML = '';
@@ -1071,7 +986,7 @@ ns.UI = (() => {
       row.appendChild(body); row.appendChild(meta);
       refs.listAll.appendChild(row);
     }
-    const indexed = all.filter((t) => t.hasVector).length;
+    const indexed = all.filter(t => t.hasVector).length;
     setPill('indexed', `INDEXED: ${indexed}/${all.length}`, all.length > 0 && indexed === all.length ? 'ok' : 'warn');
   };
 
@@ -1105,6 +1020,7 @@ ns.UI = (() => {
     refs.setThreshold.value = s.threshold;
     refs.setAdjacency.value = s.adjacency;
     refs.setMaxCards.value = s.maxCards;
+    refs.setRelayUrl.value = s.relayUrl || ns.Config.DEFAULT_RELAY_URL;
   };
 
   const bind = () => {
@@ -1151,15 +1067,20 @@ ns.UI = (() => {
     });
 
     refs.btnApplySettings.addEventListener('click', async () => {
+      const newRelayUrl = refs.setRelayUrl.value.trim();
       const patch = {
         theme: refs.setTheme.value,
         threshold: parseFloat(refs.setThreshold.value) || 0.25,
         adjacency: parseFloat(refs.setAdjacency.value) || 0.15,
         maxCards: parseInt(refs.setMaxCards.value, 10) || 5,
+        relayUrl: newRelayUrl,
       };
       await ns.Settings.save(ns.Storage, patch);
       applyTheme(patch.theme);
       ns.Logger.info('settings applied', patch);
+      if (newRelayUrl && newRelayUrl !== ns.Config.DEFAULT_RELAY_URL) {
+        ns.Relay.connect(newRelayUrl);
+      }
       await refresh();
     });
 
@@ -1217,7 +1138,7 @@ ns.UI = (() => {
       const text = refs.input.value.trim() || 'sample query';
       try {
         const qv = await ns.Vector.embed(text);
-        await ns.Mesh.query(qv);
+        await ns.Relay.query(qv);
         await updateLiveRelevance();
       } catch (e) { ns.Logger.error('manual query failed', e.message); }
     });
@@ -1230,9 +1151,7 @@ ns.UI = (() => {
       try {
         await ns.Capsule.importFile(f);
         await refresh();
-      } catch (err) {
-        ns.Logger.error('import failed', err.message);
-      }
+      } catch (err) { ns.Logger.error('import failed', err.message); }
       e.target.value = '';
     });
 
@@ -1263,6 +1182,10 @@ ns.UI = (() => {
     document.addEventListener('ns:peers', (ev) => {
       setPill('peers', `PEERS: ${ev.detail.count}`, ev.detail.count ? 'ok' : 'warn');
     });
+    document.addEventListener('ns:relay-status', (ev) => {
+      setPill('relay', ev.detail.status === 'ok' ? 'RELAY: OK' : 'RELAY: ERR',
+              ev.detail.status === 'ok' ? 'ok' : 'err');
+    });
 
     setupSwipe();
   };
@@ -1271,12 +1194,12 @@ ns.UI = (() => {
   return { init, refresh, setPill, showDeviceId, applyTheme, syncSettingsToForm };
 })();
 
-/* [13] APP */
+/* [14] APP */
 ns.App = (() => {
   const boot = async () => {
     ns.UI.init();
     ns.UI.setPill('idb', 'IDB: boot...', 'warn');
-    ns.UI.setPill('p2p', 'P2P: boot...', 'warn');
+    ns.UI.setPill('relay', 'RELAY: boot...', 'warn');
 
     try {
       await ns.Storage.open();
@@ -1295,14 +1218,13 @@ ns.App = (() => {
     ns.I18n.apply(ns.Settings.get().lang);
     ns.UI.syncSettingsToForm();
 
-    // Mesh (WebTorrent)
-    try {
-      ns.UI.setPill('p2p', 'P2P: joining...', 'warn');
-      await ns.Mesh.init();
-      ns.UI.setPill('p2p', 'P2P: OK', 'ok');
-    } catch (e) {
-      ns.UI.setPill('p2p', 'P2P: ERR', 'err');
-      ns.Logger.error('Mesh init failed', e.message);
+    // Relay connect
+    const relayUrl = ns.Settings.get().relayUrl || ns.Config.DEFAULT_RELAY_URL;
+    if (relayUrl && relayUrl !== 'wss://YOUR_RELAY_DOMAIN_HERE') {
+      ns.Relay.connect(relayUrl);
+    } else {
+      ns.UI.setPill('relay', 'RELAY: not set', 'warn');
+      ns.Logger.warn('Relay URL not configured. Open settings and set your relay URL.');
     }
 
     // Auto-load model
@@ -1324,11 +1246,6 @@ ns.App = (() => {
     await ns.UI.refresh();
     ns.Logger.info('app ready');
   };
-
-  window.addEventListener('beforeunload', () => {
-    try { ns.Mesh.destroy(); } catch (e) {}
-  });
-
   return { boot };
 })();
 
