@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Noosphere v4.2 / Resilient P2P</title>
+<title>Noosphere v4.3 / Resilient P2P</title>
 <style>
   :root {
     --bg:#0f1115; --panel:#161a22; --border:#242a36;
@@ -73,7 +73,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>NOOSPHERE / v4.2 <small>resilient p2p · multi-cdn</small></h1>
+  <h1>NOOSPHERE / v4.3 <small>resilient p2p · true ephemeral</small></h1>
 
   <div id="alertBox"></div>
 
@@ -99,7 +99,7 @@
       <button id="btnSaveWorld" class="primary">Save + World</button>
       <div style="flex:1"></div>
     </div>
-    <div class="hint">Save local = на твоём устройстве. Save + World = локально + отвечаешь на запросы пиров.</div>
+    <div class="hint">Save local = только твоё устройство. Save + World = локально + отвечаешь на запросы пиров (они видят в RAM).</div>
   </section>
 
   <section class="panel">
@@ -143,22 +143,31 @@
   </section>
 </div>
 
-<!-- Пустой script tag — Gun загрузим динамически с fallback -->
-<script id="gunLoader"></script>
-
 <script type="module">
 /* ============================================================================
-   NOOSPHERE v4.2 — RESILIENT P2P (MULTI-CDN + TAB ISOLATION)
+   NOOSPHERE v4.3 — RESILIENT P2P
    ----------------------------------------------------------------------------
-   Фиксы в v4.2:
-     - Multi-CDN fallback для Gun (jsdelivr → unpkg → cdnjs)
-     - Retry логика загрузки (до 3 попыток)
-     - Изоляция localStorage между вкладками (session-based namespace)
-     - Уменьшен heartbeat интервал (15с вместо 30с)
-     - Явная диагностика в UI когда Gun не загрузился
-     - Кнопка "Reload Gun" для ручной перезагрузки
+   Архитектура (как задумано изначально):
+     1. Заметки хранятся ТОЛЬКО на устройстве автора (IndexedDB).
+     2. Gun используется исключительно как:
+        a) presence  — кто сейчас онлайн (deviceId -> lastSeen)
+        b) signaling — обмен SDP для WebRTC
+        c) mailbox   — fallback, если WebRTC не пробился через NAT
+     3. Чужие заметки никогда не пишутся на диск — только в RAM (ns.Ephemeral).
+     4. Когда пишешь мысль — клиент запрашивает у всех онлайн-пиров (через signaling):
+        "что у тебя похожего?" → получает ответы → показывает в UI из RAM.
+     5. Автор закрыл вкладку → его данные больше не отвечают → исчезают у всех.
 
-   Секции:
+   Фиксы v4.3:
+     - Grace period 30с при старте: показываем "warming up" пока snapshot фильтруется
+     - Немедленный первый heartbeat (не ждём 15с)
+     - TTL увеличен до 120с
+     - Логирование "peer filtered by TTL" для диагностики
+     - Snapshot записи не диспатчат peer-offline
+     - Multi-CDN Gun loader с retry (jsdelivr → unpkg → cdnjs)
+     - Изоляция вкладок через sessionStorage
+
+   Секции (по зависимостям):
      [1] Config  [2] Logger  [3] Util  [4] GunLoader  [5] Device  [6] Storage
      [7] Vector  [8] Ephemeral  [9] Signaling  [10] P2P  [11] Relevance
      [12] Sync  [13] UI  [14] App
@@ -171,7 +180,9 @@ env.useBrowserCache    = true;
 
 const ns = (window.__ns = {});
 
-/* [1] CONFIG */
+/* --------------------------------------------------------------------------
+   [1] CONFIG
+   -------------------------------------------------------------------------- */
 ns.Config = Object.freeze({
   DB_NAME: 'noosphere_v4',
   DB_VERSION: 1,
@@ -184,7 +195,6 @@ ns.Config = Object.freeze({
 
   GUN_RELAYS: ['https://relay.peer.ooo/gun'],
 
-  // Multi-CDN для Gun (fallback chain)
   GUN_CDN_URLS: [
     'https://cdn.jsdelivr.net/npm/gun/gun.js',
     'https://unpkg.com/gun/gun.js',
@@ -200,9 +210,10 @@ ns.Config = Object.freeze({
     MAX_TEXT_LENGTH: 10_000,
     RENDER_CAP: 300,
     DEBOUNCE_QUERY_MS: 600,
-    PRESENCE_INTERVAL_MS: 15_000,  // УМЕНЬШЕНО: 15с вместо 30с
-    PRESENCE_TTL_MS: 60_000,       // УМЕНЬШЕНО: 60с вместо 90с
-    PRESENCE_RECHECK_MS: 5_000,    // УМЕНЬШЕНО: 5с вместо 10с
+    PRESENCE_INTERVAL_MS: 15_000,
+    PRESENCE_TTL_MS: 120_000,       // 2 минуты
+    PRESENCE_RECHECK_MS: 5_000,
+    PRESENCE_WARMUP_MS: 30_000,     // 30 секунд grace period
     QUERY_TIMEOUT_MS: 5000,
     MAX_PEERS_TO_QUERY: 10,
     MAX_RESULTS_PER_PEER: 3,
@@ -215,7 +226,9 @@ ns.Config = Object.freeze({
   RELEVANCE: { THRESHOLD: 0.25, ADJACENCY: 0.15, MAX_CARDS: 5 },
 });
 
-/* [2] LOGGER */
+/* --------------------------------------------------------------------------
+   [2] LOGGER
+   -------------------------------------------------------------------------- */
 ns.Logger = (() => {
   const el = () => document.getElementById('log');
   const fmt = (d) => d.toISOString().slice(11, 19);
@@ -237,7 +250,9 @@ ns.Logger = (() => {
   };
 })();
 
-/* [3] UTIL */
+/* --------------------------------------------------------------------------
+   [3] UTIL
+   -------------------------------------------------------------------------- */
 ns.Util = {
   newId: () => (crypto.randomUUID
     ? crypto.randomUUID()
@@ -262,7 +277,9 @@ ns.Util = {
   },
 };
 
-/* [4] GUN LOADER — Multi-CDN с retry */
+/* --------------------------------------------------------------------------
+   [4] GUN LOADER (multi-CDN с retry)
+   -------------------------------------------------------------------------- */
 ns.GunLoader = (() => {
   let loaded = false;
   let loadPromise = null;
@@ -317,7 +334,7 @@ ns.GunLoader = (() => {
           }
         }
         if (attempt < retries) {
-          await new Promise(r => setTimeout(r, 1000)); // пауза перед retry
+          await new Promise(r => setTimeout(r, 1000));
         }
       }
       throw new Error(`all Gun CDN URLs failed after ${retries} attempts`);
@@ -329,7 +346,6 @@ ns.GunLoader = (() => {
   const reload = async () => {
     loaded = false;
     loadPromise = null;
-    // Удаляем существующий Gun из памяти
     if (window.Gun) delete window.Gun;
     return load();
   };
@@ -339,7 +355,9 @@ ns.GunLoader = (() => {
   return { load, reload, isLoaded };
 })();
 
-/* [5] DEVICE */
+/* --------------------------------------------------------------------------
+   [5] DEVICE
+   -------------------------------------------------------------------------- */
 ns.Device = (() => {
   const META_KEY = 'deviceFingerprint';
   let fp = null;
@@ -367,7 +385,9 @@ ns.Device = (() => {
   return { init, get, reset };
 })();
 
-/* [6] STORAGE */
+/* --------------------------------------------------------------------------
+   [6] STORAGE (только локальные заметки, никакого source='world')
+   -------------------------------------------------------------------------- */
 ns.Storage = (() => {
   const { DB_NAME, DB_VERSION, STORE_THOUGHTS, STORE_META } = ns.Config;
   let db = null;
@@ -426,7 +446,9 @@ ns.Storage = (() => {
   return { open, put, get, remove, all, listUnindexed, getMeta, putMeta, clearAll };
 })();
 
-/* [7] VECTOR */
+/* --------------------------------------------------------------------------
+   [7] VECTOR (MiniLM через transformers.js)
+   -------------------------------------------------------------------------- */
 ns.Vector = (() => {
   let extractor = null;
   let loadPromise = null;
@@ -466,7 +488,9 @@ ns.Vector = (() => {
   return { load, embed, cosine, isLoaded };
 })();
 
-/* [8] EPHEMERAL */
+/* --------------------------------------------------------------------------
+   [8] EPHEMERAL (in-memory, никогда не на диск)
+   -------------------------------------------------------------------------- */
 ns.Ephemeral = (() => {
   const byPeer = new Map();
 
@@ -519,7 +543,15 @@ ns.Ephemeral = (() => {
   return { upsert, removePeer, allResults, clear, bindPresence };
 })();
 
-/* [9] SIGNALING */
+/* --------------------------------------------------------------------------
+   [9] SIGNALING (Gun как presence + signaling + mailbox)
+   Фиксы v4.3:
+     - Grace period 30с при старте (warming up)
+     - Немедленный первый heartbeat
+     - TTL 120с
+     - Логирование "peer filtered by TTL"
+     - Snapshot записи не диспатчат peer-offline
+   -------------------------------------------------------------------------- */
 ns.Signaling = (() => {
   const { GUN_PRESENCE_NS, GUN_SIGNALING_NS, GUN_MAILBOX_NS, GUN_RELAYS } = ns.Config;
   let gun = null;
@@ -529,10 +561,10 @@ ns.Signaling = (() => {
   const mailboxHandlers = new Map();
   const signalingHandlers = new Map();
   let recheckTimer = null;
+  let coldStartUntil = 0;
 
   const init = () => new Promise(async (res, rej) => {
     try {
-      // КРИТИЧНО: ждём загрузки Gun
       if (!ns.GunLoader.isLoaded()) {
         ns.Logger.info('waiting for Gun to load...');
         await ns.GunLoader.load();
@@ -540,7 +572,6 @@ ns.Signaling = (() => {
 
       if (typeof Gun === 'undefined') throw new Error('Gun not loaded');
 
-      // ИЗОЛЯЦИЯ: используем sessionId для localStorage чтобы вкладки не конфликтовали
       const sessionId = sessionStorage.getItem('ns_session') || (() => {
         const id = ns.Util.newId();
         sessionStorage.setItem('ns_session', id);
@@ -550,25 +581,25 @@ ns.Signaling = (() => {
       gun = Gun({
         peers: GUN_RELAYS,
         localStorage: true,
-        file: `gun_${sessionId}`, // изоляция между вкладками
+        file: `gun_${sessionId}`,
       });
 
       presenceNode  = gun.get(GUN_PRESENCE_NS);
       signalingNode = gun.get(GUN_SIGNALING_NS);
       mailboxNode   = gun.get(GUN_MAILBOX_NS);
 
-      // === PRESENCE ===
+      coldStartUntil = ns.Util.now() + ns.Config.LIMITS.PRESENCE_WARMUP_MS;
+
       presenceNode.map().once((data, devId) => {
         if (!devId || devId === '_' || !data || typeof data !== 'object') return;
-        handlePresenceUpdate(devId, Number(data.lastSeen) || 0);
+        handlePresenceUpdate(devId, Number(data.lastSeen) || 0, true);
       });
 
       presenceNode.map().on((data, devId) => {
         if (!devId || devId === '_' || !data || typeof data !== 'object') return;
-        handlePresenceUpdate(devId, Number(data.lastSeen) || 0);
+        handlePresenceUpdate(devId, Number(data.lastSeen) || 0, false);
       });
 
-      // === SIGNALING ===
       signalingNode.map().on((data, msgId) => {
         if (!data || !msgId || msgId === '_' || typeof data !== 'object') return;
         if (data.to !== ns.Device.get()) return;
@@ -578,7 +609,6 @@ ns.Signaling = (() => {
         }
       });
 
-      // === MAILBOX ===
       mailboxNode.map().on((data, msgId) => {
         if (!data || !msgId || msgId === '_' || typeof data !== 'object') return;
         if (data.to !== ns.Device.get()) return;
@@ -599,7 +629,7 @@ ns.Signaling = (() => {
     } catch (e) { rej(e); }
   });
 
-  const handlePresenceUpdate = (devId, lastSeen) => {
+  const handlePresenceUpdate = (devId, lastSeen, isSnapshot) => {
     const wasOnline = isOnline(devId);
     onlinePeers.set(devId, { lastSeen });
     const nowOnline = isOnline(devId);
@@ -608,17 +638,36 @@ ns.Signaling = (() => {
       ns.Logger.info('peer came online', { dev: devId.slice(0, 12) });
       document.dispatchEvent(new CustomEvent('ns:peer-online', { detail: { deviceId: devId } }));
     }
-    updatePeerCount();
+    
+    if (!isSnapshot) {
+      updatePeerCount();
+    }
   };
 
   const isOnline = (devId) => {
     if (devId === ns.Device.get()) return true;
     const rec = onlinePeers.get(devId);
     if (!rec) return false;
-    return (ns.Util.now() - rec.lastSeen) < ns.Config.LIMITS.PRESENCE_TTL_MS;
+    const age = ns.Util.now() - rec.lastSeen;
+    const online = age < ns.Config.LIMITS.PRESENCE_TTL_MS;
+    
+    if (!online && age < ns.Config.LIMITS.PRESENCE_TTL_MS * 2 && age > 0) {
+      ns.Logger.info(`peer filtered by TTL`, { 
+        dev: devId.slice(0,10), 
+        age: Math.round(age/1000) + 's',
+        ttl: ns.Config.LIMITS.PRESENCE_TTL_MS/1000 + 's'
+      });
+    }
+    
+    return online;
   };
 
   const updatePeerCount = () => {
+    if (ns.Util.now() < coldStartUntil) {
+      document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: -1, warmingUp: true } }));
+      return;
+    }
+
     let n = 0;
     const nowOff = [];
     for (const [devId] of onlinePeers) {
@@ -626,6 +675,7 @@ ns.Signaling = (() => {
       if (isOnline(devId)) n++;
       else nowOff.push(devId);
     }
+    
     for (const devId of nowOff) {
       if (onlinePeers.has(devId) && onlinePeers.get(devId).lastSeen > 0) {
         onlinePeers.get(devId).offlineDispatched = true;
@@ -646,19 +696,24 @@ ns.Signaling = (() => {
   let heartbeatTimer = null;
   const startHeartbeat = () => {
     if (heartbeatTimer) return;
-    const tick = () => {
-      if (!ns.Device.get()) {
-        heartbeatTimer = setTimeout(tick, ns.Config.LIMITS.PRESENCE_INTERVAL_MS);
-        return;
-      }
+    
+    const sendHeartbeat = () => {
+      if (!ns.Device.get()) return;
       presenceNode.get(ns.Device.get()).put({ lastSeen: ns.Util.now() });
+    };
+    
+    sendHeartbeat();
+    
+    const tick = () => {
+      sendHeartbeat();
       updatePeerCount();
       heartbeatTimer = setTimeout(tick, ns.Config.LIMITS.PRESENCE_INTERVAL_MS);
     };
-    tick();
-
+    
+    heartbeatTimer = setTimeout(tick, ns.Config.LIMITS.PRESENCE_INTERVAL_MS);
     recheckTimer = setInterval(updatePeerCount, ns.Config.LIMITS.PRESENCE_RECHECK_MS);
-    ns.Logger.info('presence heartbeat started (interval: ' + ns.Config.LIMITS.PRESENCE_INTERVAL_MS + 'ms)');
+    
+    ns.Logger.info('presence heartbeat started (immediate + interval: ' + ns.Config.LIMITS.PRESENCE_INTERVAL_MS + 'ms)');
   };
 
   const sendSignaling = (toDeviceId, payload) => {
@@ -711,7 +766,9 @@ ns.Signaling = (() => {
   };
 })();
 
-/* [10] P2P */
+/* --------------------------------------------------------------------------
+   [10] P2P (WebRTC preferred, mailbox fallback)
+   -------------------------------------------------------------------------- */
 ns.P2P = (() => {
   const connections = new Map();
   const channels = new Map();
@@ -920,7 +977,9 @@ ns.P2P = (() => {
   return { bind, queryPeers, updateRtcCount };
 })();
 
-/* [11] RELEVANCE */
+/* --------------------------------------------------------------------------
+   [11] RELEVANCE
+   -------------------------------------------------------------------------- */
 ns.Relevance = (() => {
   const { THRESHOLD, ADJACENCY, MAX_CARDS } = ns.Config.RELEVANCE;
   const escapeHtml = ns.Util.escapeHtml;
@@ -996,7 +1055,9 @@ ns.Relevance = (() => {
   return { rankAll, highlightFragment };
 })();
 
-/* [12] SYNC */
+/* --------------------------------------------------------------------------
+   [12] SYNC
+   -------------------------------------------------------------------------- */
 ns.Sync = (() => {
   const saveLocal = async ({ text, publishToWorld = false }) => {
     const clean = ns.Util.normalizeText(text);
@@ -1042,7 +1103,9 @@ ns.Sync = (() => {
   return { saveLocal, reindexAll };
 })();
 
-/* [13] UI */
+/* --------------------------------------------------------------------------
+   [13] UI
+   -------------------------------------------------------------------------- */
 ns.UI = (() => {
   const refs = {};
 
@@ -1335,7 +1398,11 @@ ns.UI = (() => {
     document.addEventListener('ns:thoughts-changed', refresh);
     document.addEventListener('ns:ephemeral-changed', updateLiveRelevance);
     document.addEventListener('ns:peers', (ev) => {
-      setPill('peers', `ONLINE: ${ev.detail.count}`, ev.detail.count ? 'ok' : 'warn');
+      if (ev.detail.warmingUp) {
+        setPill('peers', 'ONLINE: warming up...', 'warn');
+      } else {
+        setPill('peers', `ONLINE: ${ev.detail.count}`, ev.detail.count ? 'ok' : 'warn');
+      }
     });
     document.addEventListener('ns:rtc', (ev) => {
       setPill('rtc', `RTC: ${ev.detail.count}`, ev.detail.count ? 'ok' : 'warn');
@@ -1352,7 +1419,9 @@ ns.UI = (() => {
   return { init, refresh, setPill, showDeviceId, showAlert };
 })();
 
-/* [14] APP */
+/* --------------------------------------------------------------------------
+   [14] APP
+   -------------------------------------------------------------------------- */
 ns.App = (() => {
   const boot = async () => {
     ns.UI.init();
@@ -1375,7 +1444,6 @@ ns.App = (() => {
     } catch (e) { ns.Logger.error('device init failed', e.message); }
 
     try {
-      // Загружаем Gun с multi-CDN fallback
       await ns.GunLoader.load();
       await ns.Signaling.init();
       ns.UI.setPill('sig', 'SIGNAL: OK', 'ok');
