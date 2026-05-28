@@ -1,155 +1,175 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Noosphere v11 (P2P Vector)</title>
+  <title>Noosphere P2P</title>
   <style>
+    /* ================= CSS VARIABLES & THEMES ================= */
     :root {
-      --bg: #0a0a0f;
-      --panel: #13131a;
-      --panel-2: #1a1a24;
-      --border: #24242e;
-      --text: #e8e8f0;
-      --muted: #8888a0;
-      --accent: #7c5cff;
-      --accent-2: #5c8cff;
-      --ok: #4ade80;
-      --warn: #fbbf24;
-      --err: #f87171;
-      --card: #16161f;
+      --bg: #0a0a0f; --panel: #13131a; --panel-2: #1a1a24; --border: #24242e;
+      --text: #e8e8f0; --muted: #8888a0; --accent: #7c5cff; --accent-2: #0ea5e9;
+      --ok: #4ade80; --warn: #fbbf24; --err: #f87171; --card: #16161f;
+      --font: 14px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     }
     html[data-theme="light"] {
-      --bg: #f6f6fa;
-      --panel: #ffffff;
-      --panel-2: #f0f0f6;
-      --border: #e0e0ea;
-      --text: #1a1a24;
-      --muted: #666680;
-      --card: #ffffff;
+      --bg: #f6f6fa; --panel: #ffffff; --panel-2: #f0f0f6; --border: #e0e0ea;
+      --text: #1a1a24; --muted: #666680; --card: #ffffff;
     }
+    
+    /* ================= RESET & BASE ================= */
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+    html, body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); font: var(--font); }
     body { display: flex; flex-direction: column; }
-    .header { background: var(--panel); border-bottom: 1px solid var(--border); padding: 10px 14px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-    .header .title { font-weight: 600; font-size: 16px; letter-spacing: .5px; }
-    .header .spacer { flex: 1; }
-    .header button { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 4px 10px; border-radius: 6px; font-size: 14px; cursor: pointer; }
-    .header button:hover { background: var(--panel-2); }
+    
+    /* ================= HEADER & STATUS ================= */
+    .header { background: var(--panel); border-bottom: 1px solid var(--border); padding: 10px 16px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+    .header .title { font-weight: 700; font-size: 16px; letter-spacing: .5px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .btn-icon { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 6px 12px; border-radius: 8px; font-size: 14px; cursor: pointer; transition: background .2s; }
+    .btn-icon:hover { background: var(--panel-2); }
+    
+    .status-bar { background: var(--panel); border-bottom: 1px solid var(--border); padding: 6px 16px; display: flex; gap: 8px; flex-wrap: wrap; font-size: 11px; flex-shrink: 0; align-items: center; }
+    .chip { padding: 3px 8px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); display: inline-flex; align-items: center; gap: 6px; transition: all .3s; }
+    .chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); transition: all .3s; }
+    .chip.ok { color: var(--ok); border-color: rgba(74,222,128,.3); } .chip.ok .dot { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+    .chip.warn { color: var(--warn); border-color: rgba(251,191,36,.3); } .chip.warn .dot { background: var(--warn); }
+    .chip.err { color: var(--err); border-color: rgba(248,113,113,.3); } .chip.err .dot { background: var(--err); }
+    .chip.active { color: var(--accent-2); border-color: rgba(14,165,233,.4); background: rgba(14,165,233,.1); }
+    .chip.active .dot { background: var(--accent-2); animation: pulse 1s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(1.4); } }
+
+    /* ================= MAIN LAYOUT & TABS ================= */
     .main-tabs { display: flex; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
-    .main-tab { flex: 1; padding: 10px; text-align: center; cursor: pointer; font-size: 13px; color: var(--muted); border-bottom: 2px solid transparent; transition: all .15s; }
+    .main-tab { flex: 1; padding: 12px; text-align: center; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--muted); border-bottom: 2px solid transparent; transition: all .2s; }
     .main-tab.active { color: var(--text); border-bottom-color: var(--accent); }
-    .net-activity { height: 2px; background: var(--panel-2); position: relative; overflow: hidden; flex-shrink: 0; }
-    .net-activity .bar { position: absolute; top: 0; left: -40%; width: 40%; height: 100%; background: linear-gradient(90deg, transparent, var(--accent), transparent); opacity: 0; transition: opacity .3s; }
-    .net-activity.active .bar { opacity: 1; animation: slide 1.2s linear infinite; }
-    @keyframes slide { 0% { left: -40%; } 100% { left: 100%; } }
-    .status-bar { background: var(--panel); border-bottom: 1px solid var(--border); padding: 5px 14px; display: flex; gap: 6px; flex-wrap: wrap; font-size: 10px; flex-shrink: 0; align-items: center; }
-    .chip { padding: 2px 7px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); display: inline-flex; align-items: center; gap: 4px; transition: all .2s; }
-    .chip .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); transition: all .2s; }
-    .chip.ok { color: var(--ok); border-color: rgba(74,222,128,.3); }
-    .chip.ok .dot { background: var(--ok); box-shadow: 0 0 5px var(--ok); }
-    .chip.warn { color: var(--warn); border-color: rgba(251,191,36,.3); }
-    .chip.warn .dot { background: var(--warn); }
-    .chip.err { color: var(--err); border-color: rgba(248,113,113,.3); }
-    .chip.err .dot { background: var(--err); }
-    .chip.publishing { color: var(--accent); border-color: rgba(124,92,255,.4); background: rgba(124,92,255,.1); }
-    .chip.publishing .dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 1s infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(1.3); } }
-    .content { flex: 1; overflow-y: auto; padding: 12px; padding-bottom: 20px; }
-    .view { display: none; }
-    .view.active { display: block; }
-    .composer { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; position: relative; }
-    .composer textarea { width: 100%; background: transparent; border: none; color: var(--text); font: inherit; resize: none; min-height: 60px; outline: none; }
+    
+    .content { flex: 1; overflow-y: auto; padding: 16px; padding-bottom: 30px; }
+    .view { display: none; animation: fadeIn .3s ease; } .view.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    /* ================= COMPOSER ================= */
+    .composer { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; margin-bottom: 16px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+    .composer textarea { width: 100%; background: transparent; border: none; color: var(--text); font: inherit; font-size: 15px; resize: none; min-height: 80px; outline: none; }
     .composer textarea::placeholder { color: var(--muted); }
-    .composer .actions { display: flex; gap: 6px; margin-top: 8px; }
-    .btn { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 7px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500; transition: all .15s; }
+    .composer .actions { display: flex; gap: 8px; margin-top: 10px; }
+    
+    .btn { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 8px 16px; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: 600; transition: all .2s; }
     .btn:hover:not(:disabled) { background: #222230; border-color: var(--accent); }
-    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
     .btn.primary { background: var(--accent); border-color: var(--accent); color: white; flex: 1; }
     .btn.primary:hover:not(:disabled) { background: #6a4aee; }
-    .sub-tabs { display: flex; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 3px; margin-bottom: 12px; gap: 2px; }
-    .sub-tab { flex: 1; padding: 7px 10px; text-align: center; cursor: pointer; font-size: 12px; color: var(--muted); border-radius: 5px; transition: all .15s; display: flex; align-items: center; justify-content: center; gap: 4px; }
-    .sub-tab.active { background: var(--panel-2); color: var(--text); }
-    .sub-tab .badge { background: var(--border); color: var(--muted); padding: 0 5px; border-radius: 8px; font-size: 10px; min-width: 16px; }
-    .sub-tab.active .badge { background: rgba(124,92,255,.25); color: var(--accent); }
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; animation: fadeIn .25s; }
-    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-    .card.mine { border-left: 3px solid var(--muted); }
-    .card.world { border-left: 3px solid var(--accent); }
-    .card .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-    .card .tag { font-size: 9px; padding: 2px 6px; border-radius: 3px; background: var(--panel-2); color: var(--muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
-    .card.world .tag { background: rgba(124,92,255,.15); color: var(--accent); }
+    
+    .progress { height: 3px; background: var(--border); overflow: hidden; border-radius: 3px; margin-top: 10px; }
+    .progress > div { height: 100%; background: var(--accent); width: 0; transition: width .3s ease; }
+
+    /* ================= SUB-TABS (RESULTS) ================= */
+    .sub-tabs { display: flex; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 4px; margin-bottom: 16px; gap: 4px; }
+    .sub-tab { flex: 1; padding: 8px 4px; text-align: center; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); border-radius: 6px; transition: all .2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .sub-tab.active { background: var(--panel-2); color: var(--text); box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+    .badge { background: var(--border); color: var(--muted); padding: 2px 6px; border-radius: 10px; font-size: 10px; min-width: 20px; font-family: monospace; }
+    .sub-tab.active[data-sub="mine"] .badge { background: rgba(124,92,255,.2); color: var(--accent); }
+    .sub-tab.active[data-sub="world"] .badge { background: rgba(14,165,233,.2); color: var(--accent-2); }
+    .sub-tab.active[data-sub="serendipity"] .badge { background: rgba(74,222,128,.2); color: var(--ok); }
+
+    /* ================= CARDS ================= */
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; animation: slideUp .3s ease forwards; opacity: 0; transform: translateY(10px); }
+    @keyframes slideUp { to { opacity: 1; transform: translateY(0); } }
+    .card.mine { border-left: 3px solid var(--accent); }
+    .card.world { border-left: 3px solid var(--accent-2); }
+    .card.mixed { border-left: 3px solid var(--ok); }
+    
+    .card .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .card .tag { font-size: 9px; padding: 2px 6px; border-radius: 4px; background: var(--panel-2); color: var(--muted); text-transform: uppercase; font-weight: 700; letter-spacing: .5px; }
+    .card.world .tag { background: rgba(14,165,233,.15); color: var(--accent-2); }
+    .card.mine .tag { background: rgba(124,92,255,.15); color: var(--accent); }
+    
     .card .score { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
-    .card .text { font-size: 13px; line-height: 1.5; word-wrap: break-word; }
-    .card .text mark { background: transparent; color: var(--accent); font-weight: 600; }
-    .card .meta { margin-top: 6px; font-size: 10px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .pub-status { padding: 1px 6px; border-radius: 3px; font-size: 9px; font-weight: 600; display: inline-flex; align-items: center; gap: 3px; }
+    .card .text { font-size: 14px; line-height: 1.5; word-wrap: break-word; white-space: pre-wrap; }
+    .card .text mark { background: rgba(124,92,255,.2); color: var(--accent); font-weight: 600; padding: 0 2px; border-radius: 2px; }
+    .card .text b { font-weight: 700; color: var(--text); }
+    .card .text i { font-style: italic; color: var(--muted); }
+    
+    .pub-status { padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: 700; display: inline-block; margin-bottom: 6px; }
     .pub-ok { background: rgba(124,92,255,.15); color: var(--accent); }
-    .empty { text-align: center; color: var(--muted); padding: 32px 16px; font-size: 12px; }
-    .drawer { position: fixed; top: 0; right: -100%; width: 320px; max-width: 92vw; height: 100%; background: var(--panel); border-left: 1px solid var(--border); z-index: 100; transition: right .25s; overflow-y: auto; padding: 16px; }
-    .drawer.open { right: 0; }
-    .drawer h3 { margin: 0 0 16px 0; font-size: 15px; display: flex; justify-content: space-between; align-items: center; }
-    .drawer .close { background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: 22px; padding: 0; }
-    .setting { margin-bottom: 16px; }
-    .setting label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .4px; }
-    .setting input[type="text"] { width: 100%; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 6px; font: inherit; font-size: 13px; }
-    .setting input[type="range"] { width: 100%; accent-color: var(--accent); }
-    .setting .row { display: flex; align-items: center; justify-content: space-between; }
-    .setting .val { font-size: 12px; color: var(--accent); font-weight: 600; font-family: ui-monospace, monospace; }
-    .setting .seg { display: flex; gap: 4px; }
-    .setting .seg button { flex: 1; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); padding: 6px 10px; border-radius: 5px; font-size: 12px; cursor: pointer; }
-    .setting .seg button.active { background: var(--accent); color: white; border-color: var(--accent); }
-    .setting .btn { width: 100%; margin-bottom: 6px; }
-    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 99; opacity: 0; pointer-events: none; transition: opacity .25s; }
+    
+    .empty { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 13px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .empty .icon { font-size: 32px; opacity: .4; }
+
+    /* ================= DRAWER (SETTINGS) ================= */
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 99; opacity: 0; pointer-events: none; transition: opacity .3s; backdrop-filter: blur(2px); }
     .overlay.show { opacity: 1; pointer-events: auto; }
-    .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 10px 18px; border-radius: 8px; font-size: 12px; z-index: 200; transition: transform .25s; box-shadow: 0 4px 20px rgba(0,0,0,.4); display: flex; align-items: center; gap: 8px; }
+    .drawer { position: fixed; top: 0; right: -100%; width: 340px; max-width: 100vw; height: 100%; background: var(--panel); border-left: 1px solid var(--border); z-index: 100; transition: right .3s cubic-bezier(0.16, 1, 0.3, 1); overflow-y: auto; padding: 20px; box-shadow: -10px 0 30px rgba(0,0,0,0.5); }
+    .drawer.open { right: 0; }
+    .drawer h3 { margin: 0 0 20px 0; font-size: 18px; display: flex; justify-content: space-between; align-items: center; }
+    .drawer .close { background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: 24px; padding: 4px; line-height: 1; transition: color .2s; }
+    .drawer .close:hover { color: var(--err); }
+    
+    .setting { margin-bottom: 20px; }
+    .setting label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; font-weight: 600; letter-spacing: .5px; }
+    .setting input[type="text"] { width: 100%; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 10px; border-radius: 8px; font: inherit; font-size: 14px; outline: none; transition: border .2s; }
+    .setting input[type="text"]:focus { border-color: var(--accent); }
+    .setting input[type="range"] { width: 100%; accent-color: var(--accent); margin-top: 5px; }
+    .setting .row { display: flex; align-items: center; justify-content: space-between; }
+    .setting .val { font-size: 12px; color: var(--accent); font-weight: 700; font-family: monospace; background: var(--panel-2); padding: 2px 6px; border-radius: 4px; }
+    
+    .seg { display: flex; gap: 4px; background: var(--panel-2); padding: 4px; border-radius: 8px; border: 1px solid var(--border); }
+    .seg button { flex: 1; background: transparent; border: none; color: var(--muted); padding: 8px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all .2s; }
+    .seg button.active { background: var(--panel); color: var(--text); box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
+
+    /* ================= TOAST ================= */
+    .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(100px); background: var(--text); color: var(--bg); padding: 12px 20px; border-radius: 30px; font-size: 13px; font-weight: 600; z-index: 200; transition: transform .4s cubic-bezier(0.16, 1, 0.3, 1); box-shadow: 0 10px 30px rgba(0,0,0,.3); pointer-events: none; }
     .toast.show { transform: translateX(-50%) translateY(0); }
-    .progress { height: 2px; background: var(--border); overflow: hidden; border-radius: 2px; margin-top: 6px; }
-    .progress > div { height: 100%; background: var(--accent); width: 0; transition: width .2s; }
   </style>
 </head>
 <body>
 
 <div class="header">
   <div class="title">Noosphere</div>
-  <div class="spacer"></div>
-  <button id="btnSettings">☰</button>
+  <button class="btn-icon" id="btnSettings" data-i18n="settings">⚙</button>
 </div>
 
 <div class="main-tabs">
-  <div class="main-tab active" data-main="stream">Поток</div>
-  <div class="main-tab" data-main="history">Моя база</div>
+  <div class="main-tab active" data-main="stream" data-i18n="tab_stream">Stream</div>
+  <div class="main-tab" data-main="history" data-i18n="tab_base">My Base</div>
 </div>
 
-<div class="net-activity" id="netActivity"><div class="bar"></div></div>
-
 <div class="status-bar">
-  <span class="chip" id="chipNet"><span class="dot"></span>offline</span>
-  <span class="chip" id="chipModel"><span class="dot"></span>model</span>
+  <span class="chip" id="chipNet"><span class="dot"></span><span data-i18n="stat_offline">offline</span></span>
+  <span class="chip" id="chipModel"><span class="dot"></span><span data-i18n="stat_model">model</span></span>
   <span class="chip" id="chipPeers"><span class="dot"></span>0 peers</span>
-  <span class="chip" id="chipActivity" style="display:none"><span class="dot"></span>rx/tx</span>
+  <span class="chip" id="chipActivity" style="display:none"><span class="dot"></span>RX/TX</span>
 </div>
 
 <div class="content">
+  <!-- STREAM VIEW -->
   <div class="view active" id="view-stream">
     <div class="composer" id="composer">
-      <textarea id="input" placeholder="О чём думаешь? Ввод текста рассылает вектор-запрос пирам..."></textarea>
+      <textarea id="input" data-i18n-ph="placeholder" placeholder="Type here... Vector query broadcasts automatically."></textarea>
       <div class="actions">
-        <button class="btn ghost" id="btnSaveLocal">Сохранить приватно</button>
-        <button class="btn primary" id="btnPublish">Отдать в сеть (Shared)</button>
+        <button class="btn ghost" id="btnSaveLocal" data-i18n="btn_private">Save Private</button>
+        <button class="btn primary" id="btnPublish" data-i18n="btn_shared">Share to Net (Shared)</button>
       </div>
       <div class="progress"><div id="modelProgress"></div></div>
     </div>
 
     <div class="sub-tabs">
-      <div class="sub-tab active" data-sub="mine">Локально<span class="badge" id="badgeMine">0</span></div>
-      <div class="sub-tab" data-sub="world">Из сети<span class="badge" id="badgeWorld">0</span></div>
+      <div class="sub-tab active" data-sub="mine">
+        <span data-i18n="sub_local">Local</span> <span class="badge" id="b-mine">0</span>
+      </div>
+      <div class="sub-tab" data-sub="world">
+        <span data-i18n="sub_world">World</span> <span class="badge" id="b-world">0</span>
+      </div>
+      <div class="sub-tab" data-sub="serendipity">
+        <span data-i18n="sub_serendipity">Serendipity</span> <span class="badge" id="b-seren">0</span>
+      </div>
     </div>
 
     <div id="sub-mine"><div id="listMine"></div></div>
     <div id="sub-world" style="display:none"><div id="listWorld"></div></div>
+    <div id="sub-serendipity" style="display:none"><div id="listSeren"></div></div>
   </div>
 
+  <!-- BASE VIEW -->
   <div class="view" id="view-history">
     <div id="listHistory"></div>
   </div>
@@ -157,31 +177,55 @@
 
 <div class="overlay" id="overlay"></div>
 <div class="drawer" id="drawer">
-  <h3>Настройки<button class="close" id="btnClose">×</button></h3>
+  <h3><span data-i18n="settings">Settings</span> <button class="close" id="btnClose">×</button></h3>
+  
   <div class="setting">
-    <label>Тема</label>
-    <div class="seg" data-opt="theme">
-      <button data-val="auto" class="active">Авто</button>
-      <button data-val="light">День</button>
-      <button data-val="dark">Ночь</button>
+    <label data-i18n="lbl_lang">Language</label>
+    <div class="seg" data-opt="lang">
+      <button data-val="en" class="active">English</button>
+      <button data-val="ru">Русский</button>
     </div>
   </div>
+
   <div class="setting">
-    <label>Комната (Room)</label>
+    <label data-i18n="lbl_theme">Theme</label>
+    <div class="seg" data-opt="theme">
+      <button data-val="auto" class="active" data-i18n="th_auto">Auto</button>
+      <button data-val="light" data-i18n="th_light">Light</button>
+      <button data-val="dark" data-i18n="th_dark">Dark</button>
+    </div>
+  </div>
+
+  <div class="setting">
+    <label data-i18n="lbl_room">Room (Nostr Topic)</label>
     <input type="text" id="setRoom" />
   </div>
+
   <div class="setting">
-    <div class="row"><label>Порог релевантности</label><span class="val" id="valThreshold">0.30</span></div>
-    <input type="range" id="setThreshold" min="0.1" max="0.7" step="0.05" value="0.30" />
+    <div class="row">
+      <label data-i18n="lbl_thresh">Strict Threshold</label>
+      <span class="val" id="valThreshold">0.30</span>
+    </div>
+    <input type="range" id="setThreshold" min="0.1" max="0.8" step="0.05" value="0.30" />
   </div>
-  <div class="setting" style="margin-top:20px;">
-    <button class="btn" id="btnReset" style="color:var(--err)">🗑 Сбросить БД</button>
-    <button class="btn primary" id="btnApply">Применить и Перезайти</button>
+
+  <div class="setting">
+    <div class="row">
+      <label data-i18n="lbl_seren">Serendipity Range</label>
+      <span class="val" id="valSeren">0.15</span>
+    </div>
+    <input type="range" id="setSeren" min="0.05" max="0.3" step="0.01" value="0.15" />
+  </div>
+
+  <div class="setting" style="margin-top:30px;">
+    <button class="btn" id="btnReset" style="color:var(--err); width:100%; margin-bottom:8px;" data-i18n="btn_reset">🗑 Reset DB</button>
+    <button class="btn primary" id="btnApply" style="width:100%;" data-i18n="btn_apply">Save & Reconnect</button>
   </div>
 </div>
 
 <div class="toast" id="toast"></div>
 
+<!-- ================= SCRIPT ================= -->
 <script type="module">
 import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
 import * as nostrMod from 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
@@ -190,111 +234,162 @@ const pipeline = tfMod.pipeline || tfMod.default.pipeline;
 const tfEnv = tfMod.env || tfMod.default.env;
 const { SimplePool, finalizeEvent, generateSecretKey, getPublicKey } = nostrMod;
 
+// Optimize Transformers for Browser
 if (tfEnv) {
   tfEnv.allowLocalModels = false;
   tfEnv.useBrowserCache = true;
 }
 
-/* ================= CONFIG ================= */
-const CFG = {
-  DB_NAME: 'noosphere_p2p',
-  DB_VERSION: 1,
-  STORE_THOUGHTS: 'thoughts',
-  RELAYS: ['wss://relay.damus.io', 'wss://nos.lol'],
-  KIND_QUERY: 21000, // Эфемерный запрос
-  KIND_ANSWER: 21001, // Эфемерный ответ
-  MODEL_ID: 'Xenova/all-MiniLM-L6-v2',
-  settings: { room: 'noosphere-p2p', theme: 'auto', threshold: 0.30 }
+/* ================= I18N (DICTIONARY) ================= */
+const DICT = {
+  en: {
+    settings: 'Settings', tab_stream: 'Stream', tab_base: 'My Base',
+    stat_offline: 'Offline', stat_online: 'Online', stat_model: 'Model', stat_ready: 'Ready',
+    placeholder: 'Type a thought... Vector query broadcasts silently.',
+    btn_private: 'Save Private', btn_shared: 'Share (P2P)',
+    sub_local: 'Local', sub_world: 'World', sub_serendipity: 'Serendipity',
+    lbl_lang: 'Language', lbl_theme: 'Theme', th_auto: 'Auto', th_light: 'Light', th_dark: 'Dark',
+    lbl_room: 'Network Room', lbl_thresh: 'Exact Match Threshold', lbl_seren: 'Serendipity Delta',
+    btn_reset: '🗑 Erase Database', btn_apply: 'Apply & Reconnect',
+    msg_saved: 'Saved privately', msg_shared: 'Saved & shared to network', msg_reset: 'Database wiped',
+    empty_mine: 'No exact matches in your base.', empty_world: 'No one is thinking exactly this right now.', empty_seren: 'No adjacent thoughts found.', empty_base: 'Your knowledge base is empty.'
+  },
+  ru: {
+    settings: 'Настройки', tab_stream: 'Поток', tab_base: 'Моя база',
+    stat_offline: 'Отключен', stat_online: 'В сети', stat_model: 'Модель', stat_ready: 'Готова',
+    placeholder: 'О чем думаешь? Ввод текста рассылает векторный запрос пирам...',
+    btn_private: 'Сохранить приватно', btn_shared: 'Отдать в сеть (Shared)',
+    sub_local: 'Мои (Точно)', sub_world: 'Мир (Точно)', sub_serendipity: 'Касательные',
+    lbl_lang: 'Язык', lbl_theme: 'Тема', th_auto: 'Авто', th_light: 'День', th_dark: 'Ночь',
+    lbl_room: 'Комната связи', lbl_thresh: 'Порог точного совпадения', lbl_seren: 'Дельта случайности (Serendipity)',
+    btn_reset: '🗑 Стереть базу данных', btn_apply: 'Применить и переподключиться',
+    msg_saved: 'Сохранено локально', msg_shared: 'Сохранено и доступно сети', msg_reset: 'База очищена',
+    empty_mine: 'В вашей базе нет точных совпадений.', empty_world: 'В сети пока нет точных совпадений.', empty_seren: 'Смежных мыслей не найдено.', empty_base: 'Ваша база знаний пуста.'
+  }
 };
 
-try { const s = localStorage.getItem('ns_settings'); if (s) Object.assign(CFG.settings, JSON.parse(s)); } catch {}
-const saveSettings = () => localStorage.setItem('ns_settings', JSON.stringify(CFG.settings));
-const Util = { newId: () => Math.random().toString(36).slice(2, 15), now: () => Date.now(), esc: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') };
+/* ================= CONFIG & STATE ================= */
+const CFG = {
+  DB_NAME: 'ns_p2p_v11', DB_VERSION: 1, STORE: 'notes',
+  RELAYS: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.snort.social'],
+  KIND_QUERY: 21000, KIND_ANSWER: 21001,
+  MODEL: 'Xenova/all-MiniLM-L6-v2',
+  settings: { room: 'noosphere-alpha', theme: 'auto', lang: 'en', threshold: 0.35, serendipity: 0.15 }
+};
 
-/* ================= TOAST / UI ================= */
+// Load settings
+try { const s = localStorage.getItem('ns_settings_v11'); if (s) Object.assign(CFG.settings, JSON.parse(s)); } catch {}
+const saveSettings = () => localStorage.setItem('ns_settings_v11', JSON.stringify(CFG.settings));
+
+/* ================= UTILS & UI HELPERS ================= */
+const Util = {
+  newId: () => Math.random().toString(36).slice(2, 12) + Date.now().toString(36),
+  esc: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+  // Parse basic Markdown (**bold**, *italic*)
+  md: (txt) => {
+    let s = Util.esc(txt);
+    s = s.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
+    s = s.replace(/\*(.*?)\*/g, '<i>$1</i>');
+    return s;
+  }
+};
+
+const $ = (id) => document.getElementById(id);
+const t = (key) => DICT[CFG.settings.lang][key] || key;
+const updateUITexts = () => {
+  document.querySelectorAll('[data-i18n]').forEach(el => el.textContent = t(el.dataset.i18n));
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => el.placeholder = t(el.dataset.i18nPh));
+};
+
 const Toast = (() => {
   let timer;
   return {
-    show: (msg, duration=2500) => {
-      const t = document.getElementById('toast');
-      t.textContent = msg; t.className = 'toast show';
-      clearTimeout(timer); timer = setTimeout(() => t.className = 'toast', duration);
+    show: (msg) => {
+      const el = $('toast'); el.textContent = msg; el.className = 'toast show';
+      clearTimeout(timer); timer = setTimeout(() => el.className = 'toast', 2500);
     }
   };
 })();
-const $ = (id) => document.getElementById(id);
-const setChip = (id, txt, cls) => { const el=$(id); if(el) el.className='chip '+cls, el.innerHTML=`<span class="dot"></span>${txt}`; };
 
-/* ================= STORAGE ================= */
+const setChip = (id, txt, cls) => {
+  const el = $(id); if(!el) return;
+  el.className = 'chip ' + cls;
+  el.innerHTML = `<span class="dot"></span><span>${txt}</span>`;
+};
+
+/* ================= STORAGE (IndexedDB) ================= */
 const Storage = (() => {
   let db = null;
   const open = () => new Promise((res, rej) => {
     if (db) return res(db);
     const req = indexedDB.open(CFG.DB_NAME, CFG.DB_VERSION);
-    req.onupgradeneeded = (ev) => { if (!ev.target.result.objectStoreNames.contains(CFG.STORE_THOUGHTS)) ev.target.result.createObjectStore(CFG.STORE_THOUGHTS, { keyPath: 'id' }); };
+    req.onupgradeneeded = (ev) => { if (!ev.target.result.objectStoreNames.contains(CFG.STORE)) ev.target.result.createObjectStore(CFG.STORE, { keyPath: 'id' }); };
     req.onsuccess = (ev) => { db = ev.target.result; res(db); };
     req.onerror = () => rej(req.error);
   });
-  const tx = (store, mode='readonly') => db.transaction(store, mode).objectStore(store);
   const prom = (req) => new Promise((r, j) => { req.onsuccess = () => r(req.result); req.onerror = () => j(req.error); });
   return {
-    put: async (t) => { await open(); return prom(tx(CFG.STORE_THOUGHTS, 'readwrite').put(t)); },
-    all: async () => { await open(); return prom(tx(CFG.STORE_THOUGHTS).getAll()); },
-    clear: async () => { await open(); return prom(tx(CFG.STORE_THOUGHTS, 'readwrite').clear()); }
+    put: async (item) => { await open(); return prom(db.transaction(CFG.STORE, 'readwrite').objectStore(CFG.STORE).put(item)); },
+    all: async () => { await open(); return prom(db.transaction(CFG.STORE, 'readonly').objectStore(CFG.STORE).getAll()); },
+    clear: async () => { await open(); return prom(db.transaction(CFG.STORE, 'readwrite').objectStore(CFG.STORE).clear()); }
   };
 })();
 
-/* ================= VECTOR ================= */
+/* ================= VECTOR MATH & MODEL ================= */
 const Vector = (() => {
   let extractor = null;
   return {
     load: async (onProgress) => {
-      if (!extractor) extractor = await pipeline('feature-extraction', CFG.MODEL_ID, { progress_callback: p => { if (p.status==='progress') onProgress(p.loaded/p.total*100); }});
+      if (!extractor) extractor = await pipeline('feature-extraction', CFG.MODEL, { progress_callback: p => { if (p.status==='progress') onProgress(p.loaded/p.total*100); }});
       return extractor;
     },
     embed: async (txt) => {
       if (!extractor || !txt) return null;
+      // pooling: 'mean', normalize: true -> L2 Normalized vectors
       const out = await extractor(txt, { pooling: 'mean', normalize: true });
       return Array.from(out.data);
     },
-    cosine: (a, b) => { let s=0; for(let i=0; i<a.length; i++) s+=a[i]*b[i]; return s; },
+    // Dot product for normalized vectors == Cosine Similarity
+    cosine: (a, b) => {
+      if (!a || !b || a.length !== b.length) return 0;
+      let s = 0;
+      for (let i = 0, l = a.length; i < l; i++) s += a[i] * b[i];
+      return s;
+    },
     isLoaded: () => extractor !== null
   };
 })();
 
-/* ================= P2P NETWORK (NOSTR) ================= */
+/* ================= NETWORK (Nostr P2P) ================= */
 const Network = (() => {
   let pool = null, sk = null, pk = null, sub = null;
   let activePeers = new Set();
   let currentQueryId = null; 
-  let worldResults = []; // Временные результаты из сети
+  let worldAnswers = []; 
 
-  const flashActivity = () => {
-    const el = $('netActivity'); el.classList.add('active');
-    setTimeout(() => el.classList.remove('active'), 1000);
-  };
+  const flash = () => { setChip('chipActivity', 'RX/TX', 'active'); setTimeout(() => setChip('chipActivity', 'idle', ''), 500); };
 
-  const processIncomingEvent = async (event) => {
-    if (event.pubkey === pk) return;
-    activePeers.add(event.pubkey);
+  const handleEvent = async (ev) => {
+    if (ev.pubkey === pk) return; // Ignore self
+    activePeers.add(ev.pubkey);
     setChip('chipPeers', `${activePeers.size} peers`, 'ok');
     
-    // Кто-то ищет. Если у нас есть подходящие (shared) заметки - отвечаем.
-    if (event.kind === CFG.KIND_QUERY) {
+    // 1. Someone is searching (Query)
+    if (ev.kind === CFG.KIND_QUERY) {
       try {
-        const query = JSON.parse(event.content);
-        if (!query.vector) return;
-        const allNotes = await Storage.all();
-        const sharedNotes = allNotes.filter(n => n.shared && n.vector);
-        
-        for (const note of sharedNotes) {
-          const score = Vector.cosine(query.vector, note.vector);
-          if (score >= CFG.settings.threshold) {
-            flashActivity();
-            // Отправляем ответ, привязывая его к ID запроса (NIP-10 'e' tag)
+        const q = JSON.parse(ev.content);
+        if (!q.vector) return;
+        const allLocal = await Storage.all();
+        // Check local shared notes against their query
+        for (const note of allLocal) {
+          if (!note.shared || !note.vector) continue;
+          const score = Vector.cosine(q.vector, note.vector);
+          // If we have something relevant (even slightly serendipitous), answer them!
+          if (score >= CFG.settings.threshold - CFG.settings.serendipity) {
+            flash();
             const ansEv = finalizeEvent({
               kind: CFG.KIND_ANSWER, created_at: Math.floor(Date.now()/1000),
-              tags: [['t', CFG.settings.room], ['e', event.id]],
+              tags: [['t', CFG.settings.room], ['e', ev.id]],
               content: JSON.stringify({ text: note.text, vector: note.vector })
             }, sk);
             pool.publish(CFG.RELAYS, ansEv);
@@ -302,17 +397,16 @@ const Network = (() => {
         }
       } catch (e) {}
     } 
-    
-    // Кто-то ответил на НАШ запрос
-    else if (event.kind === CFG.KIND_ANSWER) {
-      const targetTag = event.tags.find(t => t[0] === 'e');
-      if (targetTag && targetTag[1] === currentQueryId) {
+    // 2. Someone replied to OUR search (Answer)
+    else if (ev.kind === CFG.KIND_ANSWER) {
+      const eTag = ev.tags.find(t => t[0] === 'e');
+      if (eTag && eTag[1] === currentQueryId) {
         try {
-          const data = JSON.parse(event.content);
+          const data = JSON.parse(ev.content);
           if (data.text && data.vector) {
-            worldResults.push({ source: { text: data.text, peer: event.pubkey }, vector: data.vector });
+            worldAnswers.push({ source: { text: data.text, peer: ev.pubkey.slice(0,8) }, vector: data.vector, isWorld: true });
             document.dispatchEvent(new Event('ns:update-ui'));
-            flashActivity();
+            flash();
           }
         } catch (e) {}
       }
@@ -321,11 +415,11 @@ const Network = (() => {
 
   return {
     init: () => {
-      let savedSk = localStorage.getItem('ns_sk');
+      let savedSk = localStorage.getItem('ns_sk_v11');
       if (!savedSk) {
         const s = generateSecretKey();
         savedSk = Array.from(s).map(b=>b.toString(16).padStart(2,'0')).join('');
-        localStorage.setItem('ns_sk', savedSk);
+        localStorage.setItem('ns_sk_v11', savedSk);
       }
       sk = new Uint8Array(savedSk.match(/.{1,2}/g).map(b=>parseInt(b,16)));
       pk = getPublicKey(sk);
@@ -335,54 +429,68 @@ const Network = (() => {
         kinds: [CFG.KIND_QUERY, CFG.KIND_ANSWER],
         '#t': [CFG.settings.room],
         since: Math.floor(Date.now()/1000)
-      }], { onevent: processIncomingEvent });
-      setChip('chipNet', 'online', 'ok');
+      }], { onevent: handleEvent });
+      setChip('chipNet', t('stat_online'), 'ok');
     },
     
-    // Броадкаст запроса (вызывается при вводе текста)
     sendQuery: (vector) => {
       if (!pool) return;
-      worldResults = []; // сброс старых результатов
+      worldAnswers = []; // Reset answers on new query
       const ev = finalizeEvent({
         kind: CFG.KIND_QUERY, created_at: Math.floor(Date.now()/1000),
         tags: [['t', CFG.settings.room]], content: JSON.stringify({ vector })
       }, sk);
       currentQueryId = ev.id;
       pool.publish(CFG.RELAYS, ev);
-      flashActivity();
+      flash();
     },
 
-    getWorldResults: () => worldResults,
-    
-    leave: () => { if(sub) sub.close(); if(pool) pool.close(CFG.RELAYS); pool=null; activePeers.clear(); setChip('chipNet', 'offline', 'warn'); }
+    getAnswers: () => worldAnswers,
+    resetAnswers: () => { worldAnswers = []; currentQueryId = null; },
+    leave: () => { if(sub) sub.close(); if(pool) pool.close(CFG.RELAYS); pool=null; activePeers.clear(); setChip('chipNet', t('stat_offline'), 'warn'); }
   };
 })();
 
-/* ================= UI / APP LOGIC ================= */
+/* ================= APP LOGIC ================= */
 const App = (() => {
   let debounceTimer = null;
   let lastVector = null;
 
+  // Highlight exact words (case insensitive)
   const hl = (qt, mt) => {
-    if (!qt) return Util.esc(mt);
-    const words = qt.toLowerCase().split(/\s+/).filter(w=>w.length>2);
-    let out = Util.esc(mt);
+    let out = Util.md(mt);
+    if (!qt) return out;
+    const words = qt.toLowerCase().split(/\s+/).filter(w => w.length > 2);
     words.forEach(w => {
-      const re = new RegExp(`(${w})`, 'gi');
+      // Don't break HTML tags created by MD parser
+      const re = new RegExp(`(?![^<]*>)(${w})`, 'gi'); 
       out = out.replace(re, '<mark>$1</mark>');
     });
     return out;
   };
 
-  const renderCards = (containerId, items, qText, isWorld) => {
+  const renderEmpty = (container, msgId) => {
+    $(container).innerHTML = `<div class="empty"><div class="icon">✦</div><div>${t(msgId)}</div></div>`;
+  };
+
+  const renderCards = (containerId, items, qText) => {
     const c = $(containerId); c.innerHTML = '';
-    if (!items.length) { c.innerHTML = `<div class="empty">Ничего не найдено</div>`; return; }
-    items.forEach(item => {
-      const score = item.score ? item.score.toFixed(3) : '';
-      const pubTag = isWorld ? '<span class="tag">ПИР</span>' : (item.source.shared ? '<span class="pub-status pub-ok">SHARED</span>' : '<span class="pub-status">PRIVATE</span>');
+    if (!items.length) {
+      if(containerId === 'listMine') renderEmpty(c, 'empty_mine');
+      else if(containerId === 'listWorld') renderEmpty(c, 'empty_world');
+      else if(containerId === 'listSeren') renderEmpty(c, 'empty_seren');
+      return;
+    }
+    
+    items.forEach((item, idx) => {
+      const cls = item.isWorld ? 'world' : (item.isMixed ? 'mixed' : 'mine');
+      const tagText = item.isWorld ? `PEER:${item.source.peer}` : 'LOCAL';
       c.innerHTML += `
-        <div class="card ${isWorld ? 'world' : 'mine'}">
-          <div class="head">${pubTag}<span class="score">${score}</span></div>
+        <div class="card ${cls}" style="animation-delay: ${idx * 0.05}s">
+          <div class="head">
+            <span class="tag">${tagText}</span>
+            <span class="score">${(item.score * 100).toFixed(1)}%</span>
+          </div>
           <div class="text">${hl(qText, item.source.text)}</div>
         </div>`;
     });
@@ -391,88 +499,131 @@ const App = (() => {
   const updateUI = async () => {
     const text = $('input').value.trim();
     if (!text || !Vector.isLoaded()) {
-      renderCards('listMine', [], text, false);
-      renderCards('listWorld', [], text, true);
-      $('badgeMine').textContent = '0'; $('badgeWorld').textContent = '0';
+      renderCards('listMine', [], text); renderCards('listWorld', [], text); renderCards('listSeren', [], text);
+      $('b-mine').textContent='0'; $('b-world').textContent='0'; $('b-seren').textContent='0';
+      Network.resetAnswers();
+      lastVector = null;
       return;
     }
 
     const qv = await Vector.embed(text);
+    
+    // Only broadcast to network if vector changed significantly
     if (!lastVector || Vector.cosine(qv, lastVector) < 0.99) {
       lastVector = qv;
-      Network.sendQuery(qv); // Ищем в сети
+      Network.sendQuery(qv); 
     }
 
     const allLocal = await Storage.all();
-    const mine = allLocal.filter(n=>n.vector).map(n=>({ source:n, score:Vector.cosine(qv, n.vector) }))
-                 .filter(r=>r.score >= CFG.settings.threshold).sort((a,b)=>b.score-a.score);
+    const localScored = allLocal.filter(n=>n.vector).map(n=>({ source:n, vector:n.vector, isWorld:false }));
+    const worldScored = Network.getAnswers();
     
-    const world = Network.getWorldResults().map(r=>({ source:r.source, score:Vector.cosine(qv, r.vector) }))
-                 .filter(r=>r.score >= CFG.settings.threshold).sort((a,b)=>b.score-a.score);
+    const combined = [...localScored, ...worldScored].map(item => ({
+      ...item, score: Vector.cosine(qv, item.vector)
+    }));
 
-    renderCards('listMine', mine, text, false);
-    renderCards('listWorld', world, text, true);
-    $('badgeMine').textContent = mine.length;
-    $('badgeWorld').textContent = world.length;
+    const TH = CFG.settings.threshold;
+    const SD = CFG.settings.serendipity;
+
+    const mine = combined.filter(c => !c.isWorld && c.score >= TH).sort((a,b)=>b.score-a.score);
+    const world = combined.filter(c => c.isWorld && c.score >= TH).sort((a,b)=>b.score-a.score);
+    // Serendipity: Score is between (TH - SD) and TH. Both local and world.
+    const seren = combined.filter(c => c.score >= (TH - SD) && c.score < TH)
+                          .map(c => ({...c, isMixed: true})) // Mark for CSS styling
+                          .sort((a,b)=>b.score-a.score);
+
+    renderCards('listMine', mine, text);
+    renderCards('listWorld', world, text);
+    renderCards('listSeren', seren, text);
+    
+    $('b-mine').textContent = mine.length;
+    $('b-world').textContent = world.length;
+    $('b-seren').textContent = seren.length;
   };
 
-  const renderHistory = async () => {
+  const renderBase = async () => {
     const all = await Storage.all();
     const c = $('listHistory'); c.innerHTML = '';
-    if (!all.length) { c.innerHTML = '<div class="empty">База пуста</div>'; return; }
-    all.sort((a,b)=>b.createdAt - a.createdAt).forEach(n => {
+    if (!all.length) { renderEmpty('listHistory', 'empty_base'); return; }
+    
+    all.sort((a,b) => b.createdAt - a.createdAt).forEach(n => {
+      const pTag = n.shared ? '<span class="pub-status pub-ok">SHARED</span>' : '<span class="pub-status" style="background:var(--panel-2);color:var(--muted)">PRIVATE</span>';
       c.innerHTML += `
         <div class="card mine">
-          <div class="head">${n.shared ? '<span class="pub-status pub-ok">SHARED (Доступно сети)</span>' : '<span class="pub-status">PRIVATE</span>'} 
-          <span class="score">${new Date(n.createdAt).toLocaleString()}</span></div>
-          <div class="text">${Util.esc(n.text)}</div>
+          <div class="head">${pTag} <span class="score">${new Date(n.createdAt).toLocaleString(CFG.settings.lang)}</span></div>
+          <div class="text">${Util.md(n.text)}</div>
         </div>`;
     });
   };
 
-  const saveNote = async (isShared) => {
-    const txt = $('input').value.trim();
-    if (!txt) return;
-    const v = await Vector.embed(txt);
-    await Storage.put({ id: Util.newId(), text: txt, vector: v, shared: isShared, createdAt: Date.now() });
-    $('input').value = '';
-    Toast.show(isShared ? 'Сохранено и открыто для сети' : 'Сохранено приватно');
-    updateUI(); renderHistory();
+  const applyTheme = () => {
+    const t = CFG.settings.theme;
+    document.documentElement.setAttribute('data-theme', t === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light') : t);
   };
 
   return {
     init: async () => {
-      // Темы и вкладки
-      document.documentElement.setAttribute('data-theme', CFG.settings.theme === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light') : CFG.settings.theme);
-      document.querySelectorAll('.main-tab').forEach(t => t.onclick = () => { document.querySelectorAll('.main-tab').forEach(x=>x.classList.remove('active')); t.classList.add('active'); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active', v.id==='view-'+t.dataset.main)); if(t.dataset.main==='history') renderHistory(); });
-      document.querySelectorAll('.sub-tab').forEach(t => t.onclick = () => { document.querySelectorAll('.sub-tab').forEach(x=>x.classList.remove('active')); t.classList.add('active'); $('sub-mine').style.display=t.dataset.sub==='mine'?'':'none'; $('sub-world').style.display=t.dataset.sub==='world'?'':'none'; });
+      updateUITexts(); applyTheme();
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if(CFG.settings.theme==='auto') applyTheme(); });
+
+      // Init UI controls from Settings
+      $('setRoom').value = CFG.settings.room; 
+      $('setThreshold').value = CFG.settings.threshold; $('valThreshold').textContent = CFG.settings.threshold;
+      $('setSeren').value = CFG.settings.serendipity; $('valSeren').textContent = CFG.settings.serendipity;
       
-      // Инпуты и события
-      $('input').addEventListener('input', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(updateUI, 1500); });
+      document.querySelectorAll('.seg button').forEach(b => {
+        if(b.dataset.val == CFG.settings[b.parentNode.dataset.opt]) { b.parentNode.querySelectorAll('button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); }
+        b.onclick = () => { 
+          b.parentNode.querySelectorAll('button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); 
+          const opt = b.parentNode.dataset.opt;
+          CFG.settings[opt] = b.dataset.val; 
+          if(opt === 'lang') updateUITexts();
+          if(opt === 'theme') applyTheme();
+          saveSettings();
+        };
+      });
+
+      // Range listeners
+      $('setThreshold').oninput = e => { CFG.settings.threshold = parseFloat(e.target.value); $('valThreshold').textContent = CFG.settings.threshold; updateUI(); };
+      $('setSeren').oninput = e => { CFG.settings.serendipity = parseFloat(e.target.value); $('valSeren').textContent = CFG.settings.serendipity; updateUI(); };
+
+      // Tabs Logic
+      document.querySelectorAll('.main-tab').forEach(t => t.onclick = () => { document.querySelectorAll('.main-tab').forEach(x=>x.classList.remove('active')); t.classList.add('active'); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active', v.id==='view-'+t.dataset.main)); if(t.dataset.main==='history') renderBase(); });
+      document.querySelectorAll('.sub-tab').forEach(t => t.onclick = () => { document.querySelectorAll('.sub-tab').forEach(x=>x.classList.remove('active')); t.classList.add('active'); ['mine','world','serendipity'].forEach(s => $(`sub-${s}`).style.display = t.dataset.sub===s ? '' : 'none'); });
+      
+      // Input Logic (Debounced)
+      $('input').addEventListener('input', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(updateUI, 1200); });
+      
+      const saveNote = async (shared) => {
+        const txt = $('input').value.trim(); if (!txt) return;
+        const v = await Vector.embed(txt);
+        await Storage.put({ id: Util.newId(), text: txt, vector: v, shared, createdAt: Date.now() });
+        $('input').value = ''; Toast.show(t(shared ? 'msg_shared' : 'msg_saved'));
+        updateUI(); renderBase();
+      };
+      
       $('btnSaveLocal').onclick = () => saveNote(false);
       $('btnPublish').onclick = () => saveNote(true);
       document.addEventListener('ns:update-ui', updateUI);
 
-      // Настройки
-      $('setRoom').value = CFG.settings.room; $('setThreshold').value = CFG.settings.threshold; $('valThreshold').textContent = CFG.settings.threshold;
-      document.querySelectorAll('.seg button').forEach(b => {
-        if(b.dataset.val == CFG.settings.theme) { b.parentNode.querySelectorAll('button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); }
-        b.onclick = () => { b.parentNode.querySelectorAll('button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); CFG.settings[b.parentNode.dataset.opt] = b.dataset.val; };
-      });
-      $('setThreshold').oninput = e => { CFG.settings.threshold = parseFloat(e.target.value); $('valThreshold').textContent = CFG.settings.threshold; };
-      
+      // Drawer Logic
       $('btnSettings').onclick = () => { $('drawer').classList.add('open'); $('overlay').classList.add('show'); };
       $('btnClose').onclick = $('overlay').onclick = () => { $('drawer').classList.remove('open'); $('overlay').classList.remove('show'); };
       
-      $('btnReset').onclick = async () => { if(confirm('Стереть все локальные заметки?')) { await Storage.clear(); renderHistory(); updateUI(); Toast.show('Очищено'); } };
+      $('btnReset').onclick = async () => { if(confirm('Erase all local data?')) { await Storage.clear(); renderBase(); updateUI(); Toast.show(t('msg_reset')); } };
       $('btnApply').onclick = () => { CFG.settings.room = $('setRoom').value.trim(); saveSettings(); location.reload(); };
 
-      // Загрузка
+      // Boot Sequence
+      renderBase();
       setChip('chipModel', 'loading...', 'warn');
-      await Vector.load((pct) => { $('modelProgress').style.width = pct + '%'; });
-      setChip('chipModel', 'model ready', 'ok'); $('modelProgress').style.width = '100%'; setTimeout(()=>$('modelProgress').style.opacity='0', 500);
+      try {
+        await Vector.load((pct) => { $('modelProgress').style.width = pct + '%'; });
+        setChip('chipModel', t('stat_ready'), 'ok'); 
+        $('modelProgress').style.width = '100%'; setTimeout(()=>$('modelProgress').style.opacity='0', 500);
+      } catch (e) {
+        setChip('chipModel', 'Error loading AI', 'err');
+      }
       
-      renderHistory();
       Network.init();
     }
   };
