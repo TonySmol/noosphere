@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Noosphere · Nostr Simple (v2, jsdelivr)</title>
+<title>Noosphere · Nostr (working)</title>
 <style>
 :root{
   --bg:#0b0d12; --fg:#d8dde6; --mut:#6b7280; --acc:#7cc4ff;
@@ -22,7 +22,7 @@ button:hover:not(:disabled){background:#243049;border-color:var(--acc)}
 button:disabled{opacity:.4;cursor:not-allowed}
 button.pri{background:#1e3a5f;border-color:var(--acc);color:var(--acc)}
 button.dng{background:#3a1e24;border-color:var(--er)}
-input,textarea,select{background:#0f1420;color:var(--fg);border:1px solid var(--br);
+input,textarea{background:#0f1420;color:var(--fg);border:1px solid var(--br);
   border-radius:7px;padding:9px 11px;font-size:14px;width:100%;font-family:inherit}
 textarea{resize:vertical;min-height:70px;line-height:1.5}
 input:focus,textarea:focus{outline:none;border-color:var(--acc)}
@@ -57,7 +57,7 @@ input:focus,textarea:focus{outline:none;border-color:var(--acc)}
 </head>
 <body>
 
-<h1>◈ Noosphere · Nostr <small>jsdelivr + self-nostr</small></h1>
+<h1>◈ Noosphere · Nostr <small>working v3</small></h1>
 
 <div class="pan">
   <h2>Thought</h2>
@@ -82,7 +82,7 @@ input:focus,textarea:focus{outline:none;border-color:var(--acc)}
   <div id="v-adj" class="hidden"><div id="listAdj"><i class="hint">нет смежных мыслей</i></div></div>
 
   <div id="v-diag" class="hidden">
-    <div class="kv"><span>identity (npub-сокращ.)</span><span id="stPub">—</span></div>
+    <div class="kv"><span>identity</span><span id="stPub">—</span></div>
     <div class="kv"><span>relays online</span><span id="stRelays">0</span></div>
     <div class="kv"><span>model</span><span id="stModel"><span class="badge b-wn">unloaded</span></span></div>
     <div class="kv"><span>my vectors</span><span id="stMyVec">0</span></div>
@@ -90,8 +90,7 @@ input:focus,textarea:focus{outline:none;border-color:var(--acc)}
     <h2>Relays</h2>
     <textarea id="inpRelays" style="font-family:ui-monospace,monospace;font-size:11px;min-height:60px">wss://relay.damus.io
 wss://nos.lol
-wss://relay.snort.social
-wss://nostr.wine</textarea>
+wss://relay.snort.social</textarea>
     <div class="row" style="margin-top:6px">
       <button id="btnReconnect" class="pri">Reconnect</button>
       <button id="btnRegen" class="dng">New Identity</button>
@@ -120,7 +119,7 @@ wss://nostr.wine</textarea>
    SECTION 1 · CONFIG
    ============================================================ */
 const CFG = {
-  DB_NAME:       'noosphere_nostr_v2',
+  DB_NAME:       'noosphere_nostr_v3',
   STORE_NOTES:   'notes',
   STORE_ID:      'identity',
   KIND_NOTE:     30078,
@@ -134,10 +133,6 @@ const CFG = {
   MAX_WORLD:     200,
   MODEL_ID:      'Xenova/all-MiniLM-L6-v2',
   STALE_SEC:     600,
-  // CDN: jsdelivr — стабильно в РФ, есть CDN-узлы рядом
-  // резерв: esm.sh через esm.run (Cloudflare workers)
-  CDN_PRIMARY:   'https://cdn.jsdelivr.net/npm/',
-  CDN_FALLBACK:  'https://esm.run/',
 };
 
 /* ============================================================
@@ -163,38 +158,7 @@ const Log = {
 };
 
 /* ============================================================
-   SECTION 3 · CDN RESILIENT IMPORTER
-   Пробует jsdelivr, потом esm.run, кэширует в sessionStorage.
-   ============================================================ */
-const Imp = {
-  cache: new Map(),
-  async load(path, subpath=''){
-    const key = path + '|' + subpath;
-    if(this.cache.has(key)) return this.cache.get(key);
-
-    const targets = [
-      CFG.CDN_PRIMARY + path + (subpath ? '/' + subpath : ''),
-      CFG.CDN_FALLBACK + path + (subpath ? '/' + subpath : ''),
-    ];
-
-    let lastErr = null;
-    for(const url of targets){
-      try {
-        const mod = await import(/* @vite-ignore */ url);
-        this.cache.set(key, mod);
-        Log.i('loaded:', url.slice(0, 70));
-        return mod;
-      } catch(e){
-        lastErr = e;
-        Log.w('cdn fail:', url.slice(0, 60), '→', e.message);
-      }
-    }
-    throw lastErr || new Error('all CDN failed for ' + path);
-  },
-};
-
-/* ============================================================
-   SECTION 4 · STORAGE (IndexedDB)
+   SECTION 3 · STORAGE (IndexedDB)
    ============================================================ */
 const DB = {
   db: null,
@@ -234,15 +198,22 @@ const DB = {
 };
 
 /* ============================================================
-   SECTION 5 · VECTOR (MiniLM + LSH + cosine + int8 quantize)
+   SECTION 4 · VECTOR (MiniLM + LSH + cosine + int8 quantize)
    ============================================================ */
 const Vec = {
   pipe: null,
   planes: null,
   async load(){
     if(this.pipe) return this.pipe;
-    Log.i('loading MiniLM from jsdelivr…');
-    const tf = await Imp.load('@xenova/transformers@2.17.2');
+    Log.i('loading MiniLM from HuggingFace CDN…');
+    
+    const tf = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
+    
+    // КРИТИЧНО: грузим модель с HuggingFace, не с локального домена
+    tf.env.allowLocalModels = false;
+    tf.env.remoteHost = 'https://huggingface.co';
+    tf.env.remotePathTemplate = '{model_id}/resolve/main/';
+    
     this.pipe = await tf.pipeline('feature-extraction', CFG.MODEL_ID, { quantized: true });
     this._initLSH();
     Log.s('model ready');
@@ -312,81 +283,33 @@ const Vec = {
 };
 
 /* ============================================================
-   SECTION 6 · MINIMAL NOSTR CLIENT (собственная реализация,
-   без nostr-tools — чтобы не зависеть от esm.sh резолва)
-   - schnorr sign через @noble/curves secp256k1
-   - sha256 через @noble/hashes
-   - WebSocket для relay
+   SECTION 5 · NOSTR CLIENT (через nostr-tools с jsdelivr +esm)
    ============================================================ */
 const Nostr = {
-  secp: null,
-  sha256: null,
-  hex: null,
-  sk: null,         // Uint8Array 32 bytes
-  pk: null,         // hex string (32 bytes = 64 hex)
+  tools: null,
+  sk: null,
+  pk: null,
   relays: [],
-  relayStatus: new Map(),   // url -> 'pending'|'ok'|'err'
-  relaySockets: new Map(),  // url -> WebSocket
-  subs: new Map(),          // subId -> { filter, onEvent, onEose }
+  relayStatus: new Map(),
+  relaySockets: new Map(),
+  subs: new Map(),
   subCounter: 0,
-  eventHandlers: [],        // глобальные обработчики (для EOSE и т.д.)
 
   async init(){
-    Log.i('loading @noble/curves + @noble/hashes from jsdelivr…');
-    // @noble/curves secp256k1 для schnorr
-    const curves = await Imp.load('@noble/curves@1.4.0', 'secp256k1');
-    this.secp = curves.schnorr;
-    // @noble/hashes sha256
-    const hashes = await Imp.load('@noble/hashes@1.4.0', 'sha256');
-    this.sha256 = hashes.sha256;
-    // @noble/hashes utils (bytesToHex / hexToBytes)
-    const utils = await Imp.load('@noble/hashes@1.4.0', 'utils');
-    this.hex = {
-      toBytes: (h) => {
-        const out = new Uint8Array(h.length / 2);
-        for(let i=0; i<out.length; i++) out[i] = parseInt(h.substr(i*2, 2), 16);
-        return out;
-      },
-      fromBytes: (b) => Array.from(b).map(x => x.toString(16).padStart(2,'0')).join(''),
-    };
-    Log.s('crypto ready (schnorr + sha256)');
+    Log.i('loading nostr-tools from jsdelivr…');
+    this.tools = await import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm');
+    Log.s('nostr-tools ready');
 
-    // load or generate secret key
     let skHex = await DB.getKV('sk');
     if(!skHex){
-      const sk = crypto.getRandomValues(new Uint8Array(32));
-      skHex = this.hex.fromBytes(sk);
+      const sk = this.tools.generateSecretKey();
+      skHex = this.tools.bytesToHex(sk);
       await DB.putKV('sk', skHex);
       Log.s('new identity generated');
     }
-    this.sk = this.hex.toBytes(skHex);
-    this.pk = this.hex.fromBytes(this.secp.getPublicKey(this.sk));
+    this.sk = this.tools.hexToBytes(skHex);
+    this.pk = this.tools.getPublicKey(this.sk);
     Log.i('pubkey:', this.pk.slice(0, 16) + '…');
-  },
-
-  // Nostr event id = sha256(serialized event)
-  serializeEvent(ev){
-    return JSON.stringify([
-      0,
-      ev.pubkey,
-      ev.created_at,
-      ev.kind,
-      ev.tags,
-      ev.content,
-    ]);
-  },
-  eventId(ev){
-    const ser = this.serializeEvent(ev);
-    const bytes = new TextEncoder().encode(ser);
-    const h = this.sha256(bytes);
-    return this.hex.fromBytes(h);
-  },
-  signEvent(unsigned){
-    const ev = { ...unsigned, pubkey: this.pk };
-    ev.id = this.eventId(ev);
-    const sig = this.secp.sign(ev.id, this.sk);
-    ev.sig = this.hex.fromBytes(sig);
-    return ev;
   },
 
   setRelays(list){
@@ -415,7 +338,6 @@ const Nostr = {
           this.relayStatus.set(url, 'ok');
           this.relaySockets.set(url, ws);
           Log.s('relay up:', url);
-          // re-subscribe all active subs
           for(const [subId, sub] of this.subs){
             ws.send(JSON.stringify(['REQ', subId, sub.filter]));
           }
@@ -469,25 +391,24 @@ const Nostr = {
     } else if(type === 'NOTICE'){
       Log.w('relay notice (' + url + '):', rest[0]);
     } else if(type === 'OK'){
-      // publish ack: ['OK', eventId, success, message]
       const [evId, ok, reason] = rest;
       if(!ok) Log.w('publish rejected (' + url + '):', reason);
     }
   },
 
   async publish(kind, content, tags){
-    const unsigned = {
+    const { finalizeEvent } = this.tools;
+    const event = finalizeEvent({
       kind,
       created_at: Math.floor(Date.now() / 1000),
       tags,
       content,
-    };
-    const ev = this.signEvent(unsigned);
+    }, this.sk);
 
     const okUrls = this.relays.filter(r => this.relayStatus.get(r) === 'ok');
     if(!okUrls.length) throw new Error('no online relays');
 
-    const payload = JSON.stringify(['EVENT', ev]);
+    const payload = JSON.stringify(['EVENT', event]);
     let sent = 0;
     for(const url of okUrls){
       const ws = this.relaySockets.get(url);
@@ -496,7 +417,7 @@ const Nostr = {
       }
     }
     Log.s('published kind=' + kind + ' to ' + sent + '/' + okUrls.length + ' relays');
-    return ev;
+    return event;
   },
 
   subscribe(filter, onEvent, onEose){
@@ -524,7 +445,7 @@ const Nostr = {
 };
 
 /* ============================================================
-   SECTION 7 · STATE
+   SECTION 6 · STATE
    ============================================================ */
 const State = {
   myNotes: [],
@@ -537,7 +458,7 @@ const State = {
 };
 
 /* ============================================================
-   SECTION 8 · PROTOCOL
+   SECTION 7 · PROTOCOL
    ============================================================ */
 const Proto = {
   async publishThought(text, vec){
@@ -658,7 +579,7 @@ async function shaHex(str){
 }
 
 /* ============================================================
-   SECTION 9 · DEBOUNCE FLOW
+   SECTION 8 · DEBOUNCE FLOW
    ============================================================ */
 const Flow = {
   onInput(text){
@@ -714,7 +635,7 @@ const Flow = {
 };
 
 /* ============================================================
-   SECTION 10 · UI
+   SECTION 9 · UI
    ============================================================ */
 const UI = {
   activeTab: 'mine',
@@ -846,7 +767,7 @@ function escapeHtml(s){
 }
 
 /* ============================================================
-   SECTION 11 · BOOT
+   SECTION 10 · BOOT
    ============================================================ */
 const Boot = {
   async start(){
@@ -860,9 +781,10 @@ const Boot = {
       UI.renderAll();
       await this.connect();
       UI.setModel(false);
-      Log.i('ready. type → 4s pause → publish. open on another device with same relay list.');
+      Log.i('ready. type → 4s pause → publish. open on another device.');
     } catch(e){
       Log.e('boot fail:', e);
+      console.error('BOOT ERROR:', e);
     }
   },
   async connect(){
