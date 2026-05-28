@@ -137,8 +137,10 @@
 
 <script type="module">
 /* ============================================================================
-   NOOSPHERE v2.0 — TRUE P2P VIA BITTORRENT DHT
+   NOOSPHERE v2.0 — TRUE P2P VIA BITTORRENT DHT (FIXED)
    ----------------------------------------------------------------------------
+   Исправлено: trystero@0.23.0 (актуальная версия, март 2026)
+   
    Архитектура:
      1. Storage (IDB) — только локальные заметки, векторы.
      2. Vector (MiniLM) — с умным кешем через Cache API браузера.
@@ -149,33 +151,28 @@
      4. Ephemeral (RAM) — чужие ответы, 5 минут TTL.
      5. UI — debounce 4s, кеш последнего queryVector, очистка при пустом поле.
 
-   Порядок секций (зависимости по возрастанию):
+   Порядок секций:
      [1] Config  [2] Logger  [3] Util  [4] Storage  [5] Vector
      [6] Mesh  [7] Ephemeral  [8] Relevance  [9] Sync  [10] UI  [11] App
    ============================================================================ */
 
 import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
-import { joinRoom } from 'https://esm.sh/trystero@0.20.0/bittorrent';
 
-// transformers.js: используем Cache API браузера для модели
+// ИСПРАВЛЕНО: актуальная версия trystero (0.23.0, март 2026)
+import { joinRoom } from 'https://esm.sh/trystero@0.23.0/bittorrent';
+
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
 const ns = {};
 
-/* --------------------------------------------------------------------------
-   [1] CONFIG
-   Централизованные константы. Любые настройки меняются только здесь.
-   -------------------------------------------------------------------------- */
+/* [1] CONFIG */
 ns.Config = Object.freeze({
   DB_NAME: 'noosphere_v2',
   DB_VERSION: 1,
   STORE_THOUGHTS: 'thoughts',
-
-  // Trystero config: appId изолирует нашу "комнату" от других приложений
   MESH_APP_ID: 'noosphere_v2_public',
   MESH_ROOM: 'main',
-
   LIMITS: {
     MAX_TEXT_LENGTH: 10_000,
     RENDER_CAP: 200,
@@ -184,17 +181,13 @@ ns.Config = Object.freeze({
     MAX_PEERS_TO_QUERY: 15,
     MAX_RESULTS_PER_PEER: 5,
     MAX_EPHEMERAL_AGE_MS: 5 * 60_000,
-    CACHE_PROBE_MS: 500, // если модель загрузилась быстрее — значит из кеша
+    CACHE_PROBE_MS: 500,
   },
-
   VECTOR: { MODEL_ID: 'Xenova/all-MiniLM-L6-v2' },
   RELEVANCE: { THRESHOLD: 0.25, ADJACENCY: 0.15, MAX_CARDS: 5 },
 });
 
-/* --------------------------------------------------------------------------
-   [2] LOGGER
-   Минимальный логгер. Пишет в UI и в консоль.
-   -------------------------------------------------------------------------- */
+/* [2] LOGGER */
 ns.Logger = (() => {
   const el = () => document.getElementById('log');
   const fmt = (d) => d.toISOString().slice(11, 19);
@@ -219,9 +212,7 @@ ns.Logger = (() => {
   };
 })();
 
-/* --------------------------------------------------------------------------
-   [3] UTIL
-   -------------------------------------------------------------------------- */
+/* [3] UTIL */
 ns.Util = {
   peerId: 'p-' + Math.random().toString(36).slice(2, 10),
   newId: () => crypto.randomUUID(),
@@ -238,19 +229,9 @@ ns.Util = {
     return debounced;
   },
   escapeHtml: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
-  withTimeout: (promise, ms, errMsg) => {
-    let timer;
-    const timeout = new Promise((_, rej) => {
-      timer = setTimeout(() => rej(new Error(errMsg || `timeout ${ms}ms`)), ms);
-    });
-    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-  },
 };
 
-/* --------------------------------------------------------------------------
-   [4] STORAGE (IndexedDB)
-   Хранит только локальные заметки. Чужих тут не бывает.
-   -------------------------------------------------------------------------- */
+/* [4] STORAGE */
 ns.Storage = (() => {
   const { DB_NAME, DB_VERSION, STORE_THOUGHTS } = ns.Config;
   let db = null;
@@ -300,11 +281,7 @@ ns.Storage = (() => {
   return { open, put, all, listUnindexed, clear };
 })();
 
-/* --------------------------------------------------------------------------
-   [5] VECTOR (MiniLM)
-   Умный кеш: при повторной загрузке модель берётся из Cache API, прогрессбар
-   не моргает. Детектим "быструю" загрузку (< CACHE_PROBE_MS) = from cache.
-   -------------------------------------------------------------------------- */
+/* [5] VECTOR */
 ns.Vector = (() => {
   let extractor = null;
   let loadPromise = null;
@@ -360,23 +337,13 @@ ns.Vector = (() => {
   return { load, embed, cosine, isLoaded };
 })();
 
-/* --------------------------------------------------------------------------
-   [6] MESH (Trystero + BitTorrent DHT)
-   Децентрализованный P2P:
-     - signaling через публичные BitTorrent трекеры
-     - данные через WebRTC DataChannel
-     - без центрального сервера
-
-   Протокол (два action'а):
-     query:   { queryId, vector, limit }
-     response:{ queryId, results }
-   -------------------------------------------------------------------------- */
+/* [6] MESH (Trystero + BitTorrent DHT) */
 ns.Mesh = (() => {
   let room = null;
   let sendQuery = null, getQuery = null;
   let sendResponse = null, getResponse = null;
-  const peers = new Map(); // peerId -> { joinedAt }
-  const queryHandlers = new Map(); // queryId -> { resolve, results }
+  const peers = new Map();
+  const queryHandlers = new Map();
   let queryIdCounter = 0;
 
   const init = () => {
@@ -386,7 +353,6 @@ ns.Mesh = (() => {
         ns.Config.MESH_ROOM
       );
 
-      // Peer tracking
       room.onPeerJoin((peerId) => {
         peers.set(peerId, { joinedAt: ns.Util.now() });
         ns.Logger.info('peer joined', { peer: peerId.slice(0, 10), total: peers.size });
@@ -400,11 +366,9 @@ ns.Mesh = (() => {
         updatePeerCount();
       });
 
-      // Query action: я спрашиваю у всех
       [sendQuery, getQuery] = room.makeAction('query');
       getQuery(handleIncomingQuery);
 
-      // Response action: мне отвечают (point-to-point)
       [sendResponse, getResponse] = room.makeAction('response');
       getResponse(handleIncomingResponse);
 
@@ -415,13 +379,9 @@ ns.Mesh = (() => {
     }
   };
 
-  // Кто-то спрашивает меня — отвечаю из своих published заметок
   const handleIncomingQuery = async (data, peerId) => {
     if (!data || !data.queryId || !Array.isArray(data.vector)) return;
-    if (!ns.Vector.isLoaded()) {
-      ns.Logger.warn('incoming query ignored: model not loaded');
-      return;
-    }
+    if (!ns.Vector.isLoaded()) return;
     try {
       const all = await ns.Storage.all();
       const shared = all.filter((t) => t.published && Array.isArray(t.vector));
@@ -431,7 +391,6 @@ ns.Mesh = (() => {
         .sort((a, b) => b.score - a.score)
         .slice(0, data.limit || ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
 
-      // Отвечаю только спрашивающему (point-to-point)
       sendResponse({ queryId: data.queryId, results: scored }, peerId);
       ns.Logger.info('responded to peer', { peer: peerId.slice(0, 10), n: scored.length });
     } catch (e) {
@@ -439,7 +398,6 @@ ns.Mesh = (() => {
     }
   };
 
-  // Мне пришёл ответ от пира
   const handleIncomingResponse = (data, peerId) => {
     if (!data || !data.queryId) return;
     const handler = queryHandlers.get(data.queryId);
@@ -453,7 +411,6 @@ ns.Mesh = (() => {
     document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: peers.size } }));
   };
 
-  // Публичный API: разослать query всем пирам, собрать ответы с таймаутом
   const query = async (vector, { timeoutMs = ns.Config.LIMITS.QUERY_TIMEOUT_MS, limit = ns.Config.LIMITS.MAX_RESULTS_PER_PEER } = {}) => {
     if (!room || !ns.Vector.isLoaded()) return [];
     if (peers.size === 0) {
@@ -499,11 +456,7 @@ ns.Mesh = (() => {
   return { init, query, getPeerCount, leave };
 })();
 
-/* --------------------------------------------------------------------------
-   [7] EPHEMERAL (RAM, 5 min TTL)
-   Чужие ответы живут в памяти 5 минут, потом исчезают.
-   Никогда не пишутся на диск.
-   -------------------------------------------------------------------------- */
+/* [7] EPHEMERAL */
 ns.Ephemeral = (() => {
   const byPeer = new Map();
   let pruneTimer = null;
@@ -559,11 +512,7 @@ ns.Ephemeral = (() => {
   return { upsert, removePeer, allResults, clear };
 })();
 
-/* --------------------------------------------------------------------------
-   [8] RELEVANCE
-   Ранжирование: локальные + чужие по cosine similarity.
-   Подсветка самого длинного совпавшего n-gram.
-   -------------------------------------------------------------------------- */
+/* [8] RELEVANCE */
 ns.Relevance = (() => {
   const { THRESHOLD, ADJACENCY, MAX_CARDS } = ns.Config.RELEVANCE;
   const escapeHtml = ns.Util.escapeHtml;
@@ -628,9 +577,7 @@ ns.Relevance = (() => {
   return { rankAll, highlightFragment };
 })();
 
-/* --------------------------------------------------------------------------
-   [9] SYNC
-   -------------------------------------------------------------------------- */
+/* [9] SYNC */
 ns.Sync = (() => {
   const saveLocal = async ({ text, publishToWorld = false }) => {
     const clean = ns.Util.normalizeText(text);
@@ -679,14 +626,7 @@ ns.Sync = (() => {
   return { saveLocal, reindexAll };
 })();
 
-/* --------------------------------------------------------------------------
-   [10] UI
-   Ключевые особенности:
-     - Кеш последнего queryVector (текст тот же → не считаем embed)
-     - Пустое поле = мгновенная очистка
-     - Pill "think" показывает состояние: жду паузу / считаю / запрашиваю
-     - Debounce 4 секунды
-   -------------------------------------------------------------------------- */
+/* [10] UI */
 ns.UI = (() => {
   const refs = {};
   let lastQuery = { text: null, vector: null };
@@ -1009,11 +949,7 @@ ns.UI = (() => {
   return { init, refresh, setPill };
 })();
 
-/* --------------------------------------------------------------------------
-   [11] APP
-   Boot-порядок: Storage → Vector (lazy) → Mesh → UI.
-   Cleanup при закрытии вкладки.
-   -------------------------------------------------------------------------- */
+/* [11] APP */
 ns.App = (() => {
   const boot = async () => {
     ns.UI.init();
@@ -1038,7 +974,6 @@ ns.App = (() => {
       ns.Logger.error('Mesh failed (local mode)', e.message);
     }
 
-    // Автовосстановление модели из кеша (если была загружена ранее)
     try {
       await ns.Vector.load((p) => {
         if (p.done) {
@@ -1051,7 +986,6 @@ ns.App = (() => {
         }
       });
     } catch (e) {
-      // Не критично — пользователь может загрузить вручную
       ns.Logger.warn('model auto-load skipped', e.message);
     }
 
@@ -1059,7 +993,6 @@ ns.App = (() => {
     ns.Logger.info('app ready');
   };
 
-  // Cleanup при закрытии вкладки
   window.addEventListener('beforeunload', () => {
     try { ns.Mesh.leave(); } catch (e) {}
   });
