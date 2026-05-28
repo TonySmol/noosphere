@@ -1,787 +1,986 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Noosphere P2P · Fixed Relays</title>
-<style>
-:root{--bg:#0f1115;--panel:#161a22;--border:#242a36;--text:#e6e8ee;--muted:#8a93a6;--accent:#6aa6ff;--ok:#4ade80;--warn:#f59e0b;--err:#ef4444}
-*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-monospace,Menlo,monospace}
-.wrap{max-width:1100px;margin:0 auto;padding:16px}
-h1{font-size:16px;margin:0 0 14px;letter-spacing:.5px}
-h1 small{color:var(--muted);font-weight:normal;font-size:11px;margin-left:8px}
-h2{font-size:11px;margin:18px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
-.panel{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:10px}
-.row{display:flex;gap:8px;flex-wrap:wrap}
-.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-@media(max-width:820px){.grid-3{grid-template-columns:1fr}}
-textarea,input[type=text],select{width:100%;background:#0b0d12;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:10px;font:inherit;resize:vertical}
-textarea{min-height:80px}input[type=text],select{min-height:auto;padding:8px 10px}
-button{background:#1f2532;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font:inherit;cursor:pointer}
-button:hover:not(:disabled){background:#272f40}
-button.primary{background:var(--accent);color:#0b0d12;border-color:var(--accent)}
-button.secondary{background:#2a2f3a;color:var(--accent);border-color:var(--accent)}
-button.danger{background:#2a1a1d;color:var(--err);border-color:#3d1f22}
-button:disabled{opacity:.5;cursor:not-allowed}
-.status{display:inline-flex;gap:8px;flex-wrap:wrap}
-.pill{padding:3px 8px;border-radius:999px;font-size:11px;background:#1a1f2a;border:1px solid var(--border);color:var(--muted)}
-.pill.ok{color:var(--ok);border-color:#1f3d2a}.pill.warn{color:var(--warn);border-color:#3d3220}
-.pill.err{color:var(--err);border-color:#3d1f22}.pill.think{color:var(--accent);border-color:var(--accent)}
-.list{display:flex;flex-direction:column;gap:6px;min-height:60px}
-.item{background:#0b0d12;border:1px solid var(--border);border-radius:4px;padding:8px 10px}
-.item.local{border-left:3px solid #555}.item.world{border-left:3px solid var(--accent)}
-.item.ephemeral::before{content:"P2P";font-size:9px;color:var(--accent);padding:1px 4px;border:1px solid var(--accent);border-radius:2px;margin-right:6px}
-.item .score{float:right;color:var(--muted);font-size:11px}
-.item .meta{color:var(--muted);font-size:10px;margin-top:4px}
-.item mark{background:transparent;color:var(--accent);font-weight:bold}
-.progress{height:3px;background:#1a1f2a;border-radius:2px;overflow:hidden;margin-top:6px}
-.progress>div{height:100%;background:var(--accent);width:0;transition:width .2s}
-.log{background:#07090d;border:1px solid var(--border);border-radius:4px;padding:8px;max-height:250px;overflow:auto;font-size:11px}
-.log .e{color:var(--err)}.log .w{color:var(--warn)}.log .i{color:var(--muted)}.log .s{color:var(--ok)}
-.empty{color:var(--muted);font-size:12px;padding:6px}
-.hint{font-size:11px;color:var(--muted);font-style:italic;margin-top:6px}
-.room-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
-.room-row label{font-size:11px;color:var(--muted);white-space:nowrap}
-.room-row input{flex:1;min-width:120px}.room-row select{flex:0 0 130px}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Noosphere — local-only notebook + embeddings + Trystero P2P</title>
+
+  <!-- чтобы браузер не спамил 404 favicon -->
+  <link rel="icon" href="data:," />
+
+  <style>
+    :root{
+      --bg:#0f1115; --panel:#161a22; --border:#242a36;
+      --text:#e6e8ee; --muted:#8a93a6; --accent:#6aa6ff;
+      --ok:#4ade80; --warn:#f59e0b; --err:#ef4444;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-monospace,Menlo,monospace}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px}
+    h1{font-size:16px;margin:0 0 14px;letter-spacing:.5px}
+    h1 small{color:var(--muted);font-weight:normal;font-size:11px;margin-left:8px}
+    h2{font-size:11px;margin:18px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:10px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+    @media (max-width:820px){.grid-3{grid-template-columns:1fr}}
+    textarea{width:100%;background:#0b0d12;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:10px;font:inherit;resize:vertical;min-height:90px}
+    button{background:#1f2532;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font:inherit;cursor:pointer}
+    button:hover:not(:disabled){background:#272f40}
+    button.primary{background:var(--accent);color:#0b0d12;border-color:var(--accent)}
+    button.secondary{background:#2a2f3a;color:var(--accent);border-color:var(--accent)}
+    button.danger{background:#2a1a1d;color:var(--err);border-color:#3d1f22}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .status{display:inline-flex;gap:8px;flex-wrap:wrap}
+    .pill{padding:3px 8px;border-radius:999px;font-size:11px;background:#1a1f2a;border:1px solid var(--border);color:var(--muted)}
+    .pill.ok{color:var(--ok);border-color:#1f3d2a}
+    .pill.warn{color:var(--warn);border-color:#3d3220}
+    .pill.err{color:var(--err);border-color:#3d1f22}
+    .pill.think{color:var(--accent);border-color:var(--accent)}
+    .list{display:flex;flex-direction:column;gap:6px;min-height:60px}
+    .item{background:#0b0d12;border:1px solid var(--border);border-radius:4px;padding:8px 10px}
+    .item.local{border-left:3px solid #555}
+    .item.world{border-left:3px solid var(--accent)}
+    .item.ephemeral::before{content:"RAM";font-size:9px;color:var(--accent);padding:1px 4px;border:1px solid var(--accent);border-radius:2px;margin-right:6px}
+    .item .score{float:right;color:var(--muted);font-size:11px}
+    .item .meta{color:var(--muted);font-size:10px;margin-top:4px}
+    .progress{height:3px;background:#1a1f2a;border-radius:2px;overflow:hidden;margin-top:6px}
+    .progress>div{height:100%;background:var(--accent);width:0;transition:width .2s}
+    .log{background:#07090d;border:1px solid var(--border);border-radius:4px;padding:8px;max-height:220px;overflow:auto;font-size:11px}
+    .log .e{color:var(--err)} .log .w{color:var(--warn)} .log .i{color:var(--muted)}
+    .empty{color:var(--muted);font-size:12px;padding:6px}
+    .hint{font-size:11px;color:var(--muted);font-style:italic;margin-top:6px}
+    .mono{font-family:ui-monospace,Menlo,monospace}
+  </style>
 </head>
+
 <body>
 <div class="wrap">
-<h1>NOOSPHERE P2P <small>v2.2 · fixed relays</small></h1>
+  <h1>NOOSPHERE <small>single HTML · local-only IDB · embeddings · Trystero P2P</small></h1>
 
-<section class="panel">
-  <div class="room-row">
-    <label>STRAT:</label>
-    <select id="stratSelect">
-      <option value="mqtt" selected>MQTT (EMQX)</option>
-      <option value="nostr">Nostr (Damus+nos.lol)</option>
-      <option value="torrent">BitTorrent</option>
-    </select>
-    <label>ROOM:</label>
-    <input type="text" id="roomInput" value="noosphere-main-2026" />
-  </div>
-  <div class="row">
-    <button id="btnConnect" class="primary">Connect</button>
-    <button id="btnDisconnect" class="danger" disabled>Disconnect</button>
-  </div>
-  <div class="status" id="status" style="margin-top:8px;">
-    <span class="pill" data-key="idb">IDB: ...</span>
-    <span class="pill" data-key="model">MODEL: idle</span>
-    <span class="pill" data-key="net">NET: offline</span>
-    <span class="pill" data-key="peers">PEERS: 0</span>
-    <span class="pill" data-key="indexed">INDEXED: 0</span>
-    <span class="pill" data-key="think" style="display:none">...</span>
-  </div>
-  <div class="progress"><div id="modelProgress"></div></div>
-  <div class="hint">
-    <b>v2.2:</b> MQTT теперь идёт через <code>broker.emqx.io:8084/mqtt</code> (рабочий WSS).
-    Nostr — через <code>relay.damus.io</code> + <code>nos.lol</code>. 
-    Открой на ТЕЛЕФОНЕ и на ПК в одном Wi-Fi, выбери одинаковую стратегию и room.
-  </div>
-</section>
+  <section class="panel">
+    <div class="status" id="status">
+      <span class="pill" data-key="idb">IDB: ...</span>
+      <span class="pill" data-key="model">MODEL: idle</span>
+      <span class="pill" data-key="p2p">P2P: ...</span>
+      <span class="pill" data-key="peers">PEERS: 0</span>
+      <span class="pill" data-key="indexed">INDEXED: 0</span>
+      <span class="pill think" data-key="think" style="display:none">...</span>
+      <span class="pill" data-key="room">ROOM: ...</span>
+    </div>
+    <div class="progress"><div id="modelProgress"></div></div>
+    <div class="hint">
+      Важно: открывай через <b>https://</b> или <b>http://localhost</b> (не file://).
+      Открой 2 вкладки/2 устройства с одним ROOM — появятся PEERS и WORLD-результаты (в RAM).
+    </div>
+  </section>
 
-<section class="panel">
-  <h2>thought</h2>
-  <textarea id="input" placeholder="напечатай мысль... (релевантность появится через 4 сек после паузы)"></textarea>
-  <div class="row" style="margin-top:8px;">
-    <button id="btnSave" class="secondary">Сохранить локально</button>
-    <button id="btnSaveWorld" class="primary">Сохранить + в Мир</button>
-  </div>
-</section>
+  <section class="panel">
+    <h2>thought</h2>
+    <textarea id="input" placeholder="пиши... после паузы появятся: локально, сеть, serendipity"></textarea>
+    <div class="row" style="margin-top:8px;">
+      <button id="btnLoadModel" class="primary">Load MiniLM</button>
+      <button id="btnSave" class="secondary">Save local</button>
+      <button id="btnSaveWorld" class="primary">Save + World</button>
+      <button id="btnReindex">Reindex missing vectors</button>
+      <button id="btnSeed">Seed 5</button>
+      <button id="btnReset" class="danger">Reset</button>
+    </div>
+    <div class="hint">
+      Save local = заметка только у тебя. Save + World = ты будешь отдавать <u>только topK сниппеты</u> на запросы peers, пока онлайн.
+      Ничего “чужого” не сохраняется.
+    </div>
+  </section>
 
-<section class="panel">
-  <h2>live relevance</h2>
-  <div class="grid-3">
-    <div><div style="color:var(--muted);font-size:11px;margin-bottom:4px;">MY (local)</div><div class="list" id="listMine"></div></div>
-    <div><div style="color:var(--muted);font-size:11px;margin-bottom:4px;">WORLD (peers, RAM)</div><div class="list" id="listWorld"></div></div>
-    <div><div style="color:var(--muted);font-size:11px;margin-bottom:4px;">ADJACENT</div><div class="list" id="listAdjacent"></div></div>
-  </div>
-</section>
+  <section class="panel">
+    <h2>live relevance</h2>
+    <div class="grid-3">
+      <div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">MY (local)</div>
+        <div class="list" id="listMine"></div>
+      </div>
+      <div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">WORLD (peers, RAM)</div>
+        <div class="list" id="listWorld"></div>
+      </div>
+      <div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">SERENDIPITY (low corr mix)</div>
+        <div class="list" id="listSer"></div>
+      </div>
+    </div>
+  </section>
 
-<section class="panel">
-  <h2>diagnostics</h2>
-  <div class="row">
-    <button id="btnLoadModel" class="primary">Load MiniLM</button>
-    <button id="btnReindex">Reindex</button>
-    <button id="btnSeed">Seed 5</button>
-    <button id="btnPing">Ping peers</button>
-    <button id="btnReset" class="danger">Reset</button>
-  </div>
-</section>
+  <section class="panel">
+    <h2>my notes (persisted on disk)</h2>
+    <div class="list" id="listAll"></div>
+  </section>
 
-<section class="panel">
-  <h2>my thoughts (persisted)</h2>
-  <div class="list" id="listAll"></div>
-</section>
-
-<section class="panel">
-  <h2>event log</h2>
-  <div class="log" id="log"></div>
-</section>
+  <section class="panel">
+    <h2>event log</h2>
+    <div class="log" id="log"></div>
+  </section>
 </div>
 
 <script type="module">
 /* ============================================================================
-   NOOSPHERE P2P v2.2 — FIXED RELAYS
+   NOOSPHERE — SINGLE HTML
    ----------------------------------------------------------------------------
-   Что исправлено в v2.2:
-   
-   1. MQTT стратегия теперь использует РАБОЧИЕ relay:
-      - wss://broker.emqx.io:8084/mqtt (крупный китаец, WSS работает)
-      - test.mosquitto.org:8081 НЕ ПОДДЕРЖИВАЕТ WSS, поэтому падал
-   
-   2. Nostr стратегия переопределяет relayURLs:
-      - wss://relay.damus.io
-      - wss://nos.lol
-      - wss://relay.snort.social
-      (Trystero дефолтные relay отваливались с "No space left")
-   
-   3. Добавлен WebSocket connection monitoring в логи браузера
-   
-   4. Если MQTT не работает — пробуй Nostr. Если оба падают — BitTorrent.
+   Главная цель: без “мерджа кусков”.
+   Один HTML, внутри:
+     - IndexedDB (локально)
+     - embeddings (transformers.js)
+     - P2P через Trystero (torrent adapter)
+     - WORLD-заметки: только пока peer онлайн (в RAM, без записи на диск)
    ============================================================================ */
 
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
 
-env.allowLocalModels = false;
-env.useBrowserCache = true;
-
-const ns = {};
-
-/* --------------------------------------------------------------------------
-   [1] CONFIG
-   -------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+   [0] CONFIG
+--------------------------------------------------------------------------- */
+const ns = {}
 ns.Config = Object.freeze({
-  DB_NAME: 'noosphere_p2p',
-  DB_VERSION: 1,
-  STORE_THOUGHTS: 'thoughts',
-  APP_ID: 'noosphere-p2p-v22',
+  DB: { name: 'noosphere_single_html', version: 1, store: 'notes' },
 
-  // CDN для Trystero стратегий
-  STRATEGIES: {
-    mqtt:    'https://esm.sh/trystero@0.21.1/mqtt',
-    nostr:   'https://esm.sh/trystero@0.21.1/nostr',
-    torrent: 'https://esm.sh/trystero@0.21.1/torrent',
-  },
+  // ROOM можно поменять через ?room=xxx или через #xxx
+  DEFAULT_ROOM: 'noosphere-room-1',
+  APP_ID: 'noosphere-single-html-v1',
 
-  // ПРАВИЛЬНЫЕ relay URLs (переопределяют Trystero defaults)
-  RELAY_URLS: {
-    mqtt: [
-      'wss://broker.emqx.io:8084/mqtt',
-      // запасной — если emqx упадёт
-      'wss://mqtt.stevesinternet.com:8081/mqtt',
-    ],
-    nostr: [
-      'wss://relay.damus.io',
-      'wss://nos.lol',
-      'wss://relay.snort.social',
-    ],
-    // torrent не использует relayURLs, использует trackerUrls
-    torrent_trackers: [
-      'wss://tracker.openwebtorrent.com',
-      'wss://tracker.btorrent.xyz',
-      'wss://tracker.files.fm:7073/announce',
-    ],
-  },
+  // Trackers для trystero/torrent
+  TRACKERS: [
+    'wss://tracker.openwebtorrent.com',
+    'wss://tracker.btorrent.xyz',
+    'wss://tracker.fastcast.nz',
+  ],
+
+  // ICE (STUN) — помогает находить прямые соединения
+  RTC: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
+
+  MODEL_ID: 'Xenova/all-MiniLM-L6-v2',
 
   LIMITS: {
-    MAX_TEXT_LENGTH: 10_000,
-    RENDER_CAP: 200,
-    DEBOUNCE_MS: 4000,
-    QUERY_TIMEOUT_MS: 3000,
-    MAX_RESULTS_PER_PEER: 5,
-    MAX_EPHEMERAL_AGE_MS: 5 * 60_000,
+    MAX_TEXT: 10_000,
+    SNIPPET: 240,
+    DEBOUNCE_MS: 900,
+    QUERY_TIMEOUT_MS: 1200,
+
+    LOCAL_TOPK: 5,
+    WORLD_TOPK: 5,
+    SER_TOPK: 5,
+
+    EPHEMERAL_TTL_MS: 5 * 60_000,
   },
 
-  VECTOR: { MODEL_ID: 'Xenova/all-MiniLM-L6-v2' },
-  RELEVANCE: { THRESHOLD: 0.25, ADJACENCY: 0.15, MAX_CARDS: 5 },
-});
+  SER: { min: 0.12, max: 0.33 }, // low-corr диапазон для serendipity
+})
 
-/* --------------------------------------------------------------------------
-   [2] LOGGER
-   -------------------------------------------------------------------------- */
-ns.Logger = (() => {
-  const el = () => document.getElementById('log');
-  const fmt = (d) => d.toISOString().slice(11, 19);
-  const safe = (x) => {
-    try { return typeof x === 'string' ? x : JSON.stringify(x); }
-    catch { return String(x); }
-  };
-  const write = (lvl, m, d) => {
-    const line = document.createElement('div');
-    line.className = lvl;
-    const tail = d !== undefined ? ' ' + safe(d) : '';
-    line.textContent = `[${fmt(new Date())}] [${lvl.toUpperCase()}] ${m}${tail}`;
-    const box = el();
-    if (box) { box.appendChild(line); box.scrollTop = box.scrollHeight; }
-    const fn = lvl === 'e' ? 'error' : lvl === 'w' ? 'warn' : 'log';
-    try { console[fn](`[ns:${lvl}] ${m}`, d ?? ''); } catch {}
-  };
-  return {
-    info:  (m, d) => write('i', m, d),
-    warn:  (m, d) => write('w', m, d),
-    error: (m, d) => write('e', m, d),
-    success: (m, d) => write('s', m, d),
-  };
-})();
 
-// Перехватываем WebSocket ошибки чтобы видеть что именно падает
-const _origWS = window.WebSocket;
-window.WebSocket = function(url, protocols) {
-  if (typeof url === 'string' && (url.includes('mqtt') || url.includes('nostr') || url.includes('relay'))) {
-    ns.Logger.info('WebSocket connecting:', url);
-  }
-  const ws = protocols ? new _origWS(url, protocols) : new _origWS(url);
-  ws.addEventListener('error', (e) => {
-    if (typeof url === 'string' && (url.includes('mqtt') || url.includes('nostr') || url.includes('relay'))) {
-      ns.Logger.warn('WS error on ' + url, e.message || 'unknown');
-    }
-  });
-  ws.addEventListener('open', () => {
-    if (typeof url === 'string' && (url.includes('mqtt') || url.includes('nostr') || url.includes('relay'))) {
-      ns.Logger.success('WS open: ' + url);
-    }
-  });
-  return ws;
-};
-window.WebSocket.prototype = _origWS.prototype;
-window.WebSocket.CONNECTING = _origWS.CONNECTING;
-window.WebSocket.OPEN = _origWS.OPEN;
-window.WebSocket.CLOSING = _origWS.CLOSING;
-window.WebSocket.CLOSED = _origWS.CLOSED;
-
-/* --------------------------------------------------------------------------
-   [3] UTIL
-   -------------------------------------------------------------------------- */
-ns.Util = {
-  selfId: 'self-' + Math.random().toString(36).slice(2, 10),
-  newId: () => {
-    try { return crypto.randomUUID(); }
-    catch { return 'id-' + Math.random().toString(36).slice(2, 15) + Date.now().toString(36); }
-  },
-  now: () => Date.now(),
-  normalizeText: (t) => typeof t === 'string' ? t.trim().slice(0, ns.Config.LIMITS.MAX_TEXT_LENGTH) : '',
-  isNonEmptyString: (v) => typeof v === 'string' && v.trim().length > 0,
-  debounce: (fn, ms) => { let t=null; return (...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);}; },
-  escapeHtml: (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'),
-};
-
-/* --------------------------------------------------------------------------
-   [4] STORAGE
-   -------------------------------------------------------------------------- */
-ns.Storage = (() => {
-  const { DB_NAME, DB_VERSION, STORE_THOUGHTS } = ns.Config;
-  let db = null;
-  const open = () => new Promise((res, rej) => {
-    if (db) return res(db);
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = (ev) => {
-      const _db = ev.target.result;
-      if (!_db.objectStoreNames.contains(STORE_THOUGHTS)) {
-        const s = _db.createObjectStore(STORE_THOUGHTS, { keyPath: 'id' });
-        s.createIndex('createdAt', 'createdAt');
-        s.createIndex('hasVector', 'hasVector');
-        s.createIndex('published', 'published');
-      }
-    };
-    req.onsuccess = (ev) => { db = ev.target.result; res(db); };
-    req.onerror = () => rej(req.error);
-  });
-  const tx = (mode = 'readonly') => db.transaction(STORE_THOUGHTS, mode).objectStore(STORE_THOUGHTS);
-  const prom = (req) => new Promise((r, j) => { req.onsuccess = () => r(req.result); req.onerror = () => j(req.error); });
-  const put = async (t) => { await open(); return prom(tx('readwrite').put(t)); };
-  const all = async () => { await open(); return prom(tx().getAll()); };
-  const listUnindexed = async () => {
-    await open();
-    return new Promise((res, rej) => {
-      const out = [];
-      const req = tx().index('hasVector').openCursor(IDBKeyRange.only(0));
-      req.onsuccess = (ev) => { const c = ev.target.result; if (!c) return res(out); out.push(c.value); c.continue(); };
-      req.onerror = () => rej(req.error);
-    });
-  };
-  const clear = async () => { await open(); await prom(tx('readwrite').clear()); };
-  return { open, put, all, listUnindexed, clear };
-})();
-
-/* --------------------------------------------------------------------------
-   [5] VECTOR
-   -------------------------------------------------------------------------- */
-ns.Vector = (() => {
-  let extractor = null, loadPromise = null;
-  const load = (onProgress) => {
-    if (extractor) return Promise.resolve(extractor);
-    if (loadPromise) return loadPromise;
-    loadPromise = pipeline('feature-extraction', ns.Config.VECTOR.MODEL_ID, {
-      progress_callback: (p) => { if (onProgress && p.status === 'progress' && p.total) onProgress({ loaded: p.loaded, total: p.total }); },
-    }).then((ex) => { extractor = ex; ns.Logger.info('model loaded'); return ex; })
-      .catch((err) => { loadPromise = null; throw err; });
-    return loadPromise;
-  };
-  const embed = async (text) => {
-    if (!extractor) throw new Error('Model not loaded');
-    if (!ns.Util.isNonEmptyString(text)) return null;
-    const out = await extractor(text, { pooling: 'mean', normalize: true });
-    return Array.from(out.data);
-  };
-  const cosine = (a, b) => {
-    if (!a || !b || a.length !== b.length) return 0;
-    let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s;
-  };
-  const isLoaded = () => extractor !== null;
-  return { load, embed, cosine, isLoaded };
-})();
-
-/* --------------------------------------------------------------------------
-   [6] CHANNEL — TRYSTERO (с ПРАВИЛЬНЫМИ relay)
-   -------------------------------------------------------------------------- */
-ns.Channel = (() => {
-  let room = null;
-  let sendPing = null, sendQuery = null, sendResponse = null;
-  const peers = new Map();
-  const queryHandlers = new Map();
-
-  const init = async (strategy, roomName) => {
-    if (room) return;
-    const cdnUrl = ns.Config.STRATEGIES[strategy];
-    if (!cdnUrl) throw new Error('unknown strategy: ' + strategy);
-
-    ns.Logger.info('loading trystero/' + strategy + ' from ' + cdnUrl);
-    let mod;
-    try { mod = await import(/* @vite-ignore */ cdnUrl); }
-    catch (e) { ns.Logger.error('trystero load failed', e.message); throw e; }
-    ns.Logger.success('trystero/' + strategy + ' loaded');
-
-    // ===== ГЛАВНОЕ ИСПРАВЛЕНИЕ v2.2: правильные config =====
-    const config = { appId: ns.Config.APP_ID };
-
-    if (strategy === 'mqtt') {
-      // Переопределяем дефолтные (сломанные) relay на рабочие
-      config.relayURLs = ns.Config.RELAY_URLS.mqtt;
-      ns.Logger.info('MQTT relays:', config.relayURLs);
-    }
-    else if (strategy === 'nostr') {
-      // Переопределяем дефолтные (падающие) relay на рабочие
-      config.relayURLs = ns.Config.RELAY_URLS.nostr;
-      ns.Logger.info('Nostr relays:', config.relayURLs);
-    }
-    else if (strategy === 'torrent') {
-      // Переопределяем tracker'ы на более стабильные
-      config.trackerUrls = ns.Config.RELAY_URLS.torrent_trackers;
-      ns.Logger.info('Torrent trackers:', config.trackerUrls);
-    }
-
-    ns.Logger.info('joining room "' + roomName + '"');
-    try {
-      room = mod.joinRoom(config, roomName);
-    } catch (e) {
-      ns.Logger.error('joinRoom failed', e.message);
-      throw e;
-    }
-    ns.Logger.success('joined room. selfId=' + ns.Util.selfId);
-
-    // Actions
-    const [sp, onPing]     = room.makeAction('ping');
-    const [sq, onQuery]    = room.makeAction('query');
-    const [sr, onResponse] = room.makeAction('response');
-    sendPing = sp; sendQuery = sq; sendResponse = sr;
-
-    try {
-      room.onPeerJoin((peerId) => {
-        peers.set(peerId, ns.Util.now());
-        ns.Logger.success('peer JOINED: ' + peerId.slice(0, 16));
-        updatePeerCount();
-        try { sendPing({ from: ns.Util.selfId, t: ns.Util.now() }, peerId); } catch {}
-      });
-    } catch (e) { ns.Logger.warn('onPeerJoin setup err', e.message); }
-
-    try {
-      room.onPeerLeave((peerId) => {
-        peers.delete(peerId);
-        ns.Logger.warn('peer LEFT: ' + peerId.slice(0, 16));
-        updatePeerCount();
-      });
-    } catch (e) { ns.Logger.warn('onPeerLeave setup err', e.message); }
-
-    try {
-      onPing((payload, peerId) => {
-        peers.set(peerId, ns.Util.now());
-        updatePeerCount();
-      });
-    } catch (e) {}
-
-    try {
-      onQuery(async (payload, peerId) => {
-        if (!ns.Vector.isLoaded() || !payload || !Array.isArray(payload.vector)) return;
-        try {
-          const all = await ns.Storage.all();
-          const shared = all.filter((t) => t.published && Array.isArray(t.vector));
-          const scored = shared
-            .map((t) => ({ text: t.text, score: ns.Vector.cosine(payload.vector, t.vector), id: t.id }))
-            .filter((r) => r.score > 0.1)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
-          try {
-            sendResponse({ queryId: payload.queryId, from: ns.Util.selfId, results: scored }, peerId);
-            ns.Logger.info('responded to ' + peerId.slice(0, 12) + ' with ' + scored.length + ' results');
-          } catch (e) { ns.Logger.warn('response send fail', e.message); }
-        } catch (e) { ns.Logger.warn('query handler err', e.message); }
-      });
-    } catch (e) {}
-
-    try {
-      onResponse((payload, peerId) => {
-        if (!payload || !payload.queryId) return;
-        const handler = queryHandlers.get(payload.queryId);
-        if (!handler) return;
-        handler(peerId, payload.results || []);
-        ns.Logger.info('response from ' + peerId.slice(0, 12) + ' with ' + (payload.results||[]).length + ' results');
-      });
-    } catch (e) {}
-
-    ns.Logger.success('channel ready · ' + strategy);
-  };
-
-  const leave = () => {
-    if (room) { try { room.leave(); } catch {} }
-    room = null; sendPing = null; sendQuery = null; sendResponse = null;
-    peers.clear(); updatePeerCount();
-    ns.Logger.info('left room');
-  };
-
-  const isConnected = () => room !== null;
-
-  const ping = () => {
-    if (!sendPing || !room) return;
-    try { sendPing({ from: ns.Util.selfId, t: ns.Util.now() }); }
-    catch (e) { ns.Logger.warn('ping fail', e.message); }
-  };
-
-  const query = (vector, { timeoutMs = ns.Config.LIMITS.QUERY_TIMEOUT_MS } = {}) => {
-    if (!sendQuery || !room) return Promise.resolve([]);
-    if (!peers.size) return Promise.resolve([]);
-    const queryId = ns.Util.newId();
-    const results = new Map();
-    const handler = (peerId, res) => { results.set(peerId, res); ns.Ephemeral.upsert(peerId, res); };
-    queryHandlers.set(queryId, handler);
-    try {
-      sendQuery({ queryId, vector, from: ns.Util.selfId });
-      ns.Logger.info('query sent to ' + peers.size + ' peers');
-    } catch (e) { ns.Logger.warn('query send fail', e.message); }
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        queryHandlers.delete(queryId);
-        const collected = [];
-        for (const [peerId, res] of results) for (const r of res) collected.push({ ...r, fromPeer: peerId });
-        ns.Logger.info('query done: ' + results.size + '/' + peers.size + ' responded, ' + collected.length + ' results');
-        resolve(collected);
-      }, timeoutMs);
-    });
-  };
-
-  const getActivePeers = () => {
-    const now = ns.Util.now();
-    const ttl = 60_000;
-    const out = [];
-    for (const [pid, lastSeen] of peers) { if (now - lastSeen < ttl) out.push(pid); else peers.delete(pid); }
-    return out;
-  };
-
-  const updatePeerCount = () => {
-    document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: peers.size } }));
-  };
-
-  const startPingLoop = () => {
-    setInterval(() => { if (room) { ping(); updatePeerCount(); } }, 10_000);
-  };
-
-  return { init, leave, isConnected, ping, query, getActivePeers, startPingLoop };
-})();
-
-/* --------------------------------------------------------------------------
-   [7] EPHEMERAL
-   -------------------------------------------------------------------------- */
-ns.Ephemeral = (() => {
-  const byPeer = new Map();
-  const upsert = (peerId, results) => {
-    byPeer.set(peerId, { results, lastSeen: ns.Util.now() });
-    prune();
-    document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
-  };
-  const prune = () => {
-    const now = ns.Util.now(), maxAge = ns.Config.LIMITS.MAX_EPHEMERAL_AGE_MS;
-    let changed = false;
-    for (const [pid, rec] of byPeer) { if (now - rec.lastSeen > maxAge) { byPeer.delete(pid); changed = true; } }
-    if (changed) document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
-  };
-  const allResults = () => {
-    const out = [];
-    for (const [pid, rec] of byPeer) for (const r of rec.results) out.push({ ...r, fromPeer: pid, receivedAt: rec.lastSeen });
-    return out;
-  };
-  const clear = () => { byPeer.clear(); document.dispatchEvent(new CustomEvent('ns:ephemeral-changed')); };
-  return { upsert, allResults, clear };
-})();
-
-/* --------------------------------------------------------------------------
-   [8] RELEVANCE
-   -------------------------------------------------------------------------- */
-ns.Relevance = (() => {
-  const { THRESHOLD, ADJACENCY, MAX_CARDS } = ns.Config.RELEVANCE;
-  const escapeHtml = ns.Util.escapeHtml;
-  const highlightFragment = (qt, mt) => {
-    if (!qt || !mt) return escapeHtml(mt);
-    const qT = qt.toLowerCase().match(/\w+/g) || [];
-    const mT = mt.toLowerCase().match(/\w+/g) || [];
-    if (!qT.length || !mT.length) return escapeHtml(mt);
-    const mRaw = mt.match(/\w+/g) || []; const mPos = []; let cursor = 0;
-    for (const w of mRaw) { const idx = mt.toLowerCase().indexOf(w.toLowerCase(), cursor); if (idx < 0) break; mPos.push({ start: idx, end: idx + w.length }); cursor = idx + w.length; }
-    let bestLen = 0, bestStart = -1;
-    for (let i = 0; i < mT.length && i < mPos.length; i++) {
-      for (let L = Math.min(qT.length, mT.length - i); L > bestLen; L--) {
-        if (i + L > mPos.length) break;
-        if (qT.join(' ').includes(mT.slice(i, i + L).join(' '))) { bestLen = L; bestStart = i; }
-      }
-    }
-    if (bestLen < 2 || bestStart < 0) return escapeHtml(mt);
-    const a = mPos[bestStart], b = mPos[bestStart + bestLen - 1];
-    return escapeHtml(mt.slice(0, a.start)) + '<mark>' + escapeHtml(mt.slice(a.start, b.end)) + '</mark>' + escapeHtml(mt.slice(b.end));
-  };
-  const rankAll = (qv, locals, eph) => {
-    if (!qv) return { mine: [], world: [], adjacent: [] };
-    const ls = locals.filter(t => Array.isArray(t.vector))
-      .map(t => ({ kind: 'local', source: t, score: ns.Vector.cosine(qv, t.vector) }))
-      .filter(r => r.score > THRESHOLD - ADJACENCY).sort((a,b)=>b.score-a.score);
-    const ws = eph.map(r => ({ kind: 'world', source: r, score: Number(r.score) || 0 }))
-      .filter(r => r.score > THRESHOLD - ADJACENCY).sort((a,b)=>b.score-a.score);
-    const mine = [], world = [], adjacent = [];
-    for (const r of ls) { if (r.score >= THRESHOLD) { if (mine.length < MAX_CARDS) mine.push(r); } else if (adjacent.length < MAX_CARDS) adjacent.push(r); }
-    for (const r of ws) { if (r.score >= THRESHOLD) { if (world.length < MAX_CARDS) world.push(r); } else if (adjacent.length < MAX_CARDS) adjacent.push(r); }
-    return { mine, world, adjacent };
-  };
-  return { rankAll, highlightFragment };
-})();
-
-/* --------------------------------------------------------------------------
-   [9] SYNC
-   -------------------------------------------------------------------------- */
-ns.Sync = (() => {
-  const saveLocal = async ({ text, publishToWorld = false }) => {
-    const clean = ns.Util.normalizeText(text);
-    if (!clean) throw new Error('Empty');
-    const thought = { id: ns.Util.newId(), text: clean, createdAt: ns.Util.now(), updatedAt: ns.Util.now(), vector: null, hasVector: 0, published: !!publishToWorld };
-    if (ns.Vector.isLoaded()) {
-      try { thought.vector = await ns.Vector.embed(clean); thought.hasVector = thought.vector ? 1 : 0; }
-      catch (e) { ns.Logger.warn('embed fail', e.message); }
-    }
-    await ns.Storage.put(thought);
-    ns.Logger.info('saved', { id: thought.id.slice(0, 8), published: thought.published });
-    document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
-    return thought;
-  };
-  const reindexAll = async (onProgress) => {
-    if (!ns.Vector.isLoaded()) throw new Error('Load model first');
-    const pending = await ns.Storage.listUnindexed(); let done = 0;
-    for (const t of pending) {
-      try { const v = await ns.Vector.embed(t.text); t.vector = v; t.hasVector = v ? 1 : 0; await ns.Storage.put(t); }
-      catch (e) { ns.Logger.warn('reindex fail', e.message); }
-      done++; if (onProgress) onProgress({ done, total: pending.length });
-    }
-    ns.Logger.info('reindex done', { total: pending.length });
-    document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
-  };
-  return { saveLocal, reindexAll };
-})();
-
-/* --------------------------------------------------------------------------
-   [10] UI
-   -------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+   [1] UI + LOGGER
+--------------------------------------------------------------------------- */
 ns.UI = (() => {
-  const refs = {}; let lastQuery = { text: null, vector: null };
-  const cache = () => {
-    ['input','btnSave','btnSaveWorld','btnLoadModel','btnReindex','btnSeed','btnPing','btnReset','btnConnect','btnDisconnect','roomInput','stratSelect','listMine','listWorld','listAdjacent','listAll','status','modelProgress']
-      .forEach((id) => { refs[id] = document.getElementById(id); });
-  };
-  const setPill = (k, t, s = '') => {
-    const el = refs.status.querySelector(`[data-key="${k}"]`); if (!el) return;
-    el.textContent = t; el.classList.remove('ok','warn','err','think'); if (s) el.classList.add(s);
-  };
-  const setThink = (active, text = 'думаю...') => {
-    const el = refs.status.querySelector('[data-key="think"]'); if (!el) return;
-    if (active) { el.style.display = ''; el.textContent = text; el.classList.add('think'); }
-    else { el.style.display = 'none'; el.classList.remove('think'); }
-  };
-  const setProgress = (pct) => { refs.modelProgress.style.width = pct + '%'; };
-  const renderLocalList = (c, items, qt) => {
-    c.innerHTML = '';
-    if (!items.length) { const d = document.createElement('div'); d.className = 'empty'; d.textContent = '(empty)'; c.appendChild(d); return; }
-    for (const r of items) {
-      const t = r.source, row = document.createElement('div'); row.className = 'item local';
-      const score = document.createElement('span'); score.className = 'score'; score.textContent = typeof r.score === 'number' ? r.score.toFixed(3) : '';
-      const body = document.createElement('div'); body.innerHTML = ns.Relevance.highlightFragment(qt, t.text);
-      const meta = document.createElement('div'); meta.className = 'meta';
-      meta.textContent = `${t.published ? 'world-shared' : 'local'} · ${new Date(t.createdAt).toISOString().slice(0,16)} · ${t.id.slice(0,6)}`;
-      row.appendChild(score); row.appendChild(body); row.appendChild(meta); c.appendChild(row);
+  const $ = (id) => document.getElementById(id)
+
+  const refs = {
+    input: $('input'),
+
+    listMine: $('listMine'),
+    listWorld: $('listWorld'),
+    listSer: $('listSer'),
+    listAll: $('listAll'),
+
+    status: $('status'),
+    modelProgress: $('modelProgress'),
+    log: $('log'),
+
+    btnLoadModel: $('btnLoadModel'),
+    btnSave: $('btnSave'),
+    btnSaveWorld: $('btnSaveWorld'),
+    btnReindex: $('btnReindex'),
+    btnSeed: $('btnSeed'),
+    btnReset: $('btnReset'),
+  }
+
+  const escapeHtml = (s) =>
+    String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+  const setPill = (key, text, cls = '') => {
+    const el = refs.status.querySelector(`[data-key="${key}"]`)
+    if (!el) return
+    el.textContent = text
+    el.classList.remove('ok', 'warn', 'err', 'think')
+    if (cls) el.classList.add(cls)
+  }
+
+  const setThink = (on, text = '...') => {
+    const el = refs.status.querySelector(`[data-key="think"]`)
+    if (!el) return
+    if (on) {
+      el.style.display = ''
+      el.textContent = text
+      el.classList.add('think')
+    } else {
+      el.style.display = 'none'
+      el.classList.remove('think')
     }
-  };
-  const renderWorldList = (c, items, qt) => {
-    c.innerHTML = '';
-    if (!items.length) {
-      const d = document.createElement('div'); d.className = 'empty';
-      const p = ns.Channel.getActivePeers().length;
-      d.textContent = p ? `(no matches from ${p} peer(s))` : '(no peers connected)';
-      c.appendChild(d); return;
+  }
+
+  const setProgress = (pct) => { refs.modelProgress.style.width = `${pct}%` }
+
+  const logLine = (lvl, msg, data) => {
+    const line = document.createElement('div')
+    line.className = lvl
+    const t = new Date().toISOString().slice(11, 19)
+    const tail = data !== undefined ? (' ' + (typeof data === 'string' ? data : JSON.stringify(data))) : ''
+    line.textContent = `[${t}] [${lvl.toUpperCase()}] ${msg}${tail}`
+    refs.log.appendChild(line)
+    refs.log.scrollTop = refs.log.scrollHeight
+    const fn = lvl === 'e' ? 'error' : lvl === 'w' ? 'warn' : 'log'
+    console[fn](`[ns:${lvl}] ${msg}`, data ?? '')
+  }
+
+  const itemHtml = ({ kind, text, score, meta, ephemeral }) => {
+    const scoreStr = (typeof score === 'number') ? score.toFixed(3) : ''
+    const cls = `item ${kind} ${ephemeral ? 'ephemeral' : ''}`
+    return `
+      <div class="${cls}">
+        <span class="score">${scoreStr}</span>
+        <div>${escapeHtml(text || '')}</div>
+        <div class="meta">${escapeHtml(meta || '')}</div>
+      </div>
+    `
+  }
+
+  const renderList = (el, itemsHtml, emptyText) => {
+    el.innerHTML = ''
+    if (!itemsHtml.length) {
+      const d = document.createElement('div')
+      d.className = 'empty'
+      d.textContent = emptyText
+      el.appendChild(d)
+      return
     }
-    for (const r of items) {
-      const e = r.source, row = document.createElement('div'); row.className = 'item world ephemeral';
-      const score = document.createElement('span'); score.className = 'score'; score.textContent = typeof r.score === 'number' ? r.score.toFixed(3) : '';
-      const body = document.createElement('div'); body.innerHTML = ns.Relevance.highlightFragment(qt, e.text);
-      const meta = document.createElement('div'); meta.className = 'meta';
-      meta.textContent = `from:${(e.fromPeer || '?').slice(0, 10)} · ${new Date(e.receivedAt || Date.now()).toISOString().slice(11,19)} · RAM`;
-      row.appendChild(score); row.appendChild(body); row.appendChild(meta); c.appendChild(row);
+    el.innerHTML = itemsHtml.join('')
+  }
+
+  return { refs, setPill, setThink, setProgress, logLine, itemHtml, renderList }
+})()
+
+
+/* ---------------------------------------------------------------------------
+   [2] UTIL
+--------------------------------------------------------------------------- */
+ns.Util = {
+  now: () => Date.now(),
+  id: () => crypto.randomUUID(),
+  clamp: (x, a, b) => Math.max(a, Math.min(b, x)),
+  normalizeText: (s) => (typeof s === 'string' ? s.trim().slice(0, ns.Config.LIMITS.MAX_TEXT) : ''),
+  snippet: (s, n) => (!s ? '' : (s.length <= n ? s : s.slice(0, n - 1) + '…')),
+  debounce(fn, ms) {
+    let t = null
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms) }
+  },
+}
+
+ns.Room = (() => {
+  const url = new URL(location.href)
+  const q = url.searchParams.get('room')
+  const h = location.hash ? location.hash.slice(1) : ''
+  const room = (q || h || ns.Config.DEFAULT_ROOM).trim()
+  ns.UI.setPill('room', `ROOM: ${room}`, 'ok')
+  return room
+})()
+
+
+/* ---------------------------------------------------------------------------
+   [3] STORAGE (IndexedDB, без внешних либ)
+   note = { id, text, createdAt, updatedAt, published, vector, hasVector }
+--------------------------------------------------------------------------- */
+ns.Storage = (() => {
+  const { name, version, store } = ns.Config.DB
+  let db = null
+
+  const open = () => new Promise((resolve, reject) => {
+    if (db) return resolve(db)
+    const req = indexedDB.open(name, version)
+
+    req.onupgradeneeded = (ev) => {
+      const _db = ev.target.result
+      if (!_db.objectStoreNames.contains(store)) {
+        const st = _db.createObjectStore(store, { keyPath: 'id' })
+        st.createIndex('updatedAt', 'updatedAt')
+        st.createIndex('hasVector', 'hasVector')
+        st.createIndex('published', 'published')
+      }
     }
-  };
-  const renderMixedList = (c, items, qt) => {
-    c.innerHTML = '';
-    if (!items.length) { const d = document.createElement('div'); d.className = 'empty'; d.textContent = '(empty)'; c.appendChild(d); return; }
-    for (const r of items) {
-      const isLocal = r.kind === 'local', text = r.source.text;
-      const row = document.createElement('div'); row.className = `item ${isLocal ? 'local' : 'world ephemeral'}`;
-      const score = document.createElement('span'); score.className = 'score'; score.textContent = typeof r.score === 'number' ? r.score.toFixed(3) : '';
-      const body = document.createElement('div'); body.innerHTML = ns.Relevance.highlightFragment(qt, text);
-      const meta = document.createElement('div'); meta.className = 'meta';
-      meta.textContent = isLocal ? `local · ${r.source.id.slice(0,6)}` : `from:${(r.source.fromPeer || '?').slice(0,10)}`;
-      row.appendChild(score); row.appendChild(body); row.appendChild(meta); c.appendChild(row);
+
+    req.onsuccess = (ev) => { db = ev.target.result; resolve(db) }
+    req.onerror = () => reject(req.error)
+  })
+
+  const txStore = (mode) => db.transaction(store, mode).objectStore(store)
+  const prom = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+
+  const put = async (row) => { await open(); return prom(txStore('readwrite').put(row)) }
+  const getAll = async () => {
+    await open()
+    const all = await prom(txStore('readonly').getAll())
+    all.sort((a, b) => b.updatedAt - a.updatedAt)
+    return all
+  }
+  const clear = async () => { await open(); return prom(txStore('readwrite').clear()) }
+
+  const listUnindexed = async () => {
+    await open()
+    const out = []
+    return new Promise((resolve, reject) => {
+      const req = txStore('readonly').index('hasVector').openCursor(IDBKeyRange.only(0))
+      req.onsuccess = (ev) => {
+        const c = ev.target.result
+        if (!c) return resolve(out)
+        out.push(c.value)
+        c.continue()
+      }
+      req.onerror = () => reject(req.error)
+    })
+  }
+
+  return { open, put, getAll, clear, listUnindexed }
+})()
+
+
+/* ---------------------------------------------------------------------------
+   [4] VECTOR (transformers.js)
+--------------------------------------------------------------------------- */
+ns.Vector = (() => {
+  // transformers.js импортируем модулем
+  let extractor = null
+  let loading = null
+
+  const load = async (onProgressPct) => {
+    if (extractor) return extractor
+    if (loading) return loading
+
+    // импорт прямо тут (чтобы файл был один)
+    const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js')
+
+    env.allowLocalModels = false
+    env.useBrowserCache = true
+
+    loading = pipeline('feature-extraction', ns.Config.MODEL_ID, {
+      progress_callback: (p) => {
+        if (p.status === 'progress' && p.total) {
+          const pct = Math.round((p.loaded / p.total) * 100)
+          onProgressPct?.(pct)
+        }
+      }
+    }).then((ex) => {
+      extractor = ex
+      loading = null
+      return extractor
+    }).catch((e) => {
+      loading = null
+      throw e
+    })
+
+    return loading
+  }
+
+  const embed = async (text) => {
+    if (!extractor) throw new Error('MODEL_NOT_LOADED')
+    const out = await extractor(text, { pooling: 'mean', normalize: true })
+    return out.data // Float32Array
+  }
+
+  const dot = (a, b) => {
+    if (!a || !b || a.length !== b.length) return 0
+    let s = 0
+    for (let i = 0; i < a.length; i++) s += a[i] * b[i]
+    return s
+  }
+
+  return { load, embed, dot, isLoaded: () => extractor !== null }
+})()
+
+
+/* ---------------------------------------------------------------------------
+   [5] IN-MEMORY STATE (чтобы быстро ранжировать и отвечать на P2P)
+--------------------------------------------------------------------------- */
+ns.State = (() => {
+  const state = {
+    notes: [],        // persisted notes
+    indexed: 0,       // how many have vectors
+  }
+
+  const reload = async () => {
+    state.notes = await ns.Storage.getAll()
+    state.indexed = state.notes.filter(n => n && n.hasVector && n.vector).length
+    ns.UI.setPill('indexed', `INDEXED: ${state.indexed}/${state.notes.length}`, (state.notes.length && state.indexed === state.notes.length) ? 'ok' : 'warn')
+  }
+
+  return { state, reload }
+})()
+
+
+/* ---------------------------------------------------------------------------
+   [6] EPHEMERAL (WORLD результаты в RAM, TTL)
+--------------------------------------------------------------------------- */
+ns.Ephemeral = (() => {
+  const byPeer = new Map() // peerId -> { lastSeen, results: [] }
+
+  const upsert = (peerId, results) => {
+    byPeer.set(peerId, { lastSeen: ns.Util.now(), results: results || [] })
+  }
+
+  const prune = () => {
+    const ttl = ns.Config.LIMITS.EPHEMERAL_TTL_MS
+    const t = ns.Util.now()
+    for (const [peerId, rec] of byPeer) {
+      if (t - rec.lastSeen > ttl) byPeer.delete(peerId)
     }
-  };
-  const clearAll = () => { renderLocalList(refs.listMine, [], ''); renderWorldList(refs.listWorld, [], ''); renderMixedList(refs.listAdjacent, [], ''); };
-  const updateLiveRelevance = async () => {
-    if (!ns.Vector.isLoaded()) { clearAll(); return; }
-    const text = refs.input.value.trim();
-    if (!text) { clearAll(); lastQuery = { text: null, vector: null }; setThink(false); return; }
-    let qv;
-    if (lastQuery.text === text && lastQuery.vector) { qv = lastQuery.vector; }
-    else {
-      setThink(true, 'считаю вектор...');
-      try { qv = await ns.Vector.embed(text); lastQuery = { text, vector: qv }; }
-      catch (e) { setThink(false); ns.Logger.error('embed fail', e.message); return; }
-      setThink(true, 'запрашиваю пиры...');
+  }
+
+  const allResults = () => {
+    prune()
+    const out = []
+    for (const [peerId, rec] of byPeer) {
+      for (const r of (rec.results || [])) out.push({ ...r, peerId, receivedAt: rec.lastSeen })
     }
-    if (ns.Channel.getActivePeers().length > 0 && ns.Channel.isConnected()) ns.Channel.query(qv).catch((e) => ns.Logger.warn('query fail', e.message));
-    const locals = await ns.Storage.all();
-    const eph = ns.Ephemeral.allResults();
-    const { mine, world, adjacent } = ns.Relevance.rankAll(qv, locals, eph);
-    renderLocalList(refs.listMine, mine, text);
-    renderWorldList(refs.listWorld, world, text);
-    renderMixedList(refs.listAdjacent, adjacent, text);
-    setThink(false);
-  };
-  const invalidateCache = () => { lastQuery = { text: null, vector: null }; };
-  const renderAll = async () => {
-    const all = await ns.Storage.all();
-    const sorted = all.sort((a, b) => b.createdAt - a.createdAt).slice(0, ns.Config.LIMITS.RENDER_CAP);
-    refs.listAll.innerHTML = '';
-    for (const t of sorted) {
-      const row = document.createElement('div'); row.className = 'item local';
-      const body = document.createElement('div'); body.textContent = t.text;
-      const meta = document.createElement('div'); meta.className = 'meta';
-      meta.textContent = `${new Date(t.createdAt).toISOString().slice(0,16)} · ${t.published ? 'world' : 'local'} · vec:${t.hasVector ? 'yes' : 'no'} · ${t.id.slice(0,6)}`;
-      row.appendChild(body); row.appendChild(meta); refs.listAll.appendChild(row);
+    return out
+  }
+
+  const clear = () => byPeer.clear()
+
+  return { upsert, allResults, clear, prune }
+})()
+
+
+/* ---------------------------------------------------------------------------
+   [7] RELEVANCE (локально / мир / serendipity)
+--------------------------------------------------------------------------- */
+ns.Relevance = (() => {
+  const rankLocalTop = (queryVec, topK) => {
+    const out = []
+    for (const n of ns.State.state.notes) {
+      if (!n?.hasVector || !n.vector) continue
+      const score = ns.Vector.dot(queryVec, n.vector)
+      out.push({ note: n, score })
     }
-    const indexed = all.filter((t) => t.hasVector).length;
-    setPill('indexed', `INDEXED: ${indexed}/${all.length}`, all.length > 0 && indexed === all.length ? 'ok' : 'warn');
-  };
-  const refresh = async () => { invalidateCache(); await renderAll(); await updateLiveRelevance(); };
-  const bind = () => {
-    const debouncedUpdate = ns.Util.debounce(async () => { setThink(false); await updateLiveRelevance(); }, ns.Config.LIMITS.DEBOUNCE_MS);
-    refs.input.addEventListener('input', () => {
-      const text = refs.input.value.trim();
-      if (!text) { clearAll(); lastQuery = { text: null, vector: null }; setThink(false); return; }
-      setThink(true, 'жду паузу...'); debouncedUpdate();
-    });
-    const disableSavers = (v) => { refs.btnSave.disabled = refs.btnSaveWorld.disabled = v; };
-    refs.btnSave.addEventListener('click', async () => {
-      try { disableSavers(true); await ns.Sync.saveLocal({ text: refs.input.value, publishToWorld: false }); refs.input.value = ''; clearAll(); await renderAll(); }
-      catch (e) { ns.Logger.error('save fail', e.message); } finally { disableSavers(false); }
-    });
-    refs.btnSaveWorld.addEventListener('click', async () => {
-      try { disableSavers(true); await ns.Sync.saveLocal({ text: refs.input.value, publishToWorld: true }); refs.input.value = ''; clearAll(); await renderAll(); }
-      catch (e) { ns.Logger.error('save fail', e.message); } finally { disableSavers(false); }
-    });
-    refs.btnLoadModel.addEventListener('click', async () => {
-      try { refs.btnLoadModel.disabled = true; setPill('model', 'MODEL: loading...', 'warn');
-        await ns.Vector.load((p) => { const pct = Math.round((p.loaded / p.total) * 100); setProgress(pct); setPill('model', `MODEL: ${pct}%`, 'warn'); });
-        setPill('model', 'MODEL: ready', 'ok'); setProgress(100);
-      } catch (e) { setPill('model', 'MODEL: err', 'err'); ns.Logger.error('model fail', e.message); } finally { refs.btnLoadModel.disabled = false; }
-    });
-    refs.btnReindex.addEventListener('click', async () => {
-      if (!ns.Vector.isLoaded()) { ns.Logger.warn('Load model first'); return; }
-      try { refs.btnReindex.disabled = true;
-        await ns.Sync.reindexAll((p) => { setPill('model', `MODEL: reindex ${p.done}/${p.total}`, 'warn'); });
-        setPill('model', 'MODEL: ready', 'ok'); invalidateCache(); await renderAll();
-      } catch (e) { ns.Logger.error('reindex fail', e.message); } finally { refs.btnReindex.disabled = false; }
-    });
-    refs.btnSeed.addEventListener('click', async () => {
-      const samples = ['Мысль появляется в паузе между действиями.','Архитектура — это способ договариваться с будущим собой.','Случайность — недооценённый инструмент поиска.','Иногда нужно просто записать, чтобы понять.','Связи между идеями важнее самих идей.'];
-      for (const s of samples) await ns.Sync.saveLocal({ text: s, publishToWorld: true });
-      invalidateCache(); await renderAll();
-    });
-    refs.btnPing.addEventListener('click', () => {
-      if (!ns.Channel.isConnected()) { ns.Logger.warn('not connected'); return; }
-      ns.Channel.ping(); ns.Logger.info('ping sent, peers=' + ns.Channel.getActivePeers().length);
-    });
-    refs.btnReset.addEventListener('click', async () => {
-      if (!confirm('Стереть все локальные заметки?')) return;
-      try { await ns.Storage.clear(); ns.Ephemeral.clear(); invalidateCache(); clearAll(); await renderAll(); ns.Logger.warn('storage cleared'); }
-      catch (e) { ns.Logger.error('reset fail', e.message); }
-    });
-    refs.btnConnect.addEventListener('click', async () => {
-      const strategy = refs.stratSelect.value;
-      const roomName = refs.roomInput.value.trim();
-      if (!roomName) { ns.Logger.warn('room name empty'); return; }
+    out.sort((a, b) => b.score - a.score)
+    return out.slice(0, topK).map(({ note, score }) => ({
+      kind: 'local',
+      ephemeral: false,
+      text: ns.Util.snippet(note.text, ns.Config.LIMITS.SNIPPET),
+      score,
+      meta: `${note.published ? 'world' : 'local'} · ${new Date(note.createdAt).toISOString().slice(0,16)} · ${note.id.slice(0,6)}`,
+    }))
+  }
+
+  // low-corr candidates from local notes (для serendipity)
+  const rankLocalLowCorr = (queryVec, { min, max, limit }) => {
+    const pool = []
+    for (const n of ns.State.state.notes) {
+      if (!n?.hasVector || !n.vector) continue
+      const score = ns.Vector.dot(queryVec, n.vector)
+      if (score >= min && score <= max) pool.push({ note: n, score })
+    }
+    pool.sort((a, b) => (a.score - b.score) + (Math.random() - 0.5) * 0.03)
+    return pool.slice(0, limit).map(({ note, score }) => ({
+      kind: 'local',
+      ephemeral: false,
+      text: ns.Util.snippet(note.text, ns.Config.LIMITS.SNIPPET),
+      score,
+      meta: `${note.published ? 'world' : 'local'} · low-corr · ${note.id.slice(0,6)}`,
+    }))
+  }
+
+  const serendipityMix = (localLow, worldLow, limit) => {
+    const mix = []
+    const a = localLow.slice()
+    const b = worldLow.slice()
+    while (mix.length < limit && (a.length || b.length)) {
+      if (a.length) mix.push(a.shift())
+      if (mix.length >= limit) break
+      if (b.length) mix.push(b.shift())
+    }
+    return mix.slice(0, limit)
+  }
+
+  return { rankLocalTop, rankLocalLowCorr, serendipityMix }
+})()
+
+
+/* ---------------------------------------------------------------------------
+   [8] TRYSTERO LOADER (по-умному: пробуем несколько CDN)
+   Почему так: чтобы не упираться в 404, как у тебя.
+--------------------------------------------------------------------------- */
+ns.TrysteroLoader = (() => {
+  const candidates = [
+    // обычно работает
+    'https://esm.sh/trystero@0.17.1/torrent?bundle&target=es2022',
+    'https://esm.sh/trystero/torrent?bundle&target=es2022',
+
+    // запасные
+    'https://jspm.dev/trystero/torrent',
+    'https://cdn.skypack.dev/trystero/torrent',
+    'https://esm.run/trystero/torrent',
+  ]
+
+  const loadJoinRoom = async () => {
+    const errors = []
+    for (const url of candidates) {
       try {
-        refs.btnConnect.disabled = true; refs.stratSelect.disabled = true;
-        setPill('net', 'NET: ' + strategy + ' connecting...', 'warn');
-        await ns.Channel.init(strategy, roomName);
-        setPill('net', 'NET: ' + strategy + ' online', 'ok');
-        refs.btnDisconnect.disabled = false;
-        ns.Channel.startPingLoop();
-        ns.Channel.ping();
+        const mod = await import(url)
+        if (typeof mod.joinRoom !== 'function') throw new Error('joinRoom not found')
+        ns.UI.logLine('i', 'Trystero loaded', url)
+        return mod.joinRoom
       } catch (e) {
-        setPill('net', 'NET: err', 'err');
-        ns.Logger.error('connect fail', e.message);
-      } finally { refs.btnConnect.disabled = false; }
-    });
-    refs.btnDisconnect.addEventListener('click', () => {
-      ns.Channel.leave(); setPill('net', 'NET: offline', 'warn'); setPill('peers', 'PEERS: 0', 'warn');
-      refs.btnDisconnect.disabled = true; refs.stratSelect.disabled = false; ns.Ephemeral.clear();
-    });
-    document.addEventListener('ns:thoughts-changed', async () => { invalidateCache(); await renderAll(); await updateLiveRelevance(); });
-    document.addEventListener('ns:ephemeral-changed', updateLiveRelevance);
-    document.addEventListener('ns:peers', (ev) => { setPill('peers', `PEERS: ${ev.detail.count}`, ev.detail.count ? 'ok' : 'warn'); });
-  };
-  const init = () => { cache(); bind(); };
-  return { init, refresh, setPill };
-})();
+        errors.push({ url, err: String(e?.message || e) })
+        ns.UI.logLine('w', 'Trystero import failed', { url, err: String(e?.message || e) })
+      }
+    }
+    const msg = 'Cannot import trystero/torrent from CDNs. Try другой интернет/без adblock или поставь npm+vite.'
+    const err = new Error(msg)
+    err.details = errors
+    throw err
+  }
 
-/* --------------------------------------------------------------------------
-   [11] APP
-   -------------------------------------------------------------------------- */
+  return { loadJoinRoom }
+})()
+
+
+/* ---------------------------------------------------------------------------
+   [9] P2P (Trystero/torrent)
+   Протокол:
+     ns:q:req { v:1, requestId, vec:Array<number>, k:number }
+     ns:q:res { v:1, requestId, results:[{text,score,noteId}] }
+--------------------------------------------------------------------------- */
+ns.P2P = (() => {
+  const peers = new Set()
+  let joinRoomFn = null
+  let room = null
+
+  let sendReq = null, onReq = null
+  let sendRes = null, onRes = null
+
+  const pending = new Map() // requestId -> { deadline, results: [] }
+
+  const refreshPeers = () => {
+    ns.UI.setPill('peers', `PEERS: ${peers.size}`, peers.size ? 'ok' : 'warn')
+  }
+
+  const init = async () => {
+    ns.UI.setPill('p2p', 'P2P: loading...', 'warn')
+    joinRoomFn = await ns.TrysteroLoader.loadJoinRoom()
+
+    room = joinRoomFn(
+      { appId: ns.Config.APP_ID, trackers: ns.Config.TRACKERS, rtcConfig: ns.Config.RTC },
+      ns.Room
+    )
+
+    ;[sendReq, onReq] = room.makeAction('ns:q:req')
+    ;[sendRes, onRes] = room.makeAction('ns:q:res')
+
+    room.onPeerJoin?.((peerId) => {
+      peers.add(peerId)
+      refreshPeers()
+      ns.UI.logLine('i', 'peer join', peerId)
+    })
+    room.onPeerLeave?.((peerId) => {
+      peers.delete(peerId)
+      refreshPeers()
+      ns.UI.logLine('w', 'peer leave', peerId)
+    })
+
+    // incoming query -> answer ONLY published notes
+    onReq(async (payload, peerId) => {
+      try {
+        if (!payload || payload.v !== 1) return
+        const requestId = payload.requestId
+        const vecArr = payload.vec
+        const k = ns.Util.clamp(payload.k ?? ns.Config.LIMITS.WORLD_TOPK, 1, 10)
+        if (!requestId || !Array.isArray(vecArr)) return
+
+        const qv = new Float32Array(vecArr)
+
+        // отвечаем только published + hasVector
+        const pool = []
+        for (const n of ns.State.state.notes) {
+          if (!n?.published || !n?.hasVector || !n.vector) continue
+          const score = ns.Vector.dot(qv, n.vector)
+          pool.push({
+            noteId: n.id,
+            text: ns.Util.snippet(n.text, ns.Config.LIMITS.SNIPPET),
+            score,
+            updatedAt: n.updatedAt,
+          })
+        }
+        pool.sort((a, b) => b.score - a.score)
+
+        sendRes(peerId, { v: 1, requestId, results: pool.slice(0, k) })
+      } catch (e) {
+        ns.UI.logLine('w', 'req handler failed', String(e?.message || e))
+      }
+    })
+
+    // incoming responses -> collect into pending and into ephemeral RAM
+    onRes((payload, peerId) => {
+      if (!payload || payload.v !== 1) return
+      const { requestId, results } = payload
+      const p = pending.get(requestId)
+      if (!p) return
+
+      const normalized = (results || []).map(r => ({
+        kind: 'world',
+        ephemeral: true,
+        text: r.text || '',
+        score: (typeof r.score === 'number') ? r.score : 0,
+        meta: `from ${String(peerId).slice(0,8)} · ${String(r.noteId || '').slice(0,6)}`,
+      }))
+
+      p.results.push(...normalized)
+
+      // обновляем RAM-кеш “мира” по peer
+      ns.Ephemeral.upsert(peerId, normalized)
+    })
+
+    ns.UI.setPill('p2p', 'P2P: online', 'ok')
+    refreshPeers()
+
+    // sweeper pending
+    const sweep = () => {
+      const t = ns.Util.now()
+      for (const [id, p] of pending) if (t >= p.deadline) pending.delete(id)
+      requestAnimationFrame(sweep)
+    }
+    sweep()
+  }
+
+  const queryWorld = async (queryVec, { timeoutMs, k } = {}) => {
+    if (!sendReq) return []
+    if (!peers.size) return []
+
+    const requestId = ns.Util.id()
+    const deadline = ns.Util.now() + (timeoutMs ?? ns.Config.LIMITS.QUERY_TIMEOUT_MS)
+    pending.set(requestId, { deadline, results: [] })
+
+    // Отправляем Array<number>, чтобы structured clone не чудил.
+    sendReq({ v: 1, requestId, vec: Array.from(queryVec), k: k ?? ns.Config.LIMITS.WORLD_TOPK })
+
+    await new Promise(r => setTimeout(r, timeoutMs ?? ns.Config.LIMITS.QUERY_TIMEOUT_MS))
+
+    const p = pending.get(requestId)
+    const results = (p?.results || [])
+      .filter(x => x.text)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, ns.Config.LIMITS.WORLD_TOPK)
+
+    return results
+  }
+
+  return { init, queryWorld, peersCount: () => peers.size }
+})()
+
+
+/* ---------------------------------------------------------------------------
+   [10] RENDER
+--------------------------------------------------------------------------- */
+ns.Render = (() => {
+  const renderAllNotes = async () => {
+    const all = ns.State.state.notes
+    const html = all.slice(0, 200).map(n => ns.UI.itemHtml({
+      kind: 'local',
+      ephemeral: false,
+      text: ns.Util.snippet(n.text, ns.Config.LIMITS.SNIPPET),
+      score: n.hasVector ? 1 : 0,
+      meta: `${n.published ? 'world' : 'local'} · vec:${n.hasVector ? 'yes' : 'no'} · ${new Date(n.createdAt).toISOString().slice(0,16)} · ${n.id.slice(0,6)}`
+    }))
+    ns.UI.renderList(ns.UI.refs.listAll, html, '(empty)')
+  }
+
+  const renderLive = ({ local, world, ser }) => {
+    ns.UI.renderList(
+      ns.UI.refs.listMine,
+      (local || []).map(x => ns.UI.itemHtml(x)),
+      '(empty)'
+    )
+    ns.UI.renderList(
+      ns.UI.refs.listWorld,
+      (world || []).map(x => ns.UI.itemHtml(x)),
+      ns.P2P.peersCount() ? '(no matches)' : '(no peers)'
+    )
+    ns.UI.renderList(
+      ns.UI.refs.listSer,
+      (ser || []).map(x => ns.UI.itemHtml(x)),
+      '(empty)'
+    )
+  }
+
+  return { renderAllNotes, renderLive }
+})()
+
+
+/* ---------------------------------------------------------------------------
+   [11] LIVE UPDATE (debounced)
+--------------------------------------------------------------------------- */
+ns.Live = (() => {
+  let lastQuery = { text: null, vec: null }
+
+  const compute = async () => {
+    const text = ns.Util.normalizeText(ns.UI.refs.input.value)
+    if (!text) {
+      ns.Render.renderLive({ local: [], world: [], ser: [] })
+      ns.UI.setThink(false)
+      lastQuery = { text: null, vec: null }
+      return
+    }
+
+    if (!ns.Vector.isLoaded()) {
+      ns.UI.setThink(true, 'load model first')
+      ns.Render.renderLive({ local: [], world: [], ser: [] })
+      return
+    }
+
+    ns.UI.setThink(true, 'embedding...')
+    let qv
+    if (lastQuery.text === text && lastQuery.vec) qv = lastQuery.vec
+    else {
+      qv = await ns.Vector.embed(text)
+      lastQuery = { text, vec: qv }
+    }
+
+    ns.UI.setThink(true, 'rank local...')
+    const local = ns.Relevance.rankLocalTop(qv, ns.Config.LIMITS.LOCAL_TOPK)
+
+    ns.UI.setThink(true, 'query peers...')
+    const world = await ns.P2P.queryWorld(qv, { timeoutMs: ns.Config.LIMITS.QUERY_TIMEOUT_MS })
+
+    // serendipity = low corr local + low corr world
+    const localLow = ns.Relevance.rankLocalLowCorr(qv, {
+      min: ns.Config.SER.min,
+      max: ns.Config.SER.max,
+      limit: ns.Config.LIMITS.SER_TOPK
+    })
+    const worldLow = (ns.Ephemeral.allResults() || [])
+      .filter(x => typeof x.score === 'number' && x.score >= ns.Config.SER.min && x.score <= ns.Config.SER.max)
+      .sort((a, b) => (a.score - b.score) + (Math.random() - 0.5) * 0.03)
+      .slice(0, ns.Config.LIMITS.SER_TOPK)
+      .map(x => ({ ...x, meta: (x.meta ? x.meta + ' · ' : '') + 'low-corr' }))
+
+    const ser = ns.Relevance.serendipityMix(localLow, worldLow, ns.Config.LIMITS.SER_TOPK)
+
+    ns.Render.renderLive({ local, world, ser })
+    ns.UI.setThink(false)
+  }
+
+  const debounced = ns.Util.debounce(() => {
+    ns.UI.setThink(false)
+    compute().catch(e => ns.UI.logLine('e', 'live compute failed', String(e?.message || e)))
+  }, ns.Config.LIMITS.DEBOUNCE_MS)
+
+  const invalidate = () => { lastQuery = { text: null, vec: null } }
+
+  return { compute, debounced, invalidate }
+})()
+
+
+/* ---------------------------------------------------------------------------
+   [12] ACTIONS (save / reindex / seed / reset)
+--------------------------------------------------------------------------- */
+ns.Actions = (() => {
+  const save = async ({ publish }) => {
+    const text = ns.Util.normalizeText(ns.UI.refs.input.value)
+    if (!text) return
+
+    const note = {
+      id: ns.Util.id(),
+      text,
+      createdAt: ns.Util.now(),
+      updatedAt: ns.Util.now(),
+      published: !!publish,
+      vector: null,
+      hasVector: 0,
+    }
+
+    if (ns.Vector.isLoaded()) {
+      ns.UI.setThink(true, 'embedding (save)...')
+      note.vector = await ns.Vector.embed(text)
+      note.hasVector = note.vector ? 1 : 0
+      ns.UI.setThink(false)
+    }
+
+    await ns.Storage.put(note)
+    ns.UI.refs.input.value = ''
+    ns.Live.invalidate()
+    await ns.State.reload()
+    await ns.Render.renderAllNotes()
+    await ns.Live.compute()
+  }
+
+  const reindexMissing = async () => {
+    if (!ns.Vector.isLoaded()) {
+      ns.UI.logLine('w', 'Load model first')
+      return
+    }
+
+    const pending = await ns.Storage.listUnindexed()
+    for (let i = 0; i < pending.length; i++) {
+      const n = pending[i]
+      ns.UI.setThink(true, `reindex ${i + 1}/${pending.length}`)
+      try {
+        n.vector = await ns.Vector.embed(n.text)
+        n.hasVector = n.vector ? 1 : 0
+        n.updatedAt = ns.Util.now()
+        await ns.Storage.put(n)
+      } catch (e) {
+        ns.UI.logLine('w', 'reindex failed', String(e?.message || e))
+      }
+    }
+    ns.UI.setThink(false)
+    ns.Live.invalidate()
+    await ns.State.reload()
+    await ns.Render.renderAllNotes()
+    await ns.Live.compute()
+  }
+
+  const seed5 = async () => {
+    const samples = [
+      'Мысль появляется в паузе между действиями.',
+      'Архитектура — это способ договариваться с будущим собой.',
+      'Случайность — недооценённый инструмент поиска.',
+      'Иногда нужно просто записать, чтобы понять.',
+      'Связи между идеями важнее самих идей.',
+    ]
+    for (const s of samples) {
+      ns.UI.refs.input.value = s
+      await save({ publish: true })
+    }
+  }
+
+  const reset = async () => {
+    if (!confirm('Стереть все локальные заметки?')) return
+    await ns.Storage.clear()
+    ns.Ephemeral.clear()
+    ns.Live.invalidate()
+    ns.UI.refs.input.value = ''
+    await ns.State.reload()
+    await ns.Render.renderAllNotes()
+    await ns.Live.compute()
+    ns.UI.logLine('w', 'storage cleared')
+  }
+
+  return { save, reindexMissing, seed5, reset }
+})()
+
+
+/* ---------------------------------------------------------------------------
+   [13] BOOT
+--------------------------------------------------------------------------- */
 ns.App = (() => {
-  const boot = async () => {
-    ns.UI.init();
-    ns.UI.setPill('idb', 'IDB: boot...', 'warn');
-    ns.UI.setPill('net', 'NET: offline', 'warn');
-    try { await ns.Storage.open(); ns.UI.setPill('idb', 'IDB: OK', 'ok'); ns.Logger.success('IDB ready'); }
-    catch (e) { ns.UI.setPill('idb', 'IDB: ERR', 'err'); ns.Logger.error('IDB fail', e.message); return; }
-    await ns.UI.refresh();
-    ns.Logger.success('app ready. select MQTT strategy (default), enter room, click Connect');
-    ns.Logger.info('MQTT uses broker.emqx.io:8084 (working WSS). Nostr uses damus+nos.lol.');
-  };
-  return { boot };
-})();
+  const bind = () => {
+    ns.UI.refs.input.addEventListener('input', () => {
+      const t = ns.UI.refs.input.value.trim()
+      if (!t) {
+        ns.Live.invalidate()
+        ns.Live.compute()
+        return
+      }
+      ns.UI.setThink(true, 'waiting pause...')
+      ns.Live.debounced()
+    })
 
-ns.App.boot();
+    ns.UI.refs.btnLoadModel.addEventListener('click', async () => {
+      try {
+        ns.UI.refs.btnLoadModel.disabled = true
+        ns.UI.setPill('model', 'MODEL: loading...', 'warn')
+        ns.UI.setProgress(0)
+
+        await ns.Vector.load((pct) => {
+          ns.UI.setProgress(pct)
+          ns.UI.setPill('model', `MODEL: ${pct}%`, 'warn')
+        })
+
+        ns.UI.setProgress(100)
+        ns.UI.setPill('model', 'MODEL: ready', 'ok')
+        ns.UI.logLine('i', 'model loaded')
+
+        // после загрузки модели можно сразу пересчитать live
+        ns.Live.invalidate()
+        await ns.Live.compute()
+      } catch (e) {
+        ns.UI.setPill('model', 'MODEL: ERR', 'err')
+        ns.UI.logLine('e', 'model load failed', String(e?.message || e))
+      } finally {
+        ns.UI.refs.btnLoadModel.disabled = false
+      }
+    })
+
+    ns.UI.refs.btnSave.addEventListener('click', async () => {
+      ns.UI.refs.btnSave.disabled = ns.UI.refs.btnSaveWorld.disabled = true
+      try { await ns.Actions.save({ publish: false }) }
+      catch (e) { ns.UI.logLine('e', 'save failed', String(e?.message || e)) }
+      finally { ns.UI.refs.btnSave.disabled = ns.UI.refs.btnSaveWorld.disabled = false }
+    })
+
+    ns.UI.refs.btnSaveWorld.addEventListener('click', async () => {
+      ns.UI.refs.btnSave.disabled = ns.UI.refs.btnSaveWorld.disabled = true
+      try { await ns.Actions.save({ publish: true }) }
+      catch (e) { ns.UI.logLine('e', 'save world failed', String(e?.message || e)) }
+      finally { ns.UI.refs.btnSave.disabled = ns.UI.refs.btnSaveWorld.disabled = false }
+    })
+
+    ns.UI.refs.btnReindex.addEventListener('click', async () => {
+      ns.UI.refs.btnReindex.disabled = true
+      try { await ns.Actions.reindexMissing() }
+      finally { ns.UI.refs.btnReindex.disabled = false }
+    })
+
+    ns.UI.refs.btnSeed.addEventListener('click', async () => {
+      ns.UI.refs.btnSeed.disabled = true
+      try { await ns.Actions.seed5() }
+      finally { ns.UI.refs.btnSeed.disabled = false }
+    })
+
+    ns.UI.refs.btnReset.addEventListener('click', ns.Actions.reset)
+  }
+
+  const boot = async () => {
+    ns.UI.setPill('idb', 'IDB: boot...', 'warn')
+    try {
+      await ns.Storage.open()
+      ns.UI.setPill('idb', 'IDB: OK', 'ok')
+    } catch (e) {
+      ns.UI.setPill('idb', 'IDB: ERR', 'err')
+      ns.UI.logLine('e', 'IDB init failed', String(e?.message || e))
+      return
+    }
+
+    ns.UI.setPill('model', 'MODEL: idle', 'warn')
+    ns.UI.setPill('p2p', 'P2P: boot...', 'warn')
+    ns.UI.setPill('peers', 'PEERS: 0', 'warn')
+
+    // грузим notes в память
+    await ns.State.reload()
+    await ns.Render.renderAllNotes()
+    await ns.Live.compute()
+
+    // биндим UI
+    bind()
+
+    // поднимаем P2P (важно: делаем после UI, чтобы видеть логи)
+    try {
+      await ns.P2P.init()
+    } catch (e) {
+      ns.UI.setPill('p2p', 'P2P: ERR', 'err')
+      ns.UI.logLine('e', 'P2P init failed', { msg: String(e?.message || e), details: e?.details || null })
+    }
+
+    ns.UI.logLine('i', 'app ready', { room: ns.Room })
+  }
+
+  return { boot }
+})()
+
+ns.App.boot()
 </script>
 </body>
 </html>
