@@ -3,11 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Noosphere · Nostr Simple</title>
+<title>Noosphere · Nostr Simple (v2, jsdelivr)</title>
 <style>
-/* ============================================================
-   SECTION 1 · CSS
-   ============================================================ */
 :root{
   --bg:#0b0d12; --fg:#d8dde6; --mut:#6b7280; --acc:#7cc4ff;
   --ok:#58d68d; --wn:#f5b041; --er:#ec7063; --pan:#12161f; --br:#1f2631;
@@ -28,7 +25,7 @@ button.dng{background:#3a1e24;border-color:var(--er)}
 input,textarea,select{background:#0f1420;color:var(--fg);border:1px solid var(--br);
   border-radius:7px;padding:9px 11px;font-size:14px;width:100%;font-family:inherit}
 textarea{resize:vertical;min-height:70px;line-height:1.5}
-input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc)}
+input:focus,textarea:focus{outline:none;border-color:var(--acc)}
 .row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
 .row>*{flex:1;min-width:0}
 .kv{display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px dashed #1a1f2a}
@@ -42,8 +39,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc)}
 .tab small{color:var(--mut);font-size:10px;margin-left:4px}
 .card{padding:9px 11px;background:#0f1420;border-left:3px solid var(--acc);margin:5px 0;
   font-size:13px;border-radius:5px;word-break:break-word}
-.card.adj{border-left-color:var(--wn)}
-.card.world{border-left-color:var(--mut)}
+.card.adj{border-left-color:var(--wn)} .card.world{border-left-color:var(--mut)}
 .card .m{color:var(--mut);font-size:10px;margin-top:4px}
 .card .sim{color:var(--wn);font-weight:600;margin-right:6px}
 #log{font-family:ui-monospace,Menlo,monospace;font-size:10px;line-height:1.5;max-height:160px;
@@ -61,7 +57,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc)}
 </head>
 <body>
 
-<h1>◈ Noosphere · Nostr <small>direct path</small></h1>
+<h1>◈ Noosphere · Nostr <small>jsdelivr + self-nostr</small></h1>
 
 <div class="pan">
   <h2>Thought</h2>
@@ -70,7 +66,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc)}
     <div class="meter" style="flex:1"><div id="debounceBar" style="width:0%"></div></div>
     <span id="stDebounce" style="font-size:11px;color:var(--mut);min-width:60px;text-align:right">idle</span>
   </div>
-  <p class="hint">Дебаунс 4 сек. Остановился печатать → MiniLM делает вектор → публикуется в Nostr (только вектор, не текст).</p>
+  <p class="hint">Дебаунс 4 сек. Мини-пауза → MiniLM → Nostr (публикуется только int8 вектор, не текст).</p>
 </div>
 
 <div class="pan">
@@ -86,7 +82,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc)}
   <div id="v-adj" class="hidden"><div id="listAdj"><i class="hint">нет смежных мыслей</i></div></div>
 
   <div id="v-diag" class="hidden">
-    <div class="kv"><span>identity</span><span id="stPub">—</span></div>
+    <div class="kv"><span>identity (npub-сокращ.)</span><span id="stPub">—</span></div>
     <div class="kv"><span>relays online</span><span id="stRelays">0</span></div>
     <div class="kv"><span>model</span><span id="stModel"><span class="badge b-wn">unloaded</span></span></div>
     <div class="kv"><span>my vectors</span><span id="stMyVec">0</span></div>
@@ -121,10 +117,10 @@ wss://nostr.wine</textarea>
 
 <script type="module">
 /* ============================================================
-   SECTION 2 · CONFIG
+   SECTION 1 · CONFIG
    ============================================================ */
 const CFG = {
-  DB_NAME:       'noosphere_nostr_v1',
+  DB_NAME:       'noosphere_nostr_v2',
   STORE_NOTES:   'notes',
   STORE_ID:      'identity',
   KIND_NOTE:     30078,
@@ -135,14 +131,17 @@ const CFG = {
   LSH_PLANES:    8,
   DEBOUNCE_MS:   4000,
   SIM_THR:       0.25,
-  ADJ_DELTA:     0.15,
   MAX_WORLD:     200,
   MODEL_ID:      'Xenova/all-MiniLM-L6-v2',
   STALE_SEC:     600,
+  // CDN: jsdelivr — стабильно в РФ, есть CDN-узлы рядом
+  // резерв: esm.sh через esm.run (Cloudflare workers)
+  CDN_PRIMARY:   'https://cdn.jsdelivr.net/npm/',
+  CDN_FALLBACK:  'https://esm.run/',
 };
 
 /* ============================================================
-   SECTION 3 · LOGGING
+   SECTION 2 · LOGGING
    ============================================================ */
 const Log = {
   el: () => document.getElementById('log'),
@@ -161,6 +160,37 @@ const Log = {
   },
   i:(...a)=>Log.write('i',...a), w:(...a)=>Log.write('w',...a),
   e:(...a)=>Log.write('e',...a), s:(...a)=>Log.write('s',...a),
+};
+
+/* ============================================================
+   SECTION 3 · CDN RESILIENT IMPORTER
+   Пробует jsdelivr, потом esm.run, кэширует в sessionStorage.
+   ============================================================ */
+const Imp = {
+  cache: new Map(),
+  async load(path, subpath=''){
+    const key = path + '|' + subpath;
+    if(this.cache.has(key)) return this.cache.get(key);
+
+    const targets = [
+      CFG.CDN_PRIMARY + path + (subpath ? '/' + subpath : ''),
+      CFG.CDN_FALLBACK + path + (subpath ? '/' + subpath : ''),
+    ];
+
+    let lastErr = null;
+    for(const url of targets){
+      try {
+        const mod = await import(/* @vite-ignore */ url);
+        this.cache.set(key, mod);
+        Log.i('loaded:', url.slice(0, 70));
+        return mod;
+      } catch(e){
+        lastErr = e;
+        Log.w('cdn fail:', url.slice(0, 60), '→', e.message);
+      }
+    }
+    throw lastErr || new Error('all CDN failed for ' + path);
+  },
 };
 
 /* ============================================================
@@ -211,9 +241,9 @@ const Vec = {
   planes: null,
   async load(){
     if(this.pipe) return this.pipe;
-    Log.i('loading MiniLM…');
-    const { pipeline } = await import('https://esm.sh/@xenova/transformers@2.17.2');
-    this.pipe = await pipeline('feature-extraction', CFG.MODEL_ID, { quantized: true });
+    Log.i('loading MiniLM from jsdelivr…');
+    const tf = await Imp.load('@xenova/transformers@2.17.2');
+    this.pipe = await tf.pipeline('feature-extraction', CFG.MODEL_ID, { quantized: true });
     this._initLSH();
     Log.s('model ready');
     return this.pipe;
@@ -282,80 +312,214 @@ const Vec = {
 };
 
 /* ============================================================
-   SECTION 6 · NOSTR CLIENT (minimal, zero-dep via nostr-tools)
+   SECTION 6 · MINIMAL NOSTR CLIENT (собственная реализация,
+   без nostr-tools — чтобы не зависеть от esm.sh резолва)
+   - schnorr sign через @noble/curves secp256k1
+   - sha256 через @noble/hashes
+   - WebSocket для relay
    ============================================================ */
 const Nostr = {
-  tools: null,
-  sk: null,
-  pk: null,
-  pool: null,
+  secp: null,
+  sha256: null,
+  hex: null,
+  sk: null,         // Uint8Array 32 bytes
+  pk: null,         // hex string (32 bytes = 64 hex)
   relays: [],
-  subs: [],
-  relayStatus: new Map(),
+  relayStatus: new Map(),   // url -> 'pending'|'ok'|'err'
+  relaySockets: new Map(),  // url -> WebSocket
+  subs: new Map(),          // subId -> { filter, onEvent, onEose }
+  subCounter: 0,
+  eventHandlers: [],        // глобальные обработчики (для EOSE и т.д.)
+
   async init(){
-    this.tools = await import('https://esm.sh/nostr-tools@2.7.2');
+    Log.i('loading @noble/curves + @noble/hashes from jsdelivr…');
+    // @noble/curves secp256k1 для schnorr
+    const curves = await Imp.load('@noble/curves@1.4.0', 'secp256k1');
+    this.secp = curves.schnorr;
+    // @noble/hashes sha256
+    const hashes = await Imp.load('@noble/hashes@1.4.0', 'sha256');
+    this.sha256 = hashes.sha256;
+    // @noble/hashes utils (bytesToHex / hexToBytes)
+    const utils = await Imp.load('@noble/hashes@1.4.0', 'utils');
+    this.hex = {
+      toBytes: (h) => {
+        const out = new Uint8Array(h.length / 2);
+        for(let i=0; i<out.length; i++) out[i] = parseInt(h.substr(i*2, 2), 16);
+        return out;
+      },
+      fromBytes: (b) => Array.from(b).map(x => x.toString(16).padStart(2,'0')).join(''),
+    };
+    Log.s('crypto ready (schnorr + sha256)');
+
+    // load or generate secret key
     let skHex = await DB.getKV('sk');
     if(!skHex){
-      const { generateSecretKey } = this.tools;
-      const sk = generateSecretKey();
-      skHex = this.tools.bytesToHex(sk);
+      const sk = crypto.getRandomValues(new Uint8Array(32));
+      skHex = this.hex.fromBytes(sk);
       await DB.putKV('sk', skHex);
       Log.s('new identity generated');
     }
-    this.sk = this.tools.hexToBytes(skHex);
-    this.pk = this.tools.getPublicKey(this.sk);
+    this.sk = this.hex.toBytes(skHex);
+    this.pk = this.hex.fromBytes(this.secp.getPublicKey(this.sk));
     Log.i('pubkey:', this.pk.slice(0, 16) + '…');
-    this.pool = new this.tools.SimplePool();
   },
+
+  // Nostr event id = sha256(serialized event)
+  serializeEvent(ev){
+    return JSON.stringify([
+      0,
+      ev.pubkey,
+      ev.created_at,
+      ev.kind,
+      ev.tags,
+      ev.content,
+    ]);
+  },
+  eventId(ev){
+    const ser = this.serializeEvent(ev);
+    const bytes = new TextEncoder().encode(ser);
+    const h = this.sha256(bytes);
+    return this.hex.fromBytes(h);
+  },
+  signEvent(unsigned){
+    const ev = { ...unsigned, pubkey: this.pk };
+    ev.id = this.eventId(ev);
+    const sig = this.secp.sign(ev.id, this.sk);
+    ev.sig = this.hex.fromBytes(sig);
+    return ev;
+  },
+
   setRelays(list){
     this.relays = list.filter(u => u && u.startsWith('wss://'));
     Log.i('relays set:', this.relays.length);
   },
+
   async connect(){
+    this.disconnect();
     this.relayStatus.clear();
     for(const r of this.relays) this.relayStatus.set(r, 'pending');
     UI.updateRelays();
-    const promises = this.relays.map(async r => {
+
+    const promises = this.relays.map(url => new Promise(resolve => {
       try {
-        await this.pool.ensureRelays([r]);
-        this.relayStatus.set(r, 'ok');
-        Log.s('relay up:', r);
-      } catch(e){
-        this.relayStatus.set(r, 'err');
-        Log.w('relay fail:', r, e.message || e);
+        const ws = new WebSocket(url);
+        const timeout = setTimeout(() => {
+          try { ws.close(); } catch(e){}
+          this.relayStatus.set(url, 'err');
+          UI.updateRelays();
+          resolve(false);
+        }, 8000);
+
+        ws.onopen = () => {
+          clearTimeout(timeout);
+          this.relayStatus.set(url, 'ok');
+          this.relaySockets.set(url, ws);
+          Log.s('relay up:', url);
+          // re-subscribe all active subs
+          for(const [subId, sub] of this.subs){
+            ws.send(JSON.stringify(['REQ', subId, sub.filter]));
+          }
+          UI.updateRelays();
+          resolve(true);
+        };
+        ws.onerror = () => {
+          clearTimeout(timeout);
+          this.relayStatus.set(url, 'err');
+          UI.updateRelays();
+          resolve(false);
+        };
+        ws.onclose = () => {
+          this.relayStatus.set(url, 'err');
+          this.relaySockets.delete(url);
+          UI.updateRelays();
+        };
+        ws.onmessage = (e) => this._onMessage(url, e.data);
+      } catch(err){
+        this.relayStatus.set(url, 'err');
+        UI.updateRelays();
+        resolve(false);
       }
-      UI.updateRelays();
-    });
+    }));
     await Promise.allSettled(promises);
   },
+
   disconnect(){
-    try { for(const s of this.subs) s.close(); } catch(e){}
-    this.subs = [];
-    try { this.pool.close(this.relays); } catch(e){}
+    for(const [url, ws] of this.relaySockets){
+      try { ws.close(); } catch(e){}
+    }
+    this.relaySockets.clear();
+    this.relayStatus.clear();
   },
+
+  _onMessage(url, raw){
+    let msg;
+    try { msg = JSON.parse(raw); } catch { return; }
+    if(!Array.isArray(msg)) return;
+    const [type, ...rest] = msg;
+    if(type === 'EVENT'){
+      const [subId, ev] = rest;
+      const sub = this.subs.get(subId);
+      if(sub && sub.onEvent) {
+        try { sub.onEvent(ev); } catch(e){ Log.w('onEvent err:', e.message); }
+      }
+    } else if(type === 'EOSE'){
+      const [subId] = rest;
+      const sub = this.subs.get(subId);
+      if(sub && sub.onEose) { try { sub.onEose(); } catch(e){} }
+    } else if(type === 'NOTICE'){
+      Log.w('relay notice (' + url + '):', rest[0]);
+    } else if(type === 'OK'){
+      // publish ack: ['OK', eventId, success, message]
+      const [evId, ok, reason] = rest;
+      if(!ok) Log.w('publish rejected (' + url + '):', reason);
+    }
+  },
+
   async publish(kind, content, tags){
-    const { finalizeEvent } = this.tools;
-    const event = finalizeEvent({
+    const unsigned = {
       kind,
       created_at: Math.floor(Date.now() / 1000),
       tags,
       content,
-    }, this.sk);
-    const okRelays = this.relays.filter(r => this.relayStatus.get(r) === 'ok');
-    if(!okRelays.length) throw new Error('no online relays');
-    const res = await this.pool.publish(okRelays, event);
-    Log.s('published kind=' + kind + ' to ' + okRelays.length + ' relays');
-    return { event, res };
+    };
+    const ev = this.signEvent(unsigned);
+
+    const okUrls = this.relays.filter(r => this.relayStatus.get(r) === 'ok');
+    if(!okUrls.length) throw new Error('no online relays');
+
+    const payload = JSON.stringify(['EVENT', ev]);
+    let sent = 0;
+    for(const url of okUrls){
+      const ws = this.relaySockets.get(url);
+      if(ws && ws.readyState === WebSocket.OPEN){
+        try { ws.send(payload); sent++; } catch(e){}
+      }
+    }
+    Log.s('published kind=' + kind + ' to ' + sent + '/' + okUrls.length + ' relays');
+    return ev;
   },
+
   subscribe(filter, onEvent, onEose){
-    const okRelays = this.relays.filter(r => this.relayStatus.get(r) === 'ok');
-    if(!okRelays.length) return null;
-    const sub = this.pool.subscribeMany(okRelays, [filter], {
-      onevent: onEvent,
-      oneose: onEose || (() => {}),
-    });
-    this.subs.push(sub);
-    return sub;
+    const subId = 's' + (++this.subCounter);
+    this.subs.set(subId, { filter, onEvent, onEose });
+    const payload = JSON.stringify(['REQ', subId, filter]);
+    for(const [url, ws] of this.relaySockets){
+      if(ws.readyState === WebSocket.OPEN){
+        try { ws.send(payload); } catch(e){}
+      }
+    }
+    return {
+      id: subId,
+      close: () => {
+        this.subs.delete(subId);
+        const closePayload = JSON.stringify(['CLOSE', subId]);
+        for(const [url, ws] of this.relaySockets){
+          if(ws.readyState === WebSocket.OPEN){
+            try { ws.send(closePayload); } catch(e){}
+          }
+        }
+      },
+    };
   },
 };
 
@@ -364,7 +528,7 @@ const Nostr = {
    ============================================================ */
 const State = {
   myNotes: [],
-  world: new Map(),     // eventId -> {vec(i8), room, author, ts, pulled:text?}
+  world: new Map(),
   pendingPulls: new Map(),
   debounceT: null,
   lastText: '',
@@ -408,21 +572,19 @@ const Proto = {
   },
   handleEvent(ev){
     if(ev.pubkey === Nostr.pk) return;
-    if(State.world.has(ev.id)) return;
-    const d = ev.tags.find(t => t[0] === 'd');
-    const r = ev.tags.find(t => t[0] === 'r');
-    const t = ev.tags.find(t => t[0] === 't');
+    const d = (ev.tags || []).find(t => t[0] === 'd');
+    const r = (ev.tags || []).find(t => t[0] === 'r');
+    const t = (ev.tags || []).find(t => t[0] === 't');
     if(!d || !r || !t || t[1] !== CFG.NS_TAG) return;
 
     if(ev.kind === CFG.KIND_NOTE){
+      if(State.world.has(ev.id)) return;
       try {
         const i8 = Vec.b64ToI8(ev.content);
         if(i8.length !== CFG.VEC_DIM) return;
-        const noteId = d[1];
-        const room = r[1];
         State.world.set(ev.id, {
-          evId: ev.id, noteId, room, author: ev.pubkey,
-          ts: ev.created_at * 1000, i8, text: null,
+          evId: ev.id, noteId: d[1], room: r[1], author: ev.pubkey,
+          ts: (ev.created_at || 0) * 1000, i8, text: null,
         });
         UI.renderWorld();
         UI.renderAdj();
@@ -454,29 +616,27 @@ const Proto = {
     } catch(e){ Log.e('pull_req fail', e.message); }
   },
   subscribeWorld(){
-    const filter = {
+    const now = Math.floor(Date.now() / 1000);
+    Nostr.subscribe({
       kinds: [CFG.KIND_NOTE],
       '#t': [CFG.NS_TAG],
-      since: Math.floor(Date.now() / 1000) - CFG.STALE_SEC,
+      since: now - CFG.STALE_SEC,
       limit: CFG.MAX_WORLD,
-    };
-    Nostr.subscribe(filter, ev => Proto.handleEvent(ev), () => Log.i('world EOSE'));
+    }, ev => Proto.handleEvent(ev), () => Log.i('world EOSE'));
 
-    const pullFilter = {
+    Nostr.subscribe({
       kinds: [CFG.KIND_PULL_RES],
       '#p': [Nostr.pk],
       '#t': [CFG.NS_TAG],
-      since: Math.floor(Date.now() / 1000) - 60,
-    };
-    Nostr.subscribe(pullFilter, ev => Proto.handleEvent(ev));
+      since: now - 60,
+    }, ev => Proto.handleEvent(ev));
 
-    const reqFilter = {
+    Nostr.subscribe({
       kinds: [CFG.KIND_PULL_REQ],
       '#p': [Nostr.pk],
       '#t': [CFG.NS_TAG],
-      since: Math.floor(Date.now() / 1000) - 60,
-    };
-    Nostr.subscribe(reqFilter, async ev => {
+      since: now - 60,
+    }, async ev => {
       try {
         const payload = JSON.parse(ev.content);
         const note = State.myNotes.find(n => n.id === payload.noteId);
@@ -498,7 +658,7 @@ async function shaHex(str){
 }
 
 /* ============================================================
-   SECTION 9 · DEBOUNCE + PUBLISH FLOW
+   SECTION 9 · DEBOUNCE FLOW
    ============================================================ */
 const Flow = {
   onInput(text){
@@ -536,11 +696,10 @@ const Flow = {
       const vec = await Vec.encode(text);
       const now = Date.now();
       if(now - State.lastPublish < 1500){
-        Log.i('throttle: skipping publish');
-        const note = await Proto.announceLocal(text, vec);
-        Log.s('local-only (throttled)');
+        Log.i('throttle: local only');
+        await Proto.announceLocal(text, vec);
       } else {
-        const note = await Proto.publishThought(text, vec);
+        await Proto.publishThought(text, vec);
         State.lastPublish = now;
         Log.s('published:', text.slice(0, 40) + '…');
       }
@@ -573,7 +732,7 @@ const UI = {
     document.getElementById('inpNote').addEventListener('input', e => Flow.onInput(e.target.value));
     document.getElementById('btnReconnect').onclick = () => Boot.connect();
     document.getElementById('btnRegen').onclick = async () => {
-      if(!confirm('Создать новый identity? Старый будет утерян.')) return;
+      if(!confirm('Создать новый identity?')) return;
       await DB.putKV('sk', null);
       location.reload();
     };
@@ -587,13 +746,11 @@ const UI = {
     };
     document.getElementById('btnClearLog').onclick = () => { document.getElementById('log').innerHTML = ''; };
   },
-
   setModel(ok){
     document.getElementById('stModel').innerHTML = ok
       ? '<span class="badge b-ok">ready</span>'
       : '<span class="badge b-wn">unloaded</span>';
   },
-
   updateRelays(){
     const online = [...Nostr.relayStatus.values()].filter(s => s === 'ok').length;
     document.getElementById('stRelays').textContent = online + '/' + Nostr.relayStatus.size;
@@ -607,19 +764,15 @@ const UI = {
       st.textContent = 'connecting…';
     }
   },
-
   updateCounters(){
     document.getElementById('cntMine').textContent = State.myNotes.length;
     document.getElementById('cntWorld').textContent = State.world.size;
-    const adjCount = this.computeAdj().length;
-    document.getElementById('cntAdj').textContent = adjCount;
+    document.getElementById('cntAdj').textContent = this.computeAdj().length;
     document.getElementById('stMyVec').textContent = State.myNotes.length;
     document.getElementById('stWorldVec').textContent = State.world.size;
     document.getElementById('stPub').textContent = Nostr.pk ? Nostr.pk.slice(0, 16) + '…' : '—';
   },
-
   renderAll(){ this.renderMine(); this.renderWorld(); this.renderAdj(); this.updateCounters(); },
-
   renderMine(){
     const box = document.getElementById('listMine');
     if(!State.myNotes.length){ box.innerHTML = '<i class="hint">ещё ничего не сохранено</i>'; return; }
@@ -628,24 +781,20 @@ const UI = {
       const d = document.createElement('div');
       d.className = 'card';
       const status = n.published ? '<span class="badge b-ok">pub</span>' : '<span class="badge b-wn">local</span>';
-      d.innerHTML = `${escapeHtml(n.text)}
-        <div class="m">${status} · ${n.room} · ${new Date(n.ts).toLocaleTimeString()}</div>`;
+      d.innerHTML = `${escapeHtml(n.text)}<div class="m">${status} · ${n.room} · ${new Date(n.ts).toLocaleTimeString()}</div>`;
       box.appendChild(d);
     }
   },
-
   renderWorld(){
     const box = document.getElementById('listWorld');
     if(!State.world.size){ box.innerHTML = '<i class="hint">нет входящих векторов</i>'; return; }
     box.innerHTML = '';
-    const items = [...State.world.values()]
-      .sort((a, b) => b.ts - a.ts)
-      .slice(0, 40);
+    const items = [...State.world.values()].sort((a, b) => b.ts - a.ts).slice(0, 40);
     for(const w of items){
       const d = document.createElement('div');
       d.className = 'card world';
       const age = Math.round((Date.now() - w.ts) / 1000);
-      const hasText = w.text ? `<div style="margin-top:4px;color:var(--fg)">${escapeHtml(w.text)}</div>` : '';
+      const hasText = w.text ? `<div style="margin-top:4px">${escapeHtml(w.text)}</div>` : '';
       const btn = w.text ? '' : `<button class="pullBtn" data-evid="${w.evId}" style="margin-top:6px;padding:4px 8px;font-size:11px">Request text</button>`;
       d.innerHTML = `<span class="badge b-in">${w.room}</span>
         <span style="color:var(--mut);font-size:10px;margin-left:6px">from ${w.author.slice(0,10)}… · ${age}s ago</span>
@@ -654,7 +803,6 @@ const UI = {
     }
     box.querySelectorAll('.pullBtn').forEach(b => b.onclick = () => Proto.requestPull(b.dataset.evid));
   },
-
   computeAdj(){
     if(!State.myNotes.length || !State.world.size) return [];
     const pairs = [];
@@ -665,14 +813,11 @@ const UI = {
         const s = Vec.cosine(wVec, new Float32Array(m.vec));
         if(s > bestSim){ bestSim = s; bestNote = m; }
       }
-      if(bestSim >= CFG.SIM_THR){
-        pairs.push({ w, m: bestNote, sim: bestSim });
-      }
+      if(bestSim >= CFG.SIM_THR) pairs.push({ w, m: bestNote, sim: bestSim });
     }
     pairs.sort((a, b) => b.sim - a.sim);
     return pairs.slice(0, 30);
   },
-
   renderAdj(){
     const box = document.getElementById('listAdj');
     const pairs = this.computeAdj();
@@ -689,7 +834,7 @@ const UI = {
       d.innerHTML = `<span class="sim">sim ${p.sim.toFixed(3)}</span>
         <b style="color:var(--acc)">my:</b> ${escapeHtml(p.m.text.slice(0, 100))}${p.m.text.length > 100 ? '…' : ''}
         ${textBlock}${btn}
-        <div class="m">their room: ${p.w.room} · their author: ${p.w.author.slice(0, 10)}…</div>`;
+        <div class="m">their room: ${p.w.room} · author: ${p.w.author.slice(0, 10)}…</div>`;
       box.appendChild(d);
     }
     box.querySelectorAll('.pullBtn').forEach(b => b.onclick = () => Proto.requestPull(b.dataset.evid));
@@ -708,16 +853,14 @@ const Boot = {
     try {
       await DB.open();
       Log.s('db ready');
-      State.myNotes = await DB.allNotes() || [];
+      State.myNotes = (await DB.allNotes()) || [];
       UI.init();
       await Nostr.init();
       UI.updateCounters();
       UI.renderAll();
       await this.connect();
       UI.setModel(false);
-      Log.i('ready. start typing — 4s silence → publish.');
-      Log.i('open same page on another device → see each other\'s vectors in "Мир" tab.');
-      Log.i('high cosine similarity → card appears in "Смежные". click "Pull" to read their text.');
+      Log.i('ready. type → 4s pause → publish. open on another device with same relay list.');
     } catch(e){
       Log.e('boot fail:', e);
     }
