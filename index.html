@@ -1,1270 +1,648 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Noosphere v12 - P2P Vector Search</title>
+  <title>Noosphere Core</title>
   <style>
+    /* ================= 1. DESIGN SYSTEM & VARIABLES ================= */
     :root {
-      --bg: #0a0a0f;
-      --panel: #13131a;
-      --panel-2: #1a1a24;
-      --border: #24242e;
-      --text: #e8e8f0;
-      --muted: #8888a0;
-      --accent: #7c5cff;
-      --accent-2: #5c8cff;
-      --ok: #4ade80;
-      --warn: #fbbf24;
-      --err: #f87171;
-      --card: #16161f;
-      --serendipity: #ff6b9d;
+      --bg: #0a0a0f; --surface: #13131a; --surface-hover: #1a1a24;
+      --border: #24242e; --text-main: #e8e8f0; --text-muted: #8888a0;
+      --brand: #7c5cff; --brand-glow: rgba(124, 92, 255, 0.2);
+      --world: #0ea5e9; --world-glow: rgba(14, 165, 233, 0.2);
+      --seren: #4ade80; --seren-glow: rgba(74, 222, 128, 0.2);
+      --danger: #f87171; --radius: 12px;
+      --font: 14px/1.6 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
+    
     html[data-theme="light"] {
-      --bg: #f6f6fa;
-      --panel: #ffffff;
-      --panel-2: #f0f0f6;
-      --border: #e0e0ea;
-      --text: #1a1a24;
-      --muted: #666680;
-      --card: #ffffff;
+      --bg: #f3f4f6; --surface: #ffffff; --surface-hover: #f9fafb;
+      --border: #e5e7eb; --text-main: #111827; --text-muted: #6b7280;
     }
+
+    /* ================= 2. BASE RESET ================= */
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body {
-      height: 100vh;
-      overflow: hidden;
-      background: var(--bg);
-      color: var(--text);
-      font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-    }
+    html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text-main); font: var(--font); }
     body { display: flex; flex-direction: column; }
+    button { font: inherit; cursor: pointer; border: none; background: none; }
+    input, textarea { font: inherit; color: inherit; }
+
+    /* ================= 3. LAYOUT & NAVBAR ================= */
+    .navbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); z-index: 10; }
+    .navbar-title { font-weight: 700; font-size: 16px; background: linear-gradient(to right, var(--brand), var(--world)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+    .icon-btn { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-main); transition: 0.2s; }
+    .icon-btn:hover { background: var(--surface-hover); }
+
+    .status-bar { display: flex; gap: 8px; padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border); font-size: 11px; flex-wrap: wrap; }
+    .badge-status { padding: 4px 10px; border-radius: 20px; background: var(--surface-hover); border: 1px solid var(--border); display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-weight: 500; transition: 0.3s; }
+    .badge-status .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .badge-status.active { color: var(--world); border-color: var(--world-glow); background: var(--world-glow); }
+    .badge-status.ready { color: var(--seren); border-color: var(--seren-glow); }
+
+    .main-tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); }
+    .tab { flex: 1; text-align: center; padding: 12px; color: var(--text-muted); font-weight: 500; border-bottom: 2px solid transparent; transition: 0.2s; }
+    .tab.active { color: var(--text-main); border-color: var(--brand); }
+
+    .workspace { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px; position: relative; scroll-behavior: smooth; }
+    .view-layer { display: none; animation: fade 0.2s ease-out; }
+    .view-layer.active { display: block; }
+    @keyframes fade { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* ================= 4. EDITOR COMPONENT ================= */
+    .editor-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+    .editor-textarea { width: 100%; min-height: 80px; background: transparent; border: none; resize: none; outline: none; font-size: 15px; line-height: 1.5; }
+    .editor-textarea::placeholder { color: var(--text-muted); }
+    .editor-controls { display: flex; gap: 8px; margin-top: 12px; }
     
-    .header {
-      background: var(--panel);
-      border-bottom: 1px solid var(--border);
-      padding: 10px 14px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-shrink: 0;
-    }
-    .header .title {
-      font-weight: 600;
-      font-size: 16px;
-      letter-spacing: .5px;
-    }
-    .header .spacer { flex: 1; }
-    .header button {
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 4px 10px;
-      border-radius: 6px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-    .header button:hover { background: var(--panel-2); }
+    .btn { padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 13px; transition: 0.2s; border: 1px solid transparent; flex: 1; display: flex; justify-content: center; align-items: center; gap: 6px; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-ghost { background: var(--surface-hover); color: var(--text-main); border-color: var(--border); }
+    .btn-ghost:hover:not(:disabled) { border-color: var(--brand); }
+    .btn-primary { background: var(--brand); color: #fff; }
+    .btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
+
+    /* ================= 5. DATA RENDERER (CARDS & TABS) ================= */
+    .filter-tabs { display: flex; gap: 4px; background: var(--surface); padding: 4px; border-radius: 10px; border: 1px solid var(--border); margin-bottom: 16px; }
+    .f-tab { flex: 1; padding: 6px; text-align: center; border-radius: 6px; font-size: 12px; font-weight: 600; color: var(--text-muted); transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .f-tab.active { background: var(--surface-hover); color: var(--text-main); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .f-tab .counter { background: var(--border); padding: 2px 6px; border-radius: 12px; font-size: 10px; font-family: monospace; }
     
-    .main-tabs {
-      display: flex;
-      background: var(--panel);
-      border-bottom: 1px solid var(--border);
-      flex-shrink: 0;
-    }
-    .main-tab {
-      flex: 1;
-      padding: 10px;
-      text-align: center;
-      cursor: pointer;
-      font-size: 13px;
-      color: var(--muted);
-      border-bottom: 2px solid transparent;
-      transition: all .15s;
-    }
-    .main-tab.active {
-      color: var(--text);
-      border-bottom-color: var(--accent);
-    }
+    .f-tab.active[data-filter="local"] .counter { background: var(--brand-glow); color: var(--brand); }
+    .f-tab.active[data-filter="world"] .counter { background: var(--world-glow); color: var(--world); }
+    .f-tab.active[data-filter="seren"] .counter { background: var(--seren-glow); color: var(--seren); }
+
+    .node-list { display: none; flex-direction: column; gap: 12px; }
+    .node-list.active { display: flex; }
     
-    .net-activity {
-      height: 2px;
-      background: var(--panel-2);
-      position: relative;
-      overflow: hidden;
-      flex-shrink: 0;
-    }
-    .net-activity .bar {
-      position: absolute;
-      top: 0;
-      left: -40%;
-      width: 40%;
-      height: 100%;
-      background: linear-gradient(90deg, transparent, var(--accent), transparent);
-      opacity: 0;
-      transition: opacity .3s;
-    }
-    .net-activity.active .bar {
-      opacity: 1;
-      animation: slide 1.2s linear infinite;
-    }
-    @keyframes slide {
-      0% { left: -40%; }
-      100% { left: 100%; }
-    }
+    .note-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; position: relative; overflow: hidden; animation: slideUp 0.3s ease-out backwards; opacity: 0; }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     
-    .status-bar {
-      background: var(--panel);
-      border-bottom: 1px solid var(--border);
-      padding: 5px 14px;
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-      font-size: 10px;
-      flex-shrink: 0;
-      align-items: center;
-    }
-    .chip {
-      padding: 2px 7px;
-      border-radius: 10px;
-      background: var(--panel-2);
-      border: 1px solid var(--border);
-      color: var(--muted);
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      transition: all .2s;
-    }
-    .chip .dot {
-      width: 5px;
-      height: 5px;
-      border-radius: 50%;
-      background: var(--muted);
-      transition: all .2s;
-    }
-    .chip.ok {
-      color: var(--ok);
-      border-color: rgba(74,222,128,.3);
-    }
-    .chip.ok .dot {
-      background: var(--ok);
-      box-shadow: 0 0 5px var(--ok);
-    }
-    .chip.warn {
-      color: var(--warn);
-      border-color: rgba(251,191,36,.3);
-    }
-    .chip.warn .dot {
-      background: var(--warn);
-    }
+    .note-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; }
+    .note-card.t-local::before { background: var(--brand); }
+    .note-card.t-world::before { background: var(--world); }
+    .note-card.t-seren::before { background: var(--seren); }
+
+    .note-header { display: flex; justify-content: space-between; margin-bottom: 8px; align-items: center; }
+    .note-meta { display: flex; gap: 8px; align-items: center; }
+    .note-type { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px; }
+    .t-local .note-type { background: var(--brand-glow); color: var(--brand); }
+    .t-world .note-type { background: var(--world-glow); color: var(--world); }
+    .t-seren .note-type { background: var(--seren-glow); color: var(--seren); }
     
-    .content {
-      flex: 1;
-      overflow-y: auto;
-      padding: 12px;
-      padding-bottom: 20px;
-    }
-    .view { display: none; }
-    .view.active { display: block; }
+    .note-score { font-family: monospace; font-size: 11px; color: var(--text-muted); }
+    .note-content { font-size: 14px; white-space: pre-wrap; word-wrap: break-word; }
+    .note-content mark { background: var(--brand-glow); color: var(--brand); padding: 0 2px; border-radius: 3px; font-weight: 600; }
     
-    .composer {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 12px;
-      margin-bottom: 12px;
-      position: relative;
-    }
-    .composer textarea {
-      width: 100%;
-      background: transparent;
-      border: none;
-      color: var(--text);
-      font: inherit;
-      resize: none;
-      min-height: 60px;
-      outline: none;
-    }
-    .composer textarea::placeholder { color: var(--muted); }
-    .composer .actions {
-      display: flex;
-      gap: 6px;
-      margin-top: 8px;
-    }
-    
-    .btn {
-      background: var(--panel-2);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 7px 14px;
-      border-radius: 6px;
-      font-size: 13px;
-      cursor: pointer;
-      font-weight: 500;
-      transition: all .15s;
-    }
-    .btn:hover:not(:disabled) {
-      background: #222230;
-      border-color: var(--accent);
-    }
-    .btn:disabled {
-      opacity: .4;
-      cursor: not-allowed;
-    }
-    .btn.primary {
-      background: var(--accent);
-      border-color: var(--accent);
-      color: white;
-      flex: 1;
-    }
-    .btn.primary:hover:not(:disabled) {
-      background: #6a4aee;
-    }
-    .btn.ghost {
-      background: transparent;
-    }
-    
-    .sub-tabs {
-      display: flex;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 3px;
-      margin-bottom: 12px;
-      gap: 2px;
-    }
-    .sub-tab {
-      flex: 1;
-      padding: 7px 10px;
-      text-align: center;
-      cursor: pointer;
-      font-size: 12px;
-      color: var(--muted);
-      border-radius: 5px;
-      transition: all .15s;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 4px;
-    }
-    .sub-tab.active {
-      background: var(--panel-2);
-      color: var(--text);
-    }
-    .sub-tab .badge {
-      background: var(--border);
-      color: var(--muted);
-      padding: 0 5px;
-      border-radius: 8px;
-      font-size: 10px;
-      min-width: 16px;
-    }
-    .sub-tab.active .badge {
-      background: rgba(124,92,255,.25);
-      color: var(--accent);
-    }
-    .sub-tab[data-sub="serendipity"].active .badge {
-      background: rgba(255,107,157,.25);
-      color: var(--serendipity);
-    }
-    
-    .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 10px 12px;
-      margin-bottom: 8px;
-      animation: fadeIn .25s;
-    }
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(4px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .card.mine { border-left: 3px solid var(--muted); }
-    .card.world { border-left: 3px solid var(--accent); }
-    .card.serendipity { border-left: 3px solid var(--serendipity); }
-    
-    .card .head {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 4px;
-    }
-    .card .tag {
-      font-size: 9px;
-      padding: 2px 6px;
-      border-radius: 3px;
-      background: var(--panel-2);
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: .5px;
-      font-weight: 600;
-    }
-    .card.world .tag {
-      background: rgba(124,92,255,.15);
-      color: var(--accent);
-    }
-    .card.serendipity .tag {
-      background: rgba(255,107,157,.15);
-      color: var(--serendipity);
-    }
-    .card .score {
-      font-size: 11px;
-      color: var(--muted);
-      font-family: ui-monospace, monospace;
-    }
-    .card .text {
-      font-size: 13px;
-      line-height: 1.5;
-      word-wrap: break-word;
-    }
-    .card .text mark {
-      background: transparent;
-      color: var(--accent);
-      font-weight: 600;
-    }
-    .card .meta {
-      margin-top: 6px;
-      font-size: 10px;
-      color: var(--muted);
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-    
-    .pub-status {
-      padding: 1px 6px;
-      border-radius: 3px;
-      font-size: 9px;
-      font-weight: 600;
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
-    }
-    .pub-ok {
-      background: rgba(124,92,255,.15);
-      color: var(--accent);
-    }
-    
-    .searching-indicator {
-      text-align: center;
-      padding: 8px;
-      font-size: 11px;
-      color: var(--accent);
-      background: rgba(124,92,255,.05);
-      border-radius: 6px;
-      margin-bottom: 8px;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-    }
-    .searching-indicator.active { display: flex; }
-    .searching-indicator .spinner {
-      width: 10px;
-      height: 10px;
-      border: 1.5px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
-    
-    .empty {
-      text-align: center;
-      color: var(--muted);
-      padding: 32px 16px;
-      font-size: 12px;
-    }
-    
-    .drawer {
-      position: fixed;
-      top: 0;
-      right: -100%;
-      width: 320px;
-      max-width: 92vw;
-      height: 100%;
-      background: var(--panel);
-      border-left: 1px solid var(--border);
-      z-index: 100;
-      transition: right .25s;
-      overflow-y: auto;
-      padding: 16px;
-    }
+    .empty-state { padding: 40px 20px; text-align: center; color: var(--text-muted); display: flex; flex-direction: column; align-items: center; gap: 12px; }
+    .empty-state svg { width: 48px; height: 48px; opacity: 0.2; }
+
+    /* ================= 6. MODALS & TOASTS ================= */
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(100px); background: var(--text-main); color: var(--bg); padding: 10px 20px; border-radius: 30px; font-weight: 600; font-size: 13px; transition: 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); z-index: 1000; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+
+    .drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(3px); z-index: 100; opacity: 0; pointer-events: none; transition: 0.2s; }
+    .drawer-overlay.open { opacity: 1; pointer-events: auto; }
+    .drawer { position: fixed; top: 0; right: -360px; width: 340px; max-width: 100%; height: 100%; background: var(--surface); border-left: 1px solid var(--border); z-index: 101; transition: 0.3s cubic-bezier(0.16, 1, 0.3, 1); padding: 20px; overflow-y: auto; }
     .drawer.open { right: 0; }
-    .drawer h3 {
-      margin: 0 0 16px 0;
-      font-size: 15px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .drawer .close {
-      background: transparent;
-      border: none;
-      color: var(--muted);
-      cursor: pointer;
-      font-size: 22px;
-      padding: 0;
-    }
     
-    .setting { margin-bottom: 16px; }
-    .setting label {
-      display: block;
-      font-size: 11px;
-      color: var(--muted);
-      margin-bottom: 5px;
-      text-transform: uppercase;
-      letter-spacing: .4px;
-    }
-    .setting input[type="text"] {
-      width: 100%;
-      background: var(--panel-2);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 8px 10px;
-      border-radius: 6px;
-      font: inherit;
-      font-size: 13px;
-    }
-    .setting input[type="range"] {
-      width: 100%;
-      accent-color: var(--accent);
-    }
-    .setting .row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .setting .val {
-      font-size: 12px;
-      color: var(--accent);
-      font-weight: 600;
-      font-family: ui-monospace, monospace;
-    }
-    .setting .seg {
-      display: flex;
-      gap: 4px;
-    }
-    .setting .seg button {
-      flex: 1;
-      background: var(--panel-2);
-      border: 1px solid var(--border);
-      color: var(--muted);
-      padding: 6px 10px;
-      border-radius: 5px;
-      font-size: 12px;
-      cursor: pointer;
-    }
-    .setting .seg button.active {
-      background: var(--accent);
-      color: white;
-      border-color: var(--accent);
-    }
-    .setting .btn {
-      width: 100%;
-      margin-bottom: 6px;
-    }
+    .drawer-header { display: flex; justify-content: space-between; margin-bottom: 24px; font-size: 18px; font-weight: 700; }
+    .drawer-close { font-size: 24px; color: var(--text-muted); transition: 0.2s; }
+    .drawer-close:hover { color: var(--danger); }
     
-    .overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,.6);
-      z-index: 99;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity .25s;
-    }
-    .overlay.show {
-      opacity: 1;
-      pointer-events: auto;
-    }
-    
-    .toast {
-      position: fixed;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%) translateY(80px);
-      background: var(--panel);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 10px 18px;
-      border-radius: 8px;
-      font-size: 12px;
-      z-index: 200;
-      transition: transform .25s;
-      box-shadow: 0 4px 20px rgba(0,0,0,.4);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .toast.show {
-      transform: translateX(-50%) translateY(0);
-    }
-    
-    .progress {
-      height: 2px;
-      background: var(--border);
-      overflow: hidden;
-      border-radius: 2px;
-      margin-top: 6px;
-    }
-    .progress > div {
-      height: 100%;
-      background: var(--accent);
-      width: 0;
-      transition: width .2s;
-    }
-    
-    @media (max-width: 640px) {
-      .content { padding: 10px; }
-      .drawer { width: 100%; max-width: 100vw; }
-    }
+    .form-group { margin-bottom: 20px; }
+    .form-label { display: block; font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; letter-spacing: 0.5px; }
+    .form-input { width: 100%; background: var(--bg); border: 1px solid var(--border); padding: 10px 12px; border-radius: 8px; transition: 0.2s; }
+    .form-input:focus { border-color: var(--brand); outline: none; }
+    .form-range { width: 100%; accent-color: var(--brand); }
+    .val-display { float: right; font-family: monospace; color: var(--brand); font-weight: bold; }
   </style>
 </head>
 <body>
 
-<div class="header">
-  <div class="title">Noosphere v12</div>
-  <div class="spacer"></div>
-  <button id="btnSettings">☰</button>
-</div>
+<!-- NAVBAR -->
+<header class="navbar">
+  <div class="navbar-title">Noosphere</div>
+  <button class="icon-btn" id="btnOpenSettings">
+    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9c.26.6.8 1 1.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+  </button>
+</header>
 
-<div class="main-tabs">
-  <div class="main-tab active" data-main="stream">Stream</div>
-  <div class="main-tab" data-main="history">My Base</div>
-</div>
-
-<div class="net-activity" id="netActivity"><div class="bar"></div></div>
-
+<!-- STATUS BAR -->
 <div class="status-bar">
-  <span class="chip" id="chipNet"><span class="dot"></span>offline</span>
-  <span class="chip" id="chipModel"><span class="dot"></span>model</span>
-  <span class="chip" id="chipPeers"><span class="dot"></span>0 peers</span>
+  <div class="badge-status" id="stNetwork"><div class="dot"></div><span id="stNetworkText">Offline</span></div>
+  <div class="badge-status" id="stAI"><div class="dot"></div><span id="stAIText">AI Loading...</span></div>
 </div>
 
-<div class="content">
-  <div class="view active" id="view-stream">
-    <div class="composer" id="composer">
-      <textarea id="input" placeholder="What are you thinking? Typing sends vector query to peers..."></textarea>
-      <div class="actions">
-        <button class="btn ghost" id="btnSaveLocal">Save Private</button>
-        <button class="btn primary" id="btnPublish">Make Shared (Answer Peers)</button>
-      </div>
-      <div class="progress"><div id="modelProgress"></div></div>
-    </div>
-
-    <div class="sub-tabs">
-      <div class="sub-tab active" data-sub="mine">Local<span class="badge" id="badgeMine">0</span></div>
-      <div class="sub-tab" data-sub="world">World<span class="badge" id="badgeWorld">0</span></div>
-      <div class="sub-tab" data-sub="serendipity">Serendipity<span class="badge" id="badgeSerendipity">0</span></div>
-    </div>
-
-    <div id="sub-mine"><div id="listMine"></div></div>
-    <div id="sub-world" style="display:none">
-      <div class="searching-indicator" id="searchIndicator">
-        <span class="spinner"></span> <span id="searchText">Searching network...</span>
-      </div>
-      <div id="listWorld"></div>
-    </div>
-    <div id="sub-serendipity" style="display:none"><div id="listSerendipity"></div></div>
-  </div>
-
-  <div class="view" id="view-history">
-    <div id="listHistory"></div>
-  </div>
+<!-- MAIN TABS -->
+<div class="main-tabs">
+  <button class="tab active" data-view="view-stream">Stream & Search</button>
+  <button class="tab" data-view="view-base">My Base</button>
 </div>
 
-<div class="overlay" id="overlay"></div>
+<!-- WORKSPACE -->
+<main class="workspace">
+  
+  <!-- VIEW: STREAM (Editor & Results) -->
+  <div id="view-stream" class="view-layer active">
+    
+    <div class="editor-card">
+      <textarea id="ioInput" class="editor-textarea" placeholder="What's on your mind? Thoughts automatically seek resonance..."></textarea>
+      <div class="editor-controls">
+        <button class="btn btn-ghost" id="btnSavePrivate">Save Private</button>
+        <button class="btn btn-primary" id="btnSaveShared">Share (P2P)</button>
+      </div>
+    </div>
+
+    <div class="filter-tabs">
+      <button class="f-tab active" data-filter="local">Local <span class="counter" id="cntLocal">0</span></button>
+      <button class="f-tab" data-filter="world">World <span class="counter" id="cntWorld">0</span></button>
+      <button class="f-tab" data-filter="seren">Serendipity <span class="counter" id="cntSeren">0</span></button>
+    </div>
+
+    <!-- The actual containers for JS to inject into -->
+    <div id="list-local" class="node-list active"></div>
+    <div id="list-world" class="node-list"></div>
+    <div id="list-seren" class="node-list"></div>
+
+  </div>
+
+  <!-- VIEW: BASE (All saved notes) -->
+  <div id="view-base" class="view-layer">
+    <div id="list-base" class="node-list active"></div>
+  </div>
+
+</main>
+
+<!-- SETTINGS DRAWER -->
+<div class="drawer-overlay" id="drawerOverlay"></div>
 <div class="drawer" id="drawer">
-  <h3>Settings<button class="close" id="btnClose">×</button></h3>
-  <div class="setting">
-    <label>Theme</label>
-    <div class="seg" data-opt="theme">
-      <button data-val="auto" class="active">Auto</button>
-      <button data-val="light">Day</button>
-      <button data-val="dark">Night</button>
-    </div>
+  <div class="drawer-header">
+    Settings <button class="drawer-close" id="btnCloseSettings">×</button>
   </div>
-  <div class="setting">
-    <label>Room</label>
-    <input type="text" id="setRoom" />
+  
+  <div class="form-group">
+    <label class="form-label">Theme</label>
+    <select class="form-input" id="cfgTheme">
+      <option value="dark">Dark Space</option>
+      <option value="light">Light Paper</option>
+    </select>
   </div>
-  <div class="setting">
-    <div class="row"><label>Relevance Threshold (Cosine)</label><span class="val" id="valThreshold">0.30</span></div>
-    <input type="range" id="setThreshold" min="0.1" max="0.8" step="0.05" value="0.30" />
+
+  <div class="form-group">
+    <label class="form-label">Nostr Topic (Room)</label>
+    <input type="text" class="form-input" id="cfgRoom" placeholder="e.g. noosphere-alpha" />
   </div>
-  <div class="setting">
-    <div class="row"><label>Serendipity Mix</label><span class="val" id="valMix">50%</span></div>
-    <input type="range" id="setMix" min="10" max="90" step="10" value="50" />
+
+  <div class="form-group">
+    <label class="form-label">Exact Match Threshold <span class="val-display" id="valThresh">0.30</span></label>
+    <input type="range" class="form-range" id="cfgThresh" min="0.1" max="0.7" step="0.05" />
   </div>
-  <div class="setting" style="margin-top:20px;">
-    <button class="btn" id="btnExport">💾 Export Capsule</button>
-    <button class="btn" id="btnImport">📥 Import Capsule</button>
-    <button class="btn" id="btnReset" style="color:var(--err)">🗑 Clear DB</button>
-    <button class="btn primary" id="btnApply">Apply & Reconnect</button>
+
+  <div class="form-group">
+    <label class="form-label">Serendipity Delta <span class="val-display" id="valSeren">0.15</span></label>
+    <input type="range" class="form-range" id="cfgSeren" min="0.05" max="0.3" step="0.01" />
   </div>
-  <div class="setting">
-    <label>Your Pubkey</label>
-    <div style="font-family: monospace; font-size: 10px; color: var(--muted); word-break: break-all;" id="pubkeyDisplay">—</div>
+
+  <div class="form-group" style="margin-top: 30px;">
+    <button class="btn btn-primary" id="btnSaveConfig" style="width:100%; margin-bottom:10px;">Apply & Reload</button>
+    <button class="btn btn-ghost" id="btnWipeDB" style="width:100%; color:var(--danger);">Erase Database</button>
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
-<input type="file" id="fileInput" style="display:none" accept=".json" />
+<div class="toast" id="sysToast">System Ready</div>
 
+<!-- ================= 7. APPLICATION LOGIC ================= -->
 <script type="module">
-import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
+import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 import * as nostrMod from 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
 
-const pipeline = tfMod.pipeline || tfMod.default.pipeline;
-const tfEnv = tfMod.env || tfMod.default.env;
-const { SimplePool, finalizeEvent, generateSecretKey, getPublicKey } = nostrMod;
-
-if (tfEnv) {
-  tfEnv.allowLocalModels = false;
-  tfEnv.useBrowserCache = true;
-}
-
-/* ================= CONFIG ================= */
-const CFG = {
-  DB_NAME: 'noosphere_v12',
+// --- 1. CORE CONFIGURATION ---
+const AppConfig = {
+  DB_NAME: 'ns_core_v12',
   DB_VERSION: 1,
-  STORE_THOUGHTS: 'thoughts',
-  RELAYS: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.snort.social', 'wss://relay.nostr.band'],
-  KIND_QUERY: 21000,
-  KIND_ANSWER: 21001,
-  MODEL_ID: 'Xenova/all-MiniLM-L6-v2',
-  PEER_TTL_MS: 5 * 60_000,
-  SEARCH_TIMEOUT_MS: 4000,
-  MAX_RESULTS: 50,
-  settings: {
-    room: 'noosphere-2026',
-    theme: 'auto',
-    threshold: 0.30,
-    mix: 50
+  STORE: 'notes',
+  RELAYS: ['wss://relay.damus.io', 'wss://nos.lol'],
+  K_QUERY: 21000,
+  K_ANSWER: 21001,
+  MODEL: 'Xenova/all-MiniLM-L6-v2',
+  state: { room: 'noosphere-core', theme: 'dark', threshold: 0.30, serendipity: 0.15 }
+};
+
+// Load saved config
+try { 
+  const saved = localStorage.getItem('ns_config'); 
+  if (saved) Object.assign(AppConfig.state, JSON.parse(saved)); 
+} catch {}
+
+// --- 2. LOCAL STORAGE (IndexedDB Wrapper) ---
+class AppStorage {
+  constructor() { this.db = null; }
+  
+  async open() {
+    if (this.db) return this.db;
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(AppConfig.DB_NAME, AppConfig.DB_VERSION);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains(AppConfig.STORE)) {
+          db.createObjectStore(AppConfig.STORE, { keyPath: 'id' });
+        }
+      };
+      req.onsuccess = (e) => { this.db = e.target.result; resolve(this.db); };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async _tx(mode, action) {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(AppConfig.STORE, mode);
+      const store = tx.objectStore(AppConfig.STORE);
+      const req = action(store);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  saveNote(note) { return this._tx('readwrite', s => s.put(note)); }
+  getAllNotes() { return this._tx('readonly', s => s.getAll()); }
+  clearDB() { return this._tx('readwrite', s => s.clear()); }
+}
+const DB = new AppStorage();
+
+// --- 3. AI PIPELINE (Transformers.js) ---
+class AppAI {
+  constructor() {
+    this.extractor = null;
+    const { env } = tfMod;
+    if (env) { env.allowLocalModels = false; env.useBrowserCache = true; }
+  }
+
+  async init(onProgress) {
+    if (this.extractor) return;
+    const { pipeline } = tfMod;
+    
+    this.extractor = await pipeline('feature-extraction', AppConfig.MODEL, {
+      progress_callback: (p) => {
+        // Fix for missing content-length in HF API
+        if (p.status === 'progress') {
+          if (p.total && p.total > 0) {
+            onProgress(`Loading Model ${Math.round((p.loaded/p.total)*100)}%`);
+          } else {
+            onProgress(`Downloading chunks...`);
+          }
+        }
+      }
+    });
+  }
+
+  async embed(text) {
+    if (!this.extractor || !text.trim()) return null;
+    const out = await this.extractor(text, { pooling: 'mean', normalize: true });
+    return Array.from(out.data);
+  }
+
+  cosine(a, b) {
+    if (!a || !b || a.length !== b.length) return 0;
+    let sum = 0;
+    for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+    return sum;
+  }
+}
+const AI = new AppAI();
+
+// --- 4. PEER NETWORK (Nostr Ephemeral) ---
+class AppNet {
+  constructor() {
+    this.pool = null; this.sk = null; this.pk = null; this.sub = null;
+    this.currentQueryId = null;
+    this.worldAnswers = [];
+    this.peers = new Set();
+  }
+
+  init(onActivity, onAnswersUpdated) {
+    const { SimplePool, generateSecretKey, getPublicKey } = nostrMod;
+    
+    let keyHex = localStorage.getItem('ns_key');
+    if (!keyHex) {
+      const raw = generateSecretKey();
+      keyHex = Array.from(raw).map(b=>b.toString(16).padStart(2,'0')).join('');
+      localStorage.setItem('ns_key', keyHex);
+    }
+    
+    this.sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(b=>parseInt(b,16)));
+    this.pk = getPublicKey(this.sk);
+    this.pool = new SimplePool();
+    
+    this.sub = this.pool.subscribeMany(AppConfig.RELAYS, [{
+      kinds: [AppConfig.K_QUERY, AppConfig.K_ANSWER],
+      '#t': [AppConfig.state.room],
+      since: Math.floor(Date.now() / 1000)
+    }], {
+      onevent: async (ev) => {
+        if (ev.pubkey === this.pk) return;
+        this.peers.add(ev.pubkey);
+        onActivity(this.peers.size);
+
+        // Handle incoming Query
+        if (ev.kind === AppConfig.K_QUERY) {
+          try {
+            const data = JSON.parse(ev.content);
+            if (!data.vector) return;
+            
+            const localNotes = await DB.getAllNotes();
+            const { threshold, serendipity } = AppConfig.state;
+            
+            for (const note of localNotes) {
+              if (!note.shared || !note.vector) continue;
+              const score = AI.cosine(data.vector, note.vector);
+              if (score >= (threshold - serendipity)) {
+                this._sendAnswer(ev.id, note.text, note.vector);
+              }
+            }
+          } catch(e) {}
+        }
+        
+        // Handle incoming Answer to OUR query
+        if (ev.kind === AppConfig.K_ANSWER) {
+          const eTag = ev.tags.find(t => t[0] === 'e');
+          if (eTag && eTag[1] === this.currentQueryId) {
+            try {
+              const data = JSON.parse(ev.content);
+              if (data.text && data.vector) {
+                this.worldAnswers.push({ 
+                  id: ev.id,
+                  text: data.text, 
+                  vector: data.vector, 
+                  peer: ev.pubkey.slice(0, 6) 
+                });
+                onAnswersUpdated(); // Notify UI to re-render
+              }
+            } catch(e) {}
+          }
+        }
+      }
+    });
+  }
+
+  broadcastQuery(vector) {
+    if (!this.pool) return;
+    this.worldAnswers = []; // Reset old answers
+    const { finalizeEvent } = nostrMod;
+    
+    const ev = finalizeEvent({
+      kind: AppConfig.K_QUERY, created_at: Math.floor(Date.now() / 1000),
+      tags: [['t', AppConfig.state.room]], content: JSON.stringify({ vector })
+    }, this.sk);
+    
+    this.currentQueryId = ev.id;
+    this.pool.publish(AppConfig.RELAYS, ev);
+  }
+
+  _sendAnswer(targetId, text, vector) {
+    const { finalizeEvent } = nostrMod;
+    const ev = finalizeEvent({
+      kind: AppConfig.K_ANSWER, created_at: Math.floor(Date.now() / 1000),
+      tags: [['t', AppConfig.state.room], ['e', targetId]], 
+      content: JSON.stringify({ text, vector })
+    }, this.sk);
+    this.pool.publish(AppConfig.RELAYS, ev);
+  }
+}
+const Net = new AppNet();
+
+// --- 5. UI CONTROLLER & APP GLUE ---
+const UI = {
+  get: (id) => document.getElementById(id),
+  toastTimer: null,
+  
+  toast(msg) {
+    const el = this.get('sysToast');
+    el.textContent = msg; el.classList.add('show');
+    clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
+  },
+
+  setStatus(id, text, type) {
+    const el = this.get(id); const txtEl = this.get(id+'Text');
+    if(!el || !txtEl) return;
+    el.className = `badge-status ${type}`; txtEl.textContent = text;
+  },
+
+  setTheme(theme) { document.documentElement.setAttribute('data-theme', theme); },
+
+  // Helper to generate a Node Card HTML
+  createCard(item, type, qText) {
+    // Basic Markdown parser for highlighting
+    let textHTML = item.text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    if (qText) {
+      const words = qText.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+      words.forEach(w => { textHTML = textHTML.replace(new RegExp(`(${w})`, 'gi'), '<mark>$1</mark>'); });
+    }
+
+    let typeLabel = '';
+    if (type === 't-local') typeLabel = item.shared ? 'LOCAL (SHARED)' : 'LOCAL (PRIVATE)';
+    if (type === 't-world') typeLabel = `PEER: ${item.peer}`;
+    if (type === 't-seren') typeLabel = item.peer ? `PEER: ${item.peer}` : 'LOCAL (SHARED)';
+
+    const scoreRender = item.score ? `${(item.score * 100).toFixed(1)}%` : new Date(item.createdAt).toLocaleDateString();
+
+    return `
+      <div class="note-card ${type}" style="animation-delay: ${Math.random()*0.1}s">
+        <div class="note-header">
+          <span class="note-type">${typeLabel}</span>
+          <span class="note-score">${scoreRender}</span>
+        </div>
+        <div class="note-content">${textHTML}</div>
+      </div>
+    `;
+  },
+
+  renderEmpty(containerId, message) {
+    const c = this.get(containerId); if(!c) return;
+    c.innerHTML = `<div class="empty-state">
+      <svg fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>
+      <div>${message}</div>
+    </div>`;
   }
 };
 
-try {
-  const s = localStorage.getItem('ns_settings_v12');
-  if (s) Object.assign(CFG.settings, JSON.parse(s));
-} catch {}
+// --- APP RUNTIME ---
+let debounceInput = null;
+let lastVectorHash = null;
 
-const saveSettings = () => localStorage.setItem('ns_settings_v12', JSON.stringify(CFG.settings));
+async function executeSearch() {
+  const text = UI.get('ioInput').value.trim();
+  if (!text || !AI.extractor) {
+    ['local','world','seren'].forEach(k => { UI.get(`list-${k}`).innerHTML = ''; UI.get(`cnt${k.charAt(0).toUpperCase()+k.slice(1)}`).textContent = '0'; });
+    UI.renderEmpty('list-local', 'Type to search the semantic space.');
+    return;
+  }
 
-const Util = {
-  newId: () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2, 15)),
-  now: () => Date.now(),
-  esc: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
-  escRegex: (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-  clamp: (v, min, max) => Math.max(min, Math.min(max, v))
-};
-
-/* ================= TOAST ================= */
-const Toast = (() => {
-  let timer;
-  return {
-    show: (msg, duration = 2500) => {
-      const t = document.getElementById('toast');
-      if (!t) return;
-      t.textContent = msg;
-      t.className = 'toast show';
-      clearTimeout(timer);
-      timer = setTimeout(() => t.className = 'toast', duration);
-    }
-  };
-})();
-
-const $ = (id) => document.getElementById(id);
-const setChip = (id, txt, cls) => {
-  const el = $(id);
-  if (el) el.className = 'chip ' + cls, el.innerHTML = `<span class="dot"></span>${txt}`;
-};
-
-/* ================= STORAGE ================= */
-const Storage = (() => {
-  let db = null;
-  const open = () => new Promise((res, rej) => {
-    if (db) return res(db);
-    const req = indexedDB.open(CFG.DB_NAME, CFG.DB_VERSION);
-    req.onupgradeneeded = (ev) => {
-      if (!ev.target.result.objectStoreNames.contains(CFG.STORE_THOUGHTS)) {
-        const store = ev.target.result.createObjectStore(CFG.STORE_THOUGHTS, { keyPath: 'id' });
-        store.createIndex('shared', 'shared');
-        store.createIndex('createdAt', 'createdAt');
-      }
-    };
-    req.onsuccess = (ev) => { db = ev.target.result; res(db); };
-    req.onerror = () => rej(req.error);
-  });
-  const tx = (store, mode = 'readonly') => db.transaction(store, mode).objectStore(store);
-  const prom = (req) => new Promise((r, j) => { req.onsuccess = () => r(req.result); req.onerror = () => j(req.error); });
-  return {
-    put: async (t) => { await open(); return prom(tx(CFG.STORE_THOUGHTS, 'readwrite').put(t)); },
-    all: async () => { await open(); return prom(tx(CFG.STORE_THOUGHTS).getAll()); },
-    clear: async () => { await open(); return prom(tx(CFG.STORE_THOUGHTS, 'readwrite').clear()); }
-  };
-})();
-
-/* ================= VECTOR ================= */
-const Vector = (() => {
-  let extractor = null;
-  return {
-    load: async (onProgress) => {
-      if (!extractor) {
-        extractor = await pipeline('feature-extraction', CFG.MODEL_ID, {
-          progress_callback: p => {
-            if (p.status === 'progress' && p.total) onProgress(p.loaded / p.total * 100);
-          }
-        });
-      }
-      return extractor;
-    },
-    embed: async (txt) => {
-      if (!extractor || !txt || !txt.trim()) return null;
-      try {
-        // MiniLM returns normalized vectors by default when normalize: true
-        const out = await extractor(txt, { pooling: 'mean', normalize: true });
-        return Array.from(out.data);
-      } catch (e) {
-        console.warn('Embed error:', e);
-        return null;
-      }
-    },
-    cosine: (a, b) => {
-      if (!a || !b || a.length !== b.length) return 0;
-      // Both vectors are normalized, so dot product = cosine similarity
-      let s = 0;
-      for (let i = 0; i < a.length; i++) s += a[i] * b[i];
-      return s;
-    },
-    isLoaded: () => extractor !== null
-  };
-})();
-
-/* ================= P2P NETWORK (NOSTR PULL) ================= */
-const Network = (() => {
-  let pool = null, sk = null, pk = null, sub = null;
-  const activePeers = new Map();
-  const seenEvents = new Set();
+  const queryVector = await AI.embed(text);
   
-  let currentQueryId = null;
-  let worldResults = [];
-  let answeredPeersForCurrentQuery = new Set();
-  let searchTimer = null;
+  // Throttle network broadcast: Only send if meaning changed significantly
+  if (!lastVectorHash || AI.cosine(queryVector, lastVectorHash) < 0.98) {
+    lastVectorHash = queryVector;
+    Net.broadcastQuery(queryVector);
+  }
 
-  const prunePeers = () => {
-    const now = Util.now();
-    let changed = false;
-    for (const [pub, data] of activePeers) {
-      if (now - data.lastSeen > CFG.PEER_TTL_MS) {
-        activePeers.delete(pub);
-        changed = true;
-      }
-    }
-    if (changed) setChip('chipPeers', `${activePeers.size} peers`, activePeers.size ? 'ok' : 'warn');
+  // 1. Fetch Local Data
+  const dbNotes = await DB.getAllNotes();
+  const localScored = dbNotes.filter(n => n.vector).map(n => ({ ...n, score: AI.cosine(queryVector, n.vector) }));
+  
+  // 2. Fetch Network Data
+  const worldScored = Net.worldAnswers.map(ans => ({ ...ans, score: AI.cosine(queryVector, ans.vector) }));
+
+  // 3. Filter and Sort
+  const TH = AppConfig.state.threshold;
+  const SD = AppConfig.state.serendipity;
+
+  const localExact = localScored.filter(n => n.score >= TH).sort((a,b)=>b.score-a.score);
+  const worldExact = worldScored.filter(n => n.score >= TH).sort((a,b)=>b.score-a.score);
+  
+  // Serendipity is things below strict threshold but above the serendipity floor.
+  const serenAll = [...localScored, ...worldScored]
+    .filter(n => n.score >= (TH - SD) && n.score < TH)
+    .sort((a,b)=>b.score-a.score);
+
+  // 4. Render
+  const renderList = (id, arr, typeClass, emptyMsg) => {
+    const el = UI.get(id); if(!el) return;
+    if (arr.length === 0) { UI.renderEmpty(id, emptyMsg); }
+    else { el.innerHTML = arr.map(item => UI.createCard(item, typeClass, text)).join(''); }
   };
 
-  const flashActivity = () => {
-    const el = $('netActivity');
-    el.classList.add('active');
-    setTimeout(() => el.classList.remove('active'), 800);
-  };
+  renderList('list-local', localExact, 't-local', 'No exact matches in your base.');
+  renderList('list-world', worldExact, 't-world', 'Nobody in the room thinks exactly this.');
+  renderList('list-seren', serenAll, 't-seren', 'No adjacent thoughts found.');
 
-  const showSearching = (isSearching, text = 'Searching network...') => {
-    const ind = $('searchIndicator');
-    const txt = $('searchText');
-    if (ind && txt) {
-      txt.textContent = text;
-      ind.classList.toggle('active', isSearching);
-    }
-  };
+  UI.get('cntLocal').textContent = localExact.length;
+  UI.get('cntWorld').textContent = worldExact.length;
+  UI.get('cntSeren').textContent = serenAll.length;
+}
 
-  const processIncomingEvent = async (event) => {
-    if (event.pubkey === pk) return;
-    if (seenEvents.has(event.id)) return;
-    
-    seenEvents.add(event.id);
-    activePeers.set(event.pubkey, { lastSeen: Util.now() });
-    setChip('chipPeers', `${activePeers.size} peers`, 'ok');
+async function renderMyBase() {
+  const dbNotes = await DB.getAllNotes();
+  const c = UI.get('list-base');
+  if (dbNotes.length === 0) {
+    UI.renderEmpty('list-base', 'Your local knowledge base is empty.');
+    return;
+  }
+  
+  dbNotes.sort((a,b) => b.createdAt - a.createdAt);
+  c.innerHTML = dbNotes.map(note => UI.createCard(note, 't-local', null)).join('');
+}
 
-    if (event.kind === CFG.KIND_QUERY) {
-      try {
-        const query = JSON.parse(event.content);
-        if (!query.vector) return;
-        
-        const allNotes = await Storage.all();
-        const sharedNotes = allNotes.filter(n => n.shared && n.vector);
-
-        let bestNote = null;
-        let bestScore = 0;
-
-        for (const note of sharedNotes) {
-          const score = Vector.cosine(query.vector, note.vector);
-          if (score >= CFG.settings.threshold && score > bestScore) {
-            bestScore = score;
-            bestNote = note;
-          }
-        }
-
-        if (bestNote) {
-          flashActivity();
-          const ansEv = finalizeEvent({
-            kind: CFG.KIND_ANSWER,
-            created_at: Math.floor(Date.now() / 1000),
-            tags: [['t', CFG.settings.room], ['e', event.id]],
-            content: JSON.stringify({
-              text: bestNote.text,
-              vector: bestNote.vector,
-              score: bestScore,
-              id: bestNote.id
-            })
-          }, sk);
-          
-          pool.publish(CFG.RELAYS, ansEv).catch(e => console.warn('Publish answer failed:', e));
-        }
-      } catch (e) {
-        console.warn('Process query error:', e);
-      }
-    } else if (event.kind === CFG.KIND_ANSWER) {
-      const targetTag = event.tags.find(t => t[0] === 'e');
-      if (targetTag && targetTag[1] === currentQueryId) {
-        if (answeredPeersForCurrentQuery.has(event.pubkey)) return;
-        answeredPeersForCurrentQuery.add(event.pubkey);
-
-        try {
-          const data = JSON.parse(event.content);
-          if (data.text && data.vector) {
-            worldResults.push({
-              source: { text: data.text, peer: event.pubkey, noteId: data.id },
-              vector: data.vector,
-              score: data.score || 0,
-              receivedAt: Util.now()
-            });
-            document.dispatchEvent(new Event('ns:update-ui'));
-            flashActivity();
-          }
-        } catch (e) {}
-      }
-    }
-  };
-
-  return {
-    init: () => {
-      let savedSk = localStorage.getItem('ns_sk_v12');
-      if (!savedSk) {
-        const s = generateSecretKey();
-        savedSk = Array.from(s).map(b => b.toString(16).padStart(2, '0')).join('');
-        localStorage.setItem('ns_sk_v12', savedSk);
-      }
-      sk = new Uint8Array(savedSk.match(/.{1,2}/g).map(b => parseInt(b, 16)));
-      pk = getPublicKey(sk);
-      
-      if ($('pubkeyDisplay')) $('pubkeyDisplay').textContent = pk.slice(0, 16) + '...';
-
-      pool = new SimplePool();
-      sub = pool.subscribeMany(CFG.RELAYS, [{
-        kinds: [CFG.KIND_QUERY, CFG.KIND_ANSWER],
-        '#t': [CFG.settings.room],
-        since: Math.floor(Date.now() / 1000)
-      }], { onevent: processIncomingEvent });
-      
-      setChip('chipNet', 'online', 'ok');
-      setInterval(prunePeers, 30000);
-    },
-
-    sendQuery: (vector) => {
-      if (!pool) return;
-      
-      worldResults = [];
-      answeredPeersForCurrentQuery.clear();
-      showSearching(true, 'Broadcasting query to peers...');
-      
-      if (searchTimer) clearTimeout(searchTimer);
-
-      const ev = finalizeEvent({
-        kind: CFG.KIND_QUERY,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [['t', CFG.settings.room]],
-        content: JSON.stringify({ vector })
-      }, sk);
-      
-      currentQueryId = ev.id;
-      pool.publish(CFG.RELAYS, ev).catch(e => console.warn('Publish query failed:', e));
-      flashActivity();
-
-      searchTimer = setTimeout(() => {
-        showSearching(false);
-      }, CFG.SEARCH_TIMEOUT_MS);
-    },
-
-    getWorldResults: () => worldResults,
-    leave: () => {
-      if (sub) sub.close();
-      if (pool) pool.close(CFG.RELAYS);
-      pool = null;
-      activePeers.clear();
-      seenEvents.clear();
-      setChip('chipNet', 'offline', 'warn');
-    }
-  };
-})();
-
-/* ================= UI / APP LOGIC ================= */
-const App = (() => {
-  let debounceTimer = null;
-  let lastVector = null;
-
-  const hl = (qt, mt) => {
-    if (!qt || !mt) return Util.esc(mt);
-    const words = qt.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-    let out = Util.esc(mt);
-    words.forEach(w => {
-      const safeW = Util.escRegex(w);
-      const re = new RegExp(`(${safeW})`, 'gi');
-      out = out.replace(re, '<mark>$1</mark>');
-    });
-    return out;
-  };
-
-  const renderCards = (containerId, items, qText, type) => {
-    const c = $(containerId);
-    if (!c) return;
-    
-    const fragment = document.createDocumentFragment();
-    
-    if (!items.length) {
-      const empty = document.createElement('div');
-      empty.className = 'empty';
-      empty.textContent = type === 'world' ? 'Peers are silent (or no matches)' : 
-                         type === 'serendipity' ? 'No serendipitous connections yet' :
-                         'Database is empty';
-      fragment.appendChild(empty);
-    } else {
-      items.slice(0, CFG.MAX_RESULTS).forEach(item => {
-        const score = item.score ? item.score.toFixed(3) : '';
-        const pubTag = type === 'world' || type === 'serendipity'
-          ? `<span class="tag">PEER ${item.source.peer ? item.source.peer.slice(0, 6) : '?'}</span>`
-          : (item.source.shared ? '<span class="pub-status pub-ok">SHARED</span>' : '<span class="pub-status">PRIVATE</span>');
-        
-        const card = document.createElement('div');
-        card.className = `card ${type === 'serendipity' ? 'serendipity' : (type === 'world' ? 'world' : 'mine')}`;
-        card.innerHTML = `
-          <div class="head">${pubTag}<span class="score">${score}</span></div>
-          <div class="text">${hl(qText, item.source.text)}</div>`;
-        fragment.appendChild(card);
-      });
-    }
-    
-    c.innerHTML = '';
-    c.appendChild(fragment);
-  };
-
-  const getSerendipityResults = (localItems, worldItems, queryVec) => {
-    const mix = CFG.settings.mix / 100;
-    const targetCount = CFG.MAX_RESULTS;
-    const localCount = Math.round(targetCount * (1 - mix));
-    const worldCount = targetCount - localCount;
-
-    // Mix local and world results with some randomization for serendipity
-    const local = localItems
-      .filter(r => r.score >= CFG.settings.threshold * 0.8) // Lower threshold for serendipity
-      .sort((a, b) => b.score - a.score)
-      .slice(0, localCount * 2);
-
-    const world = worldItems
-      .filter(r => r.score >= CFG.settings.threshold * 0.8)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, worldCount * 2);
-
-    // Shuffle and mix
-    const mixed = [];
-    const usedIds = new Set();
-
-    while (mixed.length < targetCount && (local.length > 0 || world.length > 0)) {
-      const takeLocal = Math.random() < (1 - mix) && local.length > 0;
-      const source = takeLocal ? local : world;
-      
-      if (source.length > 0) {
-        const item = source.shift();
-        if (!usedIds.has(item.source.id || item.source.text)) {
-          mixed.push(item);
-          usedIds.add(item.source.id || item.source.text);
-        }
-      } else if (source === local && world.length > 0) {
-        const item = world.shift();
-        if (!usedIds.has(item.source.id || item.source.text)) {
-          mixed.push(item);
-          usedIds.add(item.source.id || item.source.text);
-        }
-      } else if (source === world && local.length > 0) {
-        const item = local.shift();
-        if (!usedIds.has(item.source.id || item.source.text)) {
-          mixed.push(item);
-          usedIds.add(item.source.id || item.source.text);
-        }
-      }
-    }
-
-    return mixed;
-  };
-
-  const updateUI = async () => {
-    const text = $('input').value.trim();
-    
-    if (!text) {
-      renderCards('listMine', [], text, 'mine');
-      renderCards('listWorld', [], text, 'world');
-      renderCards('listSerendipity', [], text, 'serendipity');
-      $('badgeMine').textContent = '0';
-      $('badgeWorld').textContent = '0';
-      $('badgeSerendipity').textContent = '0';
-      lastVector = null;
-      return;
-    }
-
-    if (!Vector.isLoaded()) return;
-
-    const qv = await Vector.embed(text);
-    if (!qv) return;
-
-    if (!lastVector || Vector.cosine(qv, lastVector) < 0.98) {
-      lastVector = qv;
-      Network.sendQuery(qv);
-    }
-
-    const allLocal = await Storage.all();
-    const mine = allLocal
-      .filter(n => n.vector)
-      .map(n => ({ source: n, score: Vector.cosine(qv, n.vector) }))
-      .filter(r => r.score >= CFG.settings.threshold)
-      .sort((a, b) => b.score - a.score);
-
-    const world = Network.getWorldResults()
-      .map(r => ({ source: r.source, score: r.score || Vector.cosine(qv, r.vector), vector: r.vector }))
-      .filter(r => r.score >= CFG.settings.threshold)
-      .sort((a, b) => b.score - a.score);
-
-    const serendipity = getSerendipityResults(mine, world, qv);
-
-    renderCards('listMine', mine, text, 'mine');
-    renderCards('listWorld', world, text, 'world');
-    renderCards('listSerendipity', serendipity, text, 'serendipity');
-    
-    $('badgeMine').textContent = mine.length;
-    $('badgeWorld').textContent = world.length;
-    $('badgeSerendipity').textContent = serendipity.length;
-  };
-
-  const renderHistory = async () => {
-    const all = await Storage.all();
-    const c = $('listHistory');
-    if (!c) return;
-    
-    const fragment = document.createDocumentFragment();
-    if (!all.length) {
-      const empty = document.createElement('div');
-      empty.className = 'empty';
-      empty.textContent = 'Database is empty';
-      fragment.appendChild(empty);
-    } else {
-      all.sort((a, b) => b.createdAt - a.createdAt).forEach(n => {
-        const card = document.createElement('div');
-        card.className = 'card mine';
-        card.innerHTML = `
-          <div class="head">
-            ${n.shared ? '<span class="pub-status pub-ok">SHARED (Answers Queries)</span>' : '<span class="pub-status">PRIVATE</span>'}
-            <span class="score">${new Date(n.createdAt).toLocaleString()}</span>
-          </div>
-          <div class="text">${Util.esc(n.text)}</div>`;
-        fragment.appendChild(card);
-      });
-    }
-    c.innerHTML = '';
-    c.appendChild(fragment);
-  };
-
-  const saveNote = async (isShared) => {
-    const txt = $('input').value.trim();
-    if (!txt) return Toast.show('Empty note');
-
-    let v = null;
-    if (Vector.isLoaded()) {
-      v = await Vector.embed(txt);
-    }
-
-    const note = {
-      id: Util.newId(),
-      text: txt,
-      vector: v,
-      shared: isShared,
-      createdAt: Date.now()
+// Bind Events
+function bindEvents() {
+  // Main Tabs
+  document.querySelectorAll('.tab').forEach(t => {
+    t.onclick = () => {
+      document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.view-layer').forEach(el => el.classList.remove('active'));
+      t.classList.add('active');
+      UI.get(t.dataset.view).classList.add('active');
+      if (t.dataset.view === 'view-base') renderMyBase();
     };
+  });
 
-    await Storage.put(note);
-    $('input').value = '';
-    lastVector = null;
-    Toast.show(isShared ? 'Saved. Now answering peer queries!' : 'Saved privately');
-    updateUI();
-    renderHistory();
+  // Filter Tabs (Local, World, Seren)
+  document.querySelectorAll('.f-tab').forEach(t => {
+    t.onclick = () => {
+      document.querySelectorAll('.f-tab').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('#view-stream .node-list').forEach(el => el.classList.remove('active'));
+      t.classList.add('active');
+      const targetList = UI.get(`list-${t.dataset.filter}`);
+      if(targetList) targetList.classList.add('active');
+    };
+  });
+
+  // Input Box (Search on type)
+  UI.get('ioInput').addEventListener('input', () => {
+    clearTimeout(debounceInput);
+    debounceInput = setTimeout(executeSearch, 1000);
+  });
+
+  // Saving Data
+  const handleSave = async (isShared) => {
+    const el = UI.get('ioInput'); const text = el.value.trim();
+    if (!text || !AI.extractor) return;
+    
+    const vector = await AI.embed(text);
+    const note = { id: Math.random().toString(36).slice(2, 10), text, vector, shared: isShared, createdAt: Date.now() };
+    
+    await DB.saveNote(note);
+    el.value = '';
+    UI.toast(isShared ? 'Note saved and visible to peers.' : 'Note saved privately.');
+    
+    executeSearch(); // Refresh lists
+    if (UI.get('view-base').classList.contains('active')) renderMyBase();
+  };
+  
+  UI.get('btnSavePrivate').onclick = () => handleSave(false);
+  UI.get('btnSaveShared').onclick = () => handleSave(true);
+
+  // Settings Drawer
+  const openDrawer = () => { UI.get('drawer').classList.add('open'); UI.get('drawerOverlay').classList.add('open'); };
+  const closeDrawer = () => { UI.get('drawer').classList.remove('open'); UI.get('drawerOverlay').classList.remove('open'); };
+  
+  UI.get('btnOpenSettings').onclick = openDrawer;
+  UI.get('btnCloseSettings').onclick = closeDrawer;
+  UI.get('drawerOverlay').onclick = closeDrawer;
+
+  // Settings Config Handlers
+  UI.get('cfgTheme').value = AppConfig.state.theme;
+  UI.get('cfgRoom').value = AppConfig.state.room;
+  UI.get('cfgThresh').value = AppConfig.state.threshold;
+  UI.get('cfgSeren').value = AppConfig.state.serendipity;
+
+  UI.get('cfgThresh').oninput = e => UI.get('valThresh').textContent = e.target.value;
+  UI.get('cfgSeren').oninput = e => UI.get('valSeren').textContent = e.target.value;
+
+  UI.get('btnSaveConfig').onclick = () => {
+    AppConfig.state.theme = UI.get('cfgTheme').value;
+    AppConfig.state.room = UI.get('cfgRoom').value.trim();
+    AppConfig.state.threshold = parseFloat(UI.get('cfgThresh').value);
+    AppConfig.state.serendipity = parseFloat(UI.get('cfgSeren').value);
+    localStorage.setItem('ns_config', JSON.stringify(AppConfig.state));
+    window.location.reload(); // Reload to re-init nostr pool with new room
   };
 
-  return {
-    init: async () => {
-      document.documentElement.setAttribute('data-theme',
-        CFG.settings.theme === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : CFG.settings.theme);
-
-      document.querySelectorAll('.main-tab').forEach(t => t.onclick = () => {
-        document.querySelectorAll('.main-tab').forEach(x => x.classList.remove('active'));
-        t.classList.add('active');
-        document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + t.dataset.main));
-        if (t.dataset.main === 'history') renderHistory();
-      });
-      
-      document.querySelectorAll('.sub-tab').forEach(t => t.onclick = () => {
-        document.querySelectorAll('.sub-tab').forEach(x => x.classList.remove('active'));
-        t.classList.add('active');
-        $('sub-mine').style.display = t.dataset.sub === 'mine' ? '' : 'none';
-        $('sub-world').style.display = t.dataset.sub === 'world' ? '' : 'none';
-        $('sub-serendipity').style.display = t.dataset.sub === 'serendipity' ? '' : 'none';
-      });
-
-      $('input').addEventListener('input', () => {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(updateUI, 800);
-      });
-      
-      $('btnSaveLocal').onclick = () => saveNote(false);
-      $('btnPublish').onclick = () => saveNote(true);
-      document.addEventListener('ns:update-ui', updateUI);
-
-      $('setRoom').value = CFG.settings.room;
-      $('setThreshold').value = CFG.settings.threshold;
-      $('valThreshold').textContent = CFG.settings.threshold.toFixed(2);
-      $('setMix').value = CFG.settings.mix;
-      $('valMix').textContent = CFG.settings.mix + '%';
-      
-      document.querySelectorAll('.seg button').forEach(b => {
-        if (b.dataset.val == CFG.settings.theme) {
-          b.parentNode.querySelectorAll('button').forEach(x => x.classList.remove('active'));
-          b.classList.add('active');
-        }
-        b.onclick = () => {
-          b.parentNode.querySelectorAll('button').forEach(x => x.classList.remove('active'));
-          b.classList.add('active');
-          CFG.settings[b.parentNode.dataset.opt] = b.dataset.val;
-          if (b.parentNode.dataset.opt === 'theme') {
-            document.documentElement.setAttribute('data-theme',
-              CFG.settings.theme === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : CFG.settings.theme);
-          }
-        };
-      });
-      
-      $('setThreshold').oninput = e => {
-        CFG.settings.threshold = parseFloat(e.target.value);
-        $('valThreshold').textContent = CFG.settings.threshold.toFixed(2);
-        saveSettings();
-      };
-
-      $('setMix').oninput = e => {
-        CFG.settings.mix = parseInt(e.target.value);
-        $('valMix').textContent = CFG.settings.mix + '%';
-        saveSettings();
-        updateUI();
-      };
-
-      $('btnSettings').onclick = () => { $('drawer').classList.add('open'); $('overlay').classList.add('show'); };
-      $('btnClose').onclick = $('overlay').onclick = () => { $('drawer').classList.remove('open'); $('overlay').classList.remove('show'); };
-
-      $('btnExport').onclick = async () => {
-        const all = await Storage.all();
-        const capsule = {
-          version: 12,
-          exported: new Date().toISOString(),
-          notes: all.map(n => ({
-            id: n.id,
-            text: n.text,
-            vector: n.vector,
-            shared: n.shared,
-            createdAt: n.createdAt
-          }))
-        };
-        const blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `noosphere-capsule-${new Date().toISOString().slice(0, 10)}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-        Toast.show('Capsule exported');
-      };
-
-      $('btnImport').onclick = () => $('fileInput').click();
-      $('fileInput').onchange = async e => {
-        const file = e.target.files[0];
-        if (!file) return;
-        try {
-          const data = JSON.parse(await file.text());
-          if (!data || !Array.isArray(data.notes)) throw new Error('Invalid format');
-          let imported = 0;
-          for (const n of data.notes) {
-            if (!n.id || !n.text) continue;
-            await Storage.put({
-              id: n.id,
-              text: n.text,
-              vector: n.vector || null,
-              shared: !!n.shared,
-              createdAt: n.createdAt || Date.now()
-            });
-            imported++;
-          }
-          await updateUI();
-          await renderHistory();
-          Toast.show(`Imported ${imported} notes`);
-        } catch (err) {
-          Toast.show('Import failed: ' + err.message);
-        }
-        e.target.value = '';
-      };
-
-      $('btnReset').onclick = async () => {
-        if (confirm('Clear all local notes?')) {
-          await Storage.clear();
-          renderHistory();
-          updateUI();
-          Toast.show('Cleared');
-        }
-      };
-      
-      $('btnApply').onclick = () => {
-        CFG.settings.room = $('setRoom').value.trim() || 'noosphere-2026';
-        saveSettings();
-        location.reload();
-      };
-
-      setChip('chipModel', 'loading...', 'warn');
-      try {
-        await Vector.load((pct) => {
-          $('modelProgress').style.width = pct + '%';
-        });
-        setChip('chipModel', 'model ready', 'ok');
-        $('modelProgress').style.width = '100%';
-        setTimeout(() => $('modelProgress').style.opacity = '0', 500);
-      } catch (e) {
-        setChip('chipModel', 'model error', 'err');
-        console.error('Model load failed:', e);
-      }
-
-      renderHistory();
-      Network.init();
+  UI.get('btnWipeDB').onclick = async () => {
+    if(confirm('Warning: This will permanently delete all your notes. Continue?')) {
+      await DB.clearDB();
+      UI.toast('Database Erased.');
+      window.location.reload();
     }
   };
-})();
+}
 
-App.init();
+// --- BOOTSTRAP ---
+async function BOOTSTRAP() {
+  UI.setTheme(AppConfig.state.theme);
+  bindEvents();
+  UI.renderEmpty('list-local', 'Waiting for input...');
+  
+  // 1. Load AI Model
+  try {
+    await AI.init((msg) => { UI.setStatus('stAI', msg, ''); });
+    UI.setStatus('stAI', 'AI Active', 'ready');
+  } catch (err) {
+    UI.setStatus('stAI', 'AI Failed', '');
+    console.error(err);
+  }
+
+  // 2. Connect to Nostr
+  Net.init(
+    (peerCount) => { UI.setStatus('stNetwork', `Online (${peerCount} peers)`, 'active'); },
+    () => { executeSearch(); } // Re-run search/render when new answers arrive
+  );
+}
+
+// Start
+BOOTSTRAP();
 </script>
 </body>
 </html>
