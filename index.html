@@ -1,1012 +1,745 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Noosphere Core (IDB Local + Gun World MAP)</title>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Noosphere :: Foundation</title>
+<style>
+  /* =========================================================
+     UI: минимальный технический интерфейс для проверки связки
+     ========================================================= */
+  :root {
+    --bg: #0f1115;
+    --panel: #161a22;
+    --border: #242a36;
+    --text: #e6e8ee;
+    --muted: #8a93a6;
+    --accent: #6aa6ff;
+    --ok: #4ade80;
+    --warn: #f59e0b;
+    --err: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 20px; }
+  h1 { font-size: 16px; margin: 0 0 16px; letter-spacing: .5px; }
+  h2 { font-size: 13px; margin: 24px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
 
-  <style>
-    :root{
-      --bg:#f8fafc; --surface:#fff; --text:#0f172a; --muted:#64748b;
-      --border:#e2e8f0; --accent:#4f46e5; --accent2:#4338ca;
-      --danger:#ef4444; --ok:#16a34a; --warn:#f59e0b;
-      --r:14px;
-    }
-    body.dark{
-      --bg:#0b1220; --surface:#111c2f; --text:#eef2ff; --muted:#94a3b8; --border:#22324f;
-      --accent:#818cf8; --accent2:#6366f1;
-    }
-    *{ box-sizing:border-box; margin:0; padding:0; }
-    body{ font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); display:flex; justify-content:center; padding:12px; }
-    .app{ width:100%; max-width:760px; display:flex; flex-direction:column; gap:10px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; padding: 12px; margin-bottom: 12px;
+  }
+  textarea, input[type="text"] {
+    width: 100%; background: #0b0d12; color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 10px; font: inherit; resize: vertical;
+  }
+  textarea { min-height: 90px; }
+  button {
+    background: #1f2532; color: var(--text); border: 1px solid var(--border);
+    border-radius: 4px; padding: 8px 12px; font: inherit; cursor: pointer;
+  }
+  button:hover { background: #272f40; }
+  button.primary { background: var(--accent); color: #0b0d12; border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
 
-    .topbar{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
-    .tabs{ display:flex; gap:8px; }
-    .tab{ border:1px solid var(--border); background:transparent; color:var(--muted); padding:8px 12px; border-radius:12px; font-weight:800; cursor:pointer; }
-    .tab.active{ background:var(--accent); color:#fff; border-color:var(--accent); }
-    .gear{ width:40px; height:40px; border-radius:999px; border:1px solid var(--border); background:var(--surface); cursor:pointer; font-weight:900; }
+  label.check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+  .status { display: inline-flex; gap: 12px; flex-wrap: wrap; }
+  .pill {
+    padding: 4px 8px; border-radius: 999px; font-size: 12px;
+    background: #1a1f2a; border: 1px solid var(--border); color: var(--muted);
+  }
+  .pill.ok    { color: var(--ok);   border-color: #1f3d2a; }
+  .pill.warn  { color: var(--warn); border-color: #3d3220; }
+  .pill.err   { color: var(--err);  border-color: #3d1f22; }
 
-    .view{ display:none; }
-    .view.active{ display:block; }
+  .list { display: flex; flex-direction: column; gap: 6px; }
+  .item {
+    background: #0b0d12; border: 1px solid var(--border);
+    border-radius: 4px; padding: 8px 10px;
+  }
+  .item .meta { color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .item.world { border-left: 2px solid var(--accent); }
+  .item.local { border-left: 2px solid #555; }
 
-    .box{ background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:12px; }
-    textarea{ width:100%; min-height:92px; resize:none; outline:none; border:none; background:transparent; color:var(--text); font-size:16px; line-height:1.4; }
-    textarea::placeholder{ color:var(--muted); opacity:0.8; }
-
-    .row{ display:flex; gap:8px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin-top:10px; }
-    .btns{ display:flex; gap:8px; margin-left:auto; }
-    .btn{ border:none; border-radius:12px; padding:10px 12px; cursor:pointer; font-weight:900; background:var(--accent); color:#fff; }
-    .btn:hover{ background:var(--accent2); }
-    .btn:disabled{ opacity:.45; pointer-events:none; }
-    .btn.ghost{ background:transparent; color:var(--muted); border:1px solid var(--border); }
-    .btn.danger{ background:var(--danger); }
-
-    .status{ font-size:12px; color:var(--muted); display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
-    .pill{ border:1px solid var(--border); border-radius:999px; padding:2px 8px; font-weight:900; display:inline-flex; gap:6px; align-items:center; }
-    .dot{ width:8px; height:8px; border-radius:50%; background:var(--muted); display:inline-block; }
-    .dot.ok{ background:var(--ok); } .dot.warn{ background:var(--warn); } .dot.bad{ background:var(--danger); }
-
-    .section{ margin-top:10px; }
-    .h{ font-size:12px; color:var(--muted); font-weight:950; text-transform:uppercase; letter-spacing:.06em; margin:10px 0 6px; }
-    .list{ display:flex; flex-direction:column; gap:8px; }
-    .item{ background:var(--surface); border:1px solid var(--border); border-radius:var(--r); padding:10px 12px; }
-    .item .text{ white-space:pre-wrap; word-break:break-word; }
-    .item .meta{ margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--muted); align-items:center; }
-    .badge{ font-weight:950; border:1px solid var(--border); border-radius:999px; padding:2px 8px; }
-    .badge.pending{ border-color:rgba(245,158,11,0.5); color:var(--warn); }
-    .badge.world{ border-color:rgba(22,163,74,0.5); color:var(--ok); }
-
-    .empty{ text-align:center; color:var(--muted); font-style:italic; padding:12px; border:1px dashed var(--border); border-radius:var(--r); background:var(--surface); }
-    .search{ width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:var(--r); background:var(--surface); color:var(--text); outline:none; }
-
-    .overlay{ position:fixed; inset:0; background:rgba(0,0,0,0.35); display:none; z-index:9; }
-    .overlay.open{ display:block; }
-    .panel{
-      position:fixed; top:0; right:0; width:420px; max-width:92vw; height:100%;
-      background:var(--surface); border-left:1px solid var(--border);
-      padding:12px; z-index:10; transform:translateX(100%); transition:transform .2s ease;
-      overflow:auto;
-    }
-    .panel.open{ transform:translateX(0); }
-    .field{ margin:10px 0; display:flex; flex-direction:column; gap:6px; }
-    .field label{ font-size:12px; color:var(--muted); font-weight:950; }
-    select, input[type="range"], textarea.panel-ta{ width:100%; }
-    select, textarea.panel-ta{
-      border:1px solid var(--border); border-radius:12px; padding:10px 12px;
-      background:var(--surface); color:var(--text); outline:none;
-    }
-    textarea.panel-ta{ min-height:90px; resize:vertical; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .tiny{ font-size:12px; color:var(--muted); }
-  </style>
-
-  <!-- GunDB -->
-  <script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/gun/sea.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/gun/lib/rindexed.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/gun/lib/then.js"></script>
+  .log {
+    background: #07090d; border: 1px solid var(--border);
+    border-radius: 4px; padding: 8px; max-height: 220px; overflow: auto;
+    font-size: 12px;
+  }
+  .log .e { color: var(--err); }
+  .log .w { color: var(--warn); }
+  .log .i { color: var(--muted); }
+</style>
 </head>
-
 <body>
-  <div class="app">
-    <div class="topbar">
-      <div class="tabs">
-        <button class="tab active" id="tabFlow">Поток</button>
-        <button class="tab" id="tabHistory">История</button>
-      </div>
-      <button class="gear" id="openSettings">⚙</button>
+<div class="wrap">
+  <h1>NOOSPHERE / FOUNDATION</h1>
+
+  <!-- Статус подсистем -->
+  <section class="panel">
+    <div class="status" id="status">
+      <span class="pill" data-key="idb">IDB: ...</span>
+      <span class="pill" data-key="gun">GUN: ...</span>
+      <span class="pill" data-key="peers">PEERS: 0</span>
+      <span class="pill" data-key="local">LOCAL: 0</span>
+      <span class="pill" data-key="world">WORLD: 0</span>
     </div>
+  </section>
 
-    <div class="view active" id="flowView">
-      <div class="box">
-        <textarea id="thought" placeholder="Поделитесь мыслью..."></textarea>
-        <div class="row">
-          <div class="status" id="status"></div>
-          <div class="btns">
-            <button class="btn ghost" id="save">Сохранить</button>
-            <button class="btn" id="sendWorld" disabled>Сохранить + в Мир</button>
-          </div>
-        </div>
-        <div class="tiny" style="margin-top:8px;">Свайп вверх по полю ввода = «Сохранить + в Мир»</div>
-      </div>
-
-      <div class="section">
-        <div class="h">Мои релевантные</div>
-        <div id="localList" class="list"></div>
-      </div>
-
-      <div class="section">
-        <div class="h">Мир (релевантные, без моих)</div>
-        <div id="worldList" class="list"></div>
-      </div>
-
-      <div class="section">
-        <div class="h">Смежные (без моих)</div>
-        <div id="serList" class="list"></div>
-      </div>
+  <!-- Ввод -->
+  <section class="panel">
+    <h2>thought</h2>
+    <textarea id="input" placeholder="type a thought..."></textarea>
+    <div class="row" style="margin-top:8px; align-items:center;">
+      <label class="check">
+        <input type="checkbox" id="publishWorld" />
+        <span>publish to world (p2p)</span>
+      </label>
+      <div style="flex:1"></div>
+      <button id="btnSave" class="primary">Save</button>
     </div>
+  </section>
 
-    <div class="view" id="historyView">
-      <input id="historySearch" class="search" placeholder="Поиск по истории..." />
-      <div style="height:10px;"></div>
-      <div id="historyList" class="list"></div>
+  <!-- Действия диагностики -->
+  <section class="panel">
+    <h2>diagnostics</h2>
+    <div class="row">
+      <button id="btnTestIdb">Test IDB</button>
+      <button id="btnTestGun">Test Gun</button>
+      <button id="btnSeed">Seed 3 thoughts</button>
+      <button id="btnReindex">Reindex vectors (stub)</button>
+      <button id="btnExport">Export JSON</button>
+      <button id="btnReset">Reset device</button>
     </div>
-  </div>
+  </section>
 
-  <div class="overlay" id="overlay"></div>
-  <div class="panel" id="panel">
-    <h2 style="margin-bottom:6px;">Настройки</h2>
-    <div class="tiny" id="diag"></div>
+  <!-- Локальные -->
+  <section class="panel">
+    <h2>local thoughts</h2>
+    <div class="list" id="listLocal"></div>
+  </section>
 
-    <div class="field">
-      <label>Тема</label>
-      <select id="theme">
-        <option value="auto">Авто</option>
-        <option value="light">День</option>
-        <option value="dark">Ночь</option>
-      </select>
-    </div>
+  <!-- Мировые -->
+  <section class="panel">
+    <h2>world thoughts (p2p)</h2>
+    <div class="list" id="listWorld"></div>
+  </section>
 
-    <div class="field">
-      <label>Порог релевантности</label>
-      <div style="display:flex; gap:10px; align-items:center;">
-        <input type="range" id="threshold" min="0" max="1" step="0.01" />
-        <span id="thresholdV" style="min-width:42px; font-weight:950; color:var(--accent);">0.25</span>
-      </div>
-    </div>
+  <!-- Лог -->
+  <section class="panel">
+    <h2>event log</h2>
+    <div class="log" id="log"></div>
+  </section>
+</div>
 
-    <div class="field">
-      <label>Дельта смежности</label>
-      <div style="display:flex; gap:10px; align-items:center;">
-        <input type="range" id="serDelta" min="0" max="0.5" step="0.01" />
-        <span id="serDeltaV" style="min-width:42px; font-weight:950; color:var(--accent);">0.15</span>
-      </div>
-    </div>
+<!-- GunDB: core + relay adapters -->
+<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/lib/radisk.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/lib/rindexed.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/axe.js"></script>
 
-    <div class="field">
-      <label>Макс. карточек</label>
-      <select id="maxResults">
-        <option value="3">3</option>
-        <option value="5">5</option>
-        <option value="10">10</option>
-      </select>
-    </div>
+<script>
+/* ==========================================================================
+   NOOSPHERE :: FOUNDATION
+   Архитектура в одном файле. Секции изолированы IIFE-подобными блоками
+   через namespaces на window.__ns, чтобы не засорять глобальную область.
+   Порядок объявления критичен: Config -> Logger -> Storage -> P2P -> Sync -> UI -> App
+   ========================================================================== */
 
-    <div class="field">
-      <label>Gun relay peers (по одному URL на строку)</label>
-      <textarea id="peersText" class="panel-ta" spellcheck="false"></textarea>
-      <div class="tiny">Встроено: https://relay.peer.ooo/gun</div>
-    </div>
+(() => {
+  'use strict';
 
-    <div class="field">
-      <button class="btn ghost" id="export">Экспорт</button>
-      <button class="btn ghost" id="import">Импорт</button>
-      <input type="file" id="importFile" accept=".json,.capsule" style="display:none;" />
-    </div>
+  const ns = (window.__ns = {});
 
-    <div class="field">
-      <button class="btn ghost" id="reindex">Реиндекс (векторы)</button>
-      <button class="btn danger" id="resetDevice">Сбросить устройство</button>
-    </div>
-  </div>
+  /* --------------------------------------------------------------------------
+     [1] CONFIG
+     Централизованные константы. Меняются только здесь.
+     -------------------------------------------------------------------------- */
+  ns.Config = Object.freeze({
+    DB_NAME: 'noosphere_v1',
+    DB_VERSION: 1,
+    STORE_THOUGHTS: 'thoughts',
+    STORE_META: 'meta',
 
-  <script type="module">
-    import { pipeline } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+    GUN_NAMESPACE: 'noosphere/thoughts',
+    GUN_RELAYS: [
+      'https://relay.peer.ooo/gun',
+      // Добавляй свои relay сюда. Для продакшена обязателен собственный.
+    ],
 
-    // Utils
-    const Utils = (() => {
-      const $ = (s, r=document) => r.querySelector(s);
-      const esc = (s) => { const d=document.createElement('div'); d.textContent=String(s??''); return d.innerHTML; };
-      const debounce = (fn, ms) => { let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
-      const clamp = (x,a,b)=>Math.max(a,Math.min(b,x));
-      const uuid = ()=>crypto.randomUUID();
-      const safeJSON = (txt, fb)=>{ try{return JSON.parse(txt);}catch{return fb;} };
-      class Emitter{
-        #m=new Map();
-        on(ev, fn){ if(!this.#m.has(ev)) this.#m.set(ev,new Set()); this.#m.get(ev).add(fn); return ()=>this.#m.get(ev)?.delete(fn); }
-        emit(ev, p){ for(const fn of this.#m.get(ev)??[]) { try{fn(p);}catch(e){console.error(e);} } }
+    LIMITS: {
+      MAX_TEXT_LENGTH: 10_000,
+      RENDER_CAP: 200,
+    },
+
+    VECTOR: {
+      // Заглушка под будущую эмбеддинг-модель (MiniLM / ONNX).
+      // Сейчас вектор не вычисляется, поле зарезервировано.
+      DIMENSIONS: 0,
+    },
+  });
+
+  /* --------------------------------------------------------------------------
+     [2] LOGGER
+     Без эмодзи. Уровни: i / w / e. Выводит в UI-лог и в консоль.
+     -------------------------------------------------------------------------- */
+  ns.Logger = (() => {
+    const el = () => document.getElementById('log');
+    const fmtTime = (d) => d.toISOString().slice(11, 19);
+
+    const write = (level, msg, data) => {
+      const line = document.createElement('div');
+      line.className = level;
+      const tail = data !== undefined ? ' ' + safeStringify(data) : '';
+      line.textContent = `[${fmtTime(new Date())}] [${level.toUpperCase()}] ${msg}${tail}`;
+      const box = el();
+      if (box) {
+        box.appendChild(line);
+        box.scrollTop = box.scrollHeight;
       }
-      return { $, esc, debounce, clamp, uuid, safeJSON, Emitter };
-    })();
+      const consoleFn = level === 'e' ? 'error' : level === 'w' ? 'warn' : 'log';
+      console[consoleFn](`[noosphere:${level}] ${msg}`, data ?? '');
+    };
 
-    // IDB
-    const IDB = (() => {
-      const DB = 'noosphere_idb_local_v1';
-      const STO_KV = 'kv';
-      const STO_NOTES = 'notes';
-      let ok = true;
+    const safeStringify = (x) => {
+      try { return typeof x === 'string' ? x : JSON.stringify(x); }
+      catch { return String(x); }
+    };
 
-      function open() {
-        return new Promise((resolve, reject) => {
-          const req = indexedDB.open(DB, 1);
-          req.onupgradeneeded = () => {
-            const db = req.result;
-            if (!db.objectStoreNames.contains(STO_KV)) db.createObjectStore(STO_KV);
-            if (!db.objectStoreNames.contains(STO_NOTES)) {
-              const st = db.createObjectStore(STO_NOTES, { keyPath: 'id' });
-              st.createIndex('createdAt', 'createdAt');
-            }
-          };
-          req.onsuccess = () => resolve(req.result);
-          req.onerror = () => reject(req.error);
-        });
+    return {
+      info:  (m, d) => write('i', m, d),
+      warn:  (m, d) => write('w', m, d),
+      error: (m, d) => write('e', m, d),
+    };
+  })();
+
+  /* --------------------------------------------------------------------------
+     [3] UTIL
+     Мелкие чистые хелперы: ID, валидация, нормализация.
+     -------------------------------------------------------------------------- */
+  ns.Util = {
+    newId: () => {
+      // crypto.randomUUID доступен в secure context. Fallback — на Date+Math.
+      if (crypto && typeof crypto.randomUUID === 'function') {
+        return crypto.randomUUID();
       }
+      return 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+    },
 
-      async function kvGet(key) {
-        try{
-          const db = await open();
-          return await new Promise((resolve, reject) => {
-            const tx=db.transaction(STO_KV,'readonly'); const st=tx.objectStore(STO_KV);
-            const r=st.get(key); r.onsuccess=()=>resolve(r.result); r.onerror=()=>reject(r.error);
-          });
-        } catch { ok=false; return undefined; }
-      }
-      async function kvSet(key, val) {
-        try{
-          const db = await open();
-          return await new Promise((resolve, reject) => {
-            const tx=db.transaction(STO_KV,'readwrite'); const st=tx.objectStore(STO_KV);
-            const r=st.put(val, key); r.onsuccess=()=>resolve(true); r.onerror=()=>reject(r.error);
-          });
-        } catch { ok=false; return false; }
-      }
+    now: () => Date.now(),
 
-      async function notesPut(note) {
-        try{
-          const db = await open();
-          return await new Promise((resolve, reject) => {
-            const tx=db.transaction(STO_NOTES,'readwrite'); const st=tx.objectStore(STO_NOTES);
-            const r=st.put(note); r.onsuccess=()=>resolve(true); r.onerror=()=>reject(r.error);
-          });
-        } catch { ok=false; return false; }
-      }
-      async function notesDelete(id) {
-        try{
-          const db = await open();
-          return await new Promise((resolve, reject) => {
-            const tx=db.transaction(STO_NOTES,'readwrite'); const st=tx.objectStore(STO_NOTES);
-            const r=st.delete(id); r.onsuccess=()=>resolve(true); r.onerror=()=>reject(r.error);
-          });
-        } catch { ok=false; return false; }
-      }
-      async function notesGetAll() {
-        try{
-          const db = await open();
-          return await new Promise((resolve, reject) => {
-            const tx=db.transaction(STO_NOTES,'readonly'); const st=tx.objectStore(STO_NOTES);
-            const r=st.getAll(); r.onsuccess=()=>resolve(r.result||[]); r.onerror=()=>reject(r.error);
-          });
-        } catch { ok=false; return []; }
-      }
+    normalizeText: (text) => {
+      if (typeof text !== 'string') return '';
+      const trimmed = text.trim();
+      return trimmed.slice(0, ns.Config.LIMITS.MAX_TEXT_LENGTH);
+    },
 
-      return { kvGet, kvSet, notesPut, notesDelete, notesGetAll, ok:()=>ok };
-    })();
+    isNonEmptyString: (v) => typeof v === 'string' && v.trim().length > 0,
+  };
 
-    // Settings (relay встроен)
-    const Settings = (() => {
-      const KEY='settings';
-      const DEFAULT = { theme:'auto', threshold:0.25, serDelta:0.15, maxResults:5, peersText:'https://relay.peer.ooo/gun' };
+  /* --------------------------------------------------------------------------
+     [4] STORAGE (IndexedDB wrapper)
+     Promise-based API. Два хранилища:
+       - thoughts: ключ id, индексы по createdAt и source
+       - meta:     key-value для служебных флагов (последний курсор и т.п.)
+     -------------------------------------------------------------------------- */
+  ns.Storage = (() => {
+    const { DB_NAME, DB_VERSION, STORE_THOUGHTS, STORE_META } = ns.Config;
+    let db = null;
 
-      const sanitize = (raw) => {
-        const x = raw && typeof raw==='object' ? raw : {};
-        return {
-          theme: (x.theme==='auto'||x.theme==='light'||x.theme==='dark') ? x.theme : DEFAULT.theme,
-          threshold: Utils.clamp(Number(x.threshold ?? DEFAULT.threshold), 0, 1),
-          serDelta: Utils.clamp(Number(x.serDelta ?? DEFAULT.serDelta), 0, 0.5),
-          maxResults: Math.max(1, Number(x.maxResults ?? DEFAULT.maxResults) | 0),
-          peersText: (typeof x.peersText==='string') ? x.peersText : DEFAULT.peersText
+    const open = () => new Promise((resolve, reject) => {
+      if (db) return resolve(db);
+      if (!('indexedDB' in window)) {
+        return reject(new Error('IndexedDB is not supported in this browser'));
+      }
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+
+      req.onupgradeneeded = (ev) => {
+        const _db = ev.target.result;
+        if (!_db.objectStoreNames.contains(STORE_THOUGHTS)) {
+          const store = _db.createObjectStore(STORE_THOUGHTS, { keyPath: 'id' });
+          store.createIndex('createdAt', 'createdAt', { unique: false });
+          store.createIndex('source',    'source',    { unique: false });
+        }
+        if (!_db.objectStoreNames.contains(STORE_META)) {
+          _db.createObjectStore(STORE_META, { keyPath: 'key' });
+        }
+      };
+
+      req.onsuccess = (ev) => { db = ev.target.result; resolve(db); };
+      req.onerror   = ()    => reject(req.error);
+      req.onblocked = ()    => reject(new Error('IDB open blocked by another tab'));
+    });
+
+    const tx = (storeName, mode = 'readonly') => {
+      const t = db.transaction(storeName, mode);
+      return t.objectStore(storeName);
+    };
+
+    const prom = (req) => new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror   = () => reject(req.error);
+    });
+
+    /**
+     * Thought shape:
+     * {
+     *   id: string,
+     *   text: string,
+     *   source: 'local' | 'world',
+     *   createdAt: number,
+     *   updatedAt: number,
+     *   vector: number[] | null,   // reserved
+     *   originDevice: string,      // device fingerprint (reserved)
+     *   published: boolean,        // was pushed to Gun
+     * }
+     */
+    const validate = (t) => {
+      if (!t || typeof t !== 'object') throw new Error('Invalid thought: not an object');
+      if (!ns.Util.isNonEmptyString(t.id))   throw new Error('Invalid thought: bad id');
+      if (!ns.Util.isNonEmptyString(t.text)) throw new Error('Invalid thought: empty text');
+      if (t.source !== 'local' && t.source !== 'world') {
+        throw new Error('Invalid thought: bad source');
+      }
+      return true;
+    };
+
+    const put = async (thought) => {
+      validate(thought);
+      await open();
+      return prom(tx(STORE_THOUGHTS, 'readwrite').put(thought));
+    };
+
+    const get = async (id) => {
+      await open();
+      return prom(tx(STORE_THOUGHTS).get(id));
+    };
+
+    const remove = async (id) => {
+      await open();
+      return prom(tx(STORE_THOUGHTS, 'readwrite').delete(id));
+    };
+
+    const listBySource = async (source) => {
+      await open();
+      return new Promise((resolve, reject) => {
+        const out = [];
+        const idx = tx(STORE_THOUGHTS).index('source');
+        const req = idx.openCursor(IDBKeyRange.only(source), 'prev');
+        req.onsuccess = (ev) => {
+          const cursor = ev.target.result;
+          if (!cursor) return resolve(out);
+          out.push(cursor.value);
+          if (out.length >= ns.Config.LIMITS.RENDER_CAP) return resolve(out);
+          cursor.continue();
         };
-      };
-      const parsePeers = (peersText) => String(peersText??'').split('\n').map(s=>s.trim()).filter(Boolean);
+        req.onerror = () => reject(req.error);
+      });
+    };
 
-      async function load() { return sanitize((await IDB.kvGet(KEY)) ?? DEFAULT); }
-      async function save(s) { await IDB.kvSet(KEY, sanitize(s)); }
+    const countBySource = async (source) => {
+      await open();
+      return prom(tx(STORE_THOUGHTS).index('source').count(IDBKeyRange.only(source)));
+    };
 
-      return { sanitize, parsePeers, load, save };
-    })();
+    const all = async () => {
+      await open();
+      return prom(tx(STORE_THOUGHTS).getAll());
+    };
 
-    const Theme = (() => {
-      function apply(mode) {
-        const dark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
-        document.body.classList.toggle('dark', !!dark);
-      }
-      return { apply };
-    })();
+    const clearAll = async () => {
+      await open();
+      await prom(tx(STORE_THOUGHTS, 'readwrite').clear());
+      await prom(tx(STORE_META,    'readwrite').clear());
+    };
 
-    // Vectors
-    const Vectors = (() => {
-      const dot = (a,b)=>{ let d=0; for(let i=0;i<a.length;i++) d+=a[i]*b[i]; return d; };
-      const norm = (v)=>{ let s=0; for(let i=0;i<v.length;i++) s+=v[i]*v[i]; const m=Math.sqrt(s)||1; for(let i=0;i<v.length;i++) v[i]/=m; return v; };
-      const b64enc = (u8)=>{ let s=''; const CH=0x8000; for(let i=0;i<u8.length;i+=CH) s+=String.fromCharCode(...u8.subarray(i,i+CH)); return btoa(s); };
-      const b64dec = (b64)=>{ const bin=atob(b64); const u8=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i); return u8; };
-      const packI8 = (f32)=>{ const v=new Float32Array(f32); norm(v); const i8=new Int8Array(v.length); for(let i=0;i<v.length;i++) i8[i]=Math.max(-127, Math.min(127, Math.round(v[i]*127))); return b64enc(new Uint8Array(i8.buffer)); };
-      const unpackI8 = (b64)=>{ const u8=b64dec(b64); const i8=new Int8Array(u8.buffer); const v=new Float32Array(i8.length); for(let i=0;i<i8.length;i++) v[i]=i8[i]/127; return norm(v); };
-      return { dot, packI8, unpackI8 };
-    })();
+    return {
+      open, put, get, remove,
+      listBySource, countBySource, all, clearAll,
+    };
+  })();
 
-    // Embedder
-    const Embedder = (() => {
-      let model=null;
-      async function init() { model = await pipeline('feature-extraction','Xenova/paraphrase-multilingual-MiniLM-L12-v2',{ quantized:true }); }
-      const ready = ()=>!!model;
-      async function embed(text) {
-        const out = await model([text]);
-        const { data, dims } = out;
-        const tokens=dims?.[1], hidden=dims?.[2];
-        const emb = new Float32Array(hidden);
-        for(let t=0;t<tokens;t++){
-          const base=t*hidden;
-          for(let h=0;h<hidden;h++) emb[h]+=data[base+h];
+  /* --------------------------------------------------------------------------
+     [5] P2P (GunDB adapter)
+     Тонкий слой поверх Gun. Все операции возвращают Promise/observable.
+     Поддержка offline: Gun сам кеширует в localStorage/RAD, мы не дублируем.
+     -------------------------------------------------------------------------- */
+  ns.P2P = (() => {
+    const { GUN_NAMESPACE, GUN_RELAYS } = ns.Config;
+    let gun = null;
+    let thoughtsNode = null;
+    let peerCount = 0;
+    const listeners = new Set();
+
+    const init = () => new Promise((resolve, reject) => {
+      try {
+        if (typeof Gun === 'undefined') {
+          throw new Error('Gun library not loaded (CDN blocked?)');
         }
-        for(let h=0;h<hidden;h++) emb[h]/=tokens;
-        let s=0; for(let h=0;h<hidden;h++) s+=emb[h]*emb[h];
-        const m=Math.sqrt(s)||1;
-        for(let h=0;h<hidden;h++) emb[h]/=m;
-        return emb;
-      }
-      return { init, ready, embed };
-    })();
+        gun = Gun({
+          peers: GUN_RELAYS,
+          localStorage: true, // локальный кэш Gun (не путать с нашим IDB)
+        });
+        thoughtsNode = gun.get(GUN_NAMESPACE);
 
-    // Local notes
-    const LocalNotes = (() => {
-      function create() {
-        const ee = new Utils.Emitter();
-        let notes = [];
+        // Подписка на graph-события для подсчёта пиров.
+        gun.on('hi',  () => { peerCount++; notifyPeers(); });
+        gun.on('bye', () => { peerCount = Math.max(0, peerCount - 1); notifyPeers(); });
 
-        async function load() {
-          notes = (await IDB.notesGetAll()) || [];
-          notes.sort((a,b)=>b.createdAt-a.createdAt);
-          ee.emit('change', list());
-        }
-        function list() { return notes.slice(); }
-        function get(id) { return notes.find(n => n.id === id) ?? null; }
-
-        async function add({ text, publishState='none', vPacked=null }) {
-          const id = Utils.uuid();
-          const now = Date.now();
-          const note = { id, text, createdAt: now, editedAt: null, vPacked, publishState, worldId: null };
-          notes.unshift(note);
-          await IDB.notesPut(note);
-          ee.emit('change', list());
-          return id;
-        }
-
-        async function update(id, patch) {
-          const n = get(id);
-          if (!n) return;
-          Object.assign(n, patch);
-          await IDB.notesPut(n);
-          ee.emit('change', list());
-        }
-
-        async function remove(id) {
-          notes = notes.filter(n => n.id !== id);
-          await IDB.notesDelete(id);
-          ee.emit('change', list());
-        }
-
-        return { load, list, get, add, update, remove, onChange:(fn)=>ee.on('change', fn) };
-      }
-      return { create };
-    })();
-
-    // ===== Gun World MAP: feed.get(id).put({note: ref, ...meta}) =====
-    const World = (() => {
-      const ROOT = 'noosphere_world_prod_v1';
-
-      function create(gun) {
-        const ee = new Utils.Emitter();
-        const feed = gun.get(ROOT).get('world').get('feed');      // map id -> entry
-        const noteRoot = gun.get(ROOT).get('world').get('note');  // note/<id>
-
-        const entries = new Map(); // id -> { id, at, author, noteSoul }
-        const notes = new Map();   // id -> { id, text, vPacked, author, createdAt }
-
-        const subSoul = new Set();
-
-        function emit() {
-          // merge entries+notes when possible
-          const out = [];
-          for (const [id, n] of notes) out.push(n);
-          ee.emit('change', out.sort((a,b)=>b.createdAt-a.createdAt));
-        }
-
-        function listAll() {
-          const out = [];
-          for (const [id, n] of notes) out.push(n);
-          return out.sort((a,b)=>b.createdAt-a.createdAt);
-        }
-
-        function normalizeNote(id, raw) {
-          const x = raw && typeof raw === 'object' ? raw : {};
-          if (x.deleted) return null;
-          if (typeof x.text !== 'string') return null;
-          return {
-            id,
-            text: String(x.text),
-            vPacked: typeof x.vPacked === 'string' ? x.vPacked : null,
-            author: String(x.author ?? ''),
-            createdAt: Number(x.createdAt) || Date.now()
-          };
-        }
-
-        // Subscribe feed entries by id
-        feed.map().on((entry, id) => {
-          if (!id || id === '_' || id === 'null') return;
-          const e = entry && typeof entry === 'object' ? entry : {};
-          // entry.note is relation link { '#': soul }
-          const soul = e.note && typeof e.note === 'object' && typeof e.note['#'] === 'string' ? e.note['#'] : null;
-          if (!soul) return;
-
-          entries.set(id, { id, soul, at: Number(e.at) || 0, author: String(e.author ?? '') });
-
-          if (subSoul.has(soul)) return;
-          subSoul.add(soul);
-
-          gun.get(soul).on((raw) => {
-            const n = normalizeNote(id, raw);
-            if (!n) { notes.delete(id); emit(); return; }
-            notes.set(id, n);
-            emit();
-          });
+        // Подписка на поток мировых заметок. map().on() стреляет по каждой.
+        thoughtsNode.map().on((data, id) => {
+          if (!data) return; // удаление (tombstone)
+          const thought = gunPayloadToThought(data, id);
+          if (!thought) return;
+          for (const fn of listeners) {
+            try { fn(thought); } catch (err) { ns.Logger.error('listener crashed', err.message); }
+          }
         });
 
-        function publish({ id, text, vPacked, author }) {
-          const now = Date.now();
-          const ref = noteRoot.get(id);
-          // write note
-          ref.put({ id, text, vPacked, author, createdAt: now, deleted:false });
-          // write feed entry under deterministic key id
-          feed.get(id).put({ id, at: now, author, note: ref });
-          return id;
-        }
-
-        return {
-          ROOT,
-          listAll,
-          onChange: (fn) => ee.on('change', fn),
-          publish
-        };
+        ns.Logger.info('Gun initialized', { peers: GUN_RELAYS });
+        resolve();
+      } catch (err) {
+        reject(err);
       }
+    });
 
-      return { create };
-    })();
+    const notifyPeers = () => {
+      document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: peerCount } }));
+    };
 
-    const Indexer = (() => {
-      function create({ local }) {
-        let running = false;
-        async function runOnce() {
-          if (running) return;
-          if (!Embedder.ready()) return;
-          running = true;
-          try {
-            for (const n of local.list()) {
-              if (n.vPacked) continue;
-              const vec = await Embedder.embed(n.text);
-              const packed = Vectors.packI8(vec);
-              await local.update(n.id, { vPacked: packed });
-            }
-          } finally { running = false; }
-        }
-        return { runOnce };
-      }
-      return { create };
-    })();
+    /**
+     * Преобразует сырой объект Gun в валидный Thought.
+     * Gun добавляет служебное поле '_' — отбрасываем.
+     */
+    const gunPayloadToThought = (data, id) => {
+      if (!data || typeof data !== 'object') return null;
+      const text = typeof data.text === 'string' ? data.text : '';
+      if (!text.trim()) return null;
+      return {
+        id: String(id),
+        text: text.slice(0, ns.Config.LIMITS.MAX_TEXT_LENGTH),
+        source: 'world',
+        createdAt: Number(data.createdAt) || ns.Util.now(),
+        updatedAt: Number(data.updatedAt) || ns.Util.now(),
+        vector: null,
+        originDevice: String(data.originDevice || ''),
+        published: true,
+      };
+    };
 
-    const Publisher = (() => {
-      function create({ local, world, deviceId }) {
-        let running = false;
+    const publish = (thought) => new Promise((resolve, reject) => {
+      if (!thoughtsNode) return reject(new Error('Gun not initialized'));
+      try { validateForPublish(thought); } catch (e) { return reject(e); }
 
-        async function run() {
-          if (running) return;
-          running = true;
-          try {
-            if (!Embedder.ready()) return;
-            const pending = local.list().filter(n => n.publishState === 'pending');
-            for (const n of pending) {
-              let v = n.vPacked;
-              if (!v) {
-                const vec = await Embedder.embed(n.text);
-                v = Vectors.packI8(vec);
-                await local.update(n.id, { vPacked: v });
-              }
-              world.publish({ id: n.id, text: n.text, vPacked: v, author: deviceId });
-              await local.update(n.id, { publishState:'published', worldId: n.id });
-            }
-          } finally { running = false; }
-        }
+      const payload = {
+        text: thought.text,
+        createdAt: thought.createdAt,
+        updatedAt: thought.updatedAt,
+        originDevice: thought.originDevice || '',
+        // Вектор в публичный граф не кладём: тяжёлый и бесполезный для чужих устройств.
+      };
+      thoughtsNode.get(thought.id).put(payload, (ack) => {
+        if (ack && ack.err) return reject(new Error(ack.err));
+        resolve();
+      });
+    });
 
-        async function enqueue(localId) {
-          await local.update(localId, { publishState:'pending' });
-          run();
-        }
+    const validateForPublish = (t) => {
+      if (!t || !ns.Util.isNonEmptyString(t.id))   throw new Error('publish: bad id');
+      if (!ns.Util.isNonEmptyString(t.text))       throw new Error('publish: empty text');
+    };
 
-        return { run, enqueue };
-      }
-      return { create };
-    })();
+    const onWorldThought = (fn) => {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    };
 
-    const Search = (() => {
-      function create({ local, world, settings, deviceId }) {
-        const cache = new Map(); // id -> Float32Array
+    const getPeerCount = () => peerCount;
+    const isConnected  = () => peerCount > 0;
 
-        function vecFromPacked(id, packed) {
-          if (!packed) return null;
-          if (cache.has(id)) return cache.get(id);
-          try { const v = Vectors.unpackI8(packed); cache.set(id, v); return v; } catch { return null; }
-        }
+    return { init, publish, onWorldThought, getPeerCount, isConnected };
+  })();
 
-        function clear() { cache.clear(); }
+  /* --------------------------------------------------------------------------
+     [6] SYNC
+     Мост между Storage и P2P.
+     - Локальные сохранения: всегда в IDB, опционально publish.
+     - Входящие мировые: upsert в IDB с Last-Write-Wins по updatedAt.
+     -------------------------------------------------------------------------- */
+  ns.Sync = (() => {
+    const seenWorldIds = new Set();
 
-        async function searchAll(queryText) {
-          const q = String(queryText ?? '').trim();
-          if (!q) return { mode:'empty', local:[], world:[], ser:[] };
-          if (!Embedder.ready()) return { mode:'model_loading', local:[], world:[], ser:[] };
+    const saveLocal = async ({ text, publishToWorld }) => {
+      const clean = ns.Util.normalizeText(text);
+      if (!clean) throw new Error('Empty thought');
 
-          const s = settings();
-          const thr = s.threshold;
-          const low = Math.max(0, thr - s.serDelta);
-          const max = s.maxResults;
-
-          const qVec = await Embedder.embed(q);
-
-          const localHits = [];
-          for (const n of local.list()) {
-            const v = vecFromPacked(n.id, n.vPacked);
-            if (!v) continue;
-            const score = Vectors.dot(qVec, v);
-            if (score >= thr) localHits.push({ id:n.id, text:n.text, score, createdAt:n.createdAt });
-          }
-          localHits.sort((a,b)=>b.score-a.score);
-
-          const worldHits = [];
-          const serHits = [];
-          for (const w of world.listAll()) {
-            // hide own published in world
-            if (w.author === deviceId) continue;
-
-            const v = vecFromPacked(w.id, w.vPacked);
-            if (!v) continue;
-            const score = Vectors.dot(qVec, v);
-            if (score >= thr) worldHits.push({ id:w.id, text:w.text, score, createdAt:w.createdAt, author:w.author });
-            else if (score >= low) serHits.push({ id:w.id, text:w.text, score, createdAt:w.createdAt, author:w.author });
-          }
-          worldHits.sort((a,b)=>b.score-a.score);
-          serHits.sort((a,b)=>b.score-a.score);
-
-          return { mode:'ok', local: localHits.slice(0, max), world: worldHits.slice(0, max), ser: serHits.slice(0, max) };
-        }
-
-        function historyFilter(q) {
-          const t = String(q ?? '').trim().toLowerCase();
-          const all = local.list();
-          if (!t) return all;
-          return all.filter(n => n.text.toLowerCase().includes(t));
-        }
-
-        return { searchAll, historyFilter, clear };
-      }
-      return { create };
-    })();
-
-    const UI = (() => {
-      function pill(label, state='neutral') {
-        const dot = state === 'ok' ? 'ok' : state === 'warn' ? 'warn' : state === 'bad' ? 'bad' : '';
-        return `<span class="pill"><span class="dot ${dot}"></span>${Utils.esc(label)}</span>`;
-      }
-
-      function renderItems(container, items, { emptyText, kind }) {
-        if (!items.length) { container.innerHTML = `<div class="empty">${Utils.esc(emptyText)}</div>`; return; }
-        container.innerHTML = items.map(it => {
-          const metaRight = kind === 'world'
-            ? `<span>author:${Utils.esc(String(it.author||'').slice(0,8))}</span>`
-            : `<span>${new Date(it.createdAt).toLocaleString()}</span>`;
-          return `
-            <div class="item">
-              <div class="text">${Utils.esc(it.text)}</div>
-              <div class="meta">
-                <span class="badge">${it.score.toFixed(2)}</span>
-                ${metaRight}
-              </div>
-            </div>
-          `;
-        }).join('');
-      }
-
-      function renderHistory(container, notes) {
-        if (!notes.length) { container.innerHTML = `<div class="empty">Нет заметок</div>`; return; }
-        container.innerHTML = notes.map(n => {
-          const pub = n.publishState === 'pending'
-            ? `<span class="badge pending">pending</span>`
-            : (n.publishState === 'published' ? `<span class="badge world">world</span>` : '');
-          return `
-            <div class="item" data-id="${n.id}">
-              <div class="text">${Utils.esc(n.text)}</div>
-              <div class="meta">
-                <span>${new Date(n.createdAt).toLocaleString()}</span>
-                ${pub}
-                <span style="margin-left:auto; display:flex; gap:8px;">
-                  <button class="btn ghost" data-action="edit" data-id="${n.id}" style="padding:6px 10px;">ред.</button>
-                  <button class="btn ghost" data-action="del" data-id="${n.id}" style="padding:6px 10px; border-color:rgba(239,68,68,0.35); color:var(--danger);">удал.</button>
-                </span>
-              </div>
-            </div>
-          `;
-        }).join('');
-      }
-
-      return { pill, renderItems, renderHistory };
-    })();
-
-    const Capsule = (() => {
-      function exportNotes(notes) {
-        const cap = { version: 1, kind: 'noosphere', createdAt: Date.now(), notes };
-        const blob = new Blob([JSON.stringify(cap)], { type:'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'noosphere.capsule.json';
-        a.click();
-        URL.revokeObjectURL(a.href);
-      }
-
-      async function importNotes(file) {
-        const txt = await file.text();
-        const cap = Utils.safeJSON(txt, null);
-        if (!cap || !Array.isArray(cap.notes)) throw new Error('bad capsule');
-        return cap.notes;
-      }
-
-      return { exportNotes, importNotes };
-    })();
-
-    const App = (() => {
-      const els = {
-        tabFlow: Utils.$('#tabFlow'),
-        tabHistory: Utils.$('#tabHistory'),
-        flowView: Utils.$('#flowView'),
-        historyView: Utils.$('#historyView'),
-
-        openSettings: Utils.$('#openSettings'),
-        overlay: Utils.$('#overlay'),
-        panel: Utils.$('#panel'),
-
-        thought: Utils.$('#thought'),
-        save: Utils.$('#save'),
-        sendWorld: Utils.$('#sendWorld'),
-        status: Utils.$('#status'),
-
-        localList: Utils.$('#localList'),
-        worldList: Utils.$('#worldList'),
-        serList: Utils.$('#serList'),
-
-        historySearch: Utils.$('#historySearch'),
-        historyList: Utils.$('#historyList'),
-
-        diag: Utils.$('#diag'),
-        theme: Utils.$('#theme'),
-        threshold: Utils.$('#threshold'),
-        thresholdV: Utils.$('#thresholdV'),
-        serDelta: Utils.$('#serDelta'),
-        serDeltaV: Utils.$('#serDeltaV'),
-        maxResults: Utils.$('#maxResults'),
-        peersText: Utils.$('#peersText'),
-
-        export: Utils.$('#export'),
-        import: Utils.$('#import'),
-        importFile: Utils.$('#importFile'),
-        reindex: Utils.$('#reindex'),
-        resetDevice: Utils.$('#resetDevice'),
+      const thought = {
+        id: ns.Util.newId(),
+        text: clean,
+        source: 'local',
+        createdAt: ns.Util.now(),
+        updatedAt: ns.Util.now(),
+        vector: null,
+        originDevice: '',
+        published: false,
       };
 
-      let deviceId;
-      let settings;
-      let gun;
-      let local;
-      let world;
-      let indexer;
-      let publisher;
-      let search;
+      await ns.Storage.put(thought);
+      ns.Logger.info('saved local', { id: thought.id });
 
-      let modelReady = false;
-      let busy = false;
-
-      function renderStatus(errMsg = '') {
-        const peersCount = Settings.parsePeers(settings.peersText).length;
-        const localCount = local.list().length;
-        const pendingCount = local.list().filter(n => n.publishState === 'pending').length;
-
-        const worldAll = world.listAll().length;
-        const worldForeign = world.listAll().filter(n => n.author !== deviceId).length;
-
-        const pills = [
-          UI.pill(`IDB:${IDB.ok() ? 'ok' : 'fail'}`, IDB.ok() ? 'ok' : 'bad'),
-          UI.pill(`relay:${peersCount}`, peersCount ? 'ok' : 'warn'),
-          UI.pill(`model:${modelReady ? 'ok' : 'load'}`, modelReady ? 'ok' : 'warn'),
-          UI.pill(`local:${localCount}`),
-          UI.pill(`pending:${pendingCount}`, pendingCount ? 'warn' : 'neutral'),
-          UI.pill(`worldAll:${worldAll}`),
-          UI.pill(`worldForeign:${worldForeign}`)
-        ];
-
-        if (errMsg) pills.push(UI.pill(errMsg, 'bad'));
-        els.status.innerHTML = pills.join(' ');
-        els.diag.textContent = `device:${deviceId} | worldRoot:${world.ROOT}`;
-      }
-
-      function applyTheme() { Theme.apply(settings.theme); }
-
-      function setTab(which) {
-        const flow = which === 'flow';
-        els.tabFlow.classList.toggle('active', flow);
-        els.tabHistory.classList.toggle('active', !flow);
-        els.flowView.classList.toggle('active', flow);
-        els.historyView.classList.toggle('active', !flow);
-        if (!flow) renderHistory();
-      }
-
-      function openPanel() { els.overlay.classList.add('open'); els.panel.classList.add('open'); }
-      function closePanel() { els.overlay.classList.remove('open'); els.panel.classList.remove('open'); }
-
-      function settingsToUI() {
-        els.theme.value = settings.theme;
-        els.threshold.value = String(settings.threshold);
-        els.thresholdV.textContent = settings.threshold.toFixed(2);
-        els.serDelta.value = String(settings.serDelta);
-        els.serDeltaV.textContent = settings.serDelta.toFixed(2);
-        els.maxResults.value = String(settings.maxResults);
-        els.peersText.value = settings.peersText;
-      }
-
-      async function uiToSettingsApply() {
-        settings = Settings.sanitize({
-          theme: els.theme.value,
-          threshold: Number(els.threshold.value),
-          serDelta: Number(els.serDelta.value),
-          maxResults: Number(els.maxResults.value),
-          peersText: els.peersText.value
-        });
-        await Settings.save(settings);
-        applyTheme();
-        gun.opt({ peers: Settings.parsePeers(settings.peersText) });
-        search.clear();
-        renderStatus();
-        refreshFlow();
-        publisher.run();
-      }
-
-      let seq = 0;
-      const refreshFlow = Utils.debounce(async() => {
-        const my = ++seq;
-        const q = els.thought.value.trim();
-
-        if (!q) {
-          UI.renderItems(els.localList, [], { emptyText: 'Введите текст для поиска.', kind:'local' });
-          UI.renderItems(els.worldList, [], { emptyText: 'Введите текст для поиска.', kind:'world' });
-          UI.renderItems(els.serList, [], { emptyText: 'Введите текст для поиска.', kind:'world' });
-          return;
-        }
-
-        const res = await search.searchAll(q);
-        if (my !== seq) return;
-
-        if (res.mode === 'model_loading') {
-          UI.renderItems(els.localList, [], { emptyText: 'Модель грузится…', kind:'local' });
-          UI.renderItems(els.worldList, [], { emptyText: 'Модель грузится…', kind:'world' });
-          UI.renderItems(els.serList, [], { emptyText: 'Модель грузится…', kind:'world' });
-          return;
-        }
-
-        UI.renderItems(els.localList, res.local, { emptyText: 'Нет личных совпадений.', kind:'local' });
-        UI.renderItems(els.worldList, res.world, { emptyText: 'Нет мировых совпадений.', kind:'world' });
-        UI.renderItems(els.serList, res.ser, { emptyText: 'Нет смежных совпадений.', kind:'world' });
-      }, 250);
-
-      const renderHistory = () => {
-        const q = els.historySearch.value.trim().toLowerCase();
-        const list = search.historyFilter(q);
-        UI.renderHistory(els.historyList, list);
-      };
-
-      async function doSaveLocal() {
-        if (busy) return;
-        const text = els.thought.value.trim();
-        if (!text) return;
-
-        busy = true;
+      if (publishToWorld) {
         try {
-          await local.add({ text, publishState:'none', vPacked:null });
-          els.thought.value = '';
-          refreshFlow();
-          indexer.runOnce();
-        } finally {
-          busy = false;
-          renderStatus();
+          await ns.P2P.publish(thought);
+          thought.published = true;
+          await ns.Storage.put(thought); // фиксируем флаг published
+          ns.Logger.info('published to world', { id: thought.id });
+        } catch (err) {
+          ns.Logger.warn('publish failed (saved locally)', err.message);
         }
       }
 
-      async function doSendWorld() {
-        if (busy) return;
-        const text = els.thought.value.trim();
-        if (!text) return;
+      document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
+      return thought;
+    };
 
-        busy = true;
+    const ingestWorld = async (thought) => {
+      // Дедупликация на уровне сессии + LWW по updatedAt.
+      const existing = await ns.Storage.get(thought.id);
+      if (existing) {
+        if (existing.updatedAt >= thought.updatedAt) return; // наше новее или равно
+        if (seenWorldIds.has(thought.id)) return;
+      }
+      seenWorldIds.add(thought.id);
+      await ns.Storage.put(thought);
+      ns.Logger.info('ingested world thought', { id: thought.id });
+      document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
+    };
+
+    const bind = () => {
+      ns.P2P.onWorldThought(ingestWorld);
+    };
+
+    return { saveLocal, ingestWorld, bind };
+  })();
+
+  /* --------------------------------------------------------------------------
+     [7] UI
+     Чистый рендер без фреймворка. Слушает 'ns:thoughts-changed' и 'ns:peers'.
+     -------------------------------------------------------------------------- */
+  ns.UI = (() => {
+    const refs = {};
+
+    const cacheRefs = () => {
+      ['input','publishWorld','btnSave','btnTestIdb','btnTestGun','btnSeed',
+       'btnReindex','btnExport','btnReset','listLocal','listWorld','status']
+        .forEach((id) => { refs[id] = document.getElementById(id); });
+    };
+
+    const setPill = (key, text, state = '') => {
+      const el = refs.status.querySelector(`[data-key="${key}"]`);
+      if (!el) return;
+      el.textContent = text;
+      el.classList.remove('ok','warn','err');
+      if (state) el.classList.add(state);
+    };
+
+    const renderList = (container, items) => {
+      container.innerHTML = '';
+      if (!items.length) {
+        const empty = document.createElement('div');
+        empty.className = 'item';
+        empty.textContent = '(empty)';
+        container.appendChild(empty);
+        return;
+      }
+      for (const t of items) {
+        const row = document.createElement('div');
+        row.className = `item ${t.source}`;
+        const body = document.createElement('div');
+        body.textContent = t.text;
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.textContent =
+          `${t.source} | ${new Date(t.createdAt).toISOString()} | id:${t.id.slice(0,8)}` +
+          (t.published ? ' | published' : '');
+        row.appendChild(body);
+        row.appendChild(meta);
+        container.appendChild(row);
+      }
+    };
+
+    const refresh = async () => {
+      try {
+        const [locals, worlds, cLocal, cWorld] = await Promise.all([
+          ns.Storage.listBySource('local'),
+          ns.Storage.listBySource('world'),
+          ns.Storage.countBySource('local'),
+          ns.Storage.countBySource('world'),
+        ]);
+        renderList(refs.listLocal, locals);
+        renderList(refs.listWorld, worlds);
+        setPill('local', `LOCAL: ${cLocal}`, 'ok');
+        setPill('world', `WORLD: ${cWorld}`, cWorld ? 'ok' : '');
+      } catch (err) {
+        ns.Logger.error('refresh failed', err.message);
+      }
+    };
+
+    const bindEvents = () => {
+      refs.btnSave.addEventListener('click', async () => {
+        const text = refs.input.value;
+        const publishToWorld = refs.publishWorld.checked;
         try {
-          const id = await local.add({ text, publishState:'pending', vPacked:null });
-          els.thought.value = '';
-          refreshFlow();
-          await publisher.enqueue(id);
+          refs.btnSave.disabled = true;
+          await ns.Sync.saveLocal({ text, publishToWorld });
+          refs.input.value = '';
+          await refresh();
+        } catch (err) {
+          ns.Logger.error('save failed', err.message);
         } finally {
-          busy = false;
-          renderStatus();
-        }
-      }
-
-      let touchY = 0;
-      function bindSwipeUp() {
-        els.thought.addEventListener('touchstart', (e) => { touchY = e.touches?.[0]?.clientY ?? 0; }, { passive:true });
-        els.thought.addEventListener('touchend', (e) => {
-          const endY = e.changedTouches?.[0]?.clientY ?? 0;
-          if (touchY - endY > 60) {
-            e.preventDefault();
-            doSendWorld();
-          }
-        }, { passive:false });
-      }
-
-      document.addEventListener('click', async(e) => {
-        const btn = e.target.closest?.('button[data-action]');
-        if (!btn) return;
-        const action = btn.dataset.action;
-        const id = btn.dataset.id;
-
-        if (action === 'del') {
-          await local.remove(id);
-          renderHistory();
-          renderStatus();
-          return;
-        }
-
-        if (action === 'edit') {
-          const n = local.get(id);
-          if (!n) return;
-          const newText = prompt('Редактировать:', n.text);
-          if (newText == null) return;
-          const t = newText.trim();
-          if (!t) return;
-          await local.update(id, { text: t, editedAt: Date.now(), vPacked: null, publishState: n.publishState === 'published' ? 'pending' : n.publishState });
-          indexer.runOnce();
-          publisher.run();
-          renderHistory();
-          renderStatus();
+          refs.btnSave.disabled = false;
         }
       });
 
-      async function doReindex() {
-        if (!Embedder.ready()) return;
-        for (const n of local.list()) {
-          const vec = await Embedder.embed(n.text);
-          const packed = Vectors.packI8(vec);
-          await local.update(n.id, { vPacked: packed });
-        }
-        search.clear();
-        renderStatus();
-        refreshFlow();
-        publisher.run();
-      }
-
-      async function doResetDevice() {
-        if (!confirm('Сбросить устройство? Будет новый deviceId.')) return;
-        await IDB.kvSet('deviceId', Utils.uuid());
-        location.reload();
-      }
-
-      async function doExport() { Capsule.exportNotes(local.list()); }
-      async function doImport(file) {
-        const imported = await Capsule.importNotes(file);
-        for (const n of imported) {
-          if (!n.id) n.id = Utils.uuid();
-          await IDB.notesPut(n);
-        }
-        await local.load();
-        search.clear();
-        renderHistory();
-        refreshFlow();
-        indexer.runOnce();
-        publisher.run();
-      }
-
-      async function boot() {
-        deviceId = await IDB.kvGet('deviceId');
-        if (!deviceId) { deviceId = Utils.uuid(); await IDB.kvSet('deviceId', deviceId); }
-
-        settings = await Settings.load();
-        settingsToUI();
-        applyTheme();
-
-        gun = Gun({ peers: Settings.parsePeers(settings.peersText), localStorage:false });
-
-        local = LocalNotes.create();
-        await local.load();
-
-        world = World.create(gun);
-        indexer = Indexer.create({ local });
-        publisher = Publisher.create({ local, world, deviceId });
-        search = Search.create({ local, world, settings: () => settings, deviceId });
-
-        local.onChange(() => {
-          renderStatus();
-          if (els.historyView.classList.contains('active')) renderHistory();
-        });
-        world.onChange(() => { renderStatus(); refreshFlow(); });
-
-        renderStatus();
-
-        els.sendWorld.disabled = true;
-        (async() => {
-          try{
-            await Embedder.init();
-            modelReady = true;
-            els.sendWorld.disabled = false;
-            renderStatus();
-            indexer.runOnce();
-            publisher.run();
-          } catch(e) {
-            console.error(e);
-            modelReady = false;
-            els.sendWorld.disabled = true;
-            renderStatus('model error');
+      refs.btnTestIdb.addEventListener('click', async () => {
+        try {
+          await ns.Storage.open();
+          const probe = {
+            id: 'probe-' + ns.Util.newId(),
+            text: 'idb probe',
+            source: 'local',
+            createdAt: ns.Util.now(),
+            updatedAt: ns.Util.now(),
+            vector: null, originDevice: '', published: false,
+          };
+          await ns.Storage.put(probe);
+          const read = await ns.Storage.get(probe.id);
+          await ns.Storage.remove(probe.id);
+          if (read && read.id === probe.id) {
+            setPill('idb', 'IDB: OK', 'ok');
+            ns.Logger.info('IDB probe OK');
+          } else {
+            setPill('idb', 'IDB: READ MISMATCH', 'err');
           }
-        })();
+        } catch (err) {
+          setPill('idb', 'IDB: ERR', 'err');
+          ns.Logger.error('IDB probe failed', err.message);
+        }
+      });
 
-        setInterval(() => publisher.run(), 4000);
+      refs.btnTestGun.addEventListener('click', () => {
+        const ok = ns.P2P.isConnected();
+        setPill('gun', ok ? 'GUN: ONLINE' : 'GUN: OFFLINE', ok ? 'ok' : 'warn');
+        ns.Logger.info('Gun peer check', { peers: ns.P2P.getPeerCount() });
+      });
 
-        els.tabFlow.addEventListener('click', () => setTab('flow'));
-        els.tabHistory.addEventListener('click', () => setTab('history'));
+      refs.btnSeed.addEventListener('click', async () => {
+        const samples = [
+          'Мысль появляется в паузе между действиями.',
+          'Архитектура — это способ договариваться с будущим собой.',
+          'Случайность — недооценённый инструмент поиска.',
+        ];
+        for (const s of samples) {
+          await ns.Sync.saveLocal({ text: s, publishToWorld: false });
+        }
+        await refresh();
+      });
 
-        els.openSettings.addEventListener('click', openPanel);
-        els.overlay.addEventListener('click', closePanel);
+      refs.btnReindex.addEventListener('click', () => {
+        ns.Logger.warn('Reindex stub: эмбеддинги ещё не подключены');
+      });
 
-        els.thought.addEventListener('input', refreshFlow);
-        bindSwipeUp();
+      refs.btnExport.addEventListener('click', async () => {
+        const all = await ns.Storage.all();
+        const blob = new Blob([JSON.stringify(all, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `noosphere-export-${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        ns.Logger.info('export done', { count: all.length });
+      });
 
-        els.save.addEventListener('click', doSaveLocal);
-        els.sendWorld.addEventListener('click', doSendWorld);
+      refs.btnReset.addEventListener('click', async () => {
+        if (!confirm('Удалить все локальные данные на этом устройстве?')) return;
+        try {
+          await ns.Storage.clearAll();
+          ns.Logger.warn('device reset');
+          await refresh();
+        } catch (err) {
+          ns.Logger.error('reset failed', err.message);
+        }
+      });
 
-        els.historySearch.addEventListener('input', renderHistory);
+      document.addEventListener('ns:thoughts-changed', refresh);
+      document.addEventListener('ns:peers', (ev) => {
+        const n = ev.detail.count;
+        setPill('peers', `PEERS: ${n}`, n ? 'ok' : 'warn');
+      });
+    };
 
-        els.threshold.addEventListener('input', () => els.thresholdV.textContent = Number(els.threshold.value).toFixed(2));
-        els.serDelta.addEventListener('input', () => els.serDeltaV.textContent = Number(els.serDelta.value).toFixed(2));
+    const init = () => {
+      cacheRefs();
+      bindEvents();
+    };
 
-        els.theme.addEventListener('change', uiToSettingsApply);
-        els.threshold.addEventListener('change', uiToSettingsApply);
-        els.serDelta.addEventListener('change', uiToSettingsApply);
-        els.maxResults.addEventListener('change', uiToSettingsApply);
-        els.peersText.addEventListener('change', uiToSettingsApply);
+    return { init, refresh, setPill };
+  })();
 
-        els.export.addEventListener('click', doExport);
-        els.import.addEventListener('click', () => els.importFile.click());
-        els.importFile.addEventListener('change', (e) => {
-          const f = e.target.files?.[0];
-          e.target.value = '';
-          if (f) doImport(f);
-        });
+  /* --------------------------------------------------------------------------
+     [8] APP (entry point)
+     Последовательный bootstrap. Каждый шаг изолирован — падение одного
+     не валит остальные.
+     -------------------------------------------------------------------------- */
+  ns.App = (() => {
+    const boot = async () => {
+      ns.UI.init();
+      ns.UI.setPill('idb',  'IDB: boot...', 'warn');
+      ns.UI.setPill('gun',  'GUN: boot...', 'warn');
 
-        els.reindex.addEventListener('click', doReindex);
-        els.resetDevice.addEventListener('click', doResetDevice);
-
-        refreshFlow();
-        renderHistory();
-        renderStatus();
-
-        window.__noosphere = { gun, local, world, settings: () => settings, deviceId };
+      // 1. IndexedDB
+      try {
+        await ns.Storage.open();
+        ns.UI.setPill('idb', 'IDB: OK', 'ok');
+        ns.Logger.info('IDB ready', { name: ns.Config.DB_NAME });
+      } catch (err) {
+        ns.UI.setPill('idb', 'IDB: ERR', 'err');
+        ns.Logger.error('IDB init failed', err.message);
       }
 
-      return { boot };
-    })();
+      // 2. Gun P2P
+      try {
+        await ns.P2P.init();
+        ns.UI.setPill('gun', 'GUN: ONLINE (init)', 'ok');
+      } catch (err) {
+        ns.UI.setPill('gun', 'GUN: ERR', 'err');
+        ns.Logger.error('Gun init failed', err.message);
+      }
 
-    App.boot().catch(err => {
-      console.error(err);
-      alert('Fatal: ' + (err?.message ?? String(err)));
-    });
-  </script>
+      // 3. Связка Sync
+      ns.Sync.bind();
+
+      // 4. Первичный рендер
+      await ns.UI.refresh();
+    };
+
+    return { boot };
+  })();
+
+  // Старт после DOMContentLoaded, чтобы все узлы UI были доступны.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', ns.App.boot);
+  } else {
+    ns.App.boot();
+  }
+})();
+</script>
 </body>
 </html>
