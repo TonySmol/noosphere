@@ -1,988 +1,802 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Noomium</title>
+<meta charset="utf-8">
+<title>Noosphere · Test Harness v0.1</title>
 <style>
-  :root {
-    --bg:#0f1115; --panel:#161a22; --border:#242a36;
-    --text:#e6e8ee; --muted:#8a93a6; --accent:#6aa6ff;
-    --ok:#4ade80; --warn:#f59e0b; --err:#ef4444;
-  }
-  * { box-sizing: border-box; }
-  html, body { margin:0; padding:0; background:var(--bg); color:var(--text);
-               font:14px/1.45 ui-monospace, Menlo, monospace; }
-  .wrap { max-width:1100px; margin:0 auto; padding:16px; }
-  h1 { font-size:16px; margin:0 0 14px; letter-spacing:.5px; }
-  h1 small { color:var(--muted); font-weight:normal; font-size:11px; margin-left:8px; }
-  h2 { font-size:11px; margin:18px 0 6px; color:var(--muted);
-       text-transform:uppercase; letter-spacing:1px; }
-  .panel { background:var(--panel); border:1px solid var(--border);
-           border-radius:6px; padding:12px; margin-bottom:10px; }
-  .row { display:flex; gap:8px; flex-wrap:wrap; }
-  .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
-  @media (max-width:820px) { .grid-3 { grid-template-columns:1fr; } }
-
-  textarea, input[type="text"] { width:100%; background:#0b0d12; color:var(--text);
-             border:1px solid var(--border); border-radius:4px;
-             padding:10px; font:inherit; resize:vertical; }
-  textarea { min-height:80px; }
-  button { background:#1f2532; color:var(--text); border:1px solid var(--border);
-           border-radius:4px; padding:8px 12px; font:inherit; cursor:pointer; }
-  button:hover:not(:disabled) { background:#272f40; }
-  button.primary { background:var(--accent); color:#0b0d12; border-color:var(--accent); }
-  button.secondary { background:#2a2f3a; color:var(--accent); border-color:var(--accent); }
-  button.danger { background:#2a1a1d; color:var(--err); border-color:#3d1f22; }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-
-  .status { display:inline-flex; gap:8px; flex-wrap:wrap; }
-  .pill { padding:3px 8px; border-radius:999px; font-size:11px;
-          background:#1a1f2a; border:1px solid var(--border); color:var(--muted); }
-  .pill.ok   { color:var(--ok);   border-color:#1f3d2a; }
-  .pill.warn { color:var(--warn); border-color:#3d3220; }
-  .pill.err  { color:var(--err);  border-color:#3d1f22; }
-  .pill.think { color:var(--accent); border-color:var(--accent); }
-
-  .list { display:flex; flex-direction:column; gap:6px; min-height:60px; }
-  .item { background:#0b0d12; border:1px solid var(--border);
-          border-radius:4px; padding:8px 10px; }
-  .item.local { border-left:3px solid #555; }
-  .item.world { border-left:3px solid var(--accent); }
-  .item.world::before {
-    content:"RAM"; font-size:9px; color:var(--accent); padding:1px 4px;
-    border:1px solid var(--accent); border-radius:2px; margin-right:6px;
-  }
-  .item .score { float:right; color:var(--muted); font-size:11px; }
-  .item .meta { color:var(--muted); font-size:10px; margin-top:4px; }
-  .item mark { background:transparent; color:var(--accent); font-weight:bold; }
-
-  .progress { height:3px; background:#1a1f2a; border-radius:2px;
-              overflow:hidden; margin-top:6px; }
-  .progress > div { height:100%; background:var(--accent); width:0; transition:width .2s; }
-
-  .log { background:#07090d; border:1px solid var(--border);
-         border-radius:4px; padding:8px; max-height:200px; overflow:auto; font-size:11px; }
-  .log .e { color:var(--err); } .log .w { color:var(--warn); } .log .i { color:var(--muted); }
-
-  .empty { color:var(--muted); font-size:12px; padding:6px; }
-  .hint { font-size:11px; color:var(--muted); font-style:italic; margin-top:6px; }
-
-  details summary { cursor:pointer; color:var(--muted); font-size:12px; padding:4px 0; }
-  .settings-grid { display:grid; grid-template-columns:1fr; gap:8px; margin-top:10px; }
-  .settings-grid label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
-  .settings-grid input { padding:6px; font-size:12px; }
+/* ============================================================
+   SECTION 1 · CSS
+   ============================================================ */
+:root{
+  --bg:#0b0d12; --fg:#d8dde6; --mut:#6b7280; --acc:#7cc4ff;
+  --ok:#58d68d; --warn:#f5b041; --err:#ec7063; --pan:#12161f; --br:#1f2631;
+  font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;color:var(--fg);background:var(--bg);
+}
+*{box-sizing:border-box}
+body{margin:0;padding:12px;display:grid;grid-template-columns:320px 1fr;gap:12px;height:100vh}
+h1{font-size:14px;margin:0 0 8px;color:var(--acc);letter-spacing:.5px}
+h2{font-size:11px;margin:12px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:1px}
+.pan{background:var(--pan);border:1px solid var(--br);border-radius:8px;padding:10px;overflow:auto}
+button{background:#1a2030;color:var(--fg);border:1px solid var(--br);border-radius:5px;
+  padding:6px 10px;cursor:pointer;font:inherit;margin:2px}
+button:hover{background:#243049;border-color:var(--acc)}
+button.pri{background:#1e3a5f;border-color:var(--acc)}
+button.dng{background:#3a1e24;border-color:var(--err)}
+button:disabled{opacity:.4;cursor:not-allowed}
+input,select,textarea{background:#0f1420;color:var(--fg);border:1px solid var(--br);
+  border-radius:5px;padding:5px 8px;font:inherit;width:100%;margin:2px 0}
+textarea{resize:vertical;min-height:60px}
+.row{display:flex;gap:4px;flex-wrap:wrap}
+.kv{display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px dashed #1a1f2a}
+.kv span:last-child{color:var(--acc)}
+.badge{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;margin-left:4px}
+.b-ok{background:#1e3a2a;color:var(--ok)}
+.b-wn{background:#3a2e1e;color:var(--warn)}
+.b-er{background:#3a1e24;color:var(--err)}
+.b-in{background:#1e2a3a;color:var(--acc)}
+#log{font-size:11px;line-height:1.5;max-height:300px;overflow:auto;background:#06080c;
+  padding:6px;border-radius:5px;border:1px solid var(--br)}
+.log-t{color:var(--mut);margin-right:6px}
+.log-i{color:var(--acc)} .log-w{color:var(--warn)} .log-e{color:var(--err)} .log-s{color:var(--ok)}
+.peer{padding:5px 7px;background:#0f1420;border-radius:4px;margin:3px 0;font-size:11px;
+  display:flex;justify-content:space-between;align-items:center}
+.note{padding:6px 8px;background:#0f1420;border-left:2px solid var(--acc);margin:4px 0;font-size:11px}
+.note.adj{border-left-color:var(--warn)}
+.note .m{color:var(--mut);font-size:10px}
+.tab{display:inline-block;padding:3px 8px;cursor:pointer;border-bottom:2px solid transparent;font-size:11px}
+.tab.on{border-color:var(--acc);color:var(--acc)}
+.tab-row{border-bottom:1px solid var(--br);margin-bottom:6px}
+.hint{color:var(--mut);font-size:10px;font-style:italic;margin-top:4px}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>NOOMIUM <small>v3.1 · WebSocket relay · ephemeral world</small></h1>
 
-  <section class="panel">
-    <div class="status" id="status">
-      <span class="pill" data-key="idb">IDB: ...</span>
-      <span class="pill" data-key="relay">RELAY: ...</span>
-      <span class="pill" data-key="peers">PEERS: 0</span>
-      <span class="pill" data-key="model">MODEL: idle</span>
-      <span class="pill" data-key="indexed">INDEXED: 0</span>
-      <span class="pill" data-key="think" style="display:none">...</span>
+<!-- ============================================================
+     SECTION 1b · HTML STRUCTURE
+     ============================================================ -->
+<aside class="pan">
+  <h1>◈ NOOSPHERE TEST HARNESS</h1>
+
+  <h2>Transport</h2>
+  <select id="transport">
+    <option value="mock" selected>Mock (in-page loopback)</option>
+    <option value="real">Real (Trystero BitTorrent)</option>
+  </select>
+  <div class="row">
+    <button id="btnConn" class="pri">Connect</button>
+    <button id="btnDisc" class="dng" disabled>Disconnect</button>
+  </div>
+  <div class="kv"><span>status</span><span id="stConn"><span class="badge b-wn">idle</span></span></div>
+  <div class="kv"><span>my peer id</span><span id="stPid">—</span></div>
+  <div class="kv"><span>my room</span><span id="stRoom">—</span></div>
+  <div class="kv"><span>peers online</span><span id="stPeers">0</span></div>
+
+  <h2>Identity</h2>
+  <div class="kv"><span>pubkey (ed25519)</span><span id="stPub">—</span></div>
+  <div class="kv"><span>reputation</span><span id="stRep">1.00</span></div>
+
+  <h2>Model</h2>
+  <div class="row">
+    <button id="btnModel">Load MiniLM</button>
+  </div>
+  <div class="kv"><span>state</span><span id="stModel"><span class="badge b-wn">unloaded</span></span></div>
+
+  <h2>Local notepad</h2>
+  <textarea id="inpNote" placeholder="введите мысль → Enter для векторизации">квантовая запутанность нелокальна</textarea>
+  <button id="btnEmbed">Vectorize & store</button>
+
+  <h2>Scenarios</h2>
+  <button id="btnFakePeer">Spawn fake neighbor</button>
+  <button id="btnInject">Inject fake announce</button>
+  <button id="btnSpam">Spam 20 announces</button>
+  <button id="btnClear" class="dng">Reset state</button>
+  <p class="hint">«Fake neighbor» = локальный симулятор со своей identity; «Inject» = один тестовый announce без P2P.</p>
+</aside>
+
+<main class="pan">
+  <div class="tab-row">
+    <span class="tab on" data-t="log">Event log</span>
+    <span class="tab" data-t="peers">Peers</span>
+    <span class="tab" data-t="mine">My notes</span>
+    <span class="tab" data-t="world">World (announces)</span>
+    <span class="tab" data-t="adj">Adjacent</span>
+    <span class="tab" data-t="diag">Diagnostics</span>
+  </div>
+
+  <div id="v-log">
+    <div class="row">
+      <button id="btnClearLog">Clear log</button>
+      <label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px">
+        <input type="checkbox" id="chkAuto" checked style="width:auto"> autoscroll
+      </label>
     </div>
-    <div class="progress"><div id="modelProgress"></div></div>
-  </section>
+    <div id="log"></div>
+  </div>
 
-  <section class="panel">
-    <h2>thought</h2>
-    <textarea id="input" placeholder="напечатай мысль... (релевантность через 4 сек)"></textarea>
-    <div class="row" style="margin-top:8px;">
-      <button id="btnSave" class="secondary">Сохранить</button>
-      <button id="btnSaveWorld" class="primary">Сохранить + в Мир</button>
-    </div>
-    <div class="hint">«Сохранить» = только твоё устройство. «Сохранить + в Мир» = отвечаешь на запросы других пиров через relay.</div>
-  </section>
+  <div id="v-peers" style="display:none">
+    <div id="peerList"><i class="hint">no peers connected</i></div>
+  </div>
 
-  <section class="panel">
-    <h2>live relevance</h2>
-    <div class="grid-3">
-      <div>
-        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">MY (local)</div>
-        <div class="list" id="listMine"></div>
-      </div>
-      <div>
-        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">WORLD (peers, RAM)</div>
-        <div class="list" id="listWorld"></div>
-      </div>
-      <div>
-        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">ADJACENT</div>
-        <div class="list" id="listAdjacent"></div>
-      </div>
-    </div>
-  </section>
+  <div id="v-mine" style="display:none">
+    <div id="mineList"></div>
+  </div>
 
-  <section class="panel">
-    <details>
-      <summary>настройки</summary>
-      <div class="settings-grid">
-        <label>
-          <span>WebSocket relay URL</span>
-          <input type="text" id="setRelayUrl" placeholder="wss://..." />
-        </label>
-      </div>
-      <div class="row" style="margin-top:10px;">
-        <button id="btnApplySettings" class="primary">Применить</button>
-        <button id="btnLoadModel">Load MiniLM</button>
-        <button id="btnReindex">Reindex</button>
-        <button id="btnSeed">Seed 5</button>
-        <button id="btnQueryNow" class="secondary">Query now</button>
-        <button id="btnReset" class="danger">Reset</button>
-      </div>
-    </details>
-  </section>
+  <div id="v-world" style="display:none">
+    <div id="worldList"></div>
+  </div>
 
-  <section class="panel">
-    <h2>my thoughts (persisted on disk)</h2>
-    <div class="list" id="listAll"></div>
-  </section>
+  <div id="v-adj" style="display:none">
+    <div>threshold: <input id="inpThr" type="number" value="0.25" step="0.05" style="width:80px"></div>
+    <div id="adjList"></div>
+  </div>
 
-  <section class="panel">
-    <h2>event log</h2>
-    <div class="log" id="log"></div>
-  </section>
-</div>
+  <div id="v-diag" style="display:none">
+    <h2>Counters</h2>
+    <div id="diagBox"></div>
+    <h2>Raw state (JSON)</h2>
+    <pre id="rawState" style="background:#06080c;padding:8px;border-radius:5px;font-size:10px;max-height:400px;overflow:auto"></pre>
+  </div>
+</main>
 
 <script type="module">
-/* ============================================================================
-   NOOMIUM v3.1 — WebSocket relay
-   ============================================================================ */
-
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
-env.allowLocalModels = false;
-env.useBrowserCache = true;
-
-const ns = (window.__ns = {});
-
-/* [1] CONFIG */
-ns.Config = Object.freeze({
-  DB_NAME: 'noomium_v3',
-  DB_VERSION: 1,
-  STORE_THOUGHTS: 'thoughts',
-  STORE_META: 'meta',
-  DEFAULT_RELAY_URL: 'wss://stud-investing-nails-sole.trycloudflare.com',
-  LIMITS: {
-    MAX_TEXT_LENGTH: 10_000,
-    RENDER_CAP: 200,
-    DEBOUNCE_MS: 4000,
-    QUERY_TIMEOUT_MS: 3000,
-    MAX_RESULTS_PER_PEER: 5,
-    MAX_EPHEMERAL_AGE_MS: 5 * 60_000,
-    RECONNECT_MS: 3000,
-  },
-  VECTOR: { MODEL_ID: 'Xenova/all-MiniLM-L6-v2' },
-  RELEVANCE: { THRESHOLD: 0.25, ADJACENCY: 0.15, MAX_CARDS: 5 },
-});
-
-/* [2] LOGGER */
-ns.Logger = (() => {
-  const el = () => document.getElementById('log');
-  const fmt = (d) => d.toISOString().slice(11, 19);
-  const safe = (x) => {
-    try { return typeof x === 'string' ? x : JSON.stringify(x); }
-    catch { return String(x); }
-  };
-  const write = (lvl, m, d) => {
-    const line = document.createElement('div');
-    line.className = lvl;
-    const tail = d !== undefined ? ' ' + safe(d) : '';
-    line.textContent = `[${fmt(new Date())}] [${lvl.toUpperCase()}] ${m}${tail}`;
-    const box = el();
-    if (box) { box.appendChild(line); box.scrollTop = box.scrollHeight; }
-    const fn = lvl === 'e' ? 'error' : lvl === 'w' ? 'warn' : 'log';
-    console[fn](`[noomium:${lvl}] ${m}`, d ?? '');
-  };
-  return {
-    info:  (m, d) => write('i', m, d),
-    warn:  (m, d) => write('w', m, d),
-    error: (m, d) => write('e', m, d),
-  };
-})();
-
-/* [3] UTIL */
-ns.Util = {
-  peerId: 'p-' + Math.random().toString(36).slice(2, 10),
-  newId: () => crypto.randomUUID(),
-  now: () => Date.now(),
-  normalizeText: (t) => typeof t === 'string' ? t.trim().slice(0, ns.Config.LIMITS.MAX_TEXT_LENGTH) : '',
-  isNonEmptyString: (v) => typeof v === 'string' && v.trim().length > 0,
-  debounce: (fn, ms) => {
-    let t = null;
-    const d = (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
-    d.cancel = () => clearTimeout(t);
-    return d;
-  },
-  escapeHtml: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+/* ============================================================
+   SECTION 2 · CONFIG
+   ============================================================ */
+const CFG = {
+  ROOM_NS:      'noosphere-harness-v1',
+  MODEL_ID:     'Xenova/all-MiniLM-L6-v2',
+  VEC_DIM:      384,
+  LSH_PLANES:   8,           // 2^8 = 256 possible room buckets
+  ANNOUNCE_TTL: 60_000,
+  GOSSIP_FANOUT:3,
+  RATE_LIMIT:   {n:5, per:10_000},
+  SIM_THR:      0.25,
+  DELTA_ADJ:    0.15,
 };
 
-/* [4] STORAGE */
-ns.Storage = (() => {
-  const { DB_NAME, DB_VERSION, STORE_THOUGHTS, STORE_META } = ns.Config;
-  let db = null;
-  const open = () => new Promise((res, rej) => {
-    if (db) return res(db);
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = (ev) => {
-      const _db = ev.target.result;
-      if (!_db.objectStoreNames.contains(STORE_THOUGHTS)) {
-        const store = _db.createObjectStore(STORE_THOUGHTS, { keyPath: 'id' });
-        store.createIndex('createdAt', 'createdAt');
-        store.createIndex('hasVector', 'hasVector');
-        store.createIndex('published', 'published');
-      }
-      if (!_db.objectStoreNames.contains(STORE_META)) {
-        _db.createObjectStore(STORE_META, { keyPath: 'key' });
-      }
-    };
-    req.onsuccess = (ev) => { db = ev.target.result; res(db); };
-    req.onerror = () => rej(req.error);
-  });
-  const tx = (name, mode = 'readonly') => db.transaction(name, mode).objectStore(name);
-  const prom = (req) => new Promise((r, j) => { req.onsuccess = () => r(req.result); req.onerror = () => j(req.error); });
-  const put = async (t) => { await open(); return prom(tx(STORE_THOUGHTS, 'readwrite').put(t)); };
-  const all = async () => { await open(); return prom(tx(STORE_THOUGHTS).getAll()); };
-  const listUnindexed = async () => {
-    await open();
-    return new Promise((res, rej) => {
-      const out = [];
-      const req = tx(STORE_THOUGHTS).index('hasVector').openCursor(IDBKeyRange.only(0));
-      req.onsuccess = (ev) => {
-        const c = ev.target.result;
-        if (!c) return res(out);
-        out.push(c.value); c.continue();
-      };
-      req.onerror = () => rej(req.error);
-    });
-  };
-  const getMeta = async (key) => { await open(); return prom(tx(STORE_META).get(key)); };
-  const putMeta = async (row) => { await open(); return prom(tx(STORE_META, 'readwrite').put(row)); };
-  const clear = async () => {
-    await open();
-    await prom(tx(STORE_THOUGHTS, 'readwrite').clear());
-    await prom(tx(STORE_META, 'readwrite').clear());
-  };
-  return { open, put, all, listUnindexed, getMeta, putMeta, clear };
-})();
+/* ============================================================
+   SECTION 3 · LOGGING
+   ============================================================ */
+const LOG = {
+  el: () => document.getElementById('log'),
+  write(level, ...args){
+    const t = new Date().toISOString().slice(11,23);
+    const line = document.createElement('div');
+    line.innerHTML = `<span class="log-t">${t}</span><span class="log-${level}">[${level.toUpperCase()}]</span> ${args.map(a=>typeof a==='object'?JSON.stringify(a):String(a)).join(' ')}`;
+    this.el().appendChild(line);
+    if(document.getElementById('chkAuto').checked) this.el().scrollTop = 1e9;
+  },
+  i:(...a)=>LOG.write('i',...a), w:(...a)=>LOG.write('w',...a),
+  e:(...a)=>LOG.write('e',...a), s:(...a)=>LOG.write('s',...a),
+};
 
-/* [5] SETTINGS */
-ns.Settings = (() => {
-  const META_KEY = 'userSettings';
-  let cache = { relayUrl: ns.Config.DEFAULT_RELAY_URL };
-  const load = async () => {
-    try {
-      const row = await ns.Storage.getMeta(META_KEY);
-      if (row?.value) cache = { ...cache, ...row.value };
-    } catch {}
-    return cache;
-  };
-  const save = async (patch) => {
-    cache = { ...cache, ...patch };
-    try { await ns.Storage.putMeta({ key: META_KEY, value: cache }); } catch {}
-    return cache;
-  };
-  const get = () => cache;
-  return { load, save, get };
-})();
+/* ============================================================
+   SECTION 4 · CRYPTO (ed25519 via tweetnacl; sha256 via WebCrypto)
+   ============================================================ */
+const nacl = await import('https://esm.sh/tweetnacl@1.0.3');
+const naclUtil = (await import('https://esm.sh/tweetnacl-util@0.15.1')).default;
 
-/* [6] VECTOR */
-ns.Vector = (() => {
-  let extractor = null;
-  let loadPromise = null;
-  const load = (onProgress) => {
-    if (extractor) return Promise.resolve(extractor);
-    if (loadPromise) return loadPromise;
-    loadPromise = pipeline('feature-extraction', ns.Config.VECTOR.MODEL_ID, {
-      progress_callback: (p) => {
-        if (onProgress && p.status === 'progress' && p.total) {
-          onProgress({ loaded: p.loaded, total: p.total });
-        }
-      },
-    }).then((ex) => {
-      extractor = ex;
-      ns.Logger.info('model loaded');
-      return ex;
-    }).catch((err) => { loadPromise = null; throw err; });
-    return loadPromise;
-  };
-  const embed = async (text) => {
-    if (!extractor) throw new Error('Model not loaded');
-    if (!ns.Util.isNonEmptyString(text)) return null;
-    const out = await extractor(text, { pooling: 'mean', normalize: true });
+const Crypto = {
+  keypair: null,
+  async init(){
+    this.keypair = nacl.sign.keyPair();
+    return this.pubHex();
+  },
+  pubHex(){ return Buffer.from(this.keypair.publicKey).toString('hex').slice(0,16); },
+  pubBytes(){ return Array.from(this.keypair.publicKey); },
+  async sha256hex(str){
+    const buf = new TextEncoder().encode(str);
+    const h = await crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  },
+  sign(obj){
+    const msg = new TextEncoder().encode(JSON.stringify(obj));
+    const sig = nacl.sign.detached(msg, this.keypair.secretKey);
+    return Array.from(sig);
+  },
+  verify(obj, sig, pubBytes){
+    const msg = new TextEncoder().encode(JSON.stringify(obj));
+    return nacl.sign.detached.verify(msg, new Uint8Array(sig), new Uint8Array(pubBytes));
+  },
+};
+
+/* ============================================================
+   SECTION 5 · VECTOR ENGINE (MiniLM + quantize + cosine)
+   ============================================================ */
+const Vec = {
+  pipe: null,
+  lshPlanes: null,           // random hyperplanes for LSH
+  async load(){
+    if(this.pipe) return this.pipe;
+    LOG.i('loading MiniLM from', CFG.MODEL_ID);
+    const { pipeline } = await import('https://esm.sh/@xenova/transformers@2.17.2');
+    this.pipe = await pipeline('feature-extraction', CFG.MODEL_ID, { quantized:true });
+    this._initLSH();
+    LOG.s('model ready');
+    return this.pipe;
+  },
+  _initLSH(){
+    // deterministic random planes (seeded by dim)
+    this.lshPlanes = [];
+    let seed = 0xC0FFEE;
+    const rnd = ()=>{ seed=(seed*1664525+1013904223)|0; return ((seed>>>0)/4294967296)*2-1; };
+    for(let i=0;i<CFG.LSH_PLANES;i++){
+      const p = new Float32Array(CFG.VEC_DIM);
+      for(let j=0;j<CFG.VEC_DIM;j++) p[j]=rnd();
+      this.lshPlanes.push(p);
+    }
+  },
+  async encode(text){
+    if(!this.pipe) throw new Error('model not loaded');
+    const out = await this.pipe(text, { pooling:'mean', normalize:true });
     return Array.from(out.data);
-  };
-  const cosine = (a, b) => {
-    if (!a || !b || a.length !== b.length) return 0;
-    let s = 0;
-    for (let i = 0; i < a.length; i++) s += a[i] * b[i];
-    return s;
-  };
-  const isLoaded = () => extractor !== null;
-  return { load, embed, cosine, isLoaded };
-})();
-
-/* [7] RELAY (WebSocket) */
-ns.Relay = (() => {
-  let ws = null;
-  let reconnectTimer = null;
-  let url = null;
-  const peers = new Set();
-  const queryHandlers = new Map();
-
-  const connect = (relayUrl) => {
-    url = relayUrl;
-    if (ws) { try { ws.close(); } catch {} }
-    try {
-      ws = new WebSocket(url);
-    } catch (e) {
-      ns.Logger.error('WebSocket create failed', e.message);
-      scheduleReconnect();
-      return;
+  },
+  quantizeInt8(vec){
+    // symmetric int8: scale by 127 (normalized vectors live in [-1,1])
+    return vec.map(v => Math.max(-128, Math.min(127, Math.round(v*127))));
+  },
+  dequantizeInt8(i8){ return i8.map(v => v/127); },
+  cosine(a,b){
+    let dot=0, na=0, nb=0;
+    for(let i=0;i<a.length;i++){ dot+=a[i]*b[i]; na+=a[i]*a[i]; nb+=b[i]*b[i]; }
+    return dot/Math.sqrt(na*nb+1e-12);
+  },
+  lshBucket(vec){
+    let bucket = 0;
+    for(let i=0;i<this.lshPlanes.length;i++){
+      let d=0; const p=this.lshPlanes[i];
+      for(let j=0;j<CFG.VEC_DIM;j++) d += p[j]*vec[j];
+      if(d>0) bucket |= (1<<i);
     }
+    return 'r_'+bucket.toString(16).padStart(Math.ceil(CFG.LSH_PLANES/4),'0');
+  },
+};
 
-    ws.onopen = () => {
-      ns.Logger.info('relay connected', { url });
-      document.dispatchEvent(new CustomEvent('ns:relay-status', { detail: { status: 'ok' } }));
-      ws.send(JSON.stringify({ type: 'hello', peerId: ns.Util.peerId }));
-      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
-    };
-
-    ws.onclose = () => {
-      ns.Logger.warn('relay disconnected');
-      document.dispatchEvent(new CustomEvent('ns:relay-status', { detail: { status: 'err' } }));
-      peers.clear();
-      updatePeerCount();
-      scheduleReconnect();
-    };
-
-    ws.onerror = () => {
-      ns.Logger.error('relay error');
-    };
-
-    ws.onmessage = (ev) => {
-      let msg;
-      try { msg = JSON.parse(ev.data); } catch { return; }
-      if (!msg || typeof msg !== 'object' || !msg.type) return;
-
-      switch (msg.type) {
-        case 'peers':
-          peers.clear();
-          (msg.peers || []).forEach(p => peers.add(p));
-          ns.Logger.info('peers snapshot', { count: peers.size, peers: msg.peers });
-          updatePeerCount();
-          break;
-        case 'peer-joined':
-          if (msg.peerId) { peers.add(msg.peerId); updatePeerCount(); }
-          break;
-        case 'peer-left':
-          if (msg.peerId) {
-            peers.delete(msg.peerId);
-            ns.Ephemeral.removePeer(msg.peerId);
-            updatePeerCount();
-          }
-          break;
-        case 'query':
-          handleIncomingQuery(msg);
-          break;
-        case 'response':
-          handleIncomingResponse(msg);
-          break;
-      }
-    };
-  };
-
-  const scheduleReconnect = () => {
-    if (reconnectTimer) return;
-    reconnectTimer = setTimeout(() => {
-      reconnectTimer = null;
-      if (url) {
-        ns.Logger.info('reconnecting...');
-        connect(url);
-      }
-    }, ns.Config.LIMITS.RECONNECT_MS);
-  };
-
-  const send = (msg) => {
-    if (!ws || ws.readyState !== 1) return false;
-    try { ws.send(JSON.stringify(msg)); return true; } catch { return false; }
-  };
-
-  const updatePeerCount = () => {
-    document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: peers.size } }));
-  };
-
-  const handleIncomingQuery = async (msg) => {
-    if (!msg.queryId || !Array.isArray(msg.vector) || !msg.from) return;
-    if (!ns.Vector.isLoaded()) return;
-    try {
-      const all = await ns.Storage.all();
-      const shared = all.filter(t => t.published && Array.isArray(t.vector));
-      const scored = shared
-        .map(t => ({ text: t.text, score: ns.Vector.cosine(msg.vector, t.vector) }))
-        .filter(r => r.score > 0.1)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, msg.limit || ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
-
-      send({
-        type: 'response',
-        to: msg.from,
-        queryId: msg.queryId,
-        results: scored,
-      });
-      if (scored.length > 0) {
-        ns.Logger.info('responded', { to: msg.from.slice(0, 10), n: scored.length });
-      }
-    } catch (e) {
-      ns.Logger.warn('query handling failed', e.message);
-    }
-  };
-
-  const handleIncomingResponse = (msg) => {
-    if (!msg.queryId) return;
-    const handler = queryHandlers.get(msg.queryId);
-    if (!handler) return;
-    const fromPeer = msg.from || '?';
-    handler.results.set(fromPeer, msg.results || []);
-    ns.Ephemeral.upsert(fromPeer, msg.results || []);
-    ns.Logger.info('response received', { from: fromPeer.slice(0, 10), n: (msg.results || []).length });
-  };
-
-  const query = async (vector, { timeoutMs = ns.Config.LIMITS.QUERY_TIMEOUT_MS } = {}) => {
-    if (!ws || ws.readyState !== 1) {
-      ns.Logger.warn('query skipped: not connected');
-      return [];
-    }
-    if (peers.size === 0) {
-      ns.Logger.info('query skipped: no peers');
-      return [];
-    }
-    const queryId = ns.Util.newId();
-    const handler = { results: new Map() };
-    queryHandlers.set(queryId, handler);
-
-    send({ type: 'query', queryId, vector, limit: ns.Config.LIMITS.MAX_RESULTS_PER_PEER });
-    ns.Logger.info('query sent', { id: queryId.slice(0, 8), peers: peers.size });
-
-    return new Promise(resolve => {
-      setTimeout(() => {
-        queryHandlers.delete(queryId);
-        const collected = [];
-        for (const [peerId, results] of handler.results) {
-          for (const r of results) collected.push({ ...r, fromPeer: peerId });
-        }
-        ns.Logger.info('query done', { responded: handler.results.size, total: collected.length });
-        resolve(collected);
-      }, timeoutMs);
-    });
-  };
-
-  const getPeerCount = () => peers.size;
-  const isConnected = () => ws && ws.readyState === 1;
-
-  return { connect, query, getPeerCount, isConnected };
-})();
-
-/* [8] EPHEMERAL */
-ns.Ephemeral = (() => {
-  const byPeer = new Map();
-  let pruneTimer = null;
-  const upsert = (peerId, results) => {
-    byPeer.set(peerId, { results, lastSeen: ns.Util.now() });
-    schedulePrune();
-    document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
-  };
-  const removePeer = (peerId) => {
-    if (byPeer.delete(peerId)) document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
-  };
-  const schedulePrune = () => {
-    if (pruneTimer) return;
-    pruneTimer = setTimeout(() => { pruneTimer = null; prune(); }, 30_000);
-  };
-  const prune = () => {
-    const now = ns.Util.now();
-    const maxAge = ns.Config.LIMITS.MAX_EPHEMERAL_AGE_MS;
-    let changed = false;
-    for (const [peerId, rec] of byPeer) {
-      if (now - rec.lastSeen > maxAge) { byPeer.delete(peerId); changed = true; }
-    }
-    if (changed) document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
-  };
-  const allResults = () => {
-    const out = [];
-    for (const [peerId, rec] of byPeer) {
-      for (const r of rec.results) out.push({ ...r, fromPeer: peerId, receivedAt: rec.lastSeen });
-    }
+/* ============================================================
+   SECTION 6 · BLOOM FILTER
+   ============================================================ */
+class Bloom {
+  constructor(size=2048, k=3){ this.size=size; this.k=k; this.bits=new Uint8Array(size); this.n=0; }
+  _hashes(s){
+    const out=[]; let h1=0,h2=0;
+    for(let i=0;i<s.length;i++){ h1=(h1*31+s.charCodeAt(i))|0; h2=(h2*131+s.charCodeAt(i))|0; }
+    for(let i=0;i<this.k;i++) out.push(((h1+i*h2)>>>0)%this.size);
     return out;
-  };
-  const clear = () => {
-    byPeer.clear();
-    document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
-  };
-  return { upsert, removePeer, allResults, clear };
-})();
+  }
+  add(s){ this._hashes(s).forEach(h=>this.bits[h]=1); this.n++; }
+  has(s){ return this._hashes(s).every(h=>this.bits[h]===1); }
+}
 
-/* [9] RELEVANCE */
-ns.Relevance = (() => {
-  const { THRESHOLD, ADJACENCY, MAX_CARDS } = ns.Config.RELEVANCE;
-  const escapeHtml = ns.Util.escapeHtml;
-  const highlightFragment = (queryText, matchText) => {
-    if (!queryText || !matchText) return escapeHtml(matchText);
-    const qTokens = queryText.toLowerCase().match(/\w+/g) || [];
-    const mTokens = matchText.toLowerCase().match(/\w+/g) || [];
-    if (!qTokens.length || !mTokens.length) return escapeHtml(matchText);
-    const mRaw = matchText.match(/\w+/g) || [];
-    const mPos = [];
-    let cursor = 0;
-    for (const w of mRaw) {
-      const idx = matchText.toLowerCase().indexOf(w.toLowerCase(), cursor);
-      if (idx < 0) break;
-      mPos.push({ start: idx, end: idx + w.length });
-      cursor = idx + w.length;
-    }
-    let bestLen = 0, bestStart = -1;
-    for (let i = 0; i < mTokens.length && i < mPos.length; i++) {
-      for (let L = Math.min(qTokens.length, mTokens.length - i); L > bestLen; L--) {
-        if (i + L > mPos.length) break;
-        const slice = mTokens.slice(i, i + L).join(' ');
-        if (qTokens.join(' ').includes(slice)) { bestLen = L; bestStart = i; }
-      }
-    }
-    if (bestLen < 2 || bestStart < 0) return escapeHtml(matchText);
-    const a = mPos[bestStart], b = mPos[bestStart + bestLen - 1];
-    return escapeHtml(matchText.slice(0, a.start))
-         + '<mark>' + escapeHtml(matchText.slice(a.start, b.end)) + '</mark>'
-         + escapeHtml(matchText.slice(b.end));
-  };
-  const rankAll = (queryVec, localThoughts, ephemeralResults) => {
-    if (!queryVec) return { mine: [], world: [], adjacent: [] };
-    const localScored = localThoughts
-      .filter(t => Array.isArray(t.vector))
-      .map(t => ({ kind: 'local', source: t, score: ns.Vector.cosine(queryVec, t.vector) }))
-      .filter(r => r.score > THRESHOLD - ADJACENCY)
-      .sort((a, b) => b.score - a.score);
-    const worldScored = ephemeralResults
-      .map(r => ({ kind: 'world', source: r, score: Number(r.score) || 0 }))
-      .filter(r => r.score > THRESHOLD - ADJACENCY)
-      .sort((a, b) => b.score - a.score);
-    const mine = [], world = [], adjacent = [];
-    for (const r of localScored) {
-      if (r.score >= THRESHOLD) { if (mine.length < MAX_CARDS) mine.push(r); }
-      else if (adjacent.length < MAX_CARDS) adjacent.push(r);
-    }
-    for (const r of worldScored) {
-      if (r.score >= THRESHOLD) { if (world.length < MAX_CARDS) world.push(r); }
-      else if (adjacent.length < MAX_CARDS) adjacent.push(r);
-    }
-    return { mine, world, adjacent };
-  };
-  return { rankAll, highlightFragment };
-})();
+/* ============================================================
+   SECTION 7 · STORAGE (IndexedDB)
+   ============================================================ */
+const DB = {
+  db: null,
+  async open(){
+    return new Promise((res,rej)=>{
+      const r = indexedDB.open('noosphere_harness', 1);
+      r.onupgradeneeded = e => {
+        const d = e.target.result;
+        if(!d.objectStoreNames.contains('notes')) d.createObjectStore('notes',{keyPath:'id'});
+      };
+      r.onsuccess = e => { this.db = e.target.result; res(); };
+      r.onerror = e => rej(e);
+    });
+  },
+  async put(note){
+    return new Promise(res=>{
+      const tx = this.db.transaction('notes','readwrite');
+      tx.objectStore('notes').put(note);
+      tx.oncomplete = ()=>res();
+    });
+  },
+  async all(){
+    return new Promise(res=>{
+      const tx = this.db.transaction('notes','readonly');
+      const r = tx.objectStore('notes').getAll();
+      r.onsuccess = ()=>res(r.result||[]);
+    });
+  },
+  async clear(){
+    return new Promise(res=>{
+      const tx = this.db.transaction('notes','readwrite');
+      tx.objectStore('notes').clear();
+      tx.oncomplete = ()=>res();
+    });
+  },
+};
 
-/* [10] SYNC */
-ns.Sync = (() => {
-  const saveLocal = async ({ text, publishToWorld = false }) => {
-    const clean = ns.Util.normalizeText(text);
-    if (!clean) throw new Error('Empty thought');
-    const thought = {
-      id: ns.Util.newId(), text: clean,
-      createdAt: ns.Util.now(), updatedAt: ns.Util.now(),
-      vector: null, hasVector: 0,
-      published: !!publishToWorld,
-    };
-    if (ns.Vector.isLoaded()) {
-      try {
-        thought.vector = await ns.Vector.embed(clean);
-        thought.hasVector = thought.vector ? 1 : 0;
-      } catch (e) { ns.Logger.warn('embed failed', e.message); }
+/* ============================================================
+   SECTION 8 · RATE LIMITER + REPUTATION
+   ============================================================ */
+const RL = {
+  buckets: new Map(),   // peerPub -> [timestamps]
+  allow(pub){
+    const now = performance.now();
+    let arr = this.buckets.get(pub) || [];
+    arr = arr.filter(t => now-t < CFG.RATE_LIMIT.per);
+    if(arr.length >= CFG.RATE_LIMIT.n){ this.buckets.set(pub,arr); return false; }
+    arr.push(now); this.buckets.set(pub,arr); return true;
+  },
+};
+
+const Rep = {
+  scores: new Map(),    // peerPub -> number [0..2]
+  get(pub){ return this.scores.get(pub) ?? 1.0; },
+  inc(pub, d=0.05){ this.scores.set(pub, Math.min(2, this.get(pub)+d)); },
+  dec(pub, d=0.15){ this.scores.set(pub, Math.max(0, this.get(pub)-d)); },
+};
+
+/* ============================================================
+   SECTION 9 · APP STATE
+   ============================================================ */
+const State = {
+  myNotes:  [],           // {id, text, vec[], i8[], bucket, ts}
+  world:    [],           // announces: {id, vec:i8[], author, ts, sig, bucket}
+  seen:     new Bloom(),
+  peers:    new Map(),    // peerId -> {pub, rep, lastSeen, channel}
+  counters: { announce_in:0, announce_out:0, pull_req:0, pull_res:0, dropped_rl:0, dropped_dup:0, dropped_ttl:0 },
+  transport:null,
+  room:     null,
+  connected:false,
+};
+
+/* ============================================================
+   SECTION 10 · PROTOCOL (message schema + handlers)
+   ============================================================ */
+const Proto = {
+  async makeAnnounce(note){
+    const body = { id:note.id, i8:note.i8, bucket:note.bucket, author:Crypto.pubBytes(), ts:Date.now() };
+    const sig = Crypto.sign(body);
+    return { type:'announce', body, sig };
+  },
+  makePullReq(noteId, requesterPub){
+    return { type:'pull_req', id:noteId, requester:requesterPub, ts:Date.now() };
+  },
+  makePullRes(note){
+    return { type:'pull_res', note:{id:note.id, text:note.text, author:Crypto.pubBytes(), ts:note.ts}, sig:Crypto.sign({id:note.id, text:note.text}) };
+  },
+  async handle(msg, fromPeerId){
+    if(!msg || !msg.type){ LOG.w('bad msg', msg); return; }
+    switch(msg.type){
+      case 'hello':    return this._hello(msg, fromPeerId);
+      case 'announce': return this._announce(msg, fromPeerId);
+      case 'pull_req': return this._pullReq(msg, fromPeerId);
+      case 'pull_res': return this._pullRes(msg, fromPeerId);
+      default: LOG.w('unknown msg type', msg.type);
     }
-    await ns.Storage.put(thought);
-    ns.Logger.info('saved', { id: thought.id.slice(0, 8), published: thought.published, hasVec: !!thought.hasVector });
-    document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
-    return thought;
-  };
-  const reindexAll = async (onProgress) => {
-    if (!ns.Vector.isLoaded()) throw new Error('Load model first');
-    const pending = await ns.Storage.listUnindexed();
-    let done = 0;
-    for (const t of pending) {
-      try {
-        const v = await ns.Vector.embed(t.text);
-        t.vector = v; t.hasVector = v ? 1 : 0;
-        await ns.Storage.put(t);
-      } catch (e) { ns.Logger.warn('reindex failed', e.message); }
-      done++;
-      if (onProgress) onProgress({ done, total: pending.length });
+  },
+  _hello(msg, pid){
+    const pub = msg.pubHex;
+    State.peers.set(pid, { pub, rep:Rep.get(pub), lastSeen:Date.now() });
+    LOG.s(`hello from ${pub} (peer ${pid})`);
+    UI.refreshPeers();
+    // send back
+    State.transport.send(pid, { type:'hello', pubHex:Crypto.pubHex() });
+  },
+  async _announce(msg, pid){
+    State.counters.announce_in++;
+    const { body, sig } = msg;
+    // TTL
+    if(Date.now() - body.ts > CFG.ANNOUNCE_TTL){ State.counters.dropped_ttl++; LOG.w('drop ttl', body.id); return; }
+    // Dup (bloom)
+    if(State.seen.has(body.id)){ State.counters.dropped_dup++; return; }
+    // Rate limit
+    const pubHex = body.author.map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,16);
+    if(!RL.allow(pubHex)){ State.counters.dropped_rl++; Rep.dec(pubHex); LOG.w('drop rl', pubHex); return; }
+    // Signature
+    if(!Crypto.verify(body, sig, body.author)){ LOG.e('bad sig', body.id); Rep.dec(pubHex,0.3); return; }
+    // Already mine? skip
+    if(State.myNotes.some(n=>n.id===body.id)) return;
+
+    State.seen.add(body.id);
+    State.world.push({ ...body, from:pid, receivedAt:Date.now() });
+    LOG.s(`announce from ${pubHex} bucket=${body.bucket}`);
+
+    // auto-pull if relevant
+    const score = await this._bestSimilarity(body.i8);
+    if(score >= CFG.SIM_THR){
+      LOG.i(`relevant (${score.toFixed(2)}) → pull_req`);
+      State.counters.pull_req++;
+      State.transport.send(pid, Proto.makePullReq(body.id, Crypto.pubBytes()));
     }
-    ns.Logger.info('reindex done', { total: pending.length });
-    document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
-  };
-  return { saveLocal, reindexAll };
-})();
-
-/* [11] UI */
-ns.UI = (() => {
-  const refs = {};
-  let lastQuery = { text: null, vector: null };
-
-  const cache = () => {
-    ['input','btnSave','btnSaveWorld','btnLoadModel','btnReindex','btnSeed',
-     'btnQueryNow','btnReset','btnApplySettings','setRelayUrl',
-     'listMine','listWorld','listAdjacent','listAll',
-     'status','modelProgress']
-      .forEach(id => { refs[id] = document.getElementById(id); });
-  };
-
-  const setPill = (k, t, s = '') => {
-    const el = refs.status.querySelector(`[data-key="${k}"]`);
-    if (!el) return;
-    el.textContent = t;
-    el.classList.remove('ok','warn','err','think');
-    if (s) el.classList.add(s);
-  };
-
-  const setThink = (active, text = 'думаю...') => {
-    const el = refs.status.querySelector('[data-key="think"]');
-    if (!el) return;
-    if (active) { el.style.display = ''; el.textContent = text; el.classList.add('think'); }
-    else { el.style.display = 'none'; }
-  };
-
-  const setProgress = (pct) => { refs.modelProgress.style.width = pct + '%'; };
-
-  const renderLocalList = (container, items, queryText) => {
-    container.innerHTML = '';
-    if (!items.length) {
-      const d = document.createElement('div');
-      d.className = 'empty'; d.textContent = '(empty)';
-      container.appendChild(d); return;
+    // gossip (fanout)
+    this._gossip(msg, pid);
+    UI.refreshWorld(); UI.refreshAdj(); UI.refreshDiag();
+  },
+  _pullReq(msg, pid){
+    State.counters.pull_req++;
+    const mine = State.myNotes.find(n=>n.id===msg.id);
+    if(!mine){ LOG.w('pull_req miss', msg.id); return; }
+    LOG.i(`pull_req served → ${msg.id}`);
+    State.counters.pull_res++;
+    State.transport.send(pid, Proto.makePullRes(mine));
+  },
+  _pullRes(msg, pid){
+    State.counters.pull_res++;
+    const { note, sig } = msg;
+    if(!Crypto.verify({id:note.id, text:note.text}, sig, note.author)){ LOG.e('pull_res bad sig'); return; }
+    const pubHex = note.author.map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,16);
+    Rep.inc(pubHex);
+    LOG.s(`pull_res got "${note.text.slice(0,40)}…"`);
+    UI.refreshWorld();
+  },
+  async _bestSimilarity(i8){
+    const v = Vec.dequantizeInt8(i8);
+    let best = -1;
+    for(const n of State.myNotes){
+      const s = Vec.cosine(v, n.vec);
+      if(s>best) best=s;
     }
-    for (const r of items) {
-      const t = r.source;
-      const row = document.createElement('div');
-      row.className = 'item local';
-      const score = document.createElement('span');
-      score.className = 'score';
-      score.textContent = typeof r.score === 'number' ? r.score.toFixed(3) : '';
-      const body = document.createElement('div');
-      body.innerHTML = ns.Relevance.highlightFragment(queryText, t.text);
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = `${t.published ? 'world-shared' : 'local'} · ${new Date(t.createdAt).toISOString().slice(0,16)} · ${t.id.slice(0,6)}`;
-      row.appendChild(score); row.appendChild(body); row.appendChild(meta);
-      container.appendChild(row);
-    }
-  };
+    return best;
+  },
+  _gossip(msg, originPid){
+    const targets = [...State.peers.keys()].filter(p=>p!==originPid).slice(0, CFG.GOSSIP_FANOUT);
+    for(const t of targets) State.transport.send(t, msg);
+  },
+};
 
-  const renderWorldList = (container, items, queryText) => {
-    container.innerHTML = '';
-    if (!items.length) {
-      const d = document.createElement('div');
-      d.className = 'empty';
-      const n = ns.Relay.getPeerCount();
-      d.textContent = n ? `(no matches from ${n} peer(s))` : '(no peers online)';
-      container.appendChild(d); return;
-    }
-    for (const r of items) {
-      const t = r.source;
-      const row = document.createElement('div');
-      row.className = 'item world';
-      const score = document.createElement('span');
-      score.className = 'score';
-      score.textContent = typeof r.score === 'number' ? r.score.toFixed(3) : '';
-      const body = document.createElement('div');
-      body.innerHTML = ns.Relevance.highlightFragment(queryText, t.text);
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = `from:${(t.fromPeer || '?').slice(0,10)} · ${new Date(t.receivedAt || Date.now()).toISOString().slice(11,19)} · RAM`;
-      row.appendChild(score); row.appendChild(body); row.appendChild(meta);
-      container.appendChild(row);
-    }
-  };
+/* ============================================================
+   SECTION 11 · TRANSPORT (mock + real trystero)
+   ============================================================ */
+const MockTransport = {
+  name:'mock', peers:new Map(),
+  _bus: null,
+  init(bus){ this._bus = bus; LOG.i('mock transport init (loopback via in-memory bus)'); },
+  join(room){ LOG.i('mock join room', room); },
+  leave(){ LOG.i('mock leave'); this.peers.clear(); },
+  send(peerId, msg){
+    const ch = this.peers.get(peerId);
+    if(!ch){ LOG.w('mock send: no peer', peerId); return; }
+    setTimeout(()=>ch.onMsg(msg), 20 + Math.random()*80);
+  },
+  // test API
+  addFakePeer(pubHex, onMsgCb){
+    const id = 'fake_'+Math.random().toString(36).slice(2,8);
+    this.peers.set(id, { pubHex, onMsg:onMsgCb });
+    this._bus.onPeerJoin(id, pubHex);
+    return id;
+  },
+  injectFrom(peerId, msg){
+    this._bus.onMsg(peerId, msg);
+  },
+};
 
-  const renderMixedList = (container, items, queryText) => {
-    container.innerHTML = '';
-    if (!items.length) {
-      const d = document.createElement('div');
-      d.className = 'empty'; d.textContent = '(empty)';
-      container.appendChild(d); return;
-    }
-    for (const r of items) {
-      const isLocal = r.kind === 'local';
-      const text = r.source.text;
-      const row = document.createElement('div');
-      row.className = `item ${isLocal ? 'local' : 'world'}`;
-      const score = document.createElement('span');
-      score.className = 'score';
-      score.textContent = typeof r.score === 'number' ? r.score.toFixed(3) : '';
-      const body = document.createElement('div');
-      body.innerHTML = ns.Relevance.highlightFragment(queryText, text);
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = isLocal ? `local · ${r.source.id.slice(0,6)}` : `from:${(r.source.fromPeer || '?').slice(0,10)}`;
-      row.appendChild(score); row.appendChild(body); row.appendChild(meta);
-      container.appendChild(row);
-    }
-  };
+const RealTransport = {
+  name:'real', room:null, peers:new Map(), onData:null, onPeerJoin:null,
+  async join(roomName){
+    LOG.i('loading trystero/torrent …');
+    const { joinRoom } = await import('https://esm.sh/trystero@0.21.1/torrent');
+    const config = { appId: CFG.ROOM_NS };
+    this.room = joinRoom(config, roomName);
+    const [sendAnn, getAnn] = this.room.makeAction('a');
+    const [sendPr,  getPr ] = this.room.makeAction('p');
+    const [sendPs,  getPs ] = this.room.makeAction('r');
+    const [sendHi,  getHi ] = this.room.makeAction('h');
 
-  const clearAll = () => {
-    renderLocalList(refs.listMine, [], '');
-    renderWorldList(refs.listWorld, [], '');
-    renderMixedList(refs.listAdjacent, [], '');
-  };
+    const route = (peerId, msg) => this.onMsg && this.onMsg(peerId, msg);
+    getAnn((d,p)=>route(p,{type:'announce',...d}));
+    getPr ((d,p)=>route(p,{type:'pull_req',...d}));
+    getPs ((d,p)=>route(p,{type:'pull_res',...d}));
+    getHi ((d,p)=>route(p,{type:'hello',...d}));
 
-  const updateLiveRelevance = async () => {
-    if (!ns.Vector.isLoaded()) { clearAll(); return; }
-    const text = refs.input.value.trim();
-    if (!text) {
-      clearAll();
-      lastQuery = { text: null, vector: null };
-      setThink(false);
-      return;
-    }
-    let qv;
-    if (lastQuery.text === text && lastQuery.vector) {
-      qv = lastQuery.vector;
-      ns.Logger.info('relevance: cache hit');
+    this.room.onPeerJoin(pid => {
+      LOG.s(`webrtc peer joined ${pid}`);
+      this.peers.set(pid, { pub:'?', lastSeen:Date.now() });
+      sendHi({ pubHex:Crypto.pubHex() }, pid);
+      this.onPeerJoin && this.onPeerJoin(pid, '?');
+      UI.refreshPeers();
+    });
+    this.room.onPeerLeave(pid => {
+      LOG.w(`peer left ${pid}`);
+      this.peers.delete(pid);
+      UI.refreshPeers();
+    });
+
+    this._senders = { announce:sendAnn, pull_req:sendPr, pull_res:sendPs, hello:sendHi };
+    LOG.s('trystero room joined');
+  },
+  leave(){ if(this.room){ this.room.leave(); this.room=null; this.peers.clear(); } },
+  send(peerId, msg){
+    const s = this._senders[msg.type];
+    if(!s){ LOG.w('real send: bad type', msg.type); return; }
+    try { s(msg, peerId); } catch(e){ LOG.e('real send err', e.message); }
+  },
+};
+
+const Bus = {
+  // central switcher
+  current: null,
+  async connect(mode){
+    if(mode==='mock'){
+      this.current = MockTransport;
+      MockTransport.init(this);
+      MockTransport.join('mock_room');
     } else {
-      setThink(true, 'считаю вектор...');
-      try {
-        qv = await ns.Vector.embed(text);
-        lastQuery = { text, vector: qv };
-        ns.Logger.info('relevance: embed computed');
-      } catch (e) {
-        setThink(false);
-        ns.Logger.error('embed failed', e.message);
-        return;
-      }
+      this.current = RealTransport;
+      RealTransport.onMsg = (pid,msg)=>Proto.handle(msg,pid);
+      RealTransport.onPeerJoin = (pid,pub)=>{
+        State.peers.set(pid,{pub,lastSeen:Date.now()});
+        UI.refreshPeers();
+      };
+      await RealTransport.join(CFG.ROOM_NS+'::main');
     }
+    State.transport = this.current;
+    State.connected = true;
+    State.room = mode==='mock' ? 'mock_room' : CFG.ROOM_NS+'::main';
+    LOG.s(`connected via ${mode}`);
+  },
+  disconnect(){
+    if(this.current){ this.current.leave(); }
+    State.connected = false; State.peers.clear();
+    LOG.w('disconnected');
+  },
+  onPeerJoin(pid, pubHex){
+    State.peers.set(pid,{pub:pubHex,lastSeen:Date.now()});
+    UI.refreshPeers();
+  },
+  onMsg(pid, msg){
+    Proto.handle(msg, pid);
+  },
+};
 
-    setThink(true, 'запрашиваю пиры...');
-    if (ns.Relay.getPeerCount() > 0) {
-      try { await ns.Relay.query(qv); }
-      catch (e) { ns.Logger.warn('query failed', e.message); }
-    }
-
-    const all = await ns.Storage.all();
-    const locals = all.filter(t => t.source === 'local' || !t.source);
-    const eph = ns.Ephemeral.allResults();
-    const { mine, world, adjacent } = ns.Relevance.rankAll(qv, locals, eph);
-    renderLocalList(refs.listMine, mine, text);
-    renderWorldList(refs.listWorld, world, text);
-    renderMixedList(refs.listAdjacent, adjacent, text);
-    setThink(false);
-  };
-
-  const invalidateCache = () => { lastQuery = { text: null, vector: null }; };
-
-  const renderAll = async () => {
-    const all = await ns.Storage.all();
-    const sorted = all.sort((a, b) => b.createdAt - a.createdAt).slice(0, ns.Config.LIMITS.RENDER_CAP);
-    refs.listAll.innerHTML = '';
-    for (const t of sorted) {
-      const row = document.createElement('div');
-      row.className = 'item local';
-      const body = document.createElement('div');
-      body.textContent = t.text;
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = `${new Date(t.createdAt).toISOString().slice(0,16)} · ${t.published ? 'world-shared' : 'local'} · vec:${t.hasVector ? 'yes' : 'no'} · ${t.id.slice(0,6)}`;
-      row.appendChild(body); row.appendChild(meta);
-      refs.listAll.appendChild(row);
-    }
-    const indexed = all.filter(t => t.hasVector).length;
-    setPill('indexed', `INDEXED: ${indexed}/${all.length}`, all.length > 0 && indexed === all.length ? 'ok' : 'warn');
-  };
-
-  const refresh = async () => {
-    invalidateCache();
-    await renderAll();
-    await updateLiveRelevance();
-  };
-
-  const bind = () => {
-    const debouncedUpdate = ns.Util.debounce(async () => {
-      setThink(false);
-      await updateLiveRelevance();
-    }, ns.Config.LIMITS.DEBOUNCE_MS);
-
-    refs.input.addEventListener('input', () => {
-      const text = refs.input.value.trim();
-      if (!text) {
-        debouncedUpdate.cancel();
-        clearAll();
-        lastQuery = { text: null, vector: null };
-        setThink(false);
-        return;
-      }
-      setThink(true, 'жду паузу...');
-      debouncedUpdate();
+/* ============================================================
+   SECTION 12 · TEST HARNESS (fake neighbor + scripted scenarios)
+   ============================================================ */
+const Harness = {
+  fakes: [],
+  spawnFakeNeighbor(){
+    const kp = nacl.sign.keyPair();
+    const pubHex = Buffer.from(kp.publicKey).toString('hex').slice(0,16);
+    const fakeNotes = [
+      'квантовая запутанность нарушает локальный реализм',
+      'нейросети обучаются градиентным спуском',
+      'рецепт борща со свёклой и сметаной',
+      'стоицизм учит принимать неизбежное',
+    ];
+    const fake = {
+      pubBytes: Array.from(kp.publicKey), pubHex, kp,
+      notes: fakeNotes.map(t=>({ text:t, id:null, i8:null, bucket:null })),
+      sign(obj){ return Array.from(nacl.sign.detached(new TextEncoder().encode(JSON.stringify(obj)), kp.secretKey)); },
+    };
+    // generate ids and fake-ish vectors (hash-based, not real embeddings — fast)
+    fake.notes.forEach(n=>{
+      n.id = 'fake_'+Math.random().toString(36).slice(2,10);
+      // pseudo-vector: deterministic from text, normalized
+      const v = new Float32Array(CFG.VEC_DIM);
+      let h=0; for(let i=0;i<n.text.length;i++) h=(h*31+n.text.charCodeAt(i))|0;
+      let seed=h;
+      for(let i=0;i<CFG.VEC_DIM;i++){ seed=(seed*1664525+1013904223)|0; v[i]=((seed>>>0)/4294967296)*2-1; }
+      // normalize
+      let norm=0; for(let i=0;i<CFG.VEC_DIM;i++) norm+=v[i]*v[i]; norm=Math.sqrt(norm);
+      for(let i=0;i<CFG.VEC_DIM;i++) v[i]/=norm;
+      n.vec = Array.from(v);
+      n.i8  = Vec.quantizeInt8(n.vec);
+      n.bucket = Vec.lshBucket(n.vec);
     });
 
-    const disableSavers = (v) => { refs.btnSave.disabled = refs.btnSaveWorld.disabled = v; };
-
-    refs.btnSave.addEventListener('click', async () => {
-      try {
-        disableSavers(true);
-        await ns.Sync.saveLocal({ text: refs.input.value, publishToWorld: false });
-        refs.input.value = '';
-        clearAll();
-        await renderAll();
-      } catch (e) { ns.Logger.error('save failed', e.message); }
-      finally { disableSavers(false); }
-    });
-
-    refs.btnSaveWorld.addEventListener('click', async () => {
-      try {
-        disableSavers(true);
-        await ns.Sync.saveLocal({ text: refs.input.value, publishToWorld: true });
-        refs.input.value = '';
-        clearAll();
-        await renderAll();
-      } catch (e) { ns.Logger.error('save failed', e.message); }
-      finally { disableSavers(false); }
-    });
-
-    refs.btnLoadModel.addEventListener('click', async () => {
-      try {
-        refs.btnLoadModel.disabled = true;
-        setPill('model', 'MODEL: loading...', 'warn');
-        await ns.Vector.load((p) => {
-          if (p.total) {
-            const pct = Math.round((p.loaded / p.total) * 100);
-            setProgress(pct);
-            setPill('model', `MODEL: ${pct}%`, 'warn');
-          }
-        });
-        setPill('model', 'MODEL: ready', 'ok');
-        setProgress(100);
-        await refresh();
-      } catch (e) {
-        setPill('model', 'MODEL: err', 'err');
-        ns.Logger.error('model load failed', e.message);
-      } finally { refs.btnLoadModel.disabled = false; }
-    });
-
-    refs.btnReindex.addEventListener('click', async () => {
-      if (!ns.Vector.isLoaded()) { ns.Logger.warn('Load model first'); return; }
-      try {
-        refs.btnReindex.disabled = true;
-        await ns.Sync.reindexAll();
-        await refresh();
-      } catch (e) { ns.Logger.error('reindex failed', e.message); }
-      finally { refs.btnReindex.disabled = false; }
-    });
-
-    refs.btnSeed.addEventListener('click', async () => {
-      const samples = [
-        'Мысль появляется в паузе между действиями.',
-        'Архитектура — это способ договариваться с будущим собой.',
-        'Случайность — недооценённый инструмент поиска.',
-        'Иногда нужно просто записать, чтобы понять.',
-        'Связи между идеями важнее самих идей.',
-      ];
-      for (const s of samples) await ns.Sync.saveLocal({ text: s, publishToWorld: true });
-      invalidateCache();
-      await refresh();
-    });
-
-    refs.btnQueryNow.addEventListener('click', async () => {
-      if (!ns.Vector.isLoaded()) { ns.Logger.warn('Load model first'); return; }
-      const text = refs.input.value.trim() || 'пауза';
-      try {
-        const qv = await ns.Vector.embed(text);
-        ns.Logger.info('=== MANUAL QUERY ===');
-        ns.Logger.info('peers online:', ns.Relay.getPeerCount());
-        const results = await ns.Relay.query(qv);
-        ns.Logger.info('results:', results.length, results);
-        await updateLiveRelevance();
-      } catch (e) { ns.Logger.error('manual query failed', e.message); }
-    });
-
-    refs.btnApplySettings.addEventListener('click', async () => {
-      const url = refs.setRelayUrl.value.trim();
-      await ns.Settings.save({ relayUrl: url });
-      ns.Logger.info('settings applied', { relayUrl: url });
-      if (url) ns.Relay.connect(url);
-    });
-
-    refs.btnReset.addEventListener('click', async () => {
-      if (!confirm('Стереть все локальные заметки?')) return;
-      try {
-        await ns.Storage.clear();
-        ns.Ephemeral.clear();
-        invalidateCache();
-        clearAll();
-        await renderAll();
-        ns.Logger.warn('storage cleared');
-      } catch (e) { ns.Logger.error('reset failed', e.message); }
-    });
-
-    document.addEventListener('ns:thoughts-changed', async () => {
-      invalidateCache();
-      await renderAll();
-      await updateLiveRelevance();
-    });
-    document.addEventListener('ns:ephemeral-changed', updateLiveRelevance);
-    document.addEventListener('ns:peers', (ev) => {
-      setPill('peers', `PEERS: ${ev.detail.count}`, ev.detail.count ? 'ok' : 'warn');
-    });
-    document.addEventListener('ns:relay-status', (ev) => {
-      setPill('relay', ev.detail.status === 'ok' ? 'RELAY: OK' : 'RELAY: ERR',
-              ev.detail.status === 'ok' ? 'ok' : 'err');
-    });
-  };
-
-  const init = () => { cache(); bind(); };
-  return { init, refresh, setPill };
-})();
-
-/* [12] APP */
-ns.App = (() => {
-  const boot = async () => {
-    ns.UI.init();
-    ns.UI.setPill('idb', 'IDB: boot...', 'warn');
-    ns.UI.setPill('relay', 'RELAY: boot...', 'warn');
-
-    try {
-      await ns.Storage.open();
-      ns.UI.setPill('idb', 'IDB: OK', 'ok');
-      ns.Logger.info('IDB ready');
-    } catch (e) {
-      ns.UI.setPill('idb', 'IDB: ERR', 'err');
-      ns.Logger.error('IDB failed', e.message);
-      return;
-    }
-
-    await ns.Settings.load();
-    document.getElementById('setRelayUrl').value = ns.Settings.get().relayUrl || ns.Config.DEFAULT_RELAY_URL;
-
-    const relayUrl = ns.Settings.get().relayUrl || ns.Config.DEFAULT_RELAY_URL;
-    if (relayUrl) ns.Relay.connect(relayUrl);
-
-    try {
-      await ns.Vector.load((p) => {
-        if (p.total) {
-          const pct = Math.round((p.loaded / p.total) * 100);
-          ns.UI.setPill('model', `MODEL: ${pct}%`, 'warn');
+    const peerId = MockTransport.addFakePeer(pubHex, (msg)=>{
+      // fake neighbor behavior: respond to pull_req honestly
+      if(msg.type==='pull_req'){
+        const n = fake.notes.find(x=>x.id===msg.id);
+        if(n){
+          const body = { id:n.id, text:n.text, author:fake.pubBytes, ts:Date.now() };
+          const sig  = fake.sign({id:n.id, text:n.text});
+          setTimeout(()=>Bus.onMsg(peerId,{type:'pull_res', note:body, sig}), 30);
         }
-      });
-      ns.UI.setPill('model', 'MODEL: ready', 'ok');
-    } catch (e) {
-      ns.Logger.warn('model auto-load skipped', e.message);
+      }
+    });
+    fake.peerId = peerId;
+
+    // send hello
+    setTimeout(()=>Bus.onMsg(peerId, {type:'hello', pubHex}), 50);
+
+    this.fakes.push(fake);
+    LOG.s(`fake neighbor spawned: ${pubHex} with ${fake.notes.length} notes (peer ${peerId})`);
+    return fake;
+  },
+
+  async injectOneAnnounce(){
+    if(!this.fakes.length) this.spawnFakeNeighbor();
+    const f = this.fakes[0];
+    const n = f.notes[Math.floor(Math.random()*f.notes.length)];
+    const body = { id:n.id, i8:n.i8, bucket:n.bucket, author:f.pubBytes, ts:Date.now() };
+    const sig = f.sign(body);
+    Bus.onMsg(f.peerId, { type:'announce', body, sig });
+  },
+
+  async spamAnnounces(n=20){
+    if(!this.fakes.length) this.spawnFakeNeighbor();
+    const f = this.fakes[0];
+    for(let i=0;i<n;i++){
+      const text = `spam_${i}_${Math.random().toString(36).slice(2,6)}`;
+      const v = new Float32Array(CFG.VEC_DIM);
+      let seed=i*97; for(let j=0;j<CFG.VEC_DIM;j++){ seed=(seed*1664525+1013904223)|0; v[j]=((seed>>>0)/4294967296)*2-1; }
+      let norm=0; for(let j=0;j<CFG.VEC_DIM;j++) norm+=v[j]*v[j]; norm=Math.sqrt(norm);
+      for(let j=0;j<CFG.VEC_DIM;j++) v[j]/=norm;
+      const vec=Array.from(v), i8=Vec.quantizeInt8(vec), bucket=Vec.lshBucket(vec);
+      const id='spam_'+i+'_'+Math.random().toString(36).slice(2,6);
+      const body={id,i8,bucket,author:f.pubBytes,ts:Date.now()};
+      const sig=f.sign(body);
+      Bus.onMsg(f.peerId, {type:'announce', body, sig});
+      await new Promise(r=>setTimeout(r,50));
     }
+  },
+};
 
-    await ns.UI.refresh();
-    ns.Logger.info('app ready');
-  };
-  return { boot };
+/* ============================================================
+   SECTION 13 · UI BINDINGS
+   ============================================================ */
+const UI = {
+  init(){
+    // tabs
+    document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+      t.classList.add('on');
+      ['log','peers','mine','world','adj','diag'].forEach(k=>{
+        document.getElementById('v-'+k).style.display = (k===t.dataset.t)?'':'none';
+      });
+      if(t.dataset.t==='diag') this.refreshDiag();
+    });
+
+    // transport
+    document.getElementById('btnConn').onclick = async ()=>{
+      const mode = document.getElementById('transport').value;
+      try {
+        document.getElementById('btnConn').disabled = true;
+        await Bus.connect(mode);
+        document.getElementById('btnDisc').disabled = false;
+        this.setConn(true);
+      } catch(e){ LOG.e('connect fail', e.message); document.getElementById('btnConn').disabled=false; }
+    };
+    document.getElementById('btnDisc').onclick = ()=>{
+      Bus.disconnect();
+      document.getElementById('btnConn').disabled = false;
+      document.getElementById('btnDisc').disabled = true;
+      this.setConn(false);
+    };
+
+    // model
+    document.getElementById('btnModel').onclick = async ()=>{
+      document.getElementById('btnModel').disabled = true;
+      try { await Vec.load(); this.setModel(true); }
+      catch(e){ LOG.e('model fail', e.message); document.getElementById('btnModel').disabled=false; }
+    };
+
+    // embed
+    document.getElementById('btnEmbed').onclick = async ()=>{
+      const text = document.getElementById('inpNote').value.trim();
+      if(!text) return;
+      if(!Vec.pipe){ LOG.e('load model first'); return; }
+      LOG.i('embedding…');
+      const vec = await Vec.encode(text);
+      const i8 = Vec.quantizeInt8(vec);
+      const bucket = Vec.lshBucket(vec);
+      const id = await Crypto.sha256hex(text + Crypto.pubHex());
+      const note = { id, text, vec, i8, bucket, ts:Date.now() };
+      State.myNotes.push(note);
+      await DB.put(note);
+      LOG.s(`stored "${text.slice(0,40)}" → bucket ${bucket}`);
+      // broadcast announce
+      if(State.connected){
+        const msg = await Proto.makeAnnounce(note);
+        State.counters.announce_out++;
+        for(const pid of State.peers.keys()) State.transport.send(pid, msg);
+      }
+      this.refreshMine();
+    };
+
+    // harness
+    document.getElementById('btnFakePeer').onclick = ()=>Harness.spawnFakeNeighbor();
+    document.getElementById('btnInject').onclick   = ()=>Harness.injectOneAnnounce();
+    document.getElementById('btnSpam').onclick     = ()=>Harness.spamAnnounces(20);
+    document.getElementById('btnClear').onclick    = async ()=>{
+      State.myNotes=[]; State.world=[]; State.seen=new Bloom(); State.peers.clear();
+      State.counters = { announce_in:0, announce_out:0, pull_req:0, pull_res:0, dropped_rl:0, dropped_dup:0, dropped_ttl:0 };
+      Harness.fakes = [];
+      await DB.clear();
+      this.refreshAll();
+      LOG.w('state reset');
+    };
+    document.getElementById('btnClearLog').onclick = ()=>{ document.getElementById('log').innerHTML=''; };
+  },
+
+  setConn(on){
+    const el = document.getElementById('stConn');
+    el.innerHTML = on ? '<span class="badge b-ok">connected</span>' : '<span class="badge b-wn">idle</span>';
+    document.getElementById('stRoom').textContent = on ? State.room : '—';
+  },
+  setModel(loaded){
+    document.getElementById('stModel').innerHTML = loaded
+      ? '<span class="badge b-ok">ready</span>'
+      : '<span class="badge b-wn">unloaded</span>';
+  },
+
+  refreshAll(){ this.refreshPeers(); this.refreshMine(); this.refreshWorld(); this.refreshAdj(); this.refreshDiag(); },
+  refreshPeers(){
+    document.getElementById('stPeers').textContent = State.peers.size;
+    document.getElementById('stPid').textContent = Crypto.pubHex();
+    document.getElementById('stPub').textContent = Crypto.pubHex();
+    const box = document.getElementById('peerList');
+    if(!State.peers.size){ box.innerHTML = '<i class="hint">no peers connected</i>'; return; }
+    box.innerHTML = '';
+    for(const [pid,p] of State.peers){
+      const d = document.createElement('div'); d.className='peer';
+      d.innerHTML = `<span>peer ${pid.slice(0,10)}… · pub ${p.pub.slice(0,10)}…</span><span class="badge b-in">rep ${Rep.get(p.pub).toFixed(2)}</span>`;
+      box.appendChild(d);
+    }
+  },
+  refreshMine(){
+    const box = document.getElementById('mineList');
+    if(!State.myNotes.length){ box.innerHTML = '<i class="hint">no local notes</i>'; return; }
+    box.innerHTML = '';
+    for(const n of State.myNotes){
+      const d = document.createElement('div'); d.className='note';
+      d.innerHTML = `<b>${n.text}</b><div class="m">id=${n.id.slice(0,12)}… bucket=${n.bucket} ts=${new Date(n.ts).toLocaleTimeString()}</div>`;
+      box.appendChild(d);
+    }
+  },
+  refreshWorld(){
+    const box = document.getElementById('worldList');
+    if(!State.world.length){ box.innerHTML = '<i class="hint">no announces</i>'; return; }
+    box.innerHTML = '';
+    for(const a of [...State.world].reverse().slice(0,30)){
+      const pubHex = a.author.map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,12);
+      const d = document.createElement('div'); d.className='note';
+      d.innerHTML = `<b>announce ${a.id.slice(0,12)}</b><div class="m">from ${pubHex}… bucket=${a.bucket} age=${Math.round((Date.now()-a.ts)/1000)}s</div>`;
+      box.appendChild(d);
+    }
+  },
+  async refreshAdj(){
+    const box = document.getElementById('adjList');
+    const thr = parseFloat(document.getElementById('inpThr').value) || CFG.SIM_THR;
+    if(!State.world.length || !State.myNotes.length){ box.innerHTML = '<i class="hint">need both local notes and announces</i>'; return; }
+    const pairs = [];
+    for(const a of State.world){
+      const av = Vec.dequantizeInt8(a.i8);
+      for(const m of State.myNotes){
+        const s = Vec.cosine(av, m.vec);
+        if(s>=thr) pairs.push({ a, m, s });
+      }
+    }
+    pairs.sort((x,y)=>y.s-x.s);
+    box.innerHTML='';
+    for(const p of pairs.slice(0,20)){
+      const d = document.createElement('div'); d.className='note adj';
+      d.innerHTML = `<b>sim=${p.s.toFixed(3)}</b> mine: "${p.m.text.slice(0,40)}" ↔ announce ${p.a.id.slice(0,10)}<div class="m">bucket ${p.a.bucket} · pull to see text</div>`;
+      box.appendChild(d);
+    }
+  },
+  refreshDiag(){
+    document.getElementById('stRep').textContent = Rep.get(Crypto.pubHex()).toFixed(2);
+    const box = document.getElementById('diagBox');
+    box.innerHTML = Object.entries(State.counters)
+      .map(([k,v])=>`<div class="kv"><span>${k}</span><span>${v}</span></div>`).join('');
+    document.getElementById('rawState').textContent = JSON.stringify({
+      myNotes: State.myNotes.map(n=>({id:n.id.slice(0,10), bucket:n.bucket, text:n.text.slice(0,30)})),
+      world:   State.world.length,
+      peers:   [...State.peers.entries()].map(([k,v])=>[k.slice(0,8),v.pub.slice(0,10)]),
+      fakes:   Harness.fakes.length,
+      counters:State.counters,
+    }, null, 2);
+  },
+};
+
+/* ============================================================
+   SECTION 14 · BOOT
+   ============================================================ */
+(async function boot(){
+  await DB.open();
+  State.myNotes = await DB.all();
+  await Crypto.init();
+  UI.init();
+  UI.setConn(false);
+  UI.setModel(false);
+  UI.refreshAll();
+  LOG.s('harness booted');
+  LOG.i(`peer id: ${Crypto.pubHex()}`);
+  LOG.i('next: Load MiniLM → Connect (mock) → Spawn fake neighbor → Inject announce');
 })();
-
-ns.App.boot();
 </script>
 </body>
 </html>
