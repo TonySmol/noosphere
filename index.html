@@ -3,19 +3,24 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Noosphere v2.0</title>
+<title>Noosphere v7 · Stable Gun</title>
 <style>
   :root {
     --bg:#0f1115; --panel:#161a22; --border:#242a36;
     --text:#e6e8ee; --muted:#8a93a6; --accent:#6aa6ff;
     --ok:#4ade80; --warn:#f59e0b; --err:#ef4444;
   }
+  [data-theme="light"] {
+    --bg:#f5f5f7; --panel:#ffffff; --border:#e0e0e6;
+    --text:#1a1d24; --muted:#6b7280; --accent:#2563eb;
+  }
   * { box-sizing: border-box; }
   html, body { margin:0; padding:0; background:var(--bg); color:var(--text);
-               font:14px/1.45 ui-monospace, Menlo, monospace; }
+               font:14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", monospace;
+               transition: background .2s, color .2s; }
   .wrap { max-width:1100px; margin:0 auto; padding:16px; }
-  h1 { font-size:16px; margin:0 0 14px; letter-spacing:.5px; }
-  h1 small { color:var(--muted); font-weight:normal; font-size:11px; margin-left:8px; }
+  h1 { font-size:16px; margin:0 0 14px; letter-spacing:.5px; display:flex; align-items:center; gap:10px; }
+  h1 small { color:var(--muted); font-weight:normal; font-size:11px; margin-left:auto; }
   h2 { font-size:11px; margin:18px 0 6px; color:var(--muted);
        text-transform:uppercase; letter-spacing:1px; }
   .panel { background:var(--panel); border:1px solid var(--border);
@@ -24,170 +29,277 @@
   .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
   @media (max-width:820px) { .grid-3 { grid-template-columns:1fr; } }
 
-  textarea { width:100%; background:#0b0d12; color:var(--text);
+  textarea { width:100%; background:var(--bg); color:var(--text);
              border:1px solid var(--border); border-radius:4px;
              padding:10px; font:inherit; resize:vertical; min-height:80px; }
-  button { background:#1f2532; color:var(--text); border:1px solid var(--border);
+  button { background:var(--panel); color:var(--text); border:1px solid var(--border);
            border-radius:4px; padding:8px 12px; font:inherit; cursor:pointer; }
-  button:hover:not(:disabled) { background:#272f40; }
-  button.primary { background:var(--accent); color:#0b0d12; border-color:var(--accent); }
-  button.secondary { background:#2a2f3a; color:var(--accent); border-color:var(--accent); }
+  button:hover:not(:disabled) { background:var(--border); }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.secondary { background:var(--bg); color:var(--accent); border-color:var(--accent); }
   button.danger { background:#2a1a1d; color:var(--err); border-color:#3d1f22; }
+  [data-theme="light"] button.danger { background:#fee; }
   button:disabled { opacity:.5; cursor:not-allowed; }
 
   .status { display:inline-flex; gap:8px; flex-wrap:wrap; }
   .pill { padding:3px 8px; border-radius:999px; font-size:11px;
-          background:#1a1f2a; border:1px solid var(--border); color:var(--muted); }
-  .pill.ok   { color:var(--ok);   border-color:#1f3d2a; }
-  .pill.warn { color:var(--warn); border-color:#3d3220; }
-  .pill.err  { color:var(--err);  border-color:#3d1f22; }
+          background:var(--bg); border:1px solid var(--border); color:var(--muted); }
+  .pill.ok   { color:var(--ok);   border-color:var(--ok); }
+  .pill.warn { color:var(--warn); border-color:var(--warn); }
+  .pill.err  { color:var(--err);  border-color:var(--err); }
   .pill.think { color:var(--accent); border-color:var(--accent); }
 
   .list { display:flex; flex-direction:column; gap:6px; min-height:60px; }
-  .item { background:#0b0d12; border:1px solid var(--border);
+  .item { background:var(--bg); border:1px solid var(--border);
           border-radius:4px; padding:8px 10px; }
   .item.local { border-left:3px solid #555; }
   .item.world { border-left:3px solid var(--accent); }
-  .item.ephemeral::before {
-    content:"RAM"; font-size:9px; color:var(--accent); padding:1px 4px;
-    border:1px solid var(--accent); border-radius:2px; margin-right:6px;
-  }
   .item .score { float:right; color:var(--muted); font-size:11px; }
   .item .meta { color:var(--muted); font-size:10px; margin-top:4px; }
   .item mark { background:transparent; color:var(--accent); font-weight:bold; }
 
-  .progress { height:3px; background:#1a1f2a; border-radius:2px;
+  .progress { height:3px; background:var(--border); border-radius:2px;
               overflow:hidden; margin-top:6px; }
   .progress > div { height:100%; background:var(--accent); width:0; transition:width .2s; }
 
-  .log { background:#07090d; border:1px solid var(--border);
+  .log { background:var(--bg); border:1px solid var(--border);
          border-radius:4px; padding:8px; max-height:200px; overflow:auto; font-size:11px; }
   .log .e { color:var(--err); } .log .w { color:var(--warn); } .log .i { color:var(--muted); }
 
   .empty { color:var(--muted); font-size:12px; padding:6px; }
   .hint { font-size:11px; color:var(--muted); font-style:italic; margin-top:6px; }
+  .device-id { font-size:10px; color:var(--muted); margin-top:6px; word-break:break-all; }
+
+  .swipe-zone { position:relative; border:1px dashed transparent; transition:border-color .2s; }
+  .swipe-zone.active { border-color:var(--accent); }
+  .swipe-hint { position:absolute; right:8px; top:8px; font-size:10px;
+                color:var(--muted); pointer-events:none; }
+
+  .settings-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
+  @media (max-width:600px) { .settings-grid { grid-template-columns:1fr; } }
+  .settings-grid label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+  .settings-grid input, .settings-grid select {
+    padding:6px; font-size:12px; background:var(--bg); color:var(--text);
+    border:1px solid var(--border); border-radius:4px; font:inherit;
+  }
+  textarea.peers { min-height:60px; font-size:11px; }
+  details summary { cursor:pointer; color:var(--muted); font-size:12px; padding:4px 0; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>NOOSPHERE <small>v2.0 · true P2P via BitTorrent DHT</small></h1>
+  <h1>
+    NOOSPHERE
+    <span style="font-size:11px; color:var(--muted); cursor:pointer; padding:3px 8px; border:1px solid var(--border); border-radius:3px;" id="langSwitch">EN</span>
+    <small data-i18n="tagline">stable gun · local first</small>
+  </h1>
 
   <section class="panel">
     <div class="status" id="status">
       <span class="pill" data-key="idb">IDB: ...</span>
-      <span class="pill" data-key="model">MODEL: idle</span>
-      <span class="pill" data-key="mesh">MESH: ...</span>
+      <span class="pill" data-key="gun">GUN: ...</span>
       <span class="pill" data-key="peers">PEERS: 0</span>
+      <span class="pill" data-key="model">MODEL: idle</span>
       <span class="pill" data-key="indexed">INDEXED: 0</span>
       <span class="pill" data-key="think" style="display:none">...</span>
     </div>
+    <div class="device-id" id="deviceId">device: ...</div>
     <div class="progress"><div id="modelProgress"></div></div>
-    <div class="hint">Настоящий P2P: signaling через BitTorrent DHT, данные напрямую между устройствами. Ничего не хранится на серверах.</div>
+    <div class="hint" data-i18n="hint">Твои заметки — только на твоём устройстве. Мировые — из Gun relay (публичный граф). Anti-ghost фильтр не показывает твои старые публикации как чужие.</div>
   </section>
 
-  <section class="panel">
-    <h2>thought</h2>
-    <textarea id="input" placeholder="напечатай мысль... (релевантность через 4 сек)"></textarea>
+  <section class="panel swipe-zone" id="swipeZone">
+    <h2 data-i18n="thought">thought</h2>
+    <span class="swipe-hint" data-i18n="swipeHint">свайп вверх = Сохранить + в Мир</span>
+    <textarea id="input" placeholder="напечатай мысль..."></textarea>
     <div class="row" style="margin-top:8px;">
-      <button id="btnSave" class="secondary">Сохранить локально</button>
-      <button id="btnSaveWorld" class="primary">Сохранить + в Мир</button>
+      <button id="btnSave" class="secondary" data-i18n="saveLocal">Сохранить</button>
+      <button id="btnSaveWorld" class="primary" data-i18n="saveWorld">Сохранить + в Мир</button>
     </div>
-    <div class="hint">«Сохранить» = только твоё устройство. «Сохранить + в Мир» = отвечаешь на запросы других устройств в сети.</div>
+    <div class="hint" data-i18n="saveHint">«Сохранить» = только твоё устройство. «Сохранить + в Мир» = уходит в публичный граф Gun, пиры видят.</div>
   </section>
 
   <section class="panel">
-    <h2>live relevance</h2>
+    <h2 data-i18n="relevance">live relevance</h2>
     <div class="grid-3">
       <div>
-        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">MY (local)</div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;" data-i18n="colMine">MY (local)</div>
         <div class="list" id="listMine"></div>
       </div>
       <div>
-        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">WORLD (peers, RAM)</div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;" data-i18n="colWorld">WORLD (from Gun)</div>
         <div class="list" id="listWorld"></div>
       </div>
       <div>
-        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">ADJACENT</div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;" data-i18n="colAdjacent">ADJACENT</div>
         <div class="list" id="listAdjacent"></div>
       </div>
     </div>
   </section>
 
   <section class="panel">
-    <h2>diagnostics</h2>
-    <div class="row">
-      <button id="btnLoadModel" class="primary">Load MiniLM</button>
-      <button id="btnReindex">Reindex</button>
-      <button id="btnSeed">Seed 5</button>
-      <button id="btnQueryNow">Query peers</button>
-      <button id="btnReset" class="danger">Reset</button>
-    </div>
+    <details>
+      <summary data-i18n="settings">настройки</summary>
+      <div class="settings-grid">
+        <label>
+          <span data-i18n="theme">Тема</span>
+          <select id="setTheme">
+            <option value="auto" data-i18n="auto">Авто</option>
+            <option value="dark" data-i18n="dark">Тёмная</option>
+            <option value="light" data-i18n="light">Светлая</option>
+          </select>
+        </label>
+        <label>
+          <span data-i18n="threshold">Порог релевантности</span>
+          <input type="number" id="setThreshold" step="0.05" min="0" max="1" value="0.25" />
+        </label>
+        <label>
+          <span data-i18n="adjacency">Дельта смежности</span>
+          <input type="number" id="setAdjacency" step="0.05" min="0" max="1" value="0.15" />
+        </label>
+        <label>
+          <span data-i18n="maxCards">Макс. карточек</span>
+          <select id="setMaxCards">
+            <option value="3">3</option>
+            <option value="5" selected>5</option>
+            <option value="10">10</option>
+          </select>
+        </label>
+        <label style="grid-column: 1 / -1;">
+          <span data-i18n="relays">Gun relay peers (по одному URL на строку)</span>
+          <textarea id="setRelays" class="peers">https://relay.peer.ooo/gun</textarea>
+        </label>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button id="btnApplySettings" class="primary" data-i18n="apply">Применить</button>
+        <button id="btnLoadModel" data-i18n="loadModel">Загрузить MiniLM</button>
+        <button id="btnReindex" data-i18n="reindex">Пересоздать векторы</button>
+        <button id="btnSeed5" data-i18n="seed5">Seed 5</button>
+        <button id="btnExport" data-i18n="export">Скачать капсулу</button>
+        <button id="btnImport" data-i18n="import">Импортировать капсулу</button>
+        <input type="file" id="importFile" accept=".json" style="display:none" />
+        <button id="btnReset" class="danger" data-i18n="reset">Сбросить всё</button>
+      </div>
+    </details>
   </section>
 
   <section class="panel">
-    <h2>my thoughts (persisted on disk)</h2>
+    <h2 data-i18n="myThoughts">мои мысли (сохранены локально)</h2>
     <div class="list" id="listAll"></div>
   </section>
 
   <section class="panel">
-    <h2>event log</h2>
-    <div class="log" id="log"></div>
+    <details>
+      <summary data-i18n="eventLog">лог событий</summary>
+      <div class="log" id="log" style="margin-top:8px;"></div>
+    </details>
   </section>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/lib/radisk.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/lib/rindexed.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gun/axe.js"></script>
+
 <script type="module">
 /* ============================================================================
-   NOOSPHERE v2.0 — TRUE P2P VIA BITTORRENT DHT (FIXED)
+   NOOSPHERE v7 — STABLE GUN BUILD
    ----------------------------------------------------------------------------
-   Исправлено: trystero@0.23.0 (актуальная версия, март 2026)
-   
-   Архитектура:
-     1. Storage (IDB) — только локальные заметки, векторы.
-     2. Vector (MiniLM) — с умным кешем через Cache API браузера.
-     3. Mesh (Trystero + BitTorrent) — децентрализованный P2P:
-        - signaling через публичные BitTorrent трекеры
-        - данные через WebRTC DataChannel (напрямую между устройствами)
-        - никакого центрального сервера
-     4. Ephemeral (RAM) — чужие ответы, 5 минут TTL.
-     5. UI — debounce 4s, кеш последнего queryVector, очистка при пустом поле.
+   Архитектура (финальная, проверенная):
+     1. Storage (IDB) — только локальные заметки + векторы.
+     2. Vector (MiniLM) — с кешем Cache API, не перезагружается при обновлении.
+     3. P2P (Gun relay) — публичный граф мировых заметок + presence.
+     4. Anti-ghost: фильтр originDevice не даёт твоим старым публикациям
+        вернуться как "чужие" после Reset.
+     5. Ephemeral: чужие заметки живут в IDB с source='world', но легко
+        удаляются при Reset.
 
-   Порядок секций:
-     [1] Config  [2] Logger  [3] Util  [4] Storage  [5] Vector
-     [6] Mesh  [7] Ephemeral  [8] Relevance  [9] Sync  [10] UI  [11] App
+   Порядок секций (зависимости по возрастанию):
+     [1] Config  [2] I18n  [3] Logger  [4] Util  [5] Device  [6] Settings
+     [7] Storage  [8] Vector  [9] P2P  [10] Relevance  [11] Sync  [12] Capsule
+     [13] UI  [14] App
    ============================================================================ */
 
 import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
 
-// ИСПРАВЛЕНО: актуальная версия trystero (0.23.0, март 2026)
-import { joinRoom } from 'https://esm.sh/trystero@0.23.0/bittorrent';
-
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
-const ns = {};
+const ns = (window.__ns = {});
 
-/* [1] CONFIG */
+/* --------------------------------------------------------------------------
+   [1] CONFIG
+   -------------------------------------------------------------------------- */
 ns.Config = Object.freeze({
-  DB_NAME: 'noosphere_v2',
+  DB_NAME: 'noosphere_v7',
   DB_VERSION: 1,
   STORE_THOUGHTS: 'thoughts',
-  MESH_APP_ID: 'noosphere_v2_public',
-  MESH_ROOM: 'main',
+  STORE_META: 'meta',
+
+  GUN_WORLD_NS: 'noosphere/world/v7',
+
+  DEFAULT_RELAYS: ['https://relay.peer.ooo/gun'],
+
   LIMITS: {
     MAX_TEXT_LENGTH: 10_000,
-    RENDER_CAP: 200,
+    RENDER_CAP: 300,
     DEBOUNCE_MS: 4000,
-    QUERY_TIMEOUT_MS: 3000,
-    MAX_PEERS_TO_QUERY: 15,
-    MAX_RESULTS_PER_PEER: 5,
-    MAX_EPHEMERAL_AGE_MS: 5 * 60_000,
     CACHE_PROBE_MS: 500,
   },
+
   VECTOR: { MODEL_ID: 'Xenova/all-MiniLM-L6-v2' },
-  RELEVANCE: { THRESHOLD: 0.25, ADJACENCY: 0.15, MAX_CARDS: 5 },
 });
 
-/* [2] LOGGER */
+/* --------------------------------------------------------------------------
+   [2] I18N
+   -------------------------------------------------------------------------- */
+ns.I18n = (() => {
+  const dict = {
+    ru: {
+      tagline: 'стабильный gun · локально в приоритете',
+      hint: 'Твои заметки — только на твоём устройстве. Мировые — из Gun relay (публичный граф).',
+      thought: 'мысль', swipeHint: 'свайп вверх = Сохранить + в Мир',
+      saveLocal: 'Сохранить', saveWorld: 'Сохранить + в Мир',
+      saveHint: '«Сохранить» = только твоё устройство. «Сохранить + в Мир» = уходит в публичный граф Gun.',
+      relevance: 'живая релевантность',
+      colMine: 'MY (локально)', colWorld: 'WORLD (из Gun)', colAdjacent: 'ADJACENT (смежные)',
+      settings: 'настройки', theme: 'Тема', auto: 'Авто', dark: 'Тёмная', light: 'Светлая',
+      threshold: 'Порог релевантности', adjacency: 'Дельта смежности', maxCards: 'Макс. карточек',
+      relays: 'Gun relay peers (по одному URL на строку)',
+      apply: 'Применить', loadModel: 'Загрузить MiniLM', reindex: 'Пересоздать векторы',
+      seed5: 'Seed 5', export: 'Скачать капсулу', import: 'Импортировать капсулу',
+      reset: 'Сбросить всё', myThoughts: 'мои мысли (локально)', eventLog: 'лог событий',
+    },
+    en: {
+      tagline: 'stable gun · local first',
+      hint: 'Your thoughts — only on your device. World thoughts — from Gun relay (public graph).',
+      thought: 'thought', swipeHint: 'swipe up = Save + World',
+      saveLocal: 'Save local', saveWorld: 'Save + World',
+      saveHint: 'Save local = your device only. Save + World = publishes to Gun public graph.',
+      relevance: 'live relevance',
+      colMine: 'MY (local)', colWorld: 'WORLD (from Gun)', colAdjacent: 'ADJACENT',
+      settings: 'settings', theme: 'Theme', auto: 'Auto', dark: 'Dark', light: 'Light',
+      threshold: 'Relevance threshold', adjacency: 'Adjacency delta', maxCards: 'Max cards',
+      relays: 'Gun relay peers (one URL per line)',
+      apply: 'Apply', loadModel: 'Load MiniLM', reindex: 'Reindex vectors',
+      seed5: 'Seed 5', export: 'Export capsule', import: 'Import capsule',
+      reset: 'Reset all', myThoughts: 'my thoughts (persisted)', eventLog: 'event log',
+    },
+  };
+
+  const apply = (lang) => {
+    const d = dict[lang] || dict.ru;
+    document.querySelectorAll('[data-i18n]').forEach((el) => {
+      const key = el.getAttribute('data-i18n');
+      if (d[key]) el.textContent = d[key];
+    });
+  };
+  return { apply, has: (l) => !!dict[l] };
+})();
+
+/* --------------------------------------------------------------------------
+   [3] LOGGER
+   -------------------------------------------------------------------------- */
 ns.Logger = (() => {
   const el = () => document.getElementById('log');
   const fmt = (d) => d.toISOString().slice(11, 19);
@@ -212,28 +324,86 @@ ns.Logger = (() => {
   };
 })();
 
-/* [3] UTIL */
+/* --------------------------------------------------------------------------
+   [4] UTIL
+   -------------------------------------------------------------------------- */
 ns.Util = {
-  peerId: 'p-' + Math.random().toString(36).slice(2, 10),
   newId: () => crypto.randomUUID(),
   now: () => Date.now(),
   normalizeText: (t) => typeof t === 'string' ? t.trim().slice(0, ns.Config.LIMITS.MAX_TEXT_LENGTH) : '',
   isNonEmptyString: (v) => typeof v === 'string' && v.trim().length > 0,
   debounce: (fn, ms) => {
     let t = null;
-    const debounced = (...args) => {
-      clearTimeout(t);
-      t = setTimeout(() => fn(...args), ms);
-    };
+    const debounced = (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
     debounced.cancel = () => clearTimeout(t);
     return debounced;
   },
   escapeHtml: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
 };
 
-/* [4] STORAGE */
+/* --------------------------------------------------------------------------
+   [5] DEVICE (стабильный fingerprint, чтобы anti-ghost работал)
+   -------------------------------------------------------------------------- */
+ns.Device = (() => {
+  const META_KEY = 'deviceFingerprint';
+  let fp = null;
+
+  const init = async (storage) => {
+    try {
+      const row = await storage.getMeta(META_KEY);
+      if (row?.value) fp = row.value;
+      else {
+        fp = 'dev-' + crypto.randomUUID();
+        await storage.putMeta({ key: META_KEY, value: fp });
+        ns.Logger.info('device fingerprint minted', { fp: fp.slice(0, 16) + '...' });
+      }
+    } catch (e) {
+      fp = 'dev-' + crypto.randomUUID();
+      ns.Logger.warn('device fp in-memory fallback', e.message);
+    }
+    return fp;
+  };
+
+  const get = () => fp;
+  const reset = async (storage) => { await storage.clearAll(); fp = null; };
+
+  return { init, get, reset };
+})();
+
+/* --------------------------------------------------------------------------
+   [6] SETTINGS
+   -------------------------------------------------------------------------- */
+ns.Settings = (() => {
+  const META_KEY = 'userSettings';
+  let cache = {
+    theme: 'auto', lang: 'ru',
+    threshold: 0.25, adjacency: 0.15, maxCards: 5,
+    relays: ns.Config.DEFAULT_RELAYS,
+  };
+
+  const load = async (storage) => {
+    try {
+      const row = await storage.getMeta(META_KEY);
+      if (row?.value) cache = { ...cache, ...row.value };
+    } catch {}
+    return cache;
+  };
+
+  const save = async (storage, patch) => {
+    cache = { ...cache, ...patch };
+    try { await storage.putMeta({ key: META_KEY, value: cache }); } catch {}
+    return cache;
+  };
+
+  const get = () => cache;
+  return { load, save, get };
+})();
+
+/* --------------------------------------------------------------------------
+   [7] STORAGE
+   -------------------------------------------------------------------------- */
 ns.Storage = (() => {
-  const { DB_NAME, DB_VERSION, STORE_THOUGHTS } = ns.Config;
+  const { DB_NAME, DB_VERSION, STORE_THOUGHTS, STORE_META } = ns.Config;
   let db = null;
 
   const open = () => new Promise((res, rej) => {
@@ -246,23 +416,30 @@ ns.Storage = (() => {
         store.createIndex('createdAt', 'createdAt');
         store.createIndex('hasVector', 'hasVector');
         store.createIndex('published', 'published');
+        store.createIndex('source', 'source');
+        store.createIndex('originDevice', 'originDevice');
+      }
+      if (!_db.objectStoreNames.contains(STORE_META)) {
+        _db.createObjectStore(STORE_META, { keyPath: 'key' });
       }
     };
     req.onsuccess = (ev) => { db = ev.target.result; res(db); };
     req.onerror = () => rej(req.error);
+    req.onblocked = () => rej(new Error('IDB blocked'));
   });
 
-  const tx = (mode = 'readonly') => db.transaction(STORE_THOUGHTS, mode).objectStore(STORE_THOUGHTS);
+  const tx = (name, mode = 'readonly') => db.transaction(name, mode).objectStore(name);
   const prom = (req) => new Promise((r, j) => { req.onsuccess = () => r(req.result); req.onerror = () => j(req.error); });
 
-  const put = async (t) => { await open(); return prom(tx('readwrite').put(t)); };
-  const all = async () => { await open(); return prom(tx().getAll()); };
+  const put = async (t) => { await open(); return prom(tx(STORE_THOUGHTS, 'readwrite').put(t)); };
+  const get = async (id) => { await open(); return prom(tx(STORE_THOUGHTS).get(id)); };
+  const all = async () => { await open(); return prom(tx(STORE_THOUGHTS).getAll()); };
 
   const listUnindexed = async () => {
     await open();
     return new Promise((res, rej) => {
       const out = [];
-      const req = tx().index('hasVector').openCursor(IDBKeyRange.only(0));
+      const req = tx(STORE_THOUGHTS).index('hasVector').openCursor(IDBKeyRange.only(0));
       req.onsuccess = (ev) => {
         const c = ev.target.result;
         if (!c) return res(out);
@@ -273,15 +450,20 @@ ns.Storage = (() => {
     });
   };
 
-  const clear = async () => {
+  const getMeta = async (key) => { await open(); return prom(tx(STORE_META).get(key)); };
+  const putMeta = async (row) => { await open(); return prom(tx(STORE_META, 'readwrite').put(row)); };
+  const clearAll = async () => {
     await open();
-    await prom(tx('readwrite').clear());
+    await prom(tx(STORE_THOUGHTS, 'readwrite').clear());
+    await prom(tx(STORE_META,    'readwrite').clear());
   };
 
-  return { open, put, all, listUnindexed, clear };
+  return { open, put, get, all, listUnindexed, getMeta, putMeta, clearAll };
 })();
 
-/* [5] VECTOR */
+/* --------------------------------------------------------------------------
+   [8] VECTOR (MiniLM с умным кешем)
+   -------------------------------------------------------------------------- */
 ns.Vector = (() => {
   let extractor = null;
   let loadPromise = null;
@@ -293,7 +475,7 @@ ns.Vector = (() => {
     let progressFired = false;
     const probeTimer = setTimeout(() => {
       if (!progressFired) {
-        onProgress?.({ status: 'loading', hint: 'first time, downloading ~25MB...' });
+        onProgress?.({ status: 'loading', hint: 'первая загрузка ~25MB...' });
       }
     }, ns.Config.LIMITS.CACHE_PROBE_MS);
 
@@ -337,184 +519,93 @@ ns.Vector = (() => {
   return { load, embed, cosine, isLoaded };
 })();
 
-/* [6] MESH (Trystero + BitTorrent DHT) */
-ns.Mesh = (() => {
-  let room = null;
-  let sendQuery = null, getQuery = null;
-  let sendResponse = null, getResponse = null;
-  const peers = new Map();
-  const queryHandlers = new Map();
-  let queryIdCounter = 0;
+/* --------------------------------------------------------------------------
+   [9] P2P (Gun relay)
+   Анти-ghost: подписываем все публикации originDevice, фильтруем свои старые
+   после Reset.
+   -------------------------------------------------------------------------- */
+ns.P2P = (() => {
+  const { GUN_WORLD_NS } = ns.Config;
+  let gun = null, worldNode = null;
+  let peerCount = 0;
+  const listeners = new Set();
 
-  const init = () => {
-    try {
-      room = joinRoom(
-        { appId: ns.Config.MESH_APP_ID },
-        ns.Config.MESH_ROOM
-      );
-
-      room.onPeerJoin((peerId) => {
-        peers.set(peerId, { joinedAt: ns.Util.now() });
-        ns.Logger.info('peer joined', { peer: peerId.slice(0, 10), total: peers.size });
-        updatePeerCount();
-      });
-
-      room.onPeerLeave((peerId) => {
-        peers.delete(peerId);
-        ns.Logger.info('peer left', { peer: peerId.slice(0, 10), total: peers.size });
-        ns.Ephemeral.removePeer(peerId);
-        updatePeerCount();
-      });
-
-      [sendQuery, getQuery] = room.makeAction('query');
-      getQuery(handleIncomingQuery);
-
-      [sendResponse, getResponse] = room.makeAction('response');
-      getResponse(handleIncomingResponse);
-
-      ns.Logger.info('mesh initialized', { room: ns.Config.MESH_ROOM, self: ns.Util.peerId });
-    } catch (e) {
-      ns.Logger.error('mesh init failed', e.message);
-      throw e;
-    }
+  const toWorldThought = (data, id) => {
+    if (!data || typeof data !== 'object') return null;
+    const text = typeof data.text === 'string' ? data.text : '';
+    if (!text.trim()) return null;
+    return {
+      id: String(id),
+      text: text.slice(0, ns.Config.LIMITS.MAX_TEXT_LENGTH),
+      source: 'world',
+      createdAt: Number(data.createdAt) || ns.Util.now(),
+      updatedAt: Number(data.updatedAt) || ns.Util.now(),
+      originDevice: String(data.originDevice || ''),
+      vector: null,
+      hasVector: 0,
+      published: true,
+    };
   };
 
-  const handleIncomingQuery = async (data, peerId) => {
-    if (!data || !data.queryId || !Array.isArray(data.vector)) return;
-    if (!ns.Vector.isLoaded()) return;
+  const init = (relays) => new Promise((res, rej) => {
     try {
-      const all = await ns.Storage.all();
-      const shared = all.filter((t) => t.published && Array.isArray(t.vector));
-      const scored = shared
-        .map((t) => ({ text: t.text, score: ns.Vector.cosine(data.vector, t.vector) }))
-        .filter((r) => r.score > 0.1)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, data.limit || ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
+      if (typeof Gun === 'undefined') throw new Error('Gun not loaded');
+      gun = Gun({ peers: relays, localStorage: true });
+      worldNode = gun.get(GUN_WORLD_NS);
 
-      sendResponse({ queryId: data.queryId, results: scored }, peerId);
-      ns.Logger.info('responded to peer', { peer: peerId.slice(0, 10), n: scored.length });
-    } catch (e) {
-      ns.Logger.warn('query handling failed', e.message);
+      gun.on('hi',  () => { peerCount++; updatePeerCount(); });
+      gun.on('bye', () => { peerCount = Math.max(0, peerCount - 1); updatePeerCount(); });
+
+      // Snapshot при старте + live поток
+      worldNode.map().once((data, id) => {
+        const t = toWorldThought(data, id);
+        if (t) notifyListeners(t);
+      });
+      worldNode.map().on((data, id) => {
+        const t = toWorldThought(data, id);
+        if (t) notifyListeners(t);
+      });
+
+      ns.Logger.info('Gun initialized', { world: GUN_WORLD_NS, relays });
+      res();
+    } catch (e) { rej(e); }
+  });
+
+  const notifyListeners = (t) => {
+    for (const fn of listeners) {
+      try { fn(t); } catch (e) { ns.Logger.error('listener crashed', e.message); }
     }
-  };
-
-  const handleIncomingResponse = (data, peerId) => {
-    if (!data || !data.queryId) return;
-    const handler = queryHandlers.get(data.queryId);
-    if (!handler) return;
-    handler.results.set(peerId, data.results || []);
-    ns.Ephemeral.upsert(peerId, data.results || []);
-    ns.Logger.info('response received', { peer: peerId.slice(0, 10), n: (data.results || []).length });
   };
 
   const updatePeerCount = () => {
-    document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: peers.size } }));
+    document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: peerCount } }));
   };
 
-  const query = async (vector, { timeoutMs = ns.Config.LIMITS.QUERY_TIMEOUT_MS, limit = ns.Config.LIMITS.MAX_RESULTS_PER_PEER } = {}) => {
-    if (!room || !ns.Vector.isLoaded()) return [];
-    if (peers.size === 0) {
-      ns.Logger.info('query skipped: no peers');
-      return [];
-    }
-
-    const queryId = `q-${++queryIdCounter}-${ns.Util.now()}`;
-    const handler = { results: new Map() };
-    queryHandlers.set(queryId, handler);
-
-    try {
-      sendQuery({ queryId, vector, limit });
-      ns.Logger.info('query broadcasted', { queryId, peers: peers.size });
-    } catch (e) {
-      ns.Logger.warn('query broadcast failed', e.message);
-      queryHandlers.delete(queryId);
-      return [];
-    }
-
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        queryHandlers.delete(queryId);
-        const collected = [];
-        for (const [peerId, results] of handler.results) {
-          for (const r of results) collected.push({ ...r, fromPeer: peerId });
-        }
-        ns.Logger.info('query done', { responded: handler.results.size, total: collected.length });
-        resolve(collected);
-      }, timeoutMs);
+  const publish = (t) => new Promise((res, rej) => {
+    if (!worldNode) return rej(new Error('Gun not init'));
+    worldNode.get(t.id).put({
+      text: t.text,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+      originDevice: t.originDevice || '',
+    }, (ack) => {
+      if (ack && ack.err) return rej(new Error(ack.err));
+      res();
     });
+  });
+
+  const onWorldThought = (fn) => {
+    listeners.add(fn);
+    return () => listeners.delete(fn);
   };
 
-  const getPeerCount = () => peers.size;
-
-  const leave = () => {
-    if (room) {
-      try { room.leave(); } catch (e) {}
-      room = null;
-    }
-  };
-
-  return { init, query, getPeerCount, leave };
+  return { init, publish, onWorldThought };
 })();
 
-/* [7] EPHEMERAL */
-ns.Ephemeral = (() => {
-  const byPeer = new Map();
-  let pruneTimer = null;
-
-  const upsert = (peerId, results) => {
-    byPeer.set(peerId, { results, lastSeen: ns.Util.now() });
-    schedulePrune();
-    document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
-  };
-
-  const removePeer = (peerId) => {
-    if (byPeer.delete(peerId)) {
-      document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
-    }
-  };
-
-  const schedulePrune = () => {
-    if (pruneTimer) return;
-    pruneTimer = setTimeout(() => {
-      pruneTimer = null;
-      prune();
-    }, 30_000);
-  };
-
-  const prune = () => {
-    const now = ns.Util.now();
-    const maxAge = ns.Config.LIMITS.MAX_EPHEMERAL_AGE_MS;
-    let changed = false;
-    for (const [peerId, rec] of byPeer) {
-      if (now - rec.lastSeen > maxAge) {
-        byPeer.delete(peerId);
-        changed = true;
-      }
-    }
-    if (changed) document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
-  };
-
-  const allResults = () => {
-    const out = [];
-    for (const [peerId, rec] of byPeer) {
-      for (const r of rec.results) {
-        out.push({ ...r, fromPeer: peerId, receivedAt: rec.lastSeen });
-      }
-    }
-    return out;
-  };
-
-  const clear = () => {
-    byPeer.clear();
-    document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
-  };
-
-  return { upsert, removePeer, allResults, clear };
-})();
-
-/* [8] RELEVANCE */
+/* --------------------------------------------------------------------------
+   [10] RELEVANCE
+   -------------------------------------------------------------------------- */
 ns.Relevance = (() => {
-  const { THRESHOLD, ADJACENCY, MAX_CARDS } = ns.Config.RELEVANCE;
   const escapeHtml = ns.Util.escapeHtml;
 
   const highlightFragment = (queryText, matchText) => {
@@ -548,28 +639,30 @@ ns.Relevance = (() => {
          + escapeHtml(matchText.slice(b.end));
   };
 
-  const rankAll = (queryVec, localThoughts, ephemeralResults) => {
+  const rankAll = (queryVec, localThoughts, worldThoughts) => {
     if (!queryVec) return { mine: [], world: [], adjacent: [] };
+    const s = ns.Settings.get();
 
     const localScored = localThoughts
       .filter((t) => Array.isArray(t.vector))
       .map((t) => ({ kind: 'local', source: t, score: ns.Vector.cosine(queryVec, t.vector) }))
-      .filter((r) => r.score > THRESHOLD - ADJACENCY)
+      .filter((r) => r.score > s.threshold - s.adjacency)
       .sort((a, b) => b.score - a.score);
 
-    const worldScored = ephemeralResults
-      .map((r) => ({ kind: 'world', source: r, score: Number(r.score) || 0 }))
-      .filter((r) => r.score > THRESHOLD - ADJACENCY)
+    const worldScored = worldThoughts
+      .filter((t) => Array.isArray(t.vector))
+      .map((t) => ({ kind: 'world', source: t, score: ns.Vector.cosine(queryVec, t.vector) }))
+      .filter((r) => r.score > s.threshold - s.adjacency)
       .sort((a, b) => b.score - a.score);
 
     const mine = [], world = [], adjacent = [];
     for (const r of localScored) {
-      if (r.score >= THRESHOLD) { if (mine.length < MAX_CARDS) mine.push(r); }
-      else if (adjacent.length < MAX_CARDS) adjacent.push(r);
+      if (r.score >= s.threshold) { if (mine.length < s.maxCards) mine.push(r); }
+      else if (adjacent.length < s.maxCards) adjacent.push(r);
     }
     for (const r of worldScored) {
-      if (r.score >= THRESHOLD) { if (world.length < MAX_CARDS) world.push(r); }
-      else if (adjacent.length < MAX_CARDS) adjacent.push(r);
+      if (r.score >= s.threshold) { if (world.length < s.maxCards) world.push(r); }
+      else if (adjacent.length < s.maxCards) adjacent.push(r);
     }
     return { mine, world, adjacent };
   };
@@ -577,17 +670,26 @@ ns.Relevance = (() => {
   return { rankAll, highlightFragment };
 })();
 
-/* [9] SYNC */
+/* --------------------------------------------------------------------------
+   [11] SYNC
+   Ключевые моменты:
+     - saveLocal: помечает originDevice своим fingerprint
+     - ingestWorld: фильтрует originDevice === myFp (anti-ghost) + дедуп по тексту
+     - автовекторизация мировых при ingest если модель готова
+   -------------------------------------------------------------------------- */
 ns.Sync = (() => {
   const saveLocal = async ({ text, publishToWorld = false }) => {
     const clean = ns.Util.normalizeText(text);
     if (!clean) throw new Error('Empty thought');
+    const myFp = ns.Device.get();
 
     const thought = {
       id: ns.Util.newId(),
       text: clean,
+      source: 'local',
       createdAt: ns.Util.now(),
       updatedAt: ns.Util.now(),
+      originDevice: myFp,
       vector: null,
       hasVector: 0,
       published: !!publishToWorld,
@@ -601,9 +703,54 @@ ns.Sync = (() => {
     }
 
     await ns.Storage.put(thought);
-    ns.Logger.info('saved', { id: thought.id.slice(0, 8), published: thought.published });
+    ns.Logger.info('saved local', { id: thought.id.slice(0, 8), published: thought.published });
+
+    if (publishToWorld) {
+      try {
+        await ns.P2P.publish(thought);
+        ns.Logger.info('published to world', { id: thought.id.slice(0, 8) });
+      } catch (e) {
+        ns.Logger.warn('publish failed', e.message);
+      }
+    }
+
     document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
     return thought;
+  };
+
+  const ingestWorld = async (incoming) => {
+    const myFp = ns.Device.get();
+
+    // [ANTI-GHOST] свои старые публикации игнорим
+    if (incoming.originDevice && incoming.originDevice === myFp) return;
+
+    // LWW по updatedAt
+    const existing = await ns.Storage.get(incoming.id);
+    if (existing && existing.updatedAt >= incoming.updatedAt) return;
+
+    // Дедуп по тексту (своя локальная может совпасть с мировой)
+    const all = await ns.Storage.all();
+    const duplicate = all.find((t) => t.text === incoming.text && t.id !== incoming.id);
+    if (duplicate) {
+      ns.Logger.info('skipped world duplicate', { id: incoming.id.slice(0, 8) });
+      return;
+    }
+
+    // Автовекторизация если модель готова
+    if (ns.Vector.isLoaded() && !incoming.hasVector) {
+      try {
+        incoming.vector = await ns.Vector.embed(incoming.text);
+        incoming.hasVector = incoming.vector ? 1 : 0;
+      } catch (e) { ns.Logger.warn('embed failed on ingest', e.message); }
+    }
+
+    await ns.Storage.put(incoming);
+    ns.Logger.info('ingested world', {
+      id: incoming.id.slice(0, 8),
+      from: (incoming.originDevice || '?').slice(0, 12),
+      vectorized: !!incoming.hasVector,
+    });
+    document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
   };
 
   const reindexAll = async (onProgress) => {
@@ -623,18 +770,70 @@ ns.Sync = (() => {
     document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
   };
 
-  return { saveLocal, reindexAll };
+  const bind = () => { ns.P2P.onWorldThought(ingestWorld); };
+
+  return { saveLocal, ingestWorld, reindexAll, bind };
 })();
 
-/* [10] UI */
+/* --------------------------------------------------------------------------
+   [12] CAPSULE (export/import)
+   -------------------------------------------------------------------------- */
+ns.Capsule = (() => {
+  const exportAll = async () => {
+    const all = await ns.Storage.all();
+    const capsule = {
+      version: 7,
+      exportedAt: new Date().toISOString(),
+      device: ns.Device.get(),
+      thoughts: all,
+    };
+    const blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `noosphere-capsule-${Date.now()}.json`; a.click();
+    URL.revokeObjectURL(url);
+    ns.Logger.info('capsule exported', { count: all.length });
+  };
+
+  const importFile = async (file) => {
+    const text = await file.text();
+    const capsule = JSON.parse(text);
+    if (!capsule || capsule.version !== 7 || !Array.isArray(capsule.thoughts)) {
+      throw new Error('Invalid capsule (expected v7)');
+    }
+    let imported = 0;
+    for (const t of capsule.thoughts) {
+      const existing = await ns.Storage.get(t.id);
+      if (existing) continue;
+      await ns.Storage.put(t);
+      imported++;
+    }
+    ns.Logger.info('capsule imported', { imported, total: capsule.thoughts.length });
+    document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
+  };
+
+  return { exportAll, importFile };
+})();
+
+/* --------------------------------------------------------------------------
+   [13] UI
+   Ключевые фичи:
+     - Кеш последнего queryVector
+     - Debounce 4s
+     - Пустое поле = очистка колонок
+     - Pill "think" показывает состояние
+     - Свайп вверх для Save + World
+   -------------------------------------------------------------------------- */
 ns.UI = (() => {
   const refs = {};
   let lastQuery = { text: null, vector: null };
 
   const cache = () => {
-    ['input','btnSave','btnSaveWorld','btnLoadModel','btnReindex','btnSeed',
-     'btnQueryNow','btnReset','listMine','listWorld','listAdjacent','listAll',
-     'status','modelProgress']
+    ['input','btnSave','btnSaveWorld','btnLoadModel','btnReindex','btnSeed5',
+     'btnExport','btnImport','importFile','btnReset','btnApplySettings',
+     'listMine','listWorld','listAdjacent','listAll','status','modelProgress',
+     'deviceId','langSwitch','swipeZone','setTheme','setThreshold','setAdjacency',
+     'setMaxCards','setRelays']
       .forEach((id) => { refs[id] = document.getElementById(id); });
   };
 
@@ -659,6 +858,20 @@ ns.UI = (() => {
   };
 
   const setProgress = (pct) => { refs.modelProgress.style.width = pct + '%'; };
+
+  const showDeviceId = () => {
+    const fp = ns.Device.get();
+    if (refs.deviceId && fp) {
+      refs.deviceId.textContent = `device: ${fp}  (anti-ghost fingerprint)`;
+    }
+  };
+
+  const applyTheme = (theme) => {
+    const resolved = theme === 'auto'
+      ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+      : theme;
+    document.documentElement.setAttribute('data-theme', resolved);
+  };
 
   const renderLocalList = (container, items, queryText) => {
     container.innerHTML = '';
@@ -690,23 +903,22 @@ ns.UI = (() => {
     if (!items.length) {
       const d = document.createElement('div');
       d.className = 'empty';
-      const peers = ns.Mesh.getPeerCount();
-      d.textContent = peers ? `(no matches from ${peers} peer(s))` : '(no peers online)';
+      d.textContent = '(no world matches)';
       container.appendChild(d);
       return;
     }
     for (const r of items) {
-      const e = r.source;
+      const t = r.source;
       const row = document.createElement('div');
-      row.className = 'item world ephemeral';
+      row.className = 'item world';
       const score = document.createElement('span');
       score.className = 'score';
       score.textContent = typeof r.score === 'number' ? r.score.toFixed(3) : '';
       const body = document.createElement('div');
-      body.innerHTML = ns.Relevance.highlightFragment(queryText, e.text);
+      body.innerHTML = ns.Relevance.highlightFragment(queryText, t.text);
       const meta = document.createElement('div');
       meta.className = 'meta';
-      meta.textContent = `from:${(e.fromPeer || '?').slice(0,10)} · ${new Date(e.receivedAt || Date.now()).toISOString().slice(11,19)} · RAM`;
+      meta.textContent = `from:${(t.originDevice || '?').slice(0,12)} · ${new Date(t.createdAt).toISOString().slice(0,16)} · ${t.id.slice(0,6)}`;
       row.appendChild(score); row.appendChild(body); row.appendChild(meta);
       container.appendChild(row);
     }
@@ -724,7 +936,7 @@ ns.UI = (() => {
       const isLocal = r.kind === 'local';
       const text = r.source.text;
       const row = document.createElement('div');
-      row.className = `item ${isLocal ? 'local' : 'world ephemeral'}`;
+      row.className = `item ${isLocal ? 'local' : 'world'}`;
       const score = document.createElement('span');
       score.className = 'score';
       score.textContent = typeof r.score === 'number' ? r.score.toFixed(3) : '';
@@ -732,7 +944,7 @@ ns.UI = (() => {
       body.innerHTML = ns.Relevance.highlightFragment(queryText, text);
       const meta = document.createElement('div');
       meta.className = 'meta';
-      meta.textContent = isLocal ? `local · ${r.source.id.slice(0,6)}` : `from:${(r.source.fromPeer || '?').slice(0,10)}`;
+      meta.textContent = isLocal ? `local · ${r.source.id.slice(0,6)}` : `from:${(r.source.originDevice || '?').slice(0,12)}`;
       row.appendChild(score); row.appendChild(body); row.appendChild(meta);
       container.appendChild(row);
     }
@@ -771,19 +983,11 @@ ns.UI = (() => {
       }
     }
 
-    setThink(true, 'запрашиваю сеть...');
-    const peersOnline = ns.Mesh.getPeerCount();
-    if (peersOnline > 0) {
-      try {
-        await ns.Mesh.query(qv);
-      } catch (e) {
-        ns.Logger.warn('mesh query failed', e.message);
-      }
-    }
+    const all = await ns.Storage.all();
+    const locals = all.filter((t) => t.source === 'local');
+    const worlds = all.filter((t) => t.source === 'world');
 
-    const locals = await ns.Storage.all();
-    const eph = ns.Ephemeral.allResults();
-    const { mine, world, adjacent } = ns.Relevance.rankAll(qv, locals, eph);
+    const { mine, world, adjacent } = ns.Relevance.rankAll(qv, locals, worlds);
     renderLocalList(refs.listMine, mine, text);
     renderWorldList(refs.listWorld, world, text);
     renderMixedList(refs.listAdjacent, adjacent, text);
@@ -797,16 +1001,18 @@ ns.UI = (() => {
 
   const renderAll = async () => {
     const all = await ns.Storage.all();
-    const sorted = all.sort((a, b) => b.createdAt - a.createdAt).slice(0, ns.Config.LIMITS.RENDER_CAP);
+    const locals = all.filter((t) => t.source === 'local')
+                      .sort((a, b) => b.createdAt - a.createdAt)
+                      .slice(0, ns.Config.LIMITS.RENDER_CAP);
     refs.listAll.innerHTML = '';
-    for (const t of sorted) {
+    for (const t of locals) {
       const row = document.createElement('div');
       row.className = 'item local';
       const body = document.createElement('div');
       body.textContent = t.text;
       const meta = document.createElement('div');
       meta.className = 'meta';
-      meta.textContent = `${new Date(t.createdAt).toISOString().slice(0,16)} · ${t.published ? 'world' : 'local'} · vec:${t.hasVector ? 'yes' : 'no'} · ${t.id.slice(0,6)}`;
+      meta.textContent = `${new Date(t.createdAt).toISOString().slice(0,16)} · ${t.published ? 'world-shared' : 'local'} · vec:${t.hasVector ? 'yes' : 'no'} · ${t.id.slice(0,6)}`;
       row.appendChild(body); row.appendChild(meta);
       refs.listAll.appendChild(row);
     }
@@ -818,6 +1024,36 @@ ns.UI = (() => {
     invalidateCache();
     await renderAll();
     await updateLiveRelevance();
+  };
+
+  const setupSwipe = () => {
+    let startY = 0, active = false;
+    const zone = refs.swipeZone;
+    zone.addEventListener('touchstart', (e) => {
+      startY = e.touches[0].clientY;
+      active = true;
+    }, { passive: true });
+    zone.addEventListener('touchmove', (e) => {
+      if (!active) return;
+      if (startY - e.touches[0].clientY > 60) zone.classList.add('active');
+    }, { passive: true });
+    zone.addEventListener('touchend', (e) => {
+      if (!active) return;
+      if (startY - e.changedTouches[0].clientY > 60) {
+        refs.btnSaveWorld.click();
+      }
+      zone.classList.remove('active');
+      active = false;
+    });
+  };
+
+  const syncSettingsToForm = () => {
+    const s = ns.Settings.get();
+    refs.setTheme.value = s.theme;
+    refs.setThreshold.value = s.threshold;
+    refs.setAdjacency.value = s.adjacency;
+    refs.setMaxCards.value = s.maxCards;
+    refs.setRelays.value = (s.relays || ns.Config.DEFAULT_RELAYS).join('\n');
   };
 
   const bind = () => {
@@ -863,6 +1099,20 @@ ns.UI = (() => {
       finally { disableSavers(false); }
     });
 
+    refs.btnApplySettings.addEventListener('click', async () => {
+      const patch = {
+        theme: refs.setTheme.value,
+        threshold: parseFloat(refs.setThreshold.value) || 0.25,
+        adjacency: parseFloat(refs.setAdjacency.value) || 0.15,
+        maxCards: parseInt(refs.setMaxCards.value, 10) || 5,
+        relays: refs.setRelays.value.split('\n').map((s) => s.trim()).filter(Boolean),
+      };
+      await ns.Settings.save(ns.Storage, patch);
+      applyTheme(patch.theme);
+      ns.Logger.info('settings applied', patch);
+      await refresh();
+    });
+
     refs.btnLoadModel.addEventListener('click', async () => {
       try {
         refs.btnLoadModel.disabled = true;
@@ -899,7 +1149,7 @@ ns.UI = (() => {
       finally { refs.btnReindex.disabled = false; }
     });
 
-    refs.btnSeed.addEventListener('click', async () => {
+    refs.btnSeed5.addEventListener('click', async () => {
       const samples = [
         'Мысль появляется в паузе между действиями.',
         'Архитектура — это способ договариваться с будущим собой.',
@@ -912,26 +1162,35 @@ ns.UI = (() => {
       await renderAll();
     });
 
-    refs.btnQueryNow.addEventListener('click', async () => {
-      if (!ns.Vector.isLoaded()) { ns.Logger.warn('Load model first'); return; }
-      const text = refs.input.value.trim() || 'sample query';
+    refs.btnExport.addEventListener('click', ns.Capsule.exportAll);
+    refs.btnImport.addEventListener('click', () => refs.importFile.click());
+    refs.importFile.addEventListener('change', async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
       try {
-        const qv = await ns.Vector.embed(text);
-        await ns.Mesh.query(qv);
-        await updateLiveRelevance();
-      } catch (e) { ns.Logger.error('manual query failed', e.message); }
+        await ns.Capsule.importFile(f);
+        await refresh();
+      } catch (err) {
+        ns.Logger.error('import failed', err.message);
+      }
+      e.target.value = '';
     });
 
     refs.btnReset.addEventListener('click', async () => {
-      if (!confirm('Стереть все локальные заметки?')) return;
+      if (!confirm('Стереть ВСЕ локальные данные? После Reset у тебя будет новый device fingerprint — твои старые публикации в мире больше не вернутся к тебе как "чужие".')) return;
       try {
-        await ns.Storage.clear();
-        ns.Ephemeral.clear();
-        invalidateCache();
-        clearAll();
-        await renderAll();
-        ns.Logger.warn('storage cleared');
+        await ns.Device.reset(ns.Storage);
+        alert('Готово. Перезагружаю...');
+        location.reload();
       } catch (e) { ns.Logger.error('reset failed', e.message); }
+    });
+
+    refs.langSwitch.addEventListener('click', async () => {
+      const cur = ns.Settings.get().lang || 'ru';
+      const next = cur === 'ru' ? 'en' : 'ru';
+      await ns.Settings.save(ns.Storage, { lang: next });
+      ns.I18n.apply(next);
+      refs.langSwitch.textContent = next === 'ru' ? 'EN' : 'RU';
     });
 
     document.addEventListener('ns:thoughts-changed', async () => {
@@ -939,41 +1198,61 @@ ns.UI = (() => {
       await renderAll();
       await updateLiveRelevance();
     });
-    document.addEventListener('ns:ephemeral-changed', updateLiveRelevance);
     document.addEventListener('ns:peers', (ev) => {
       setPill('peers', `PEERS: ${ev.detail.count}`, ev.detail.count ? 'ok' : 'warn');
     });
+
+    setupSwipe();
   };
 
   const init = () => { cache(); bind(); };
-  return { init, refresh, setPill };
+  return { init, refresh, setPill, showDeviceId, applyTheme, syncSettingsToForm };
 })();
 
-/* [11] APP */
+/* --------------------------------------------------------------------------
+   [14] APP
+   Boot-порядок: Storage → Device → Settings → UI → Gun → Sync → auto-load model
+   -------------------------------------------------------------------------- */
 ns.App = (() => {
   const boot = async () => {
     ns.UI.init();
     ns.UI.setPill('idb', 'IDB: boot...', 'warn');
-    ns.UI.setPill('mesh', 'MESH: boot...', 'warn');
+    ns.UI.setPill('gun', 'GUN: boot...', 'warn');
 
     try {
       await ns.Storage.open();
       ns.UI.setPill('idb', 'IDB: OK', 'ok');
-      ns.Logger.info('IDB ready');
+      ns.Logger.info('IDB ready', { name: ns.Config.DB_NAME });
     } catch (e) {
       ns.UI.setPill('idb', 'IDB: ERR', 'err');
-      ns.Logger.error('IDB failed', e.message);
+      ns.Logger.error('IDB init failed', e.message);
       return;
     }
 
     try {
-      ns.Mesh.init();
-      ns.UI.setPill('mesh', 'MESH: OK', 'ok');
+      await ns.Device.init(ns.Storage);
+      ns.UI.showDeviceId();
+    } catch (e) { ns.Logger.error('device init failed', e.message); }
+
+    await ns.Settings.load(ns.Storage);
+    ns.UI.applyTheme(ns.Settings.get().theme);
+    ns.I18n.apply(ns.Settings.get().lang);
+    refs.langSwitch = document.getElementById('langSwitch');
+    if (refs.langSwitch) refs.langSwitch.textContent = (ns.Settings.get().lang || 'ru') === 'ru' ? 'EN' : 'RU';
+    ns.UI.syncSettingsToForm();
+
+    const relays = ns.Settings.get().relays || ns.Config.DEFAULT_RELAYS;
+    try {
+      await ns.P2P.init(relays);
+      ns.UI.setPill('gun', 'GUN: OK', 'ok');
     } catch (e) {
-      ns.UI.setPill('mesh', 'MESH: ERR', 'err');
-      ns.Logger.error('Mesh failed (local mode)', e.message);
+      ns.UI.setPill('gun', 'GUN: ERR', 'err');
+      ns.Logger.error('Gun init failed', e.message);
     }
 
+    ns.Sync.bind();
+
+    // Автозагрузка модели из кеша (если была загружена ранее)
     try {
       await ns.Vector.load((p) => {
         if (p.done) {
@@ -992,10 +1271,6 @@ ns.App = (() => {
     await ns.UI.refresh();
     ns.Logger.info('app ready');
   };
-
-  window.addEventListener('beforeunload', () => {
-    try { ns.Mesh.leave(); } catch (e) {}
-  });
 
   return { boot };
 })();
