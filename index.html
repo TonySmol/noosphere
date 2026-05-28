@@ -3,11 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Noosphere :: Relevance</title>
+<title>Noosphere :: Stable</title>
 <style>
-  /* =========================================================
-     UI: добавили колонки релевантности и прогресс модели
-     ========================================================= */
   :root {
     --bg: #0f1115; --panel: #161a22; --border: #242a36;
     --text: #e6e8ee; --muted: #8a93a6; --accent: #6aa6ff;
@@ -22,7 +19,6 @@
   h1 { font-size: 16px; margin: 0 0 16px; letter-spacing: .5px; }
   h2 { font-size: 12px; margin: 20px 0 8px; color: var(--muted);
        text-transform: uppercase; letter-spacing: 1px; }
-
   .panel { background: var(--panel); border: 1px solid var(--border);
            border-radius: 6px; padding: 12px; margin-bottom: 12px; }
   .row { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -60,20 +56,24 @@
   .item .meta  { color: var(--muted); font-size: 11px; margin-top: 4px; }
   .item mark { background: transparent; color: var(--accent); font-weight: bold; }
 
-  .progress { height: 4px; background: #1a1f2a; border-radius: 2px; overflow: hidden; margin-top: 6px; }
-  .progress > div { height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+  .progress { height: 4px; background: #1a1f2a; border-radius: 2px;
+              overflow: hidden; margin-top: 6px; }
+  .progress > div { height: 100%; background: var(--accent); width: 0;
+                    transition: width .2s; }
 
   .log { background: #07090d; border: 1px solid var(--border);
-         border-radius: 4px; padding: 8px; max-height: 180px; overflow: auto;
+         border-radius: 4px; padding: 8px; max-height: 200px; overflow: auto;
          font-size: 12px; }
-  .log .e { color: var(--err); } .log .w { color: var(--warn); } .log .i { color: var(--muted); }
+  .log .e { color: var(--err); }
+  .log .w { color: var(--warn); }
+  .log .i { color: var(--muted); }
 
   .empty { color: var(--muted); font-size: 12px; padding: 6px; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>NOOSPHERE / RELEVANCE LAYER</h1>
+  <h1>NOOSPHERE / STABLE BUILD</h1>
 
   <section class="panel">
     <div class="status" id="status">
@@ -146,14 +146,13 @@
 
 <script type="module">
 /* ==========================================================================
-   NOOSPHERE :: RELEVANCE LAYER
-   Добавляем: Vector (MiniLM via transformers.js) + live relevance
-   Порядок секций: Config -> Logger -> Util -> Storage -> Vector -> P2P -> Sync -> UI -> App
+   NOOSPHERE / STABLE BUILD
+   Единый файл, жёсткая последовательность секций:
+   Config -> Logger -> Util -> Storage -> Vector -> P2P -> Relevance -> Sync -> UI -> App
    ========================================================================== */
 
 import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
 
-// Кеш моделей храним в браузере, чтобы не тянуть 25 МБ каждый раз.
 env.allowLocalModels = false;
 env.useBrowserCache    = true;
 
@@ -164,7 +163,7 @@ const ns = (window.__ns = {});
    -------------------------------------------------------------------------- */
 ns.Config = Object.freeze({
   DB_NAME: 'noosphere_v1',
-  DB_VERSION: 2, // bump: добавляем поле vector
+  DB_VERSION: 2,
   STORE_THOUGHTS: 'thoughts',
   STORE_META: 'meta',
 
@@ -178,13 +177,13 @@ ns.Config = Object.freeze({
   },
 
   VECTOR: {
-    MODEL_ID: 'Xenova/all-MiniLM-L6-v2', // ONNX-квантованная версия MiniLM
+    MODEL_ID: 'Xenova/all-MiniLM-L6-v2',
     DIMENSIONS: 384,
   },
 
   RELEVANCE: {
-    THRESHOLD:   0.25, // ниже — не показываем
-    ADJACENCY:   0.15, // delta для смежных (serendipity)
+    THRESHOLD:   0.25,
+    ADJACENCY:   0.15,
     MAX_CARDS:   5,
   },
 });
@@ -195,8 +194,10 @@ ns.Config = Object.freeze({
 ns.Logger = (() => {
   const el = () => document.getElementById('log');
   const fmt = (d) => d.toISOString().slice(11, 19);
-  const safe = (x) => { try { return typeof x === 'string' ? x : JSON.stringify(x); }
-                        catch { return String(x); } };
+  const safe = (x) => {
+    try { return typeof x === 'string' ? x : JSON.stringify(x); }
+    catch { return String(x); }
+  };
   const write = (lvl, m, d) => {
     const line = document.createElement('div');
     line.className = lvl;
@@ -218,10 +219,13 @@ ns.Logger = (() => {
    [3] UTIL
    -------------------------------------------------------------------------- */
 ns.Util = {
-  newId: () => (crypto.randomUUID ? crypto.randomUUID()
-                                  : 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)),
+  newId: () => (crypto.randomUUID
+    ? crypto.randomUUID()
+    : 'id-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10)),
   now: () => Date.now(),
-  normalizeText: (t) => typeof t === 'string' ? t.trim().slice(0, ns.Config.LIMITS.MAX_TEXT_LENGTH) : '',
+  normalizeText: (t) => typeof t === 'string'
+    ? t.trim().slice(0, ns.Config.LIMITS.MAX_TEXT_LENGTH)
+    : '',
   isNonEmptyString: (v) => typeof v === 'string' && v.trim().length > 0,
   debounce: (fn, ms) => {
     let t = null;
@@ -231,8 +235,6 @@ ns.Util = {
 
 /* --------------------------------------------------------------------------
    [4] STORAGE (IndexedDB)
-   Миграция с v1 -> v2: при upgrade добавляем индекс hasVector для быстрого
-   поиска заметок без посчитанного вектора.
    -------------------------------------------------------------------------- */
 ns.Storage = (() => {
   const { DB_NAME, DB_VERSION, STORE_THOUGHTS, STORE_META } = ns.Config;
@@ -263,7 +265,10 @@ ns.Storage = (() => {
   });
 
   const tx = (name, mode = 'readonly') => db.transaction(name, mode).objectStore(name);
-  const prom = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error); });
+  const prom = (req) => new Promise((res, rej) => {
+    req.onsuccess = () => res(req.result);
+    req.onerror   = () => rej(req.error);
+  });
 
   const put    = async (t) => { await open(); return prom(tx(STORE_THOUGHTS, 'readwrite').put(t)); };
   const get    = async (id) => { await open(); return prom(tx(STORE_THOUGHTS).get(id)); };
@@ -301,49 +306,58 @@ ns.Storage = (() => {
     });
   };
 
-  const countBySource = async (s) => { await open(); return prom(tx(STORE_THOUGHTS).index('source').count(IDBKeyRange.only(s))); };
-  const clearAll = async () => { await open(); await prom(tx(STORE_THOUGHTS, 'readwrite').clear()); await prom(tx(STORE_META, 'readwrite').clear()); };
+  const countBySource = async (s) => {
+    await open();
+    return prom(tx(STORE_THOUGHTS).index('source').count(IDBKeyRange.only(s)));
+  };
+
+  const clearAll = async () => {
+    await open();
+    await prom(tx(STORE_THOUGHTS, 'readwrite').clear());
+    await prom(tx(STORE_META,    'readwrite').clear());
+  };
 
   return { open, put, get, remove, all, listBySource, listUnindexed, countBySource, clearAll };
 })();
 
 /* --------------------------------------------------------------------------
    [5] VECTOR (MiniLM via transformers.js)
-   Ленивая загрузка: модель подтягивается только при явном load().
-   Кеш векторов: в IDB, в поле `vector` у каждой заметки.
    -------------------------------------------------------------------------- */
 ns.Vector = (() => {
   let extractor = null;
   let loading = false;
+  let loadPromise = null;
 
-  const load = async (onProgress) => {
-    if (extractor) return extractor;
-    if (loading) throw new Error('Model already loading');
+  const load = (onProgress) => {
+    if (extractor) return Promise.resolve(extractor);
+    if (loadPromise) return loadPromise;
     loading = true;
-    try {
-      extractor = await pipeline('feature-extraction', ns.Config.VECTOR.MODEL_ID, {
-        progress_callback: (p) => {
-          if (onProgress && p.status === 'progress' && p.total) {
-            onProgress({ loaded: p.loaded, total: p.total, file: p.file });
-          }
-        },
-      });
-      ns.Logger.info('model loaded', { id: ns.Config.VECTOR.MODEL_ID });
-      return extractor;
-    } finally {
+    loadPromise = pipeline('feature-extraction', ns.Config.VECTOR.MODEL_ID, {
+      progress_callback: (p) => {
+        if (onProgress && p.status === 'progress' && p.total) {
+          onProgress({ loaded: p.loaded, total: p.total, file: p.file });
+        }
+      },
+    }).then((ex) => {
+      extractor = ex;
       loading = false;
-    }
+      ns.Logger.info('model loaded', { id: ns.Config.VECTOR.MODEL_ID });
+      return ex;
+    }).catch((err) => {
+      loading = false;
+      loadPromise = null;
+      throw err;
+    });
+    return loadPromise;
   };
 
   const embed = async (text) => {
     if (!extractor) throw new Error('Model not loaded');
     if (!ns.Util.isNonEmptyString(text)) return null;
     const out = await extractor(text, { pooling: 'mean', normalize: true });
-    // out.data — Float32Array длиной 384
     return Array.from(out.data);
   };
 
-  // cosine similarity для уже нормализованных векторов = dot product
   const cosine = (a, b) => {
     if (!a || !b || a.length !== b.length) return 0;
     let s = 0;
@@ -357,30 +371,22 @@ ns.Vector = (() => {
 })();
 
 /* --------------------------------------------------------------------------
-   [6] P2P (GunDB) — без изменений, только перенёс для цельности
+   [6] P2P (GunDB)
+   Разделены initial sync (map().once()) и realtime stream (map().on()).
+   Это устраняет волну повторных срабатываний при старте.
    -------------------------------------------------------------------------- */
 ns.P2P = (() => {
   const { GUN_NAMESPACE, GUN_RELAYS } = ns.Config;
   let gun = null, node = null, peerCount = 0;
   const listeners = new Set();
 
-  const init = () => new Promise((res, rej) => {
-    try {
-      if (typeof Gun === 'undefined') throw new Error('Gun not loaded');
-      gun = Gun({ peers: GUN_RELAYS, localStorage: true });
-      node = gun.get(GUN_NAMESPACE);
-      gun.on('hi',  () => { peerCount++; document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: peerCount } })); });
-      gun.on('bye', () => { peerCount = Math.max(0, peerCount - 1); document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: peerCount } })); });
-      node.map().on((data, id) => {
-        if (!data) return;
-        const t = toThought(data, id);
-        if (!t) return;
-        for (const fn of listeners) { try { fn(t); } catch (e) { ns.Logger.error('listener crashed', e.message); } }
-      });
-      ns.Logger.info('Gun initialized', { peers: GUN_RELAYS });
-      res();
-    } catch (e) { rej(e); }
-  });
+  const safeCall = (fn, t) => {
+    try { fn(t); } catch (e) { ns.Logger.error('listener crashed', e.message); }
+  };
+
+  const broadcastPeers = () => {
+    document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: peerCount } }));
+  };
 
   const toThought = (d, id) => {
     if (!d || typeof d !== 'object') return null;
@@ -398,15 +404,52 @@ ns.P2P = (() => {
     };
   };
 
+  const init = () => new Promise((res, rej) => {
+    try {
+      if (typeof Gun === 'undefined') throw new Error('Gun not loaded');
+      gun = Gun({ peers: GUN_RELAYS, localStorage: true });
+      node = gun.get(GUN_NAMESPACE);
+
+      gun.on('hi',  () => { peerCount++; broadcastPeers(); });
+      gun.on('bye', () => { peerCount = Math.max(0, peerCount - 1); broadcastPeers(); });
+
+      // Initial sync: снапшот графа, один раз.
+      node.map().once((data, id) => {
+        const t = toThought(data, id);
+        if (t) for (const fn of listeners) safeCall(fn, t);
+      });
+
+      // Realtime stream: изменения в графе.
+      node.map().on((data, id) => {
+        const t = toThought(data, id);
+        if (t) for (const fn of listeners) safeCall(fn, t);
+      });
+
+      ns.Logger.info('Gun initialized', { peers: GUN_RELAYS });
+      res();
+    } catch (e) { rej(e); }
+  });
+
   const publish = (t) => new Promise((res, rej) => {
     if (!node) return rej(new Error('Gun not init'));
-    node.get(t.id).put({ text: t.text, createdAt: t.createdAt, updatedAt: t.updatedAt }, (ack) => {
+    if (!ns.Util.isNonEmptyString(t.id) || !ns.Util.isNonEmptyString(t.text)) {
+      return rej(new Error('publish: invalid thought'));
+    }
+    node.get(t.id).put({
+      text: t.text,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+    }, (ack) => {
       if (ack && ack.err) return rej(new Error(ack.err));
       res();
     });
   });
 
-  const onWorldThought = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
+  const onWorldThought = (fn) => {
+    listeners.add(fn);
+    return () => listeners.delete(fn);
+  };
+
   const getPeerCount = () => peerCount;
   const isConnected  = () => peerCount > 0;
 
@@ -414,7 +457,7 @@ ns.P2P = (() => {
 })();
 
 /* --------------------------------------------------------------------------
-   [7] RELEVANCE (поиск совпадений + подсветка фрагмента)
+   [7] RELEVANCE
    -------------------------------------------------------------------------- */
 ns.Relevance = (() => {
   const { THRESHOLD, ADJACENCY, MAX_CARDS } = ns.Config.RELEVANCE;
@@ -424,7 +467,7 @@ ns.Relevance = (() => {
     return thoughts
       .filter((t) => Array.isArray(t.vector))
       .map((t) => ({ thought: t, score: ns.Vector.cosine(queryVec, t.vector) }))
-      .filter((r) => r.score > THRESHOLD - ADJACENCY) // берём чуть шире, фильтруем ниже
+      .filter((r) => r.score > THRESHOLD - ADJACENCY)
       .sort((a, b) => b.score - a.score);
   };
 
@@ -442,15 +485,12 @@ ns.Relevance = (() => {
     return { mine, world, adjacent };
   };
 
-  // Простая подсветка совпавшего куска: ищем самый длинный общий подмассив токенов.
   const highlightFragment = (queryText, matchText) => {
-    if (!queryText || !matchText) return matchText;
+    if (!queryText || !matchText) return escapeHtml(matchText);
     const qTokens = queryText.toLowerCase().match(/\w+/g) || [];
     const mTokens = matchText.toLowerCase().match(/\w+/g) || [];
-    if (!qTokens.length || !mTokens.length) return matchText;
+    if (!qTokens.length || !mTokens.length) return escapeHtml(matchText);
 
-    // Ищем самую длинную общую подпоследовательность подряд идущих токенов (n-gram).
-    let bestLen = 0, bestStart = -1;
     const mRaw = matchText.match(/\w+/g) || [];
     const mPos = [];
     let cursor = 0;
@@ -460,6 +500,7 @@ ns.Relevance = (() => {
       cursor = idx + w.length;
     }
 
+    let bestLen = 0, bestStart = -1;
     for (let i = 0; i < mTokens.length; i++) {
       for (let L = Math.min(qTokens.length, mTokens.length - i); L > bestLen; L--) {
         const slice = mTokens.slice(i, i + L).join(' ');
@@ -468,27 +509,27 @@ ns.Relevance = (() => {
         }
       }
     }
-    if (bestLen < 2) return matchText;
+    if (bestLen < 2) return escapeHtml(matchText);
 
-    const { start, end } = (() => {
-      const a = mPos[bestStart];
-      const b = mPos[bestStart + bestLen - 1];
-      return { start: a.start, end: b.end };
-    })();
-    return matchText.slice(0, start) + '<mark>' + matchText.slice(start, end) + '</mark>' + matchText.slice(end);
+    const a = mPos[bestStart];
+    const b = mPos[bestStart + bestLen - 1];
+    return escapeHtml(matchText.slice(0, a.start))
+         + '<mark>' + escapeHtml(matchText.slice(a.start, b.end)) + '</mark>'
+         + escapeHtml(matchText.slice(b.end));
   };
+
+  const escapeHtml = (s) => String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
   return { rank, split, highlightFragment };
 })();
 
 /* --------------------------------------------------------------------------
    [8] SYNC
-   При сохранении — сразу считаем вектор (если модель загружена).
-   Мировые заметки приходят без вектора: помечаем hasVector=0, реиндексим фоном.
+   Автовекторизация мировых при ingest + персистентная дедупликация по тексту.
    -------------------------------------------------------------------------- */
 ns.Sync = (() => {
-  const seen = new Set();
-
   const saveLocal = async ({ text, publishToWorld }) => {
     const clean = ns.Util.normalizeText(text);
     if (!clean) throw new Error('Empty thought');
@@ -502,7 +543,7 @@ ns.Sync = (() => {
     if (ns.Vector.isLoaded()) {
       try {
         thought.vector = await ns.Vector.embed(clean);
-        thought.hasVector = 1;
+        thought.hasVector = thought.vector ? 1 : 0;
       } catch (e) { ns.Logger.warn('embed failed on save', e.message); }
     }
 
@@ -522,17 +563,32 @@ ns.Sync = (() => {
     return thought;
   };
 
-  const ingestWorld = async (t) => {
-    const existing = await ns.Storage.get(t.id);
-    if (existing && existing.updatedAt >= t.updatedAt) return;
-    if (seen.has(t.id)) return;
-    seen.add(t.id);
-    await ns.Storage.put(t);
-    ns.Logger.info('ingested world', { id: t.id });
+  const ingestWorld = async (incoming) => {
+    // 1. LWW по updatedAt
+    const existing = await ns.Storage.get(incoming.id);
+    if (existing && existing.updatedAt >= incoming.updatedAt) return;
+
+    // 2. Дедупликация по тексту (включая свои локальные)
+    const all = await ns.Storage.all();
+    const duplicate = all.find((t) => t.text === incoming.text && t.id !== incoming.id);
+    if (duplicate) {
+      ns.Logger.info('skipped world duplicate (text match)', { id: incoming.id });
+      return;
+    }
+
+    // 3. Автовекторизация
+    if (ns.Vector.isLoaded() && !incoming.hasVector) {
+      try {
+        incoming.vector = await ns.Vector.embed(incoming.text);
+        incoming.hasVector = incoming.vector ? 1 : 0;
+      } catch (e) { ns.Logger.warn('embed failed on ingest', e.message); }
+    }
+
+    await ns.Storage.put(incoming);
+    ns.Logger.info('ingested world', { id: incoming.id, vectorized: !!incoming.hasVector });
     document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
   };
 
-  // Фоновый реиндекс: берём все hasVector=0 и считаем им векторы.
   const reindexAll = async (onProgress) => {
     if (!ns.Vector.isLoaded()) throw new Error('Load model first');
     const pending = await ns.Storage.listUnindexed();
@@ -540,7 +596,8 @@ ns.Sync = (() => {
     for (const t of pending) {
       try {
         const v = await ns.Vector.embed(t.text);
-        t.vector = v; t.hasVector = v ? 1 : 0;
+        t.vector = v;
+        t.hasVector = v ? 1 : 0;
         await ns.Storage.put(t);
       } catch (e) { ns.Logger.warn('reindex failed for ' + t.id, e.message); }
       done++;
@@ -560,97 +617,143 @@ ns.Sync = (() => {
    -------------------------------------------------------------------------- */
 ns.UI = (() => {
   const refs = {};
+
   const cache = () => {
     ['input','publishWorld','btnSave','btnLoadModel','btnReindex','btnSeed',
      'btnExport','btnReset','listMineRelevant','listWorldRelevant','listAdjacent',
      'listAll','status','modelProgress']
       .forEach((id) => { refs[id] = document.getElementById(id); });
   };
+
   const setPill = (k, t, s = '') => {
     const el = refs.status.querySelector(`[data-key="${k}"]`);
     if (!el) return;
-    el.textContent = t; el.classList.remove('ok','warn','err');
+    el.textContent = t;
+    el.classList.remove('ok','warn','err');
     if (s) el.classList.add(s);
   };
+
   const setProgress = (pct) => { refs.modelProgress.style.width = pct + '%'; };
 
   const renderRelevanceList = (container, ranked, queryText) => {
     container.innerHTML = '';
     if (!ranked.length) {
-      const d = document.createElement('div'); d.className = 'empty'; d.textContent = '(none)';
-      container.appendChild(d); return;
+      const d = document.createElement('div');
+      d.className = 'empty';
+      d.textContent = '(none)';
+      container.appendChild(d);
+      return;
     }
     for (const r of ranked) {
       const row = document.createElement('div');
       row.className = `item ${r.thought.source}`;
       const score = document.createElement('span');
-      score.className = 'score'; score.textContent = r.score.toFixed(3);
+      score.className = 'score';
+      score.textContent = typeof r.score === 'number' ? r.score.toFixed(3) : '';
       const body = document.createElement('div');
       body.innerHTML = ns.Relevance.highlightFragment(queryText, r.thought.text);
       const meta = document.createElement('div');
       meta.className = 'meta';
-      meta.textContent = `${r.thought.source} | ${new Date(r.thought.createdAt).toISOString().slice(0,16)} | ${r.thought.id.slice(0,6)}`;
-      row.appendChild(score); row.appendChild(body); row.appendChild(meta);
+      meta.textContent =
+        `${r.thought.source} | ${new Date(r.thought.createdAt).toISOString().slice(0,16)} | ${r.thought.id.slice(0,6)}`;
+      row.appendChild(score);
+      row.appendChild(body);
+      row.appendChild(meta);
       container.appendChild(row);
     }
   };
 
-  const renderAll = async () => {
-    const all = await ns.Storage.all();
-    const sorted = all.sort((a, b) => b.createdAt - a.createdAt);
-    const limit = sorted.slice(0, ns.Config.LIMITS.RENDER_CAP);
-    refs.listAll.innerHTML = '';
-    for (const t of limit) {
-      const row = document.createElement('div');
-      row.className = `item ${t.source}`;
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = `${t.source} | ${new Date(t.createdAt).toISOString().slice(0,16)} | vec:${t.hasVector ? 'yes' : 'no'} | ${t.id.slice(0,8)}`;
-      const body = document.createElement('div'); body.textContent = t.text;
-      row.appendChild(body); row.appendChild(meta);
-      refs.listAll.appendChild(row);
-    }
-    const indexed = all.filter((t) => t.hasVector).length;
-    setPill('indexed', `INDEXED: ${indexed}/${all.length}`, indexed === all.length ? 'ok' : 'warn');
+  const clearRelevanceColumns = () => {
+    renderRelevanceList(refs.listMineRelevant,  [], '');
+    renderRelevanceList(refs.listWorldRelevant, [], '');
+    renderRelevanceList(refs.listAdjacent,      [], '');
   };
 
-  // Live relevance: вызывается на каждый тик ввода (через debounce).
   const updateLiveRelevance = async () => {
     if (!ns.Vector.isLoaded()) {
-      renderRelevanceList(refs.listMineRelevant, [], '');
-      renderRelevanceList(refs.listWorldRelevant, [], '');
-      renderRelevanceList(refs.listAdjacent, [], '');
+      clearRelevanceColumns();
       return;
     }
     const text = refs.input.value.trim();
+    const all = await ns.Storage.all();
+
+    // При пустом поле: показываем ленту последних индексированных.
     if (!text) {
-      renderRelevanceList(refs.listMineRelevant, [], '');
-      renderRelevanceList(refs.listWorldRelevant, [], '');
+      const recent = all
+        .filter((t) => t.hasVector)
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, ns.Config.RELEVANCE.MAX_CARDS);
+      renderRelevanceList(
+        refs.listMineRelevant,
+        recent.filter(t => t.source === 'local').map(t => ({ thought: t, score: 1 })),
+        ''
+      );
+      renderRelevanceList(
+        refs.listWorldRelevant,
+        recent.filter(t => t.source === 'world').map(t => ({ thought: t, score: 1 })),
+        ''
+      );
       renderRelevanceList(refs.listAdjacent, [], '');
       return;
     }
+
     try {
       const qv = await ns.Vector.embed(text);
-      const all = await ns.Storage.all();
       const ranked = ns.Relevance.rank(qv, all);
       const { mine, world, adjacent } = ns.Relevance.split(ranked);
       renderRelevanceList(refs.listMineRelevant,  mine,     text);
       renderRelevanceList(refs.listWorldRelevant, world,    text);
       renderRelevanceList(refs.listAdjacent,      adjacent, text);
-    } catch (e) { ns.Logger.error('live relevance failed', e.message); }
+    } catch (e) {
+      ns.Logger.error('live relevance failed', e.message);
+    }
+  };
+
+  const renderAll = async () => {
+    const all = await ns.Storage.all();
+    const sorted = all.sort((a, b) => b.createdAt - a.createdAt)
+                      .slice(0, ns.Config.LIMITS.RENDER_CAP);
+    refs.listAll.innerHTML = '';
+    for (const t of sorted) {
+      const row = document.createElement('div');
+      row.className = `item ${t.source}`;
+      const body = document.createElement('div');
+      body.textContent = t.text;
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent =
+        `${t.source} | ${new Date(t.createdAt).toISOString().slice(0,16)} | vec:${t.hasVector ? 'yes' : 'no'} | ${t.id.slice(0,8)}`;
+      row.appendChild(body);
+      row.appendChild(meta);
+      refs.listAll.appendChild(row);
+    }
+    const indexed = all.filter((t) => t.hasVector).length;
+    setPill('indexed',
+      `INDEXED: ${indexed}/${all.length}`,
+      all.length > 0 && indexed === all.length ? 'ok' : 'warn');
+  };
+
+  const refresh = async () => {
+    await renderAll();
+    await updateLiveRelevance();
   };
 
   const bind = () => {
-    const debouncedUpdate = ns.Util.debounce(updateLiveRelevance, ns.Config.LIMITS.DEBOUNCE_INPUT_MS);
+    const debouncedUpdate = ns.Util.debounce(
+      updateLiveRelevance,
+      ns.Config.LIMITS.DEBOUNCE_INPUT_MS
+    );
     refs.input.addEventListener('input', debouncedUpdate);
 
     refs.btnSave.addEventListener('click', async () => {
       try {
         refs.btnSave.disabled = true;
-        await ns.Sync.saveLocal({ text: refs.input.value, publishToWorld: refs.publishWorld.checked });
+        await ns.Sync.saveLocal({
+          text: refs.input.value,
+          publishToWorld: refs.publishWorld.checked,
+        });
         refs.input.value = '';
-        await updateLiveRelevance();
-        await renderAll();
+        await refresh();
       } catch (e) { ns.Logger.error('save failed', e.message); }
       finally { refs.btnSave.disabled = false; }
     });
@@ -666,7 +769,7 @@ ns.UI = (() => {
         });
         setPill('model', 'MODEL: ready', 'ok');
         setProgress(100);
-        await updateLiveRelevance();
+        await refresh();
       } catch (e) {
         setPill('model', 'MODEL: err', 'err');
         ns.Logger.error('model load failed', e.message);
@@ -674,14 +777,17 @@ ns.UI = (() => {
     });
 
     refs.btnReindex.addEventListener('click', async () => {
-      if (!ns.Vector.isLoaded()) { ns.Logger.warn('Load model first'); return; }
+      if (!ns.Vector.isLoaded()) {
+        ns.Logger.warn('Load model first');
+        return;
+      }
       try {
         refs.btnReindex.disabled = true;
         await ns.Sync.reindexAll((p) => {
           setPill('model', `MODEL: reindex ${p.done}/${p.total}`, 'warn');
         });
         setPill('model', 'MODEL: ready', 'ok');
-        await renderAll();
+        await refresh();
       } catch (e) { ns.Logger.error('reindex failed', e.message); }
       finally { refs.btnReindex.disabled = false; }
     });
@@ -694,9 +800,10 @@ ns.UI = (() => {
         'Иногда нужно просто записать, чтобы понять.',
         'Связи между идеями важнее самих идей.',
       ];
-      for (const s of samples) await ns.Sync.saveLocal({ text: s, publishToWorld: false });
-      await renderAll();
-      await updateLiveRelevance();
+      for (const s of samples) {
+        await ns.Sync.saveLocal({ text: s, publishToWorld: false });
+      }
+      await refresh();
     });
 
     refs.btnExport.addEventListener('click', async () => {
@@ -704,26 +811,32 @@ ns.UI = (() => {
       const blob = new Blob([JSON.stringify(all, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `noosphere-${Date.now()}.json`; a.click();
+      a.href = url;
+      a.download = `noosphere-${Date.now()}.json`;
+      a.click();
       URL.revokeObjectURL(url);
+      ns.Logger.info('export done', { count: all.length });
     });
 
     refs.btnReset.addEventListener('click', async () => {
-      if (!confirm('Стереть всё на этом устройстве?')) return;
-      await ns.Storage.clearAll();
-      ns.Logger.warn('device reset');
-      await renderAll();
+      if (!confirm('Стереть все локальные данные на этом устройстве?')) return;
+      try {
+        await ns.Storage.clearAll();
+        ns.Logger.warn('device reset');
+        await refresh();
+      } catch (e) { ns.Logger.error('reset failed', e.message); }
     });
 
-    document.addEventListener('ns:thoughts-changed', async () => {
-      await renderAll();
-      await updateLiveRelevance();
+    document.addEventListener('ns:thoughts-changed', refresh);
+    document.addEventListener('ns:peers', (ev) => {
+      const n = ev.detail.count;
+      setPill('peers', `PEERS: ${n}`, n ? 'ok' : 'warn');
     });
-    document.addEventListener('ns:peers', (ev) => setPill('peers', `PEERS: ${ev.detail.count}`, ev.detail.count ? 'ok' : 'warn'));
   };
 
   const init = () => { cache(); bind(); };
-  return { init, renderAll, setPill };
+
+  return { init, renderAll, refresh, setPill };
 })();
 
 /* --------------------------------------------------------------------------
@@ -735,19 +848,34 @@ ns.App = (() => {
     ns.UI.setPill('idb', 'IDB: boot...', 'warn');
     ns.UI.setPill('gun', 'GUN: boot...', 'warn');
 
-    try { await ns.Storage.open(); ns.UI.setPill('idb', 'IDB: OK', 'ok'); ns.Logger.info('IDB ready'); }
-    catch (e) { ns.UI.setPill('idb', 'IDB: ERR', 'err'); ns.Logger.error('IDB init failed', e.message); }
+    try {
+      await ns.Storage.open();
+      ns.UI.setPill('idb', 'IDB: OK', 'ok');
+      ns.Logger.info('IDB ready', { name: ns.Config.DB_NAME });
+    } catch (e) {
+      ns.UI.setPill('idb', 'IDB: ERR', 'err');
+      ns.Logger.error('IDB init failed', e.message);
+    }
 
-    try { await ns.P2P.init(); ns.UI.setPill('gun', 'GUN: ONLINE', 'ok'); }
-    catch (e) { ns.UI.setPill('gun', 'GUN: ERR', 'err'); ns.Logger.error('Gun init failed', e.message); }
+    try {
+      await ns.P2P.init();
+      ns.UI.setPill('gun', 'GUN: ONLINE', 'ok');
+    } catch (e) {
+      ns.UI.setPill('gun', 'GUN: ERR', 'err');
+      ns.Logger.error('Gun init failed', e.message);
+    }
 
     ns.Sync.bind();
-    await ns.UI.renderAll();
+    await ns.UI.refresh();
   };
   return { boot };
 })();
 
-ns.App.boot();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', ns.App.boot);
+} else {
+  ns.App.boot();
+}
 </script>
 </body>
 </html>
