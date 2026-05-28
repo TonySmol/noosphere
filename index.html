@@ -1,576 +1,695 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Noosphere · Trystero Tester</title>
-<style>
-:root{
-  --bg:#0b0d12; --fg:#d8dde6; --mut:#6b7280; --acc:#7cc4ff;
-  --ok:#58d68d; --wn:#f5b041; --er:#ec7063; --pan:#12161f; --br:#1f2631;
-  font-family:system-ui,-apple-system,sans-serif;font-size:14px;color:var(--fg);background:var(--bg);
-}
-*{box-sizing:border-box;margin:0;padding:0}
-body{padding:12px;max-width:860px;margin:0 auto;min-height:100vh}
-h1{font-size:17px;margin-bottom:12px;color:var(--acc)}
-h2{font-size:11px;margin:10px 0 6px;color:var(--mut);text-transform:uppercase;letter-spacing:1px}
-.pan{background:var(--pan);border:1px solid var(--br);border-radius:9px;padding:11px;margin-bottom:10px}
-button{background:#1a2030;color:var(--fg);border:1px solid var(--br);border-radius:6px;
-  padding:8px 12px;cursor:pointer;font-size:13px;font-weight:500;transition:all .15s}
-button:hover:not(:disabled){background:#243049;border-color:var(--acc)}
-button:disabled{opacity:.4;cursor:not-allowed}
-button.pri{background:#1e3a5f;border-color:var(--acc);color:var(--acc)}
-button.dng{background:#3a1e24;border-color:var(--er)}
-button.ok{background:#1e3a2a;border-color:var(--ok);color:var(--ok)}
-button.sel{background:#2a3a4f;border-color:var(--acc);box-shadow:0 0 0 2px rgba(124,196,255,.3)}
-input,textarea{background:#0f1420;color:var(--fg);border:1px solid var(--br);
-  border-radius:6px;padding:8px 10px;font-size:13px;width:100%;font-family:inherit}
-textarea{resize:vertical;min-height:60px;line-height:1.4}
-input:focus,textarea:focus{outline:none;border-color:var(--acc)}
-.row{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
-.row>*{flex:1;min-width:0}
-.kv{display:flex;justify-content:space-between;padding:3px 0;font-size:12px;border-bottom:1px dashed #1a1f2a}
-.kv span:last-child{color:var(--acc);font-weight:500}
-.badge{display:inline-block;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600;margin-left:4px}
-.b-ok{background:#1e3a2a;color:var(--ok)} .b-wn{background:#3a2e1e;color:var(--wn)}
-.b-er{background:#3a1e24;color:var(--er)} .b-in{background:#1e2a3a;color:var(--acc)}
-.grid4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.peer{padding:7px 10px;background:#0f1420;border-radius:5px;margin:3px 0;font-size:11px;
-  display:flex;justify-content:space-between;align-items:center}
-.peer.ok{border-left:3px solid var(--ok)}
-.peer.wn{border-left:3px solid var(--wn)}
-.msg{padding:8px 10px;background:#0f1420;border-left:3px solid var(--acc);margin:4px 0;font-size:12px;border-radius:4px;word-break:break-word}
-.msg.in{border-left-color:var(--ok)} .msg.out{border-left-color:var(--wn)}
-.msg .m{color:var(--mut);font-size:10px;margin-top:3px}
-#log{font-family:ui-monospace,Menlo,monospace;font-size:10px;line-height:1.5;max-height:300px;
-  overflow:auto;background:#06080c;padding:8px;border-radius:6px;border:1px solid var(--br);white-space:pre-wrap;word-break:break-all}
-.log-t{color:var(--mut);margin-right:6px}
-.log-i{color:var(--acc)} .log-w{color:var(--wn)} .log-e{color:var(--er)} .log-s{color:var(--ok)}
-.hint{color:var(--mut);font-size:11px;font-style:italic;margin-top:4px;line-height:1.4}
-.pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--mut);margin-right:6px;vertical-align:middle}
-.pulse.on{background:var(--ok);box-shadow:0 0 6px var(--ok);animation:pulse 1.5s infinite}
-.pulse.wn{background:var(--wn);box-shadow:0 0 6px var(--wn)}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
-.stat{display:inline-block;padding:2px 8px;background:#0f1420;border-radius:4px;font-size:11px;margin-right:4px}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>P2P Notebook (local-only + embeddings + trystero)</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    body { margin: 0; display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+    aside { border-right: 1px solid #ddd; padding: 12px; overflow: auto; }
+    main { padding: 12px; overflow: auto; display: grid; grid-template-rows: auto 1fr auto; gap: 10px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    input, textarea, button { font: inherit; }
+    textarea { width: 100%; min-height: 220px; resize: vertical; }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li { border: 1px solid #eee; border-radius: 10px; padding: 10px; margin: 8px 0; cursor: pointer; }
+    li:hover { background: #fafafa; }
+    .muted { color: #666; font-size: 12px; }
+    .pill { display:inline-block; padding: 2px 8px; border: 1px solid #ddd; border-radius: 999px; font-size: 12px; color:#333;}
+    .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .card { border: 1px solid #e8e8e8; border-radius: 12px; padding: 10px; min-height: 180px; overflow: auto; }
+    .card h3 { margin: 0 0 6px 0; font-size: 14px; }
+    .noteTitle { font-weight: 600; }
+    .snippet { margin-top: 6px; white-space: pre-wrap; color: #222; }
+    .score { float:right; color:#555; font-size: 12px; }
+    .danger { color: #a00; }
+    .ok { color: #0a0; }
+  </style>
 </head>
+
 <body>
+  <aside>
+    <div class="row" style="justify-content:space-between">
+      <div>
+        <div><strong>Заметки</strong></div>
+        <div class="muted">Локально (IndexedDB)</div>
+      </div>
+      <button id="btnNew">+ Новая</button>
+    </div>
 
-<h1>◈ Noosphere · Trystero Auto-Tester</h1>
+    <div class="row" style="margin-top:10px">
+      <span class="pill">Peers: <span id="peersCount">0</span></span>
+      <span class="pill">Model: <span id="modelStatus">idle</span></span>
+      <span class="pill">P2P: <span id="p2pStatus">offline</span></span>
+    </div>
 
-<div class="pan">
-  <h2>1. Strategy</h2>
-  <div class="grid4">
-    <button class="sel" data-strat="nostr">Nostr</button>
-    <button data-strat="mqtt">MQTT</button>
-    <button data-strat="torrent">Torrent</button>
-    <button data-strat="supabase">Supabase</button>
-  </div>
-  <p class="hint" id="stratHint">Nostr: WebSocket relay, обычный HTTPS трафик, децентрализовано</p>
-</div>
+    <hr/>
+    <ul id="notesList"></ul>
+  </aside>
 
-<div class="pan">
-  <h2>2. Connection</h2>
-  <input id="inpRoom" placeholder="room name (same on both devices)" value="noosphere-autotest-2026">
-  <div class="row" style="margin-top:6px">
-    <button id="btnConn" class="pri">Connect</button>
-    <button id="btnDisc" class="dng" disabled>Disconnect</button>
-  </div>
-  <div class="kv"><span>status</span><span id="stConn"><span class="badge b-wn">idle</span></span></div>
-  <div class="kv"><span>self peer id</span><span id="stPid">—</span></div>
-  <div class="kv"><span>strategy</span><span id="stStrat">nostr</span></div>
-  <div class="kv"><span>peers online</span><span id="stPeers">0</span></div>
-</div>
+  <main>
+    <div class="row">
+      <input id="title" placeholder="Заголовок" style="flex:1; padding:8px;"/>
+      <button id="btnSave">Сохранить</button>
+      <button id="btnDelete" class="danger">Удалить</button>
+    </div>
 
-<div class="pan">
-  <h2>3. Auto-Test</h2>
-  <div class="grid2">
-    <button id="btnAutoTest" class="ok">▶ Start Auto-Test (60s)</button>
-    <button id="btnStopTest" class="dng" disabled>■ Stop</button>
-  </div>
-  <div class="row" style="margin-top:8px">
-    <div class="stat">sent: <b id="stSent">0</b></div>
-    <div class="stat">received: <b id="stRecv">0</b></div>
-    <div class="stat">lost: <b id="stLost">0</b></div>
-    <div class="stat">avg ms: <b id="stAvg">—</b></div>
-    <div class="stat">min ms: <b id="stMin">—</b></div>
-    <div class="stat">max ms: <b id="stMax">—</b></div>
-  </div>
-  <p class="hint">Отправляет ping каждые 1 сек 60 секунд. Собирает статистику latency/loss.</p>
-</div>
+    <textarea id="body" placeholder="Пиши... снизу будут локальные/сетевые/serendipity подсказки"></textarea>
 
-<div class="pan">
-  <h2>4. Manual Test</h2>
-  <textarea id="inpMsg" placeholder="type message to send…">hello from device</textarea>
-  <div class="row" style="margin-top:6px">
-    <button id="btnSend" disabled>Send to all peers</button>
-    <button id="btnPing">Manual ping</button>
-  </div>
-</div>
+    <div class="grid3">
+      <section class="card">
+        <h3>Локально релевантное</h3>
+        <div id="localRec" class="muted">—</div>
+      </section>
 
-<div class="pan">
-  <h2>Peers</h2>
-  <div id="peerList"><i class="hint">no peers connected</i></div>
-</div>
+      <section class="card">
+        <h3>Из сети (пока peer онлайн)</h3>
+        <div id="netRec" class="muted">—</div>
+      </section>
 
-<div class="pan">
-  <h2>Messages</h2>
-  <div class="row">
-    <button id="btnClearMsg">Clear</button>
-  </div>
-  <div id="msgList" style="max-height:200px;overflow:auto"><i class="hint">no messages yet</i></div>
-</div>
-
-<div class="pan">
-  <h2>Event Log</h2>
-  <div class="row">
-    <button id="btnClearLog">Clear log</button>
-    <button id="btnExport" class="pri">📋 Copy log for AI</button>
-    <label style="font-size:11px;color:var(--mut);display:flex;align-items:center;gap:4px;flex:0 0 auto">
-      <input type="checkbox" id="chkAuto" checked style="width:auto"> auto-scroll
-    </label>
-  </div>
-  <div id="log"></div>
-</div>
+      <section class="card">
+        <h3>Serendipity (слабая корреляция)</h3>
+        <div id="mixRec" class="muted">—</div>
+      </section>
+    </div>
+  </main>
 
 <script type="module">
-/* ============================================================
-   SECTION 1 · CONFIG
-   ============================================================ */
-const CFG = {
-  APP_ID: 'noosphere-trystero-tester-v4',
-  STRAT_HINTS: {
-    nostr:    'Nostr: WebSocket relay, обычный HTTPS трафик, децентрализовано',
-    mqtt:     'MQTT: IoT инфраструктура, редко блокируют',
-    torrent:  'BitTorrent: UDP + WebSocket, торрент-трекеры',
-    supabase: 'Supabase: WebSocket к supabase.co (требует API key в коде, демо)',
-  },
-  TEST_INTERVAL: 1000,
-  TEST_DURATION: 60000,
-};
+  import { openDB } from 'https://esm.sh/idb@8.0.0';
+  import { joinRoom } from 'https://esm.sh/trystero@0.17.1';
+  import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js';
 
-/* ============================================================
-   SECTION 2 · LOGGING
-   ============================================================ */
-const Log = {
-  buffer: [],
-  el: () => document.getElementById('log'),
-  write(level, ...args){
-    const ts = new Date().toISOString().slice(11,23);
-    const text = args.map(a => {
-      if(a instanceof Error) return a.message;
-      if(typeof a === 'object' && a !== null) { try { return JSON.stringify(a).slice(0,200); } catch { return String(a); } }
-      return String(a);
-    }).join(' ');
-    const entry = { ts, level, text, full: `[${ts}] [${level.toUpperCase()}] ${text}` };
-    this.buffer.push(entry);
-    if(this.buffer.length > 2000) this.buffer.shift();
-    const line = document.createElement('div');
-    line.innerHTML = `<span class="log-t">${ts}</span><span class="log-${level}">[${level.toUpperCase()}]</span> ${text.replace(/</g,'&lt;')}`;
-    const el = this.el();
-    if(el){ el.appendChild(line); if(document.getElementById('chkAuto').checked) el.scrollTop = 1e9; }
-  },
-  i:(...a)=>Log.write('i',...a), w:(...a)=>Log.write('w',...a),
-  e:(...a)=>Log.write('e',...a), s:(...a)=>Log.write('s',...a),
-  export(){
-    const header = `=== NOOSPHERE TRYSTERO TEST LOG ===\n` +
-                   `Generated: ${new Date().toISOString()}\n` +
-                   `User-Agent: ${navigator.userAgent}\n` +
-                   `Strategy: ${State.strat}\n` +
-                   `Room: ${State.room}\n` +
-                   `Self ID: ${State.selfId}\n` +
-                   `Peers: ${State.peers.size}\n` +
-                   `Stats: sent=${Stats.sent} recv=${Stats.recv} lost=${Stats.lost} avg=${Stats.avg}ms min=${Stats.min}ms max=${Stats.max}ms\n` +
-                   `===================================\n\n`;
-    return header + this.buffer.map(e => e.full).join('\n');
-  },
-};
+  // ----------------------------
+  // Config (поменяй под себя)
+  // ----------------------------
+  const APP_ID = 'p2p-notebook-v1';
+  const ROOM_NAME = 'my-shared-room'; // одинаковая строка у всех участников
+  const MODEL_ID = 'Xenova/all-MiniLM-L6-v2';
 
-/* ============================================================
-   SECTION 3 · STATS
-   ============================================================ */
-const Stats = {
-  sent: 0, recv: 0, lost: 0,
-  latencies: [],
-  min: Infinity, max: 0,
-  get avg(){ return this.latencies.length ? Math.round(this.latencies.reduce((a,b)=>a+b,0)/this.latencies.length) : 0; },
-  recordPing(rtt){
-    this.recv++;
-    this.latencies.push(rtt);
-    if(this.latencies.length > 200) this.latencies.shift();
-    if(rtt < this.min) this.min = rtt;
-    if(rtt > this.max) this.max = rtt;
-    UI.updateStats();
-  },
-  recordLoss(){ this.lost++; UI.updateStats(); },
-  recordSend(){ this.sent++; UI.updateStats(); },
-  reset(){ this.sent=0; this.recv=0; this.lost=0; this.latencies=[]; this.min=Infinity; this.max=0; UI.updateStats(); },
-};
+  // WebTorrent trackers (можно расширять)
+  const TRACKERS = [
+    'wss://tracker.openwebtorrent.com',
+    'wss://tracker.btorrent.xyz',
+    'wss://tracker.fastcast.nz',
+  ];
 
-/* ============================================================
-   SECTION 4 · STATE
-   ============================================================ */
-const State = {
-  strat: 'nostr',
-  room: null,
-  selfId: null,
-  peers: new Map(),       // peerId -> { joinedAt, lastSeen, rtt }
-  messages: [],
-  sendMsg: null,
-  sendPing: null,
-  sendPong: null,
-  roomHandle: null,
-  testTimer: null,
-  pendingPings: new Map(), // nonce -> {ts, peerId}
-};
+  // ----------------------------
+  // Utils
+  // ----------------------------
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
-/* ============================================================
-   SECTION 5 · TRYSTERO TRANSPORT
-   ============================================================ */
-const Transport = {
-  async connect(strat, roomName){
-    const cdnUrl = `https://cdn.jsdelivr.net/npm/trystero@0.21.1/${strat}.min.js`;
-    Log.i('loading trystero/' + strat + ' from jsdelivr…');
-    Log.i('URL: ' + cdnUrl);
+  function debounce(fn, ms) {
+    let t = null;
+    return (...args) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...args), ms);
+    };
+  }
 
-    let mod;
-    try {
-      mod = await import(/* @vite-ignore */ cdnUrl);
-      Log.s('trystero module loaded');
-    } catch(e){
-      Log.e('module load failed:', e.message);
-      // Fallback: попробуем +esm вариант
-      try {
-        const esmUrl = `https://cdn.jsdelivr.net/npm/trystero@0.21.1/+esm`;
-        Log.i('trying bundled ESM fallback:', esmUrl);
-        // это не поможет для конкретных стратегий, но пробуем
-        mod = await import(/* @vite-ignore */ `https://cdn.jsdelivr.net/npm/trystero@0.21.1/src/${strat}.js`);
-      } catch(e2){
-        throw new Error('all CDN attempts failed: ' + e.message);
-      }
-    }
+  function now() { return Date.now(); }
 
-    Log.i('joining room: "' + roomName + '" (appId=' + CFG.APP_ID + ')');
-    const config = { appId: CFG.APP_ID };
-    State.roomHandle = mod.joinRoom(config, roomName);
-    State.selfId = State.roomHandle.selfId;
-    Log.s('joined. self peer id: ' + State.selfId);
+  function truncate(text, n) {
+    if (!text) return '';
+    return text.length <= n ? text : text.slice(0, n - 1) + '…';
+  }
 
-    const [sendMsg, getMsg]   = State.roomHandle.makeAction('msg');
-    const [sendPing, getPing] = State.roomHandle.makeAction('ping');
-    const [sendPong, getPong] = State.roomHandle.makeAction('pong');
-    State.sendMsg = sendMsg;
-    State.sendPing = sendPing;
-    State.sendPong = sendPong;
+  function dot(a, b) {
+    // a,b: Float32Array одинаковой длины
+    let s = 0;
+    for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+    return s;
+  }
 
-    State.roomHandle.onPeerJoin(peerId => {
-      State.peers.set(peerId, { joinedAt: Date.now(), lastSeen: Date.now(), rtt: null });
-      Log.s('peer JOINED: ' + peerId.slice(0,24));
-      UI.refreshPeers();
-    });
-    State.roomHandle.onPeerLeave(peerId => {
-      State.peers.delete(peerId);
-      Log.w('peer LEFT: ' + peerId.slice(0,24));
-      UI.refreshPeers();
-    });
+  function pickQueryText(title, body) {
+    // Чтобы эмбеддинг строился стабильно и быстро:
+    // - заголовок + последние символы тела (контекст текущей мысли)
+    const tail = (body || '').slice(-1200);
+    return `${title || ''}\n\n${tail}`.trim();
+  }
 
-    getMsg((payload, peerId) => {
-      const p = State.peers.get(peerId);
-      if(p) p.lastSeen = Date.now();
-      Log.s('msg from ' + peerId.slice(0,16) + ': "' + String(payload).slice(0,40) + '"');
-      UI.addMessage('in', peerId, String(payload));
-    });
+  // ----------------------------
+  // DB (IndexedDB)
+  // ----------------------------
+  class NoteDB {
+    /** @type {import('idb').IDBPDatabase<any>} */
+    #db;
 
-    getPing((payload, peerId) => {
-      // payload: { nonce, ts }
-      try {
-        State.sendPong({ nonce: payload.nonce, ts: payload.ts, echoTs: Date.now() }, peerId);
-      } catch(e){ Log.w('pong send fail:', e.message); }
-    });
+    async init() {
+      this.#db = await openDB('p2p-notebook-db', 1, {
+        upgrade(db) {
+          const notes = db.createObjectStore('notes', { keyPath: 'id' });
+          notes.createIndex('updatedAt', 'updatedAt');
 
-    getPong((payload, peerId) => {
-      // payload: { nonce, ts (original), echoTs }
-      const pending = State.pendingPings.get(payload.nonce);
-      if(!pending) return;
-      State.pendingPings.delete(payload.nonce);
-      clearTimeout(pending.timeout);
-      const rtt = Date.now() - pending.ts;
-      const p = State.peers.get(peerId);
-      if(p) p.rtt = rtt;
-      Stats.recordPing(rtt);
-      UI.refreshPeers();
-    });
-  },
-
-  disconnect(){
-    if(State.roomHandle){
-      try { State.roomHandle.leave(); } catch(e){}
-    }
-    State.roomHandle = null;
-    State.selfId = null;
-    State.peers.clear();
-    State.sendMsg = null;
-    State.sendPing = null;
-    State.sendPong = null;
-  },
-
-  sendToAll(text){
-    if(!State.sendMsg) return 0;
-    const ids = [...State.peers.keys()];
-    if(!ids.length) return 0;
-    let sent = 0;
-    for(const id of ids){
-      try { State.sendMsg(text, id); sent++; }
-      catch(e){ Log.e('send fail to '+id.slice(0,10), e.message); }
-    }
-    return sent;
-  },
-
-  pingPeer(peerId){
-    if(!State.sendPing) return null;
-    const nonce = Math.random().toString(36).slice(2,10);
-    const ts = Date.now();
-    const timeout = setTimeout(() => {
-      if(State.pendingPings.has(nonce)){
-        State.pendingPings.delete(nonce);
-        Stats.recordLoss();
-        Log.w('ping timeout to ' + peerId.slice(0,16));
-      }
-    }, 5000);
-    State.pendingPings.set(nonce, { ts, peerId, timeout });
-    Stats.recordSend();
-    try { State.sendPing({ nonce, ts }, peerId); }
-    catch(e){ Log.e('ping send fail', e.message); return null; }
-    return nonce;
-  },
-
-  pingAll(){
-    const ids = [...State.peers.keys()];
-    for(const id of ids) this.pingPeer(id);
-    return ids.length;
-  },
-};
-
-/* ============================================================
-   SECTION 6 · AUTO-TEST
-   ============================================================ */
-const AutoTest = {
-  running: false,
-  startTs: 0,
-  start(){
-    if(this.running) return;
-    if(!State.peers.size){
-      Log.e('auto-test: no peers connected yet');
-      return;
-    }
-    this.running = true;
-    this.startTs = Date.now();
-    Stats.reset();
-    Log.s('AUTO-TEST STARTED (60s)');
-    document.getElementById('btnAutoTest').disabled = true;
-    document.getElementById('btnStopTest').disabled = false;
-    this.tick();
-  },
-  tick(){
-    if(!this.running) return;
-    const elapsed = Date.now() - this.startTs;
-    if(elapsed >= CFG.TEST_DURATION){
-      this.stop('duration reached');
-      return;
-    }
-    const n = Transport.pingAll();
-    if(n === 0){
-      Log.w('auto-test: no peers to ping, stopping');
-      this.stop('no peers');
-      return;
-    }
-    State.testTimer = setTimeout(() => this.tick(), CFG.TEST_INTERVAL);
-  },
-  stop(reason){
-    this.running = false;
-    if(State.testTimer) clearTimeout(State.testTimer);
-    State.testTimer = null;
-    document.getElementById('btnAutoTest').disabled = false;
-    document.getElementById('btnStopTest').disabled = true;
-    const loss = Stats.sent ? ((Stats.lost / Stats.sent) * 100).toFixed(1) : '0';
-    Log.s(`AUTO-TEST FINISHED (${reason})`);
-    Log.s(`  sent=${Stats.sent} recv=${Stats.recv} lost=${Stats.lost} (${loss}%)`);
-    Log.s(`  latency: avg=${Stats.avg}ms min=${Stats.min===Infinity?'-':Stats.min}ms max=${Stats.max}ms`);
-    Log.i('click "Copy log for AI" to export results');
-  },
-};
-
-/* ============================================================
-   SECTION 7 · UI
-   ============================================================ */
-const UI = {
-  init(){
-    document.querySelectorAll('[data-strat]').forEach(btn => {
-      btn.onclick = () => {
-        if(document.getElementById('btnDisc').disabled === false){
-          Log.w('disconnect first to change strategy');
-          return;
+          const emb = db.createObjectStore('embeddings', { keyPath: 'noteId' });
+          emb.createIndex('updatedAt', 'updatedAt');
         }
-        document.querySelectorAll('[data-strat]').forEach(b => b.classList.remove('sel'));
-        btn.classList.add('sel');
-        State.strat = btn.dataset.strat;
-        document.getElementById('stratHint').textContent = CFG.STRAT_HINTS[State.strat];
-        document.getElementById('stStrat').textContent = State.strat;
-        Log.i('strategy selected: ' + State.strat);
-      };
-    });
-
-    document.getElementById('btnConn').onclick = this.onConnect.bind(this);
-    document.getElementById('btnDisc').onclick  = this.onDisconnect.bind(this);
-    document.getElementById('btnSend').onclick  = this.onSend.bind(this);
-    document.getElementById('btnPing').onclick  = () => {
-      const n = Transport.pingAll();
-      Log.i('manual ping sent to ' + n + ' peers');
-    };
-    document.getElementById('btnAutoTest').onclick = () => AutoTest.start();
-    document.getElementById('btnStopTest').onclick = () => AutoTest.stop('user stopped');
-    document.getElementById('btnClearMsg').onclick = () => {
-      State.messages = [];
-      document.getElementById('msgList').innerHTML = '<i class="hint">no messages yet</i>';
-    };
-    document.getElementById('btnClearLog').onclick = () => {
-      document.getElementById('log').innerHTML = '';
-      Log.buffer = [];
-    };
-    document.getElementById('btnExport').onclick = async () => {
-      const text = Log.export();
-      try {
-        await navigator.clipboard.writeText(text);
-        Log.s('log copied to clipboard (' + text.length + ' chars)');
-        alert('Лог скопирован! Вставь его в чат с AI.');
-      } catch(e){
-        // fallback: показываем в textarea
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        ta.style.cssText = 'position:fixed;top:10px;left:10px;right:10px;bottom:10px;z-index:9999;background:#000;color:#0f0;padding:10px';
-        document.body.appendChild(ta);
-        ta.select();
-        Log.w('clipboard blocked, showing in textarea. Copy manually.');
-      }
-    };
-    document.getElementById('inpMsg').addEventListener('keydown', e => {
-      if(e.key === 'Enter' && !e.shiftKey && !document.getElementById('btnSend').disabled){
-        e.preventDefault();
-        this.onSend();
-      }
-    });
-  },
-
-  async onConnect(){
-    const roomName = document.getElementById('inpRoom').value.trim();
-    if(!roomName){ Log.e('room name is empty'); return; }
-    const btn = document.getElementById('btnConn');
-    btn.disabled = true;
-    btn.textContent = 'Connecting…';
-    try {
-      await Transport.connect(State.strat, roomName);
-      document.getElementById('btnDisc').disabled = false;
-      document.getElementById('btnSend').disabled = false;
-      document.getElementById('stConn').innerHTML = '<span class="badge b-ok">connected</span>';
-      document.getElementById('stPid').textContent = State.selfId.slice(0,24) + '…';
-      document.getElementById('stStrat').textContent = State.strat;
-      State.room = roomName;
-      Log.s('=== CONNECT READY ===');
-      Log.i('next steps:');
-      Log.i('  1) open this URL on another device (phone/PC)');
-      Log.i('  2) select SAME strategy (' + State.strat + ')');
-      Log.i('  3) enter SAME room name: "' + roomName + '"');
-      Log.i('  4) click Connect on the other device');
-      Log.i('  5) wait 5-30 seconds for peer discovery');
-      Log.i('  6) when peer appears → click "Start Auto-Test"');
-    } catch(e){
-      Log.e('connect failed:', e);
-      document.getElementById('stConn').innerHTML = '<span class="badge b-er">error</span>';
+      });
     }
-    btn.disabled = false;
-    btn.textContent = 'Connect';
-  },
 
-  onDisconnect(){
-    AutoTest.stop('disconnect');
-    Transport.disconnect();
-    document.getElementById('btnConn').disabled = false;
-    document.getElementById('btnDisc').disabled = true;
-    document.getElementById('btnSend').disabled = true;
-    document.getElementById('stConn').innerHTML = '<span class="badge b-wn">idle</span>';
-    document.getElementById('stPid').textContent = '—';
-    document.getElementById('stPeers').textContent = '0';
-    document.getElementById('peerList').innerHTML = '<i class="hint">no peers connected</i>';
-    Log.w('disconnected');
-  },
+    async listNotes() {
+      const tx = this.#db.transaction('notes', 'readonly');
+      const all = await tx.store.getAll();
+      all.sort((a, b) => b.updatedAt - a.updatedAt);
+      return all;
+    }
 
-  onSend(){
-    const text = document.getElementById('inpMsg').value.trim();
-    if(!text){ Log.w('empty message'); return; }
-    const sent = Transport.sendToAll(text);
-    Log.i('sent to ' + sent + ' peer(s): "' + text.slice(0,40) + '"');
-    if(sent > 0) UI.addMessage('out', 'broadcast', text);
-  },
+    async getNote(id) { return this.#db.get('notes', id); }
 
-  refreshPeers(){
-    document.getElementById('stPeers').textContent = State.peers.size;
-    const box = document.getElementById('peerList');
-    if(!State.peers.size){
-      box.innerHTML = '<i class="hint">no peers connected</i>';
+    async upsertNote(note) {
+      await this.#db.put('notes', note);
+    }
+
+    async deleteNote(id) {
+      const tx = this.#db.transaction(['notes', 'embeddings'], 'readwrite');
+      await tx.objectStore('notes').delete(id);
+      await tx.objectStore('embeddings').delete(id);
+      await tx.done;
+    }
+
+    async getEmbedding(noteId) {
+      const row = await this.#db.get('embeddings', noteId);
+      return row?.vector || null;
+    }
+
+    async putEmbedding(noteId, vector, model = MODEL_ID) {
+      await this.#db.put('embeddings', {
+        noteId, vector, model, updatedAt: now()
+      });
+    }
+
+    async listAllEmbeddings() {
+      return await this.#db.getAll('embeddings');
+    }
+  }
+
+  // ----------------------------
+  // Embedder (transformers.js)
+  // ----------------------------
+  class Embedder {
+    #extractor = null;
+    #statusEl;
+
+    constructor(statusEl) {
+      this.#statusEl = statusEl;
+    }
+
+    async init() {
+      if (this.#extractor) return;
+
+      this.#statusEl.textContent = 'loading';
+      // Без локальных моделей; качаем с CDN/HF (как настроено в transformers.js)
+      env.allowLocalModels = false;
+
+      // pipeline feature-extraction -> mean pooling -> normalize
+      this.#extractor = await pipeline('feature-extraction', MODEL_ID);
+      this.#statusEl.textContent = 'ready';
+    }
+
+    /** @returns {Promise<Float32Array>} */
+    async embed(text) {
+      await this.init();
+      const out = await this.#extractor(text, { pooling: 'mean', normalize: true });
+      // out.data: Float32Array
+      return out.data;
+    }
+  }
+
+  // ----------------------------
+  // Vector index (in-memory)
+  // ----------------------------
+  class VectorIndex {
+    /** @type {Map<string, Float32Array>} */
+    #map = new Map();
+
+    async loadFromDB(db) {
+      const rows = await db.listAllEmbeddings();
+      this.#map.clear();
+      for (const r of rows) {
+        if (r?.vector?.length) this.#map.set(r.noteId, r.vector);
+      }
+    }
+
+    set(noteId, vec) { this.#map.set(noteId, vec); }
+    delete(noteId) { this.#map.delete(noteId); }
+
+    /**
+     * @param {Float32Array} queryVec normalized
+     * @param {{excludeIds?: Set<string>, k?: number}} opts
+     */
+    search(queryVec, opts = {}) {
+      const k = opts.k ?? 6;
+      const exclude = opts.excludeIds ?? new Set();
+
+      /** @type {{id:string, score:number}[]} */
+      const scored = [];
+      for (const [id, vec] of this.#map.entries()) {
+        if (exclude.has(id)) continue;
+        if (vec.length !== queryVec.length) continue;
+        scored.push({ id, score: dot(queryVec, vec) });
+      }
+      scored.sort((a, b) => b.score - a.score);
+      return scored.slice(0, k);
+    }
+
+    /**
+     * “Слабокоррелированные” кандидаты для serendipity
+     * @param {Float32Array} queryVec
+     * @param {{excludeIds?: Set<string>, min?: number, max?: number, k?: number}} opts
+     */
+    searchLowCorr(queryVec, opts = {}) {
+      const min = opts.min ?? 0.15;
+      const max = opts.max ?? 0.35;
+      const k = opts.k ?? 6;
+      const exclude = opts.excludeIds ?? new Set();
+
+      /** @type {{id:string, score:number}[]} */
+      const pool = [];
+      for (const [id, vec] of this.#map.entries()) {
+        if (exclude.has(id)) continue;
+        if (vec.length !== queryVec.length) continue;
+        const s = dot(queryVec, vec);
+        if (s >= min && s <= max) pool.push({ id, score: s });
+      }
+      // немного рандома, чтобы “инсайты” не были слишком детерминированы
+      pool.sort((a, b) => (b.score - a.score) + (Math.random() - 0.5) * 0.05);
+      return pool.slice(0, k);
+    }
+  }
+
+  // ----------------------------
+  // P2P search (Trystero)
+  // ----------------------------
+  class P2PSearch {
+    #room;
+    #p2pStatusEl;
+    #peersCountEl;
+
+    /** pending requestId -> { deadline, results: [], resolve } */
+    #pending = new Map();
+
+    constructor(p2pStatusEl, peersCountEl) {
+      this.#p2pStatusEl = p2pStatusEl;
+      this.#peersCountEl = peersCountEl;
+    }
+
+    init({ onIncomingSearch }) {
+      // Room
+      this.#room = joinRoom(
+        { appId: APP_ID, trackers: TRACKERS },
+        ROOM_NAME
+      );
+
+      this.#p2pStatusEl.textContent = 'online';
+
+      // Actions
+      const [sendReq, onReq] = this.#room.makeAction('search:req');
+      const [sendRes, onRes] = this.#room.makeAction('search:res');
+
+      // Presence / peers count
+      const updatePeers = () => {
+        const peers = this.#room.getPeers?.() ?? []; // на новых версиях есть getPeers()
+        const n = Array.isArray(peers) ? peers.length : (this.#room.peers?.length ?? 0);
+        this.#peersCountEl.textContent = String(n);
+      };
+
+      this.#room.onPeerJoin?.(() => updatePeers());
+      this.#room.onPeerLeave?.(() => updatePeers());
+      updatePeers();
+
+      // Handle incoming request: peer asks us to search in OUR local notes
+      onReq(async (payload, peerId) => {
+        try {
+          if (!payload || payload.v !== 1) return;
+          const { requestId, queryVec, k, snippetChars } = payload;
+          if (!requestId || !queryVec) return;
+
+          const results = await onIncomingSearch({
+            queryVec,
+            k: clamp(k ?? 6, 1, 12),
+            snippetChars: clamp(snippetChars ?? 240, 80, 600),
+          });
+
+          sendRes(peerId, { v: 1, requestId, results });
+        } catch (e) {
+          // намеренно молчим: не хотим ломать сетевой обмен из-за одной ошибки
+          console.warn('onReq error', e);
+        }
+      });
+
+      // Handle incoming response: peer returns results to our query
+      onRes((payload, peerId) => {
+        if (!payload || payload.v !== 1) return;
+        const { requestId, results } = payload;
+        const pending = this.#pending.get(requestId);
+        if (!pending) return;
+        if (Array.isArray(results)) {
+          // Добавляем peerId только как метку источника (в памяти)
+          for (const r of results) pending.results.push({ ...r, peerId });
+        }
+      });
+
+      // expose methods
+      this.sendSearch = async ({ queryVec, k = 6, snippetChars = 240, timeoutMs = 900 }) => {
+        const requestId = crypto.randomUUID();
+        const deadline = now() + timeoutMs;
+
+        // отправляем всем
+        // В Trystero sendReq(data) пошлёт всем, sendReq(peerId, data) конкретному
+        sendReq({ v: 1, requestId, queryVec, k, snippetChars });
+
+        const results = await new Promise((resolve) => {
+          this.#pending.set(requestId, { deadline, results: [], resolve });
+        });
+
+        return results;
+      };
+
+      // simple pending sweeper
+      const tick = () => {
+        const t = now();
+        for (const [requestId, p] of this.#pending.entries()) {
+          if (t >= p.deadline) {
+            this.#pending.delete(requestId);
+            p.resolve(p.results);
+          }
+        }
+        requestAnimationFrame(tick);
+      };
+      tick();
+    }
+
+    /** @type {(args: {queryVec:Float32Array, k?:number, snippetChars?:number, timeoutMs?:number})=>Promise<any[]>} */
+    sendSearch = async () => [];
+
+    destroy() {
+      try { this.#room?.leave?.(); } catch {}
+      this.#p2pStatusEl.textContent = 'offline';
+      this.#peersCountEl.textContent = '0';
+    }
+  }
+
+  // ----------------------------
+  // App glue
+  // ----------------------------
+  const els = {
+    notesList: document.getElementById('notesList'),
+    title: document.getElementById('title'),
+    body: document.getElementById('body'),
+    btnNew: document.getElementById('btnNew'),
+    btnSave: document.getElementById('btnSave'),
+    btnDelete: document.getElementById('btnDelete'),
+    localRec: document.getElementById('localRec'),
+    netRec: document.getElementById('netRec'),
+    mixRec: document.getElementById('mixRec'),
+    modelStatus: document.getElementById('modelStatus'),
+    p2pStatus: document.getElementById('p2pStatus'),
+    peersCount: document.getElementById('peersCount'),
+  };
+
+  const db = new NoteDB();
+  const index = new VectorIndex();
+  const embedder = new Embedder(els.modelStatus);
+  const p2p = new P2PSearch(els.p2pStatus, els.peersCount);
+
+  /** @type {{id:string, title:string, body:string, createdAt:number, updatedAt:number} | null} */
+  let currentNote = null;
+
+  function renderNotesList(notes) {
+    els.notesList.innerHTML = '';
+    for (const n of notes) {
+      const li = document.createElement('li');
+      li.dataset.id = n.id;
+      li.innerHTML = `
+        <div class="noteTitle">${escapeHtml(n.title || '(без названия)')}</div>
+        <div class="muted">${new Date(n.updatedAt).toLocaleString()}</div>
+        <div class="muted">${escapeHtml(truncate(n.body || '', 120))}</div>
+      `;
+      li.onclick = () => loadNote(n.id);
+      els.notesList.appendChild(li);
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replaceAll('&','&amp;')
+      .replaceAll('<','&lt;')
+      .replaceAll('>','&gt;')
+      .replaceAll('"','&quot;')
+      .replaceAll("'","&#039;");
+  }
+
+  async function refreshNotesList() {
+    const notes = await db.listNotes();
+    renderNotesList(notes);
+  }
+
+  async function loadNote(id) {
+    const n = await db.getNote(id);
+    if (!n) return;
+    currentNote = n;
+    els.title.value = n.title || '';
+    els.body.value = n.body || '';
+    scheduleRecs();
+  }
+
+  function newNote() {
+    const t = now();
+    currentNote = {
+      id: crypto.randomUUID(),
+      title: '',
+      body: '',
+      createdAt: t,
+      updatedAt: t,
+    };
+    els.title.value = '';
+    els.body.value = '';
+    scheduleRecs();
+  }
+
+  async function saveCurrentNote() {
+    if (!currentNote) newNote();
+    const t = now();
+    currentNote.title = els.title.value;
+    currentNote.body = els.body.value;
+    currentNote.updatedAt = t;
+
+    await db.upsertNote(currentNote);
+    await refreshNotesList();
+
+    // Асинхронно пересчитываем эмбеддинг (в реале можно вынести в worker/очередь)
+    // Чтобы не пересчитывать на каждый символ — мы делаем это только при Save.
+    const text = pickQueryText(currentNote.title, currentNote.body);
+    if (text.length >= 4) {
+      const vec = await embedder.embed(text);
+      await db.putEmbedding(currentNote.id, vec);
+      index.set(currentNote.id, vec);
+    }
+    scheduleRecs();
+  }
+
+  async function deleteCurrentNote() {
+    if (!currentNote) return;
+    const id = currentNote.id;
+    await db.deleteNote(id);
+    index.delete(id);
+    currentNote = null;
+    els.title.value = '';
+    els.body.value = '';
+    await refreshNotesList();
+    renderRecs([], [], []);
+  }
+
+  function renderRecs(local, net, mix) {
+    els.localRec.innerHTML = renderRecList(local, { showPeer: false }) || '<span class="muted">—</span>';
+    els.netRec.innerHTML = renderRecList(net, { showPeer: true }) || '<span class="muted">—</span>';
+    els.mixRec.innerHTML = renderRecList(mix, { showPeer: true }) || '<span class="muted">—</span>';
+  }
+
+  function renderRecList(items, { showPeer }) {
+    if (!items?.length) return '';
+    return items.map(it => {
+      const src = it.peerId ? `<span class="pill">peer: ${escapeHtml(it.peerId.slice(0, 6))}</span>` : `<span class="pill">local</span>`;
+      const score = (it.score ?? 0).toFixed(3);
+      return `
+        <div style="border:1px solid #eee; border-radius:10px; padding:8px; margin:8px 0;">
+          <div>
+            <span class="score">${score}</span>
+            <span class="noteTitle">${escapeHtml(it.title || '(без названия)')}</span>
+          </div>
+          <div class="muted" style="margin-top:6px">
+            ${showPeer ? src : '<span class="pill">local</span>'}
+            ${it.updatedAt ? `<span class="pill">${new Date(it.updatedAt).toLocaleString()}</span>` : ''}
+          </div>
+          <div class="snippet">${escapeHtml(it.snippet || '')}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  async function computeLocalRecommendations(queryVec) {
+    const exclude = new Set();
+    if (currentNote?.id) exclude.add(currentNote.id);
+
+    const top = index.search(queryVec, { excludeIds: exclude, k: 6 });
+    // Гидратим из notes
+    const out = [];
+    for (const { id, score } of top) {
+      const n = await db.getNote(id);
+      if (!n) continue;
+      out.push({
+        id,
+        title: n.title,
+        snippet: truncate(n.body, 240),
+        score,
+        updatedAt: n.updatedAt,
+      });
+    }
+    return out;
+  }
+
+  async function computeNetworkRecommendations(queryVec) {
+    const results = await p2p.sendSearch({ queryVec, k: 6, snippetChars: 240, timeoutMs: 900 });
+    // Убираем мусор, сортируем
+    const cleaned = results
+      .filter(r => r && typeof r.score === 'number')
+      .map(r => ({
+        ...r,
+        score: clamp(r.score, -1, 1),
+        title: r.title || '',
+        snippet: r.snippet || '',
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6);
+
+    return cleaned;
+  }
+
+  async function computeSerendipity(queryVec, localRecs, netRecs) {
+    const exclude = new Set();
+    if (currentNote?.id) exclude.add(currentNote.id);
+
+    // 1) слабокоррелированные локальные
+    const lowLocalIds = index.searchLowCorr(queryVec, {
+      excludeIds: exclude,
+      min: 0.12, max: 0.33, k: 6
+    });
+
+    const lowLocal = [];
+    for (const { id, score } of lowLocalIds) {
+      const n = await db.getNote(id);
+      if (!n) continue;
+      lowLocal.push({
+        id,
+        title: n.title,
+        snippet: truncate(n.body, 240),
+        score,
+        updatedAt: n.updatedAt,
+        peerId: null
+      });
+    }
+
+    // 2) слабокоррелированные из сети: берём из netRecs те, что не “в топ релевантности”
+    const lowNet = (netRecs || [])
+      .filter(r => r.score >= 0.12 && r.score <= 0.33)
+      .sort((a, b) => (a.score - b.score) + (Math.random() - 0.5) * 0.03) // предпочитаем “слабее”, чуть рандома
+      .slice(0, 6);
+
+    // 3) микс: чередование local/net
+    const mix = [];
+    const a = lowLocal.slice();
+    const b = lowNet.slice();
+    while (mix.length < 6 && (a.length || b.length)) {
+      if (a.length) mix.push(a.shift());
+      if (mix.length >= 6) break;
+      if (b.length) mix.push(b.shift());
+    }
+    return mix;
+  }
+
+  const scheduleRecs = debounce(async () => {
+    // Не спамим моделью на каждый ввод: считаем по дебаунсу
+    const title = els.title.value;
+    const body = els.body.value;
+    const q = pickQueryText(title, body);
+    if (q.length < 10) {
+      renderRecs([], [], []);
       return;
     }
-    box.innerHTML = '';
-    for(const [pid, info] of State.peers){
-      const age = Math.round((Date.now() - info.joinedAt)/1000);
-      const rtt = info.rtt !== null ? info.rtt + 'ms' : '—';
-      const cls = info.rtt !== null && info.rtt < 500 ? 'peer ok' : 'peer wn';
-      const d = document.createElement('div');
-      d.className = cls;
-      d.innerHTML = `<span><b>${pid.slice(0,20)}…</b></span>
-                     <span>
-                       <span class="badge b-in">age ${age}s</span>
-                       <span class="badge ${info.rtt!==null?'b-ok':'b-wn'}">rtt ${rtt}</span>
-                     </span>`;
-      box.appendChild(d);
+
+    try {
+      const queryVec = await embedder.embed(q);
+
+      // локально — быстро
+      const localRecs = await computeLocalRecommendations(queryVec);
+
+      // сеть — параллельно
+      const netPromise = computeNetworkRecommendations(queryVec);
+
+      const netRecs = await netPromise;
+      const mixRecs = await computeSerendipity(queryVec, localRecs, netRecs);
+
+      renderRecs(localRecs, netRecs, mixRecs);
+    } catch (e) {
+      console.warn(e);
+      els.localRec.innerHTML = '<span class="muted">Ошибка рекомендаций</span>';
+      els.netRec.innerHTML = '<span class="muted">—</span>';
+      els.mixRec.innerHTML = '<span class="muted">—</span>';
     }
-  },
+  }, 550);
 
-  addMessage(dir, peerId, text){
-    const m = { dir, peerId, text, ts: Date.now() };
-    State.messages.push(m);
-    if(State.messages.length > 200) State.messages.shift();
-    const box = document.getElementById('msgList');
-    if(box.querySelector('i')) box.innerHTML = '';
-    const d = document.createElement('div');
-    d.className = 'msg ' + dir;
-    const when = new Date(m.ts).toLocaleTimeString();
-    const who = dir === 'in' ? 'from ' + peerId.slice(0,16) + '…' : 'to ' + peerId;
-    d.innerHTML = `<b>${dir === 'in' ? '← IN' : '→ OUT'}</b> ${who}<div class="m">${when}</div>${text.replace(/</g,'&lt;')}`;
-    box.insertBefore(d, box.firstChild);
-    while(box.children.length > 50) box.removeChild(box.lastChild);
-  },
+  // ----------------------------
+  // P2P incoming search handler
+  // ----------------------------
+  p2p.init({
+    onIncomingSearch: async ({ queryVec, k, snippetChars }) => {
+      // Мы НЕ отдаем всю базу. Мы отдаём только top-K сниппеты.
+      // Это “эпhemeral sharing”: пока мы онлайн.
+      const scored = index.search(queryVec, { k, excludeIds: new Set() });
 
-  updateStats(){
-    document.getElementById('stSent').textContent = Stats.sent;
-    document.getElementById('stRecv').textContent = Stats.recv;
-    document.getElementById('stLost').textContent = Stats.lost;
-    document.getElementById('stAvg').textContent = Stats.avg || '—';
-    document.getElementById('stMin').textContent = Stats.min === Infinity ? '—' : Stats.min;
-    document.getElementById('stMax').textContent = Stats.max || '—';
-  },
-};
+      const out = [];
+      for (const { id, score } of scored) {
+        const n = await db.getNote(id);
+        if (!n) continue;
+        out.push({
+          id: n.id,
+          title: n.title || '',
+          snippet: truncate(n.body || '', snippetChars),
+          score: clamp(score, -1, 1),
+          updatedAt: n.updatedAt,
+        });
+      }
+      return out;
+    }
+  });
 
-/* ============================================================
-   SECTION 8 · BOOT
-   ============================================================ */
-(async function boot(){
-  UI.init();
-  Log.s('boot OK · user-agent: ' + navigator.userAgent.slice(0,80));
-  Log.i('jsdelivr will be used for trystero modules');
-  Log.i('select strategy → click Connect → open on 2nd device → Start Auto-Test');
-  Log.i('after test: click "Copy log for AI" and paste into chat');
-})();
+  // ----------------------------
+  // UI bindings
+  // ----------------------------
+  els.btnNew.onclick = () => newNote();
+  els.btnSave.onclick = () => saveCurrentNote();
+  els.btnDelete.onclick = () => deleteCurrentNote();
+
+  els.title.addEventListener('input', scheduleRecs);
+  els.body.addEventListener('input', scheduleRecs);
+
+  // ----------------------------
+  // Boot
+  // ----------------------------
+  (async function boot() {
+    await db.init();
+    await index.loadFromDB(db);
+    await refreshNotesList();
+
+    // Если пусто — создадим новую
+    const notes = await db.listNotes();
+    if (notes.length) await loadNote(notes[0].id);
+    else newNote();
+
+    // Подогрев модели не обязателен, но уменьшает первый лаг
+    // await embedder.init();
+  })();
 </script>
 </body>
 </html>
