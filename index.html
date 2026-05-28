@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Noosphere · Nostr</title>
+<title>Noosphere · Direct Nostr</title>
 <style>
 :root{--bg:#0f1115;--panel:#161a22;--border:#242a36;--text:#e6e8ee;--muted:#8a93a6;--accent:#6aa6ff;--ok:#4ade80;--warn:#f59e0b;--err:#ef4444}
 *{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-monospace,Menlo,monospace}
@@ -30,7 +30,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .list{display:flex;flex-direction:column;gap:6px;min-height:60px}
 .item{background:#0b0d12;border:1px solid var(--border);border-radius:4px;padding:8px 10px}
 .item.local{border-left:3px solid #555}.item.world{border-left:3px solid var(--accent)}
-.item.ephemeral::before{content:"P2P";font-size:9px;color:var(--accent);padding:1px 4px;border:1px solid var(--accent);border-radius:2px;margin-right:6px}
+.item.ephemeral::before{content:"NOSTR";font-size:9px;color:var(--accent);padding:1px 4px;border:1px solid var(--accent);border-radius:2px;margin-right:6px}
 .item .score{float:right;color:var(--muted);font-size:11px}
 .item .meta{color:var(--muted);font-size:10px;margin-top:4px}
 .item mark{background:transparent;color:var(--accent);font-weight:bold}
@@ -47,12 +47,12 @@ button:disabled{opacity:.5;cursor:not-allowed}
 </head>
 <body>
 <div class="wrap">
-<h1>NOOSPHERE <small>v4.0 · Nostr · децентрализовано</small></h1>
+<h1>NOOSPHERE <small>v5.0 · Direct Nostr · без Trystero</small></h1>
 
 <section class="panel">
   <div class="room-row">
     <label>ROOM:</label>
-    <input type="text" id="roomInput" value="noosphere-nostr-2026" />
+    <input type="text" id="roomInput" value="noosphere-direct-2026" />
     <button id="btnConnect" class="primary">Connect</button>
     <button id="btnDisconnect" class="danger" disabled>Disconnect</button>
   </div>
@@ -66,9 +66,9 @@ button:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="progress"><div id="modelProgress"></div></div>
   <div class="hint">
-    <b>v4.0 Nostr:</b> Trystero/nostr с переопределёнными relay.
-    Открой на ТЕЛЕФОНЕ и на ПК, одинаковый room, Connect на обоих.
-    Через 5-15 секунд появятся соседи (Nostr signaling может быть медленным).
+    <b>v5.0:</b> Выкинул Trystero. Прямой Nostr через nostr-tools к relay.damus.io + nos.lol.
+    Свой протокол на kind 30078. Открой на ТЕЛЕФОНЕ и на ПК, одинаковый room, Connect.
+    Через 3-5 сек должны появиться соседи.
   </div>
 </section>
 
@@ -113,41 +113,87 @@ button:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <script type="module">
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
+/* ============================================================================
+   NOOSPHERE v5.0 — DIRECT NOSTR (без Trystero)
+   ----------------------------------------------------------------------------
+   Почему Trystero/nostr не работал:
+     - relayURLs в config НЕ переопределяют hardcoded relay, а merge-ятся с ними
+     - hardcoded relay (nostromo.social, circum.space, etc.) падают или платные
+     - после signaling всё равно нужен WebRTC, который падает на NAT
+   
+   Решение: прямой Nostr client через nostr-tools
+     - Свой протокол на kind 30078 (custom event)
+     - Subscribe к events с tag 'd' = roomName
+     - Каждый клиент публикует свои мысли как events
+     - Каждый клиент подписывается на room и получает мысли других
+     - Query/response через ephemeral events (kind 23078)
+   
+   Преимущества:
+     - relay.damus.io и nos.lol стабильные и бесплатные
+     - Нет WebRTC = нет NAT проблем
+     - Events живут на relay (можно читать асинхронно)
+     - Децентрализованно, тысячи relay
+   
+   Секции:
+     [1] Config  [2] Logger  [3] Util  [4] Storage  [5] Vector
+     [6] Nostr Channel  [7] Ephemeral  [8] Relevance  [9] Sync  [10] UI  [11] App
+   ============================================================================ */
 
-env.allowLocalModels = false;
-env.useBrowserCache = true;
+// Namespace imports
+import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
+import * as nostrMod from 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
+
+const pipeline = tfMod.pipeline || (tfMod.default && tfMod.default.pipeline);
+const tfEnv = tfMod.env || (tfMod.default && tfMod.default.env);
+const { SimplePool, finalizeEvent, generateSecretKey, getPublicKey } = nostrMod;
+
+if (!pipeline) throw new Error('transformers pipeline not found');
+if (!SimplePool) throw new Error('nostr-tools SimplePool not found');
+
+if (tfEnv) {
+  tfEnv.allowLocalModels = false;
+  tfEnv.useBrowserCache = true;
+}
 
 const ns = {};
 
+/* --------------------------------------------------------------------------
+   [1] CONFIG
+   -------------------------------------------------------------------------- */
 ns.Config = Object.freeze({
-  DB_NAME: 'noosphere_nostr_v4',
+  DB_NAME: 'noosphere_direct_nostr',
   DB_VERSION: 1,
   STORE_THOUGHTS: 'thoughts',
-  APP_ID: 'noosphere-nostr-v4',
+  STORE_KEYS: 'keys',
   
-  // Nostr relay URLs (переопределяем Trystero defaults)
+  // Nostr relay (стабильные, бесплатные)
   NOSTR_RELAYS: [
-    'wss://relay.nostr.band',
-    'wss://nostr.mutinywallet.com',
     'wss://relay.damus.io',
     'wss://nos.lol',
-    'wss://nostr-pub.wellorder.net',
+    'wss://relay.snort.social',
   ],
+  
+  // Nostr event kinds
+  KIND_THOUGHT: 30078,      // published thoughts (addressable)
+  KIND_EPHEMERAL: 23078,    // ephemeral query/response
   
   LIMITS: {
     MAX_TEXT_LENGTH: 10_000,
     RENDER_CAP: 200,
     DEBOUNCE_MS: 4000,
-    QUERY_TIMEOUT_MS: 3000,
+    QUERY_TIMEOUT_MS: 5000,
     MAX_RESULTS_PER_PEER: 5,
     MAX_EPHEMERAL_AGE_MS: 5 * 60_000,
+    HEARTBEAT_INTERVAL_MS: 10000,
   },
   
   VECTOR: { MODEL_ID: 'Xenova/all-MiniLM-L6-v2' },
   RELEVANCE: { THRESHOLD: 0.25, ADJACENCY: 0.15, MAX_CARDS: 5 },
 });
 
+/* --------------------------------------------------------------------------
+   [2] LOGGER
+   -------------------------------------------------------------------------- */
 ns.Logger = (() => {
   const el = () => document.getElementById('log');
   const fmt = (d) => d.toISOString().slice(11, 19);
@@ -173,33 +219,11 @@ ns.Logger = (() => {
   };
 })();
 
-// WebSocket interceptor для отладки
-const _origWS = window.WebSocket;
-window.WebSocket = function(url, protocols) {
-  if (typeof url === 'string' && url.includes('nostr')) {
-    ns.Logger.info('WS connecting: ' + url);
-  }
-  const ws = protocols ? new _origWS(url, protocols) : new _origWS(url);
-  ws.addEventListener('error', (e) => {
-    if (typeof url === 'string' && url.includes('nostr')) {
-      ns.Logger.warn('WS error on ' + url + ': ' + (e.message || 'unknown'));
-    }
-  });
-  ws.addEventListener('open', () => {
-    if (typeof url === 'string' && url.includes('nostr')) {
-      ns.Logger.success('WS open: ' + url);
-    }
-  });
-  return ws;
-};
-window.WebSocket.prototype = _origWS.prototype;
-window.WebSocket.CONNECTING = _origWS.CONNECTING;
-window.WebSocket.OPEN = _origWS.OPEN;
-window.WebSocket.CLOSING = _origWS.CLOSING;
-window.WebSocket.CLOSED = _origWS.CLOSED;
-
+/* --------------------------------------------------------------------------
+   [3] UTIL
+   -------------------------------------------------------------------------- */
 ns.Util = {
-  selfId: 'peer-' + Math.random().toString(36).slice(2, 10),
+  selfId: null,  // будет установлен после генерации ключа
   newId: () => {
     try { return crypto.randomUUID(); }
     catch { return 'id-' + Math.random().toString(36).slice(2, 15) + Date.now().toString(36); }
@@ -214,8 +238,11 @@ ns.Util = {
   escapeHtml: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
 };
 
+/* --------------------------------------------------------------------------
+   [4] STORAGE
+   -------------------------------------------------------------------------- */
 ns.Storage = (() => {
-  const { DB_NAME, DB_VERSION, STORE_THOUGHTS } = ns.Config;
+  const { DB_NAME, DB_VERSION, STORE_THOUGHTS, STORE_KEYS } = ns.Config;
   let db = null;
   
   const open = () => new Promise((res, rej) => {
@@ -229,25 +256,28 @@ ns.Storage = (() => {
         s.createIndex('hasVector', 'hasVector');
         s.createIndex('published', 'published');
       }
+      if (!_db.objectStoreNames.contains(STORE_KEYS)) {
+        _db.createObjectStore(STORE_KEYS, { keyPath: 'k' });
+      }
     };
     req.onsuccess = (ev) => { db = ev.target.result; res(db); };
     req.onerror = () => rej(req.error);
   });
   
-  const tx = (mode) => db.transaction(STORE_THOUGHTS, mode || 'readonly').objectStore(STORE_THOUGHTS);
+  const tx = (store, mode) => db.transaction(store, mode || 'readonly').objectStore(store);
   const prom = (req) => new Promise((r, j) => {
     req.onsuccess = () => r(req.result);
     req.onerror = () => j(req.error);
   });
   
-  const put = async (t) => { await open(); return prom(tx('readwrite').put(t)); };
-  const all = async () => { await open(); return prom(tx().getAll()); };
+  const put = async (t) => { await open(); return prom(tx(STORE_THOUGHTS, 'readwrite').put(t)); };
+  const all = async () => { await open(); return prom(tx(STORE_THOUGHTS).getAll()); };
   
   const listUnindexed = async () => {
     await open();
     return new Promise((res, rej) => {
       const out = [];
-      const req = tx().index('hasVector').openCursor(IDBKeyRange.only(0));
+      const req = tx(STORE_THOUGHTS).index('hasVector').openCursor(IDBKeyRange.only(0));
       req.onsuccess = (ev) => {
         const c = ev.target.result;
         if (!c) return res(out);
@@ -258,11 +288,21 @@ ns.Storage = (() => {
     });
   };
   
-  const clear = async () => { await open(); await prom(tx('readwrite').clear()); };
+  const clear = async () => { await open(); await prom(tx(STORE_THOUGHTS, 'readwrite').clear()); };
   
-  return { open, put, all, listUnindexed, clear };
+  const putKey = async (k, v) => { await open(); return prom(tx(STORE_KEYS, 'readwrite').put({ k, v })); };
+  const getKey = async (k) => {
+    await open();
+    const result = await prom(tx(STORE_KEYS).get(k));
+    return result ? result.v : null;
+  };
+  
+  return { open, put, all, listUnindexed, clear, putKey, getKey };
 })();
 
+/* --------------------------------------------------------------------------
+   [5] VECTOR
+   -------------------------------------------------------------------------- */
 ns.Vector = (() => {
   let extractor = null;
   let loadPromise = null;
@@ -305,164 +345,218 @@ ns.Vector = (() => {
   return { load, embed, cosine, isLoaded };
 })();
 
+/* --------------------------------------------------------------------------
+   [6] NOSTR CHANNEL (прямой клиент через nostr-tools)
+   -------------------------------------------------------------------------- */
 ns.Channel = (() => {
-  let room = null;
-  let sendPing = null, sendQuery = null, sendResponse = null;
-  const peers = new Map();
+  let pool = null;
+  let sk = null;  // secret key (Uint8Array)
+  let pk = null;  // public key (hex string)
+  let roomName = null;
+  let sub = null;
+  const peers = new Map();  // pubkey -> lastSeen
   const queryHandlers = new Map();
+  let heartbeatTimer = null;
   
-  const init = async (roomName) => {
-    if (room) return;
+  const init = async (room) => {
+    if (pool) return;
+    roomName = room;
     
-    ns.Logger.info('loading trystero/nostr...');
-    let mod;
-    try {
-      mod = await import('https://esm.sh/trystero@0.21.1/nostr');
-    } catch (e) {
-      ns.Logger.error('trystero load failed', e.message);
-      throw e;
+    ns.Logger.info('initializing Nostr client...');
+    
+    // Load or generate keys
+    let skHex = await ns.Storage.getKey('nostr_sk');
+    if (!skHex) {
+      const newSk = generateSecretKey();
+      skHex = Array.from(newSk).map(b => b.toString(16).padStart(2, '0')).join('');
+      await ns.Storage.putKey('nostr_sk', skHex);
+      ns.Logger.success('generated new Nostr identity');
     }
-    ns.Logger.success('trystero/nostr loaded');
     
-    const config = {
-      appId: ns.Config.APP_ID,
-      relayURLs: ns.Config.NOSTR_RELAYS,
+    sk = new Uint8Array(skHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+    pk = getPublicKey(sk);
+    ns.Util.selfId = pk.slice(0, 16);
+    ns.Logger.success('pubkey: ' + pk.slice(0, 16) + '...');
+    
+    // Create pool
+    pool = new SimplePool();
+    
+    ns.Logger.info('connecting to relays: ' + ns.Config.NOSTR_RELAYS.join(', '));
+    
+    // Subscribe to room events
+    const filter = {
+      kinds: [ns.Config.KIND_THOUGHT],
+      '#d': [roomName],
+      since: Math.floor(Date.now() / 1000) - 3600,  // last hour
     };
-    ns.Logger.info('joining room: ' + roomName);
-    ns.Logger.info('relays: ' + JSON.stringify(ns.Config.NOSTR_RELAYS));
     
-    try {
-      room = mod.joinRoom(config, roomName);
-    } catch (e) {
-      ns.Logger.error('joinRoom failed', e.message);
-      throw e;
-    }
-    ns.Logger.success('joined room. selfId=' + ns.Util.selfId);
+    sub = pool.subscribeMany(ns.Config.NOSTR_RELAYS, [filter], {
+      onevent: (event) => {
+        handleThoughtEvent(event);
+      },
+      oneose: () => {
+        ns.Logger.success('subscribed to room: ' + roomName);
+      },
+    });
     
-    const [sp, onPing] = room.makeAction('ping');
-    const [sq, onQuery] = room.makeAction('query');
-    const [sr, onResponse] = room.makeAction('response');
-    sendPing = sp;
-    sendQuery = sq;
-    sendResponse = sr;
+    // Also subscribe to ephemeral queries addressed to us
+    const queryFilter = {
+      kinds: [ns.Config.KIND_EPHEMERAL],
+      '#p': [pk],
+      since: Math.floor(Date.now() / 1000) - 60,
+    };
     
-    try {
-      room.onPeerJoin((peerId) => {
-        peers.set(peerId, ns.Util.now());
-        ns.Logger.success('peer JOINED: ' + peerId.slice(0, 16));
-        updatePeerCount();
-        try { sendPing({ from: ns.Util.selfId, t: ns.Util.now() }, peerId); } catch {}
-      });
-    } catch (e) { ns.Logger.warn('onPeerJoin setup err', e.message); }
+    pool.subscribeMany(ns.Config.NOSTR_RELAYS, [queryFilter], {
+      onevent: (event) => {
+        handleQueryEvent(event);
+      },
+    });
     
-    try {
-      room.onPeerLeave((peerId) => {
-        peers.delete(peerId);
-        ns.Logger.warn('peer LEFT: ' + peerId.slice(0, 16));
-        updatePeerCount();
-      });
-    } catch (e) { ns.Logger.warn('onPeerLeave setup err', e.message); }
-    
-    try {
-      onPing((payload, peerId) => {
-        peers.set(peerId, ns.Util.now());
-        updatePeerCount();
-      });
-    } catch (e) {}
-    
-    try {
-      onQuery(async (payload, peerId) => {
-        if (!ns.Vector.isLoaded() || !payload || !Array.isArray(payload.vector)) return;
-        try {
-          const all = await ns.Storage.all();
-          const shared = all.filter((t) => t.published && Array.isArray(t.vector));
-          const scored = shared
-            .map((t) => ({
-              text: t.text,
-              score: ns.Vector.cosine(payload.vector, t.vector),
-              id: t.id,
-            }))
-            .filter((r) => r.score > 0.1)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
-          
-          try {
-            sendResponse({
-              queryId: payload.queryId,
-              from: ns.Util.selfId,
-              results: scored,
-            }, peerId);
-            ns.Logger.info('responded to ' + peerId.slice(0, 12) + ' with ' + scored.length + ' results');
-          } catch (e) {
-            ns.Logger.warn('response send fail', e.message);
-          }
-        } catch (e) {
-          ns.Logger.warn('query handler err', e.message);
-        }
-      });
-    } catch (e) {}
-    
-    try {
-      onResponse((payload, peerId) => {
-        if (!payload || !payload.queryId) return;
-        const handler = queryHandlers.get(payload.queryId);
-        if (!handler) return;
-        handler(peerId, payload.results || []);
-        ns.Logger.info('response from ' + peerId.slice(0, 12) + ' with ' + ((payload.results || []).length) + ' results');
-      });
-    } catch (e) {}
+    // Start heartbeat
+    startHeartbeat();
     
     ns.Logger.success('channel ready');
   };
   
-  const leave = () => {
-    if (room) {
-      try { room.leave(); } catch {}
-    }
-    room = null;
-    sendPing = null;
-    sendQuery = null;
-    sendResponse = null;
-    peers.clear();
-    queryHandlers.clear();
+  const handleThoughtEvent = (event) => {
+    if (event.pubkey === pk) return;  // ignore own events
+    
+    peers.set(event.pubkey, ns.Util.now());
     updatePeerCount();
-    ns.Logger.info('left room');
+    
+    try {
+      const content = JSON.parse(event.content);
+      if (content.text && Array.isArray(content.vector)) {
+        ns.Ephemeral.upsert(event.pubkey, {
+          text: content.text,
+          vector: content.vector,
+          id: event.id,
+        });
+      }
+    } catch (e) {
+      ns.Logger.warn('parse thought event err', e.message);
+    }
   };
   
-  const isConnected = () => room !== null;
-  
-  const ping = () => {
-    if (!sendPing || !room) return;
+  const handleQueryEvent = async (event) => {
+    if (!ns.Vector.isLoaded()) return;
+    
     try {
-      sendPing({ from: ns.Util.selfId, t: ns.Util.now() });
+      const query = JSON.parse(event.content);
+      if (!query.queryId || !Array.isArray(query.vector)) return;
+      
+      const all = await ns.Storage.all();
+      const shared = all.filter((t) => t.published && Array.isArray(t.vector));
+      const scored = shared
+        .map((t) => ({
+          text: t.text,
+          score: ns.Vector.cosine(query.vector, t.vector),
+          id: t.id,
+        }))
+        .filter((r) => r.score > 0.1)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
+      
+      // Send response as ephemeral event
+      const responseEvent = finalizeEvent({
+        kind: ns.Config.KIND_EPHEMERAL,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+          ['p', event.pubkey],  // addressed to requester
+          ['q', query.queryId], // query id
+        ],
+        content: JSON.stringify({
+          queryId: query.queryId,
+          results: scored,
+        }),
+      }, sk);
+      
+      await pool.publish(ns.Config.NOSTR_RELAYS, responseEvent);
+      ns.Logger.info('responded to query from ' + event.pubkey.slice(0, 10) + ' with ' + scored.length + ' results');
     } catch (e) {
-      ns.Logger.warn('ping fail', e.message);
+      ns.Logger.warn('query handler err', e.message);
+    }
+  };
+  
+  const publishThought = async (text, vector, noteId) => {
+    if (!pool || !sk) return false;
+    
+    try {
+      const event = finalizeEvent({
+        kind: ns.Config.KIND_THOUGHT,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+          ['d', roomName],  // room identifier (addressable)
+          ['t', 'noosphere'],
+        ],
+        content: JSON.stringify({
+          text: text.slice(0, 500),
+          vector: vector,
+          id: noteId,
+        }),
+      }, sk);
+      
+      await pool.publish(ns.Config.NOSTR_RELAYS, event);
+      ns.Logger.info('published thought to Nostr');
+      return true;
+    } catch (e) {
+      ns.Logger.warn('publish err', e.message);
+      return false;
     }
   };
   
   const query = (vector, opts) => {
     const timeoutMs = (opts && opts.timeoutMs) || ns.Config.LIMITS.QUERY_TIMEOUT_MS;
-    if (!sendQuery || !room) return Promise.resolve([]);
-    if (!peers.size) return Promise.resolve([]);
+    if (!pool || !peers.size) return Promise.resolve([]);
     
     const queryId = ns.Util.newId();
     const results = new Map();
     const handler = (peerId, res) => {
       results.set(peerId, res);
-      ns.Ephemeral.upsert(peerId, res);
     };
     queryHandlers.set(queryId, handler);
     
-    try {
-      sendQuery({ queryId: queryId, vector: vector, from: ns.Util.selfId });
-      ns.Logger.info('query sent to ' + peers.size + ' peers');
-    } catch (e) {
-      ns.Logger.warn('query send fail', e.message);
-    }
+    // Subscribe to responses
+    const responseFilter = {
+      kinds: [ns.Config.KIND_EPHEMERAL],
+      '#p': [pk],
+      '#q': [queryId],
+      since: Math.floor(Date.now() / 1000),
+    };
+    
+    const responseSub = pool.subscribeMany(ns.Config.NOSTR_RELAYS, [responseFilter], {
+      onevent: (event) => {
+        try {
+          const response = JSON.parse(event.content);
+          if (response.queryId === queryId) {
+            handler(event.pubkey, response.results || []);
+            ns.Ephemeral.upsertResponse(event.pubkey, response.results || []);
+          }
+        } catch (e) {}
+      },
+    });
+    
+    // Send query to all peers
+    const queryEvent = finalizeEvent({
+      kind: ns.Config.KIND_EPHEMERAL,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [['t', 'noosphere-query']],
+      content: JSON.stringify({
+        queryId: queryId,
+        vector: vector,
+      }),
+    }, sk);
+    
+    pool.publish(ns.Config.NOSTR_RELAYS, queryEvent).catch((e) => {
+      ns.Logger.warn('query publish err', e.message);
+    });
+    
+    ns.Logger.info('query sent to ' + peers.size + ' peers');
     
     return new Promise((resolve) => {
       setTimeout(() => {
         queryHandlers.delete(queryId);
+        try { responseSub.close(); } catch {}
         const collected = [];
         for (const [peerId, res] of results) {
           for (const r of res) collected.push(Object.assign({}, r, { fromPeer: peerId }));
@@ -473,13 +567,41 @@ ns.Channel = (() => {
     });
   };
   
+  const startHeartbeat = () => {
+    const sendHeartbeat = () => {
+      // Just touch the network to keep connection alive
+      if (pool && sk) {
+        const heartbeatEvent = finalizeEvent({
+          kind: ns.Config.KIND_EPHEMERAL,
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [['t', 'noosphere-heartbeat']],
+          content: JSON.stringify({ from: pk, t: ns.Util.now() }),
+        }, sk);
+        pool.publish(ns.Config.NOSTR_RELAYS, heartbeatEvent).catch(() => {});
+      }
+    };
+    heartbeatTimer = setInterval(sendHeartbeat, ns.Config.LIMITS.HEARTBEAT_INTERVAL_MS);
+  };
+  
+  const leave = () => {
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    if (sub) { try { sub.close(); } catch {} sub = null; }
+    if (pool) { try { pool.close(ns.Config.NOSTR_RELAYS); } catch {} pool = null; }
+    peers.clear();
+    queryHandlers.clear();
+    updatePeerCount();
+    ns.Logger.info('disconnected from Nostr');
+  };
+  
+  const isConnected = () => pool !== null;
+  
   const getActivePeers = () => {
     const now = ns.Util.now();
     const ttl = 60000;
     const out = [];
-    for (const [pid, lastSeen] of peers) {
-      if (now - lastSeen < ttl) out.push(pid);
-      else peers.delete(pid);
+    for (const [pub, lastSeen] of peers) {
+      if (now - lastSeen < ttl) out.push(pub);
+      else peers.delete(pub);
     }
     return out;
   };
@@ -488,25 +610,40 @@ ns.Channel = (() => {
     document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: peers.size } }));
   };
   
-  const startPingLoop = () => {
-    setInterval(() => {
-      if (room) {
-        ping();
-        updatePeerCount();
-      }
-    }, 10000);
+  const ping = () => {
+    // Heartbeat serves as ping
   };
   
-  return { init, leave, isConnected, ping, query, getActivePeers, startPingLoop };
+  return { init, leave, isConnected, publishThought, query, ping, getActivePeers };
 })();
 
+/* --------------------------------------------------------------------------
+   [7] EPHEMERAL
+   -------------------------------------------------------------------------- */
 ns.Ephemeral = (() => {
   const byPeer = new Map();
   
-  const upsert = (peerId, results) => {
-    byPeer.set(peerId, { results: results, lastSeen: ns.Util.now() });
+  const upsert = (peerId, announce) => {
+    let rec = byPeer.get(peerId);
+    if (!rec) {
+      rec = { announces: new Map(), lastSeen: ns.Util.now() };
+      byPeer.set(peerId, rec);
+    }
+    rec.announces.set(announce.id, Object.assign({}, announce, { ts: ns.Util.now() }));
+    rec.lastSeen = ns.Util.now();
     prune();
     document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
+  };
+  
+  const upsertResponse = (peerId, results) => {
+    for (const r of results) {
+      upsert(peerId, {
+        id: r.id || ns.Util.newId(),
+        text: r.text,
+        vector: null,
+        score: r.score,
+      });
+    }
   };
   
   const prune = () => {
@@ -514,19 +651,19 @@ ns.Ephemeral = (() => {
     const maxAge = ns.Config.LIMITS.MAX_EPHEMERAL_AGE_MS;
     let changed = false;
     for (const [peerId, rec] of byPeer) {
-      if (now - rec.lastSeen > maxAge) {
-        byPeer.delete(peerId);
-        changed = true;
+      if (now - rec.lastSeen > maxAge) { byPeer.delete(peerId); changed = true; continue; }
+      for (const [id, a] of rec.announces) {
+        if (now - a.ts > maxAge) { rec.announces.delete(id); changed = true; }
       }
     }
     if (changed) document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
   };
   
-  const allResults = () => {
+  const allAnnounces = () => {
     const out = [];
     for (const [peerId, rec] of byPeer) {
-      for (const r of rec.results) {
-        out.push(Object.assign({}, r, { fromPeer: peerId, receivedAt: rec.lastSeen }));
+      for (const [id, a] of rec.announces) {
+        out.push(Object.assign({}, a, { fromPeer: peerId, receivedAt: a.ts }));
       }
     }
     return out;
@@ -537,9 +674,12 @@ ns.Ephemeral = (() => {
     document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
   };
   
-  return { upsert, allResults, clear };
+  return { upsert, upsertResponse, allAnnounces, clear };
 })();
 
+/* --------------------------------------------------------------------------
+   [8] RELEVANCE
+   -------------------------------------------------------------------------- */
 ns.Relevance = (() => {
   const { THRESHOLD, ADJACENCY, MAX_CARDS } = ns.Config.RELEVANCE;
   const escapeHtml = ns.Util.escapeHtml;
@@ -581,7 +721,9 @@ ns.Relevance = (() => {
       .map(t => ({ kind: 'local', source: t, score: ns.Vector.cosine(qv, t.vector) }))
       .filter(r => r.score > THRESHOLD - ADJACENCY)
       .sort((a, b) => b.score - a.score);
-    const ws = eph.map(r => ({ kind: 'world', source: r, score: Number(r.score) || 0 }))
+    const ws = eph
+      .filter(r => Array.isArray(r.vector) && r.vector.length === qv.length)
+      .map(r => ({ kind: 'world', source: r, score: ns.Vector.cosine(qv, r.vector) }))
       .filter(r => r.score > THRESHOLD - ADJACENCY)
       .sort((a, b) => b.score - a.score);
     const mine = [], world = [], adjacent = [];
@@ -601,6 +743,9 @@ ns.Relevance = (() => {
   return { rankAll, highlightFragment };
 })();
 
+/* --------------------------------------------------------------------------
+   [9] SYNC
+   -------------------------------------------------------------------------- */
 ns.Sync = (() => {
   const saveLocal = async ({ text, publishToWorld }) => {
     const clean = ns.Util.normalizeText(text);
@@ -625,6 +770,10 @@ ns.Sync = (() => {
     await ns.Storage.put(thought);
     ns.Logger.info('saved', { id: thought.id.slice(0, 8), published: thought.published });
     document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
+    
+    if (publishToWorld && thought.vector && ns.Channel.isConnected()) {
+      await ns.Channel.publishThought(clean, thought.vector, thought.id);
+    }
     return thought;
   };
   
@@ -651,6 +800,9 @@ ns.Sync = (() => {
   return { saveLocal, reindexAll };
 })();
 
+/* --------------------------------------------------------------------------
+   [10] UI
+   -------------------------------------------------------------------------- */
 ns.UI = (() => {
   const refs = {};
   let lastQuery = { text: null, vector: null };
@@ -803,7 +955,7 @@ ns.UI = (() => {
       ns.Channel.query(qv).catch((e) => ns.Logger.warn('query fail', e.message));
     }
     const locals = await ns.Storage.all();
-    const eph = ns.Ephemeral.allResults();
+    const eph = ns.Ephemeral.allAnnounces();
     const { mine, world, adjacent } = ns.Relevance.rankAll(qv, locals, eph);
     renderLocalList(refs.listMine, mine, text);
     renderWorldList(refs.listWorld, world, text);
@@ -969,8 +1121,6 @@ ns.UI = (() => {
         await ns.Channel.init(roomName);
         setPill('net', 'NET: Nostr online', 'ok');
         refs.btnDisconnect.disabled = false;
-        ns.Channel.startPingLoop();
-        ns.Channel.ping();
       } catch (e) {
         setPill('net', 'NET: err', 'err');
         ns.Logger.error('connect fail', e.message);
@@ -1005,6 +1155,9 @@ ns.UI = (() => {
   return { init, refresh, setPill };
 })();
 
+/* --------------------------------------------------------------------------
+   [11] APP
+   -------------------------------------------------------------------------- */
 ns.App = (() => {
   const boot = async () => {
     ns.UI.init();
@@ -1021,7 +1174,7 @@ ns.App = (() => {
     }
     await ns.UI.refresh();
     ns.Logger.success('app ready. Enter room, click Connect, open same on 2nd device.');
-    ns.Logger.info('Using Trystero/Nostr with custom relays. No NAT issues.');
+    ns.Logger.info('Using direct Nostr to relay.damus.io + nos.lol. No Trystero, no WebRTC.');
   };
   return { boot };
 })();
