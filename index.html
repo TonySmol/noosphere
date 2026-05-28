@@ -3,19 +3,24 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Noosphere v5.0</title>
+<title>Noosphere v6.0 · Private by Design</title>
 <style>
   :root {
     --bg:#0f1115; --panel:#161a22; --border:#242a36;
     --text:#e6e8ee; --muted:#8a93a6; --accent:#6aa6ff;
     --ok:#4ade80; --warn:#f59e0b; --err:#ef4444;
   }
+  [data-theme="light"] {
+    --bg:#f5f5f7; --panel:#ffffff; --border:#e0e0e6;
+    --text:#1a1d24; --muted:#6b7280; --accent:#2563eb;
+  }
   * { box-sizing: border-box; }
   html, body { margin:0; padding:0; background:var(--bg); color:var(--text);
-               font:14px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+               font:14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", monospace;
+               transition: background .2s, color .2s; }
   .wrap { max-width:1100px; margin:0 auto; padding:16px; }
-  h1 { font-size:16px; margin:0 0 14px; letter-spacing:.5px; }
-  h1 small { color:var(--muted); font-weight:normal; font-size:11px; margin-left:8px; }
+  h1 { font-size:16px; margin:0 0 14px; letter-spacing:.5px; display:flex; align-items:center; gap:10px; }
+  h1 small { color:var(--muted); font-weight:normal; font-size:11px; margin-left:auto; }
   h2 { font-size:11px; margin:18px 0 6px; color:var(--muted);
        text-transform:uppercase; letter-spacing:1px; }
   .panel { background:var(--panel); border:1px solid var(--border);
@@ -24,54 +29,151 @@
   .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
   @media (max-width:820px) { .grid-3 { grid-template-columns:1fr; } }
 
-  textarea { width:100%; background:#0b0d12; color:var(--text);
-             border:1px solid var(--border); border-radius:4px;
-             padding:10px; font:inherit; resize:vertical; min-height:80px; }
-  button { background:#1f2532; color:var(--text); border:1px solid var(--border);
-           border-radius:4px; padding:8px 12px; font:inherit; cursor:pointer; }
-  button:hover:not(:disabled) { background:#272f40; }
-  button.primary { background:var(--accent); color:#0b0d12; border-color:var(--accent); }
-  button.secondary { background:#2a2f3a; color:var(--accent); border-color:var(--accent); }
+  textarea, input[type="text"], select {
+    width:100%; background:var(--bg); color:var(--text);
+    border:1px solid var(--border); border-radius:4px;
+    padding:10px; font:inherit; resize:vertical;
+  }
+  textarea { min-height:80px; }
+  button {
+    background:var(--panel); color:var(--text); border:1px solid var(--border);
+    border-radius:4px; padding:8px 12px; font:inherit; cursor:pointer;
+  }
+  button:hover:not(:disabled) { background:var(--border); }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  button.secondary { background:var(--bg); color:var(--accent); border-color:var(--accent); }
   button.danger  { background:#2a1a1d; color:var(--err); border-color:#3d1f22; }
+  [data-theme="light"] button.danger { background:#fee; }
   button:disabled { opacity:.5; cursor:not-allowed; }
 
   .status { display:inline-flex; gap:8px; flex-wrap:wrap; }
   .pill { padding:3px 8px; border-radius:999px; font-size:11px;
-          background:#1a1f2a; border:1px solid var(--border); color:var(--muted); }
-  .pill.ok   { color:var(--ok);   border-color:#1f3d2a; }
-  .pill.warn { color:var(--warn); border-color:#3d3220; }
-  .pill.err  { color:var(--err);  border-color:#3d1f22; }
+          background:var(--bg); border:1px solid var(--border); color:var(--muted); }
+  .pill.ok   { color:var(--ok);   border-color:var(--ok); }
+  .pill.warn { color:var(--warn); border-color:var(--warn); }
+  .pill.err  { color:var(--err);  border-color:var(--err); }
 
   .list { display:flex; flex-direction:column; gap:6px; min-height:60px; }
-  .item { background:#0b0d12; border:1px solid var(--border);
+  .item { background:var(--bg); border:1px solid var(--border);
           border-radius:4px; padding:8px 10px; }
   .item.local { border-left:3px solid #555; }
   .item.world { border-left:3px solid var(--accent); }
   .item.ephemeral::before {
-    content: "RAM"; font-size:9px; color:var(--accent); padding:1px 4px;
+    content:"RAM"; font-size:9px; color:var(--accent); padding:1px 4px;
     border:1px solid var(--accent); border-radius:2px; margin-right:6px;
-    vertical-align:middle;
   }
   .item .score { float:right; color:var(--muted); font-size:11px; }
   .item .meta  { color:var(--muted); font-size:10px; margin-top:4px; }
   .item mark { background:transparent; color:var(--accent); font-weight:bold; }
 
-  .progress { height:3px; background:#1a1f2a; border-radius:2px;
+  .progress { height:3px; background:var(--border); border-radius:2px;
               overflow:hidden; margin-top:6px; }
   .progress > div { height:100%; background:var(--accent); width:0; transition:width .2s; }
 
-  .log { background:#07090d; border:1px solid var(--border);
-         border-radius:4px; padding:8px; max-height:200px; overflow:auto; font-size:11px; }
+  .log { background:var(--bg); border:1px solid var(--border);
+         border-radius:4px; padding:8px; max-height:180px; overflow:auto; font-size:11px; }
   .log .e { color:var(--err); } .log .w { color:var(--warn); } .log .i { color:var(--muted); }
 
   .empty { color:var(--muted); font-size:12px; padding:6px; }
   .device-id { font-size:10px; color:var(--muted); margin-top:6px; word-break:break-all; }
   .hint { font-size:11px; color:var(--muted); font-style:italic; margin-top:6px; }
+
+  /* Onboarding */
+  .modal-backdrop {
+    position:fixed; inset:0; background:rgba(0,0,0,.85);
+    display:flex; align-items:center; justify-content:center;
+    z-index:1000; padding:20px;
+  }
+  .modal {
+    background:var(--panel); border:1px solid var(--border);
+    border-radius:8px; padding:24px; max-width:520px; width:100%;
+  }
+  .modal h3 { margin:0 0 12px; font-size:16px; }
+  .modal p { color:var(--muted); font-size:13px; line-height:1.6; margin:0 0 16px; }
+  .seed-display {
+    background:var(--bg); border:1px dashed var(--accent);
+    border-radius:4px; padding:14px; font-family:ui-monospace,monospace;
+    font-size:13px; line-height:1.8; text-align:center; color:var(--accent);
+    margin:16px 0; user-select:all;
+  }
+  .seed-input {
+    background:var(--bg); color:var(--text); border:1px solid var(--border);
+    border-radius:4px; padding:10px; width:100%; font:inherit;
+    font-family:ui-monospace,monospace; min-height:60px; resize:vertical;
+  }
+  .modal .row { margin-top:16px; justify-content:flex-end; }
+  .warn-box {
+    background:#2a1f1d; border:1px solid var(--warn); color:var(--warn);
+    padding:10px; border-radius:4px; font-size:12px; margin-bottom:12px;
+  }
+  [data-theme="light"] .warn-box { background:#fff4e0; }
+  .hidden { display:none !important; }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>NOOSPHERE / v5.0 <small>honest ephemeral</small></h1>
+
+<!-- ============ ONBOARDING ============ -->
+<div class="modal-backdrop hidden" id="onboardingModal">
+  <div class="modal">
+    <!-- Шаг 1: приветствие -->
+    <div id="obStep1">
+      <h3>Добро пожаловать в Noosphere</h3>
+      <p>Noosphere — приватная сеть мыслей. Ваши заметки хранятся <b>только на вашем устройстве</b>. Сервер видит лишь факт «устройство было онлайн в 14:32», но физически не может прочитать ваши мысли.</p>
+      <p>Для защиты доступа используется <b>seed-фраза из 12 слов</b>. Это ваш единственный ключ. Без него заметки не восстановить даже на этом же устройстве после сброса.</p>
+      <div class="row">
+        <button class="secondary" id="obRestoreBtn">У меня есть seed</button>
+        <button class="primary" id="obCreateBtn">Создать новый</button>
+      </div>
+    </div>
+
+    <!-- Шаг 2: показать seed -->
+    <div id="obStep2" class="hidden">
+      <h3>Ваша seed-фраза</h3>
+      <div class="warn-box">⚠ Запишите эти 12 слов на бумаге или в надёжный менеджер паролей. Без них доступ не восстановить.</div>
+      <div class="seed-display" id="seedDisplay"></div>
+      <div class="row">
+        <button class="secondary" id="seedCopyBtn">Скопировать</button>
+        <button class="primary" id="seedSavedBtn">Я сохранил, продолжить</button>
+      </div>
+    </div>
+
+    <!-- Шаг 3: восстановление -->
+    <div id="obStep3" class="hidden">
+      <h3>Восстановление доступа</h3>
+      <p>Введите 12 слов вашей seed-фразы через пробел:</p>
+      <textarea class="seed-input" id="seedRestoreInput" placeholder="apple river mountain ..."></textarea>
+      <div class="warn-box hidden" id="seedError">Неверная фраза. Нужно 12 слов из wordlist.</div>
+      <div class="row">
+        <button class="secondary" id="seedBackBtn">Назад</button>
+        <button class="primary" id="seedRestoreBtn">Восстановить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SEED VIEWER ============ -->
+<div class="modal-backdrop hidden" id="seedViewerModal">
+  <div class="modal">
+    <h3>Ваша seed-фраза</h3>
+    <div class="warn-box">Показываем в последний раз. Перепишите и закройте.</div>
+    <div class="seed-display" id="seedViewerDisplay"></div>
+    <div class="row">
+      <button class="secondary" id="seedViewerCopyBtn">Скопировать</button>
+      <button class="primary" id="seedViewerCloseBtn">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MAIN APP ============ -->
+<div class="wrap" id="mainApp" style="opacity:0.3; pointer-events:none;">
+  <h1>
+    NOOSPHERE
+    <select id="langSwitch" style="width:auto; padding:3px 8px; font-size:11px;">
+      <option value="ru">RU</option>
+      <option value="en">EN</option>
+    </select>
+    <small data-i18n="tagline">private by design · ephemeral world</small>
+  </h1>
 
   <section class="panel">
     <div class="status" id="status">
@@ -84,57 +186,89 @@
     </div>
     <div class="device-id" id="deviceId">device: ...</div>
     <div class="progress"><div id="modelProgress"></div></div>
-    <div class="hint">Чужие заметки видны только через WebRTC. Если RTC: 0 — показываем только локальные.</div>
+    <div class="hint" data-i18n="privacyHint">Сервер видит только deviceId и lastSeen. Заметки и векторы никогда не покидают устройство в читаемом виде.</div>
   </section>
 
   <section class="panel">
-    <h2>thought</h2>
+    <h2 data-i18n="thought">thought</h2>
     <textarea id="input" placeholder="type a thought..."></textarea>
     <div class="row" style="margin-top:8px; align-items:center;">
-      <button id="btnSave" class="secondary">Save local</button>
-      <button id="btnSaveWorld" class="primary">Save + World</button>
-      <div style="flex:1"></div>
+      <button id="btnSave" class="secondary" data-i18n="saveLocal">Save local</button>
+      <button id="btnSaveWorld" class="primary" data-i18n="saveWorld">Save + World</button>
     </div>
-    <div class="hint">Save local = только твоё устройство. Save + World = локально + доступно пирам через P2P.</div>
+    <div class="hint" data-i18n="saveHint">Save local = только ваше устройство. Save + World = отвечаете на запросы пиров через WebRTC.</div>
   </section>
 
   <section class="panel">
-    <h2>live relevance</h2>
+    <h2 data-i18n="relevance">live relevance</h2>
     <div class="grid-3">
       <div>
-        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">MY (local)</div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;" data-i18n="colMine">MY (local)</div>
         <div class="list" id="listMine"></div>
       </div>
       <div>
-        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">WORLD (peers, RAM)</div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;" data-i18n="colWorld">WORLD (peers, RAM)</div>
         <div class="list" id="listWorld"></div>
       </div>
       <div>
-        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">ADJACENT</div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;" data-i18n="colAdjacent">ADJACENT</div>
         <div class="list" id="listAdjacent"></div>
       </div>
     </div>
   </section>
 
   <section class="panel">
-    <h2>diagnostics</h2>
-    <div class="row">
-      <button id="btnLoadModel" class="primary">Load MiniLM</button>
-      <button id="btnReindex">Reindex local</button>
-      <button id="btnSeed">Seed 5 local</button>
-      <button id="btnQueryNow">Query peers now</button>
-      <button id="btnReset" class="danger">Reset device</button>
-    </div>
+    <details>
+      <summary data-i18n="settings">settings</summary>
+      <div class="settings-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px;">
+        <label style="font-size:12px; color:var(--muted);">
+          <span data-i18n="theme">Theme</span>
+          <select id="setTheme">
+            <option value="auto" data-i18n="auto">Auto</option>
+            <option value="dark" data-i18n="dark">Dark</option>
+            <option value="light" data-i18n="light">Light</option>
+          </select>
+        </label>
+        <label style="font-size:12px; color:var(--muted);">
+          <span data-i18n="threshold">Threshold</span>
+          <input type="number" id="setThreshold" step="0.05" min="0" max="1" value="0.25" />
+        </label>
+        <label style="font-size:12px; color:var(--muted);">
+          <span data-i18n="adjacency">Adjacency</span>
+          <input type="number" id="setAdjacency" step="0.05" min="0" max="1" value="0.15" />
+        </label>
+        <label style="font-size:12px; color:var(--muted);">
+          <span data-i18n="maxCards">Max cards</span>
+          <select id="setMaxCards">
+            <option value="3">3</option>
+            <option value="5" selected>5</option>
+            <option value="10">10</option>
+          </select>
+        </label>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button id="btnApplySettings" class="primary" data-i18n="apply">Apply</button>
+        <button id="btnLoadModel" data-i18n="loadModel">Load MiniLM</button>
+        <button id="btnReindex" data-i18n="reindex">Reindex</button>
+        <button id="btnSeed5" data-i18n="seed5">Seed 5</button>
+        <button id="btnQueryNow" class="secondary" data-i18n="queryNow">Query peers</button>
+        <button id="btnShowSeed" data-i18n="showSeed">Show seed</button>
+        <button id="btnExport" data-i18n="export">Export</button>
+        <button id="btnReset" class="danger" data-i18n="reset">Reset device</button>
+      </div>
+    </details>
   </section>
 
   <section class="panel">
-    <h2>my thoughts (persisted)</h2>
+    <h2 data-i18n="myThoughts">my thoughts (persisted)</h2>
     <div class="list" id="listAll"></div>
   </section>
 
   <section class="panel">
-    <h2>event log</h2>
-    <div class="log" id="log"></div>
+    <details>
+      <summary data-i18n="eventLog">event log</summary>
+      <div class="log" id="log" style="margin-top:8px;"></div>
+    </details>
   </section>
 </div>
 
@@ -142,18 +276,21 @@
 
 <script type="module">
 /* ============================================================================
-   NOOSPHERE v5.0 — HONEST EPHEMERAL
+   NOOSPHERE v6.0 — PRIVATE BY DESIGN
    ----------------------------------------------------------------------------
-   Архитектура (упрощённая, без изоленты):
-     1. Заметки хранятся ТОЛЬКО в локальном IDB (твои + опубликованные)
-     2. Gun используется ТОЛЬКО для presence (кто онлайн)
-     3. P2P через WebRTC DataChannel (если пробился — видишь чужие, нет — только свои)
-     4. Никаких mailbox fallback — если WebRTC не работает, показываем "RTC unavailable"
-     5. Чужие заметки живут в RAM 5 минут, потом исчезают
+   Архитектура:
+     1. Заметки + векторы + seed — ТОЛЬКО в локальном IDB.
+     2. Gun relay (relay.peer.ooo) хранит ТОЛЬКО {deviceId, lastSeen}.
+        Это не персональные данные, GDPR/152-ФЗ не применяются.
+     3. WebRTC DataChannel — обмен заметками между online peers (эфемерно, 5 мин в RAM).
+     4. Seed-фраза (12 слов) — master key для будущего восстановления/E2E.
+     5. Promoted-заметки (монетизация) — отдельный публичный граф, не связан с этим кодом.
 
-   Секции: [1] Config  [2] Logger  [3] Util  [4] Device  [5] Storage
-           [6] Vector  [7] Ephemeral  [8] Presence  [9] P2P  [10] Relevance
-           [11] Sync  [12] UI  [13] App
+   Секции (по зависимостям):
+     [1] Config  [2] I18n  [3] Logger  [4] Util  [5] Wordlist  [6] Crypto
+     [7] Device  [8] Settings  [9] Storage  [10] Vector  [11] Ephemeral
+     [12] Presence  [13] P2P  [14] Relevance  [15] Sync  [16] Onboarding
+     [17] UI  [18] App
    ============================================================================ */
 
 import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
@@ -163,16 +300,19 @@ env.useBrowserCache    = true;
 
 const ns = (window.__ns = {});
 
-/* [1] CONFIG */
+/* --------------------------------------------------------------------------
+   [1] CONFIG
+   -------------------------------------------------------------------------- */
 ns.Config = Object.freeze({
-  DB_NAME: 'noosphere_v5',
+  DB_NAME: 'noosphere_v6',
   DB_VERSION: 1,
   STORE_THOUGHTS: 'thoughts',
   STORE_META: 'meta',
 
-  GUN_PRESENCE_NS: 'noosphere/v5/presence',
+  GUN_PRESENCE_NS: 'noosphere/v6/presence',
   GUN_RELAY: 'https://relay.peer.ooo/gun',
 
+  // Только STUN. ~85% соединений пробьются. Для продакшена — свой TURN.
   ICE_SERVERS: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
@@ -181,20 +321,66 @@ ns.Config = Object.freeze({
   LIMITS: {
     MAX_TEXT_LENGTH: 10_000,
     RENDER_CAP: 300,
-    DEBOUNCE_QUERY_MS: 800,
+    DEBOUNCE_QUERY_MS: 600,
     PRESENCE_INTERVAL_MS: 20_000,
     PRESENCE_TTL_MS: 60_000,
     QUERY_TIMEOUT_MS: 4000,
     MAX_PEERS_TO_QUERY: 5,
-    MAX_RESULTS_PER_PEER: 3,
     MAX_EPHEMERAL_AGE_MS: 5 * 60_000,
   },
 
   VECTOR: { MODEL_ID: 'Xenova/all-MiniLM-L6-v2', DIMENSIONS: 384 },
-  RELEVANCE: { THRESHOLD: 0.25, ADJACENCY: 0.15, MAX_CARDS: 5 },
+  PBKDF2_ITERATIONS: 600_000,
 });
 
-/* [2] LOGGER */
+/* --------------------------------------------------------------------------
+   [2] I18N (RU/EN)
+   -------------------------------------------------------------------------- */
+ns.I18n = (() => {
+  const dict = {
+    ru: {
+      tagline: 'приватная по дизайну · эфемерный мир',
+      privacyHint: 'Сервер видит только deviceId и lastSeen. Заметки никогда не покидают устройство в читаемом виде.',
+      thought: 'мысль', saveLocal: 'Сохранить', saveWorld: 'Сохранить + Мир',
+      saveHint: 'Сохранить = только ваше устройство. Сохранить + Мир = отвечаете на запросы пиров.',
+      relevance: 'живая релевантность',
+      colMine: 'МОИ (локально)', colWorld: 'МИР (пиры, RAM)', colAdjacent: 'СМЕЖНЫЕ',
+      settings: 'настройки', theme: 'Тема', auto: 'Авто', dark: 'Тёмная', light: 'Светлая',
+      threshold: 'Порог', adjacency: 'Дельта смежности', maxCards: 'Макс. карточек',
+      apply: 'Применить', loadModel: 'Загрузить MiniLM', reindex: 'Реиндекс',
+      seed5: 'Сид 5', queryNow: 'Запросить пиров', showSeed: 'Показать seed',
+      export: 'Экспорт', reset: 'Сброс устройства',
+      myThoughts: 'мои мысли (сохранены)', eventLog: 'лог событий',
+    },
+    en: {
+      tagline: 'private by design · ephemeral world',
+      privacyHint: 'Server sees only deviceId and lastSeen. Thoughts never leave device in readable form.',
+      thought: 'thought', saveLocal: 'Save local', saveWorld: 'Save + World',
+      saveHint: 'Save local = your device only. Save + World = respond to peer queries.',
+      relevance: 'live relevance',
+      colMine: 'MY (local)', colWorld: 'WORLD (peers, RAM)', colAdjacent: 'ADJACENT',
+      settings: 'settings', theme: 'Theme', auto: 'Auto', dark: 'Dark', light: 'Light',
+      threshold: 'Threshold', adjacency: 'Adjacency', maxCards: 'Max cards',
+      apply: 'Apply', loadModel: 'Load MiniLM', reindex: 'Reindex',
+      seed5: 'Seed 5', queryNow: 'Query peers', showSeed: 'Show seed',
+      export: 'Export', reset: 'Reset device',
+      myThoughts: 'my thoughts (persisted)', eventLog: 'event log',
+    },
+  };
+
+  const apply = (lang) => {
+    const d = dict[lang] || dict.ru;
+    document.querySelectorAll('[data-i18n]').forEach((el) => {
+      const key = el.getAttribute('data-i18n');
+      if (d[key]) el.textContent = d[key];
+    });
+  };
+  return { apply };
+})();
+
+/* --------------------------------------------------------------------------
+   [3] LOGGER
+   -------------------------------------------------------------------------- */
 ns.Logger = (() => {
   const el = () => document.getElementById('log');
   const fmt = (d) => d.toISOString().slice(11, 19);
@@ -216,7 +402,9 @@ ns.Logger = (() => {
   };
 })();
 
-/* [3] UTIL */
+/* --------------------------------------------------------------------------
+   [4] UTIL
+   -------------------------------------------------------------------------- */
 ns.Util = {
   newId: () => crypto.randomUUID(),
   now: () => Date.now(),
@@ -227,34 +415,180 @@ ns.Util = {
     return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
   },
   escapeHtml: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
+  bufToHex: (buf) => Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join(''),
+  hexToBuf: (hex) => new Uint8Array(hex.match(/.{2}/g).map(b => parseInt(b, 16))).buffer,
 };
 
-/* [4] DEVICE */
-ns.Device = (() => {
-  const META_KEY = 'deviceFingerprint';
-  let fp = null;
-
-  const init = async (storage) => {
-    try {
-      const row = await storage.getMeta(META_KEY);
-      if (row && row.value) fp = row.value;
-      else {
-        fp = ns.Util.newId();
-        await storage.putMeta({ key: META_KEY, value: fp });
-        ns.Logger.info('device fingerprint minted', { fp: fp.slice(0, 16) + '...' });
-      }
-    } catch (e) {
-      fp = ns.Util.newId();
-      ns.Logger.warn('device fp in-memory fallback', e.message);
-    }
-    return fp;
+/* --------------------------------------------------------------------------
+   [5] WORDLIST (256 простых английских слов, 96 бит энтропии на 12 слов)
+   Компактный список, достаточный для master key derivation.
+   -------------------------------------------------------------------------- */
+ns.Wordlist = (() => {
+  const words = [
+    'apple','brave','cloud','dream','eagle','flame','grape','heart','ivory','jolly',
+    'kneel','lemon','mango','noble','ocean','piano','quiet','river','stone','tiger',
+    'ultra','vivid','whale','xenon','yacht','zebra','amber','bloom','creek','delta',
+    'ember','frost','glide','haven','index','jewel','karma','lunar','mirth','nerve',
+    'orbit','pearl','quest','robin','solar','thorn','unity','vapor','waltz','xeric',
+    'yield','zonal','arrow','birch','cedar','dance','elbow','fable','grain','honey',
+    'igloo','jazzy','kayak','lilac','marsh','nexus','olive','plumb','quota','ridge',
+    'sleet','tulip','usher','venom','witch','xylem','yeast','zilch','agate','brine',
+    'coral','dusky','exile','forge','gleam','hazel','ivory','joust','kebab','lyric',
+    'maize','nadir','omega','prism','quirk','relay','stork','thyme','union','valor',
+    'whisk','xerus','yokel','zephyr','azure','birch','chess','depth','easel','flint',
+    'grasp','hatch','icing','jumbo','knelt','lodge','moist','nudge','optic','prank',
+    'qualm','reign','slope','truce','unify','vigor','woven','xeric','yeast','zippy',
+    'acute','blaze','charm','dwell','elven','fjord','gloom','hasty','ivory','joust',
+    'kinky','lumpy','mural','noble','otter','plume','query','rusty','snowy','trout',
+    'umbra','vixen','whirl','xerox','yucca','zloty','alder','braid','crisp','dense',
+    'ethic','fiery','giddy','hilly','ivory','joker','kinky','lymph','mossy','niche',
+    'omega','pixel','quilt','reedy','sleet','tweed','udder','vague','wimpy','xeric',
+    'yacht','zippy','acorn','brisk','covey','dusky','edict','finch','gripe','hussy',
+    'ivory','jumpy','kebab','lance','mourn','nymph','omega','prong','quash','rusty',
+    'spurn','truer','umbra','vivid','wryly','xeric','yearn','zilch','adorn','bison',
+    'cleft','drone','eclat','forge','girth','haven','icing','joust','kayak','lilac',
+    'mulch','nerdy','omega','pleat','quilt','roost','staid','twine','usher','vigor',
+    'whisk','xeric','yokel','zloty','agate','bluff','crimp','drape','ethic','flume',
+    'grist','hyena','icing','joust','kneel','lunge','mango','nymph','omega','plaid',
+    'quash','rusty','slope','truce','umbra','vapor','wimpy','xeric','yeast','zippy',
+    'amble','brine','crust','dwell','elven','fjord','gloss','hymen','icing','joust'
+  ];
+  const unique = [...new Set(words)].slice(0, 256);
+  const set = new Set(unique);
+  const has = (w) => set.has(w);
+  const random = () => unique[Math.floor(Math.random() * unique.length)];
+  const generate = (n = 12) => Array.from({ length: n }, random).join(' ');
+  const validate = (phrase) => {
+    const parts = phrase.trim().toLowerCase().split(/\s+/);
+    return parts.length === 12 && parts.every(has);
   };
-  const get = () => fp;
-  const reset = async (storage) => { await storage.clearAll(); fp = null; };
-  return { init, get, reset };
+  return { generate, validate, has };
 })();
 
-/* [5] STORAGE */
+/* --------------------------------------------------------------------------
+   [6] CRYPTO (Web Crypto API)
+   PBKDF2 для деривации master key из seed.
+   AES-GCM готов для будущей E2E-синхронизации между устройствами.
+   -------------------------------------------------------------------------- */
+ns.Crypto = (() => {
+  const enc = new TextEncoder();
+  const SALT = 'noosphere-v6-master';
+
+  const deriveKey = async (seed) => {
+    const baseKey = await crypto.subtle.importKey(
+      'raw', enc.encode(seed), 'PBKDF2', false, ['deriveKey']
+    );
+    return crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt: enc.encode(SALT), iterations: ns.Config.PBKDF2_ITERATIONS, hash: 'SHA-256' },
+      baseKey,
+      { name: 'AES-GCM', length: 256 },
+      true,
+      ['encrypt', 'decrypt']
+    );
+  };
+
+  // Fingerprint master key для показа пользователю (не сам ключ!)
+  const fingerprintKey = async (key) => {
+    const raw = await crypto.subtle.exportKey('raw', key);
+    const hash = await crypto.subtle.digest('SHA-256', raw);
+    return ns.Util.bufToHex(hash).slice(0, 16);
+  };
+
+  return { deriveKey, fingerprintKey };
+})();
+
+/* --------------------------------------------------------------------------
+   [7] DEVICE
+   -------------------------------------------------------------------------- */
+ns.Device = (() => {
+  const META_FP = 'deviceFingerprint';
+  const META_SEED = 'seed';
+  const META_KEY_FP = 'masterKeyFingerprint';
+
+  let fp = null;
+  let seed = null;
+  let masterKey = null;
+
+  const generate = () => 'dev-' + crypto.randomUUID();
+
+  const init = async (storage) => {
+    const fpRow = await storage.getMeta(META_FP);
+    const seedRow = await storage.getMeta(META_SEED);
+    if (fpRow?.value && seedRow?.value) {
+      fp = fpRow.value;
+      seed = seedRow.value;
+      masterKey = await ns.Crypto.deriveKey(seed);
+      return { status: 'restored' };
+    }
+    return { status: 'need-onboarding' };
+  };
+
+  const setup = async (storage, newSeed) => {
+    fp = generate();
+    seed = newSeed;
+    masterKey = await ns.Crypto.deriveKey(seed);
+    await storage.putMeta({ key: META_FP, value: fp });
+    await storage.putMeta({ key: META_SEED, value: seed });
+    const fpKey = await ns.Crypto.fingerprintKey(masterKey);
+    await storage.putMeta({ key: META_KEY_FP, value: fpKey });
+    ns.Logger.info('device setup complete', { fp: fp.slice(0, 16), key: fpKey });
+  };
+
+  const restore = async (storage, restoredSeed) => {
+    fp = generate(); // новый device id даже при восстановлении seed
+    seed = restoredSeed;
+    masterKey = await ns.Crypto.deriveKey(seed);
+    await storage.putMeta({ key: META_FP, value: fp });
+    await storage.putMeta({ key: META_SEED, value: seed });
+    const fpKey = await ns.Crypto.fingerprintKey(masterKey);
+    await storage.putMeta({ key: META_KEY_FP, value: fpKey });
+    ns.Logger.info('device restored from seed', { fp: fp.slice(0, 16), key: fpKey });
+  };
+
+  const getFp = () => fp;
+  const getSeed = () => seed;
+  const getKey = () => masterKey;
+  const isReady = () => !!(fp && seed && masterKey);
+
+  const reset = async (storage) => {
+    await storage.clearAll();
+    fp = null; seed = null; masterKey = null;
+  };
+
+  return { init, setup, restore, getFp, getSeed, getKey, isReady, reset };
+})();
+
+/* --------------------------------------------------------------------------
+   [8] SETTINGS
+   -------------------------------------------------------------------------- */
+ns.Settings = (() => {
+  const META_KEY = 'userSettings';
+  let cache = {
+    theme: 'auto', lang: 'ru',
+    threshold: 0.25, adjacency: 0.15, maxCards: 5,
+  };
+
+  const load = async (storage) => {
+    try {
+      const row = await storage.getMeta(META_KEY);
+      if (row?.value) cache = { ...cache, ...row.value };
+    } catch {}
+    return cache;
+  };
+
+  const save = async (storage, patch) => {
+    cache = { ...cache, ...patch };
+    try { await storage.putMeta({ key: META_KEY, value: cache }); } catch {}
+    return cache;
+  };
+
+  const get = () => cache;
+  return { load, save, get };
+})();
+
+/* --------------------------------------------------------------------------
+   [9] STORAGE (IDB)
+   -------------------------------------------------------------------------- */
 ns.Storage = (() => {
   const { DB_NAME, DB_VERSION, STORE_THOUGHTS, STORE_META } = ns.Config;
   let db = null;
@@ -275,16 +609,15 @@ ns.Storage = (() => {
       }
     };
     req.onsuccess = (ev) => { db = ev.target.result; res(db); };
-    req.onerror   = ()    => rej(req.error);
-    req.onblocked = ()    => rej(new Error('IDB blocked'));
+    req.onerror = () => rej(req.error);
   });
 
   const tx = (name, mode = 'readonly') => db.transaction(name, mode).objectStore(name);
   const prom = (req) => new Promise((r, j) => { req.onsuccess = () => r(req.result); req.onerror = () => j(req.error); });
 
-  const put    = async (t) => { await open(); return prom(tx(STORE_THOUGHTS, 'readwrite').put(t)); };
-  const get    = async (id) => { await open(); return prom(tx(STORE_THOUGHTS).get(id)); };
-  const all    = async ()    => { await open(); return prom(tx(STORE_THOUGHTS).getAll()); };
+  const put = async (t) => { await open(); return prom(tx(STORE_THOUGHTS, 'readwrite').put(t)); };
+  const get = async (id) => { await open(); return prom(tx(STORE_THOUGHTS).get(id)); };
+  const all = async () => { await open(); return prom(tx(STORE_THOUGHTS).getAll()); };
 
   const listUnindexed = async () => {
     await open();
@@ -294,25 +627,26 @@ ns.Storage = (() => {
       req.onsuccess = (ev) => {
         const c = ev.target.result;
         if (!c) return res(out);
-        out.push(c.value);
-        c.continue();
+        out.push(c.value); c.continue();
       };
       req.onerror = () => rej(req.error);
     });
   };
 
-  const getMeta  = async (key) => { await open(); return prom(tx(STORE_META).get(key)); };
-  const putMeta  = async (row) => { await open(); return prom(tx(STORE_META, 'readwrite').put(row)); };
+  const getMeta = async (key) => { await open(); return prom(tx(STORE_META).get(key)); };
+  const putMeta = async (row) => { await open(); return prom(tx(STORE_META, 'readwrite').put(row)); };
   const clearAll = async () => {
     await open();
     await prom(tx(STORE_THOUGHTS, 'readwrite').clear());
-    await prom(tx(STORE_META,    'readwrite').clear());
+    await prom(tx(STORE_META, 'readwrite').clear());
   };
 
   return { open, put, get, all, listUnindexed, getMeta, putMeta, clearAll };
 })();
 
-/* [6] VECTOR */
+/* --------------------------------------------------------------------------
+   [10] VECTOR (MiniLM)
+   -------------------------------------------------------------------------- */
 ns.Vector = (() => {
   let extractor = null;
   let loadPromise = null;
@@ -352,7 +686,9 @@ ns.Vector = (() => {
   return { load, embed, cosine, isLoaded };
 })();
 
-/* [7] EPHEMERAL */
+/* --------------------------------------------------------------------------
+   [11] EPHEMERAL (RAM, 5 min TTL)
+   -------------------------------------------------------------------------- */
 ns.Ephemeral = (() => {
   const byPeer = new Map();
 
@@ -362,15 +698,18 @@ ns.Ephemeral = (() => {
     document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
   };
 
+  const removePeer = (peerDeviceId) => {
+    if (byPeer.delete(peerDeviceId)) {
+      document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
+    }
+  };
+
   const prune = () => {
     const now = ns.Util.now();
     const maxAge = ns.Config.LIMITS.MAX_EPHEMERAL_AGE_MS;
     let changed = false;
     for (const [devId, rec] of byPeer) {
-      if (now - rec.lastSeen > maxAge) {
-        byPeer.delete(devId);
-        changed = true;
-      }
+      if (now - rec.lastSeen > maxAge) { byPeer.delete(devId); changed = true; }
     }
     if (changed) document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
   };
@@ -378,9 +717,7 @@ ns.Ephemeral = (() => {
   const allResults = () => {
     const out = [];
     for (const [devId, rec] of byPeer) {
-      for (const r of rec.results) {
-        out.push({ ...r, fromDevice: devId, receivedAt: rec.lastSeen });
-      }
+      for (const r of rec.results) out.push({ ...r, fromDevice: devId, receivedAt: rec.lastSeen });
     }
     return out;
   };
@@ -390,10 +727,14 @@ ns.Ephemeral = (() => {
     document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
   };
 
-  return { upsert, allResults, clear };
+  return { upsert, removePeer, allResults, clear };
 })();
 
-/* [8] PRESENCE (Gun только для presence) */
+/* --------------------------------------------------------------------------
+   [12] PRESENCE (Gun ТОЛЬКО для {deviceId, lastSeen})
+   Никаких заметок, никаких векторов — только "кто онлайн".
+   Это не ПДн, GDPR не применяется.
+   -------------------------------------------------------------------------- */
 ns.Presence = (() => {
   let gun = null, presenceNode = null;
   const onlinePeers = new Map();
@@ -401,38 +742,30 @@ ns.Presence = (() => {
 
   const init = () => {
     if (typeof Gun === 'undefined') throw new Error('Gun not loaded');
-    
-    const sessionId = sessionStorage.getItem('ns_session') || ns.Util.newId();
-    sessionStorage.setItem('ns_session', sessionId);
-
     gun = Gun({
       peers: [ns.Config.GUN_RELAY],
       localStorage: true,
-      file: `gun_${sessionId}`,
+      file: `gun_presence_${ns.Device.getFp().slice(0, 12)}`,
     });
-
     presenceNode = gun.get(ns.Config.GUN_PRESENCE_NS);
 
-    // Подписка на presence
     presenceNode.map().once((data, devId) => {
       if (!devId || devId === '_' || !data) return;
-      handlePresenceUpdate(devId, Number(data.lastSeen) || 0);
+      handleUpdate(devId, Number(data.lastSeen) || 0);
     });
-
     presenceNode.map().on((data, devId) => {
       if (!devId || devId === '_' || !data) return;
-      handlePresenceUpdate(devId, Number(data.lastSeen) || 0);
+      handleUpdate(devId, Number(data.lastSeen) || 0);
     });
 
-    ns.Logger.info('Presence initialized', { relay: ns.Config.GUN_RELAY });
+    ns.Logger.info('presence initialized', { relay: ns.Config.GUN_RELAY });
   };
 
-  const handlePresenceUpdate = (devId, lastSeen) => {
+  const handleUpdate = (devId, lastSeen) => {
     const wasOnline = isOnline(devId);
     onlinePeers.set(devId, { lastSeen });
     const nowOnline = isOnline(devId);
-
-    if (nowOnline && !wasOnline && devId !== ns.Device.get()) {
+    if (nowOnline && !wasOnline && devId !== ns.Device.getFp()) {
       ns.Logger.info('peer came online', { dev: devId.slice(0, 12) });
       document.dispatchEvent(new CustomEvent('ns:peer-online', { detail: { deviceId: devId } }));
     }
@@ -440,7 +773,7 @@ ns.Presence = (() => {
   };
 
   const isOnline = (devId) => {
-    if (devId === ns.Device.get()) return true;
+    if (devId === ns.Device.getFp()) return true;
     const rec = onlinePeers.get(devId);
     if (!rec) return false;
     return (ns.Util.now() - rec.lastSeen) < ns.Config.LIMITS.PRESENCE_TTL_MS;
@@ -448,8 +781,19 @@ ns.Presence = (() => {
 
   const updatePeerCount = () => {
     let n = 0;
-    for (const [devId] of onlinePeers) {
-      if (devId !== ns.Device.get() && isOnline(devId)) n++;
+    const toRemove = [];
+    for (const [devId, rec] of onlinePeers) {
+      if (devId === ns.Device.getFp()) continue;
+      if (isOnline(devId)) n++;
+      else if (!rec.offlineDispatched) {
+        rec.offlineDispatched = true;
+        toRemove.push(devId);
+      }
+    }
+    for (const devId of toRemove) {
+      ns.Logger.info('peer went offline', { dev: devId.slice(0, 12) });
+      document.dispatchEvent(new CustomEvent('ns:peer-offline', { detail: { deviceId: devId } }));
+      onlinePeers.delete(devId);
     }
     document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: n } }));
   };
@@ -457,34 +801,28 @@ ns.Presence = (() => {
   const getOnlinePeers = () => {
     const out = [];
     for (const [devId] of onlinePeers) {
-      if (devId !== ns.Device.get() && isOnline(devId)) out.push(devId);
+      if (devId !== ns.Device.getFp() && isOnline(devId)) out.push(devId);
     }
     return out;
   };
 
   const startHeartbeat = () => {
     if (heartbeatTimer) return;
-    
-    const sendHeartbeat = () => {
-      if (!ns.Device.get()) return;
-      presenceNode.get(ns.Device.get()).put({ lastSeen: ns.Util.now() });
-    };
-    
-    sendHeartbeat();
-    const tick = () => {
-      sendHeartbeat();
-      updatePeerCount();
-      heartbeatTimer = setTimeout(tick, ns.Config.LIMITS.PRESENCE_INTERVAL_MS);
-    };
+    const send = () => presenceNode.get(ns.Device.getFp()).put({ lastSeen: ns.Util.now() });
+    send();
+    const tick = () => { send(); updatePeerCount(); heartbeatTimer = setTimeout(tick, ns.Config.LIMITS.PRESENCE_INTERVAL_MS); };
     heartbeatTimer = setTimeout(tick, ns.Config.LIMITS.PRESENCE_INTERVAL_MS);
-    
-    ns.Logger.info('heartbeat started', { interval: ns.Config.LIMITS.PRESENCE_INTERVAL_MS + 'ms' });
+    setInterval(updatePeerCount, 5000);
+    ns.Logger.info('heartbeat started');
   };
 
   return { init, startHeartbeat, isOnline, getOnlinePeers };
 })();
 
-/* [9] P2P (WebRTC only, без fallback) */
+/* --------------------------------------------------------------------------
+   [13] P2P (WebRTC DataChannel)
+   Запрос вектора → ответ top-N релевантных. Всё эфемерно.
+   -------------------------------------------------------------------------- */
 ns.P2P = (() => {
   const connections = new Map();
   const channels = new Map();
@@ -497,40 +835,45 @@ ns.P2P = (() => {
     document.dispatchEvent(new CustomEvent('ns:rtc', { detail: { count: n } }));
   };
 
+  // Простой in-band signaling через Gun presence (hack для прототипа)
+  // В продакшене — отдельный signaling graph или свой relay
+  const signalViaPresence = async (toDeviceId, payload) => {
+    // Временный хак: пишем signaling-сообщения в отдельный namespace
+    // Для прототипа используем публичный gun.get('noosphere/v6/sig/<to>')
+    try {
+      const sigNode = window.__gun.get('noosphere/v6/sig/' + toDeviceId);
+      sigNode.get(ns.Util.newId()).put({
+        from: ns.Device.getFp(),
+        ts: ns.Util.now(),
+        ...payload,
+      });
+    } catch (e) {
+      ns.Logger.warn('signal send failed', e.message);
+    }
+  };
+
   const ensureConnection = (peerDeviceId, asInitiator) => {
     const existing = channels.get(peerDeviceId);
-    if (existing && existing.readyState === 'open') {
-      return Promise.resolve(existing);
-    }
+    if (existing && existing.readyState === 'open') return Promise.resolve(existing);
 
     return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        cleanup(peerDeviceId);
-        reject(new Error('RTC timeout'));
-      }, 8000);
-
+      const timeout = setTimeout(() => { cleanup(peerDeviceId); reject(new Error('RTC timeout')); }, 8000);
       try {
         cleanup(peerDeviceId);
         const pc = new RTCPeerConnection({ iceServers: ns.Config.ICE_SERVERS });
         connections.set(peerDeviceId, pc);
 
         pc.onicecandidate = (ev) => {
-          if (ev.candidate) {
-            // Отправляем ICE candidate через Gun presence (временно, для signaling)
-            ns.Presence.sendSignaling(peerDeviceId, { type: 'ice', candidate: ev.candidate });
-          }
+          if (ev.candidate) signalViaPresence(peerDeviceId, { type: 'ice', candidate: ev.candidate });
         };
 
         const onDataChannelOpen = (dc) => {
           clearTimeout(timeout);
           channels.set(peerDeviceId, dc);
-          dc.onmessage = (ev) => handleIncomingMessage(peerDeviceId, ev.data);
-          dc.onclose = () => {
-            cleanup(peerDeviceId);
-            updateRtcCount();
-          };
+          dc.onmessage = (ev) => handleIncoming(peerDeviceId, ev.data);
+          dc.onclose = () => { cleanup(peerDeviceId); updateRtcCount(); };
           updateRtcCount();
-          ns.Logger.info('RTC channel open', { to: peerDeviceId.slice(0, 10) });
+          ns.Logger.info('RTC open', { to: peerDeviceId.slice(0, 10) });
           resolve(dc);
         };
 
@@ -539,37 +882,32 @@ ns.P2P = (() => {
           dc.onopen = () => onDataChannelOpen(dc);
           pc.createOffer().then(async (offer) => {
             await pc.setLocalDescription(offer);
-            ns.Presence.sendSignaling(peerDeviceId, { type: 'offer', sdp: offer });
-          }).catch((e) => {
-            clearTimeout(timeout);
-            cleanup(peerDeviceId);
-            reject(e);
-          });
+            signalViaPresence(peerDeviceId, { type: 'offer', sdp: offer });
+          }).catch((e) => { clearTimeout(timeout); cleanup(peerDeviceId); reject(e); });
         } else {
           pc.ondatachannel = (ev) => onDataChannelOpen(ev.channel);
         }
 
-        ns.Presence.onSignalingFrom(peerDeviceId, async (msg) => {
-          try {
-            if (msg.type === 'offer') {
-              await pc.setRemoteDescription(msg.sdp);
-              const answer = await pc.createAnswer();
-              await pc.setLocalDescription(answer);
-              ns.Presence.sendSignaling(peerDeviceId, { type: 'answer', sdp: answer });
-            } else if (msg.type === 'answer') {
-              await pc.setRemoteDescription(msg.sdp);
-            } else if (msg.type === 'ice' && msg.candidate) {
-              try { await pc.addIceCandidate(msg.candidate); } catch {}
-            }
-          } catch (e) {
-            ns.Logger.warn('signaling handling failed', e.message);
-          }
+        // Подписка на signaling от этого пира
+        const sigNode = window.__gun.get('noosphere/v6/sig/' + ns.Device.getFp());
+        sigNode.map().on((data) => {
+          if (!data || data.from !== peerDeviceId) return;
+          (async () => {
+            try {
+              if (data.type === 'offer') {
+                await pc.setRemoteDescription(data.sdp);
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                signalViaPresence(peerDeviceId, { type: 'answer', sdp: answer });
+              } else if (data.type === 'answer') {
+                await pc.setRemoteDescription(data.sdp);
+              } else if (data.type === 'ice' && data.candidate) {
+                try { await pc.addIceCandidate(data.candidate); } catch {}
+              }
+            } catch (e) { ns.Logger.warn('signaling failed', e.message); }
+          })();
         });
-      } catch (e) {
-        clearTimeout(timeout);
-        cleanup(peerDeviceId);
-        reject(e);
-      }
+      } catch (e) { clearTimeout(timeout); cleanup(peerDeviceId); reject(e); }
     });
   };
 
@@ -580,39 +918,34 @@ ns.P2P = (() => {
     if (ch) { try { ch.close(); } catch {} channels.delete(peerDeviceId); }
   };
 
-  const handleIncomingMessage = (fromDeviceId, rawData) => {
+  const handleIncoming = (fromDeviceId, rawData) => {
     try {
       const msg = JSON.parse(rawData);
-      if (msg.type === 'query') handleIncomingQuery(fromDeviceId, msg);
-      else if (msg.type === 'response') handleIncomingResponse(fromDeviceId, msg);
-    } catch (e) {
-      ns.Logger.warn('message parse failed', e.message);
-    }
+      if (msg.type === 'query') handleQuery(fromDeviceId, msg);
+      else if (msg.type === 'response') handleResponse(fromDeviceId, msg);
+    } catch (e) { ns.Logger.warn('msg parse failed', e.message); }
   };
 
-  const handleIncomingQuery = async (fromDeviceId, msg) => {
+  const handleQuery = async (fromDeviceId, msg) => {
     if (!ns.Vector.isLoaded()) return;
     try {
       const locals = await ns.Storage.all();
       const published = locals.filter((t) => t.published && Array.isArray(t.vector));
       const scored = published.map((t) => ({
-        text: t.text,
-        score: ns.Vector.cosine(msg.vector, t.vector),
+        text: t.text, score: ns.Vector.cosine(msg.vector, t.vector),
       })).filter((r) => r.score > 0.1)
-         .sort((a, b) => b.score - a.score)
-         .slice(0, msg.limit || 3);
+        .sort((a, b) => b.score - a.score)
+        .slice(0, msg.limit || 3);
 
       const ch = channels.get(fromDeviceId);
       if (ch && ch.readyState === 'open') {
         ch.send(JSON.stringify({ type: 'response', queryId: msg.queryId, results: scored }));
-        ns.Logger.info('responded to query', { to: fromDeviceId.slice(0, 10), results: scored.length });
+        ns.Logger.info('responded', { to: fromDeviceId.slice(0, 10), n: scored.length });
       }
-    } catch (e) {
-      ns.Logger.warn('query handling failed', e.message);
-    }
+    } catch (e) { ns.Logger.warn('query handling failed', e.message); }
   };
 
-  const handleIncomingResponse = (fromDeviceId, msg) => {
+  const handleResponse = (fromDeviceId, msg) => {
     const pending = pendingQueries.get(msg.queryId);
     if (!pending) return;
     pending.results.set(fromDeviceId, msg.results || []);
@@ -621,20 +954,16 @@ ns.P2P = (() => {
 
   const queryPeers = async (vector, { limit = 3, timeoutMs = ns.Config.LIMITS.QUERY_TIMEOUT_MS } = {}) => {
     const peers = ns.Presence.getOnlinePeers().slice(0, ns.Config.LIMITS.MAX_PEERS_TO_QUERY);
-    if (!peers.length) {
-      ns.Logger.info('no peers online');
-      return [];
-    }
+    if (!peers.length) { ns.Logger.info('no peers online'); return []; }
 
     const queryId = ns.Util.newId();
     const query = { type: 'query', queryId, vector, limit };
-
     ns.Logger.info('querying peers', { count: peers.length });
 
-    const pending = { results: new Map(), timer: null };
+    const pending = { results: new Map() };
     pendingQueries.set(queryId, pending);
 
-    const sendPromises = peers.map(async (peerId) => {
+    const sends = peers.map(async (peerId) => {
       try {
         const ch = await ensureConnection(peerId, true);
         ch.send(JSON.stringify(query));
@@ -642,11 +971,10 @@ ns.P2P = (() => {
         ns.Logger.warn(`RTC to ${peerId.slice(0, 8)} failed`, e.message);
       }
     });
-
-    await Promise.allSettled(sendPromises);
+    await Promise.allSettled(sends);
 
     return new Promise((resolve) => {
-      pending.timer = setTimeout(() => {
+      setTimeout(() => {
         const collected = [];
         for (const [peerId, results] of pending.results) {
           for (const r of results) collected.push({ ...r, fromDevice: peerId });
@@ -658,6 +986,14 @@ ns.P2P = (() => {
     });
   };
 
+  const initSignaling = () => {
+    // Глобальный gun для signaling (отдельный от presence)
+    window.__gun = window.__gun || Gun({
+      peers: [ns.Config.GUN_RELAY],
+      localStorage: false, // signaling не кешируем
+    });
+  };
+
   const bind = () => {
     document.addEventListener('ns:peer-offline', (ev) => {
       cleanup(ev.detail.deviceId);
@@ -665,12 +1001,13 @@ ns.P2P = (() => {
     });
   };
 
-  return { bind, queryPeers };
+  return { initSignaling, bind, queryPeers };
 })();
 
-/* [10] RELEVANCE */
+/* --------------------------------------------------------------------------
+   [14] RELEVANCE
+   -------------------------------------------------------------------------- */
 ns.Relevance = (() => {
-  const { THRESHOLD, ADJACENCY, MAX_CARDS } = ns.Config.RELEVANCE;
   const escapeHtml = ns.Util.escapeHtml;
 
   const highlightFragment = (queryText, matchText) => {
@@ -694,14 +1031,11 @@ ns.Relevance = (() => {
       for (let L = Math.min(qTokens.length, mTokens.length - i); L > bestLen; L--) {
         if (i + L > mPos.length) break;
         const slice = mTokens.slice(i, i + L).join(' ');
-        if (qTokens.join(' ').includes(slice)) {
-          bestLen = L; bestStart = i;
-        }
+        if (qTokens.join(' ').includes(slice)) { bestLen = L; bestStart = i; }
       }
     }
     if (bestLen < 2 || bestStart < 0) return escapeHtml(matchText);
-    const a = mPos[bestStart];
-    const b = mPos[bestStart + bestLen - 1];
+    const a = mPos[bestStart], b = mPos[bestStart + bestLen - 1];
     return escapeHtml(matchText.slice(0, a.start))
          + '<mark>' + escapeHtml(matchText.slice(a.start, b.end)) + '</mark>'
          + escapeHtml(matchText.slice(b.end));
@@ -709,29 +1043,27 @@ ns.Relevance = (() => {
 
   const rankAll = (queryVec, localThoughts, ephemeralResults) => {
     if (!queryVec) return { mine: [], world: [], adjacent: [] };
+    const s = ns.Settings.get();
 
     const localScored = localThoughts
       .filter((t) => Array.isArray(t.vector))
       .map((t) => ({ kind: 'local', source: t, score: ns.Vector.cosine(queryVec, t.vector) }))
-      .filter((r) => r.score > THRESHOLD - ADJACENCY)
+      .filter((r) => r.score > s.threshold - s.adjacency)
       .sort((a, b) => b.score - a.score);
 
     const worldScored = ephemeralResults
       .map((r) => ({ kind: 'world', source: r, score: Number(r.score) || 0 }))
-      .filter((r) => r.score > THRESHOLD - ADJACENCY)
+      .filter((r) => r.score > s.threshold - s.adjacency)
       .sort((a, b) => b.score - a.score);
 
     const mine = [], world = [], adjacent = [];
-
     for (const r of localScored) {
-      if (r.score >= THRESHOLD) {
-        if (mine.length < MAX_CARDS) mine.push(r);
-      } else if (adjacent.length < MAX_CARDS) adjacent.push(r);
+      if (r.score >= s.threshold) { if (mine.length < s.maxCards) mine.push(r); }
+      else if (adjacent.length < s.maxCards) adjacent.push(r);
     }
     for (const r of worldScored) {
-      if (r.score >= THRESHOLD) {
-        if (world.length < MAX_CARDS) world.push(r);
-      } else if (adjacent.length < MAX_CARDS) adjacent.push(r);
+      if (r.score >= s.threshold) { if (world.length < s.maxCards) world.push(r); }
+      else if (adjacent.length < s.maxCards) adjacent.push(r);
     }
     return { mine, world, adjacent };
   };
@@ -739,7 +1071,9 @@ ns.Relevance = (() => {
   return { rankAll, highlightFragment };
 })();
 
-/* [11] SYNC */
+/* --------------------------------------------------------------------------
+   [15] SYNC
+   -------------------------------------------------------------------------- */
 ns.Sync = (() => {
   const saveLocal = async ({ text, publishToWorld = false }) => {
     const clean = ns.Util.normalizeText(text);
@@ -760,7 +1094,7 @@ ns.Sync = (() => {
     }
 
     await ns.Storage.put(thought);
-    ns.Logger.info('saved local', { id: thought.id, published: thought.published });
+    ns.Logger.info('saved local', { id: thought.id.slice(0, 8), published: thought.published });
     document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
     return thought;
   };
@@ -785,14 +1119,80 @@ ns.Sync = (() => {
   return { saveLocal, reindexAll };
 })();
 
-/* [12] UI */
+/* --------------------------------------------------------------------------
+   [16] ONBOARDING
+   -------------------------------------------------------------------------- */
+ns.Onboarding = (() => {
+  const modal = document.getElementById('onboardingModal');
+  const step1 = document.getElementById('obStep1');
+  const step2 = document.getElementById('obStep2');
+  const step3 = document.getElementById('obStep3');
+  let currentSeed = null;
+
+  const show = () => modal.classList.remove('hidden');
+  const hide = () => modal.classList.add('hidden');
+
+  const showStep = (n) => {
+    step1.classList.toggle('hidden', n !== 1);
+    step2.classList.toggle('hidden', n !== 2);
+    step3.classList.toggle('hidden', n !== 3);
+  };
+
+  const init = () => {
+    document.getElementById('obCreateBtn').addEventListener('click', () => {
+      currentSeed = ns.Wordlist.generate(12);
+      document.getElementById('seedDisplay').textContent = currentSeed;
+      showStep(2);
+    });
+
+    document.getElementById('obRestoreBtn').addEventListener('click', () => {
+      showStep(3);
+    });
+
+    document.getElementById('seedCopyBtn').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(currentSeed);
+        ns.Logger.info('seed copied to clipboard');
+      } catch {}
+    });
+
+    document.getElementById('seedSavedBtn').addEventListener('click', async () => {
+      await ns.Device.setup(ns.Storage, currentSeed);
+      hide();
+      document.dispatchEvent(new CustomEvent('ns:onboarding-done'));
+    });
+
+    document.getElementById('seedBackBtn').addEventListener('click', () => showStep(1));
+
+    document.getElementById('seedRestoreBtn').addEventListener('click', async () => {
+      const input = document.getElementById('seedRestoreInput').value;
+      const errBox = document.getElementById('seedError');
+      if (!ns.Wordlist.validate(input)) {
+        errBox.classList.remove('hidden');
+        return;
+      }
+      errBox.classList.add('hidden');
+      await ns.Device.restore(ns.Storage, input.trim().toLowerCase());
+      hide();
+      document.dispatchEvent(new CustomEvent('ns:onboarding-done'));
+    });
+  };
+
+  return { show, hide, init };
+})();
+
+/* --------------------------------------------------------------------------
+   [17] UI
+   -------------------------------------------------------------------------- */
 ns.UI = (() => {
   const refs = {};
 
   const cache = () => {
-    ['input','btnSave','btnSaveWorld','btnLoadModel','btnReindex','btnSeed',
-     'btnQueryNow','btnReset','listMine','listWorld','listAdjacent',
-     'listAll','status','modelProgress','deviceId']
+    ['input','btnSave','btnSaveWorld','btnLoadModel','btnReindex','btnSeed5',
+     'btnQueryNow','btnShowSeed','btnExport','btnReset','btnApplySettings',
+     'listMine','listWorld','listAdjacent','listAll','status','modelProgress',
+     'deviceId','langSwitch','setTheme','setThreshold','setAdjacency','setMaxCards',
+     'mainApp']
       .forEach((id) => { refs[id] = document.getElementById(id); });
   };
 
@@ -805,9 +1205,19 @@ ns.UI = (() => {
   };
 
   const setProgress = (pct) => { refs.modelProgress.style.width = pct + '%'; };
+
   const showDeviceId = () => {
-    const fp = ns.Device.get();
-    if (refs.deviceId) refs.deviceId.textContent = fp ? `device: ${fp}` : 'device: (n/a)';
+    const fp = ns.Device.getFp();
+    if (refs.deviceId && fp) {
+      refs.deviceId.textContent = `device: ${fp}  (seed-protected, server sees only this id)`;
+    }
+  };
+
+  const applyTheme = (theme) => {
+    const resolved = theme === 'auto'
+      ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+      : theme;
+    document.documentElement.setAttribute('data-theme', resolved);
   };
 
   const renderLocalList = (container, items, queryText) => {
@@ -840,8 +1250,8 @@ ns.UI = (() => {
       const d = document.createElement('div');
       d.className = 'empty';
       const peers = ns.Presence.getOnlinePeers().length;
-      const rtc = document.querySelector('[data-key="rtc"]')?.textContent || 'RTC: 0';
-      d.textContent = peers ? `(no matches, ${rtc})` : `(no peers online, ${rtc})`;
+      const rtcPill = refs.status.querySelector('[data-key="rtc"]')?.textContent || 'RTC: 0';
+      d.textContent = peers ? `(no matches, ${rtcPill})` : `(no peers online, ${rtcPill})`;
       container.appendChild(d);
       return;
     }
@@ -856,7 +1266,7 @@ ns.UI = (() => {
       body.innerHTML = ns.Relevance.highlightFragment(queryText, e.text);
       const meta = document.createElement('div');
       meta.className = 'meta';
-      meta.textContent = `from:${(e.fromDevice || '?').slice(0,10)} | ${new Date(e.receivedAt || Date.now()).toISOString().slice(11,19)}`;
+      meta.textContent = `from:${(e.fromDevice || '?').slice(0,10)} | ${new Date(e.receivedAt || Date.now()).toISOString().slice(11,19)} | RAM only`;
       row.appendChild(score); row.appendChild(body); row.appendChild(meta);
       container.appendChild(row);
     }
@@ -902,13 +1312,9 @@ ns.UI = (() => {
     if (!text) {
       renderLocalList(refs.listMine,
         locals.filter(t => t.hasVector).sort((a,b) => b.createdAt - a.createdAt)
-              .slice(0, ns.Config.RELEVANCE.MAX_CARDS).map(t => ({ source: t, score: null })),
-        ''
-      );
+              .slice(0, ns.Settings.get().maxCards).map(t => ({ source: t, score: null })), '');
       renderWorldList(refs.listWorld,
-        eph.slice(0, ns.Config.RELEVANCE.MAX_CARDS).map(r => ({ source: r, score: null })),
-        ''
-      );
+        eph.slice(0, ns.Settings.get().maxCards).map(r => ({ source: r, score: null })), '');
       renderMixedList(refs.listAdjacent, [], '');
       return;
     }
@@ -917,16 +1323,14 @@ ns.UI = (() => {
       const qv = await ns.Vector.embed(text);
       const peersOnline = ns.Presence.getOnlinePeers().length;
       if (peersOnline > 0) {
-        ns.P2P.queryPeers(qv, { limit: ns.Config.RELEVANCE.MAX_CARDS })
+        ns.P2P.queryPeers(qv, { limit: ns.Settings.get().maxCards })
           .catch((e) => ns.Logger.warn('queryPeers failed', e.message));
       }
       const { mine, world, adjacent } = ns.Relevance.rankAll(qv, locals, eph);
       renderLocalList(refs.listMine, mine, text);
       renderWorldList(refs.listWorld, world, text);
       renderMixedList(refs.listAdjacent, adjacent, text);
-    } catch (e) {
-      ns.Logger.error('live relevance failed', e.message);
-    }
+    } catch (e) { ns.Logger.error('live relevance failed', e.message); }
   };
 
   const renderAll = async () => {
@@ -948,33 +1352,58 @@ ns.UI = (() => {
     setPill('indexed', `INDEXED: ${indexed}/${all.length}`, all.length > 0 && indexed === all.length ? 'ok' : 'warn');
   };
 
-  const refresh = async () => {
-    await renderAll();
-    await updateLiveRelevance();
+  const refresh = async () => { await renderAll(); await updateLiveRelevance(); };
+
+  const unlockMainApp = () => {
+    refs.mainApp.style.opacity = '1';
+    refs.mainApp.style.pointerEvents = 'auto';
+  };
+
+  const syncSettingsToForm = () => {
+    const s = ns.Settings.get();
+    refs.setTheme.value = s.theme;
+    refs.setThreshold.value = s.threshold;
+    refs.setAdjacency.value = s.adjacency;
+    refs.setMaxCards.value = s.maxCards;
   };
 
   const bind = () => {
     const debouncedUpdate = ns.Util.debounce(updateLiveRelevance, ns.Config.LIMITS.DEBOUNCE_QUERY_MS);
     refs.input.addEventListener('input', debouncedUpdate);
 
+    const disableSavers = (v) => { refs.btnSave.disabled = refs.btnSaveWorld.disabled = v; };
+
     refs.btnSave.addEventListener('click', async () => {
       try {
-        refs.btnSave.disabled = refs.btnSaveWorld.disabled = true;
+        disableSavers(true);
         await ns.Sync.saveLocal({ text: refs.input.value, publishToWorld: false });
         refs.input.value = '';
         await refresh();
       } catch (e) { ns.Logger.error('save failed', e.message); }
-      finally { refs.btnSave.disabled = refs.btnSaveWorld.disabled = false; }
+      finally { disableSavers(false); }
     });
 
     refs.btnSaveWorld.addEventListener('click', async () => {
       try {
-        refs.btnSave.disabled = refs.btnSaveWorld.disabled = true;
+        disableSavers(true);
         await ns.Sync.saveLocal({ text: refs.input.value, publishToWorld: true });
         refs.input.value = '';
         await refresh();
       } catch (e) { ns.Logger.error('save failed', e.message); }
-      finally { refs.btnSave.disabled = refs.btnSaveWorld.disabled = false; }
+      finally { disableSavers(false); }
+    });
+
+    refs.btnApplySettings.addEventListener('click', async () => {
+      const patch = {
+        theme: refs.setTheme.value,
+        threshold: parseFloat(refs.setThreshold.value) || 0.25,
+        adjacency: parseFloat(refs.setAdjacency.value) || 0.15,
+        maxCards: parseInt(refs.setMaxCards.value, 10) || 5,
+      };
+      await ns.Settings.save(ns.Storage, patch);
+      applyTheme(patch.theme);
+      ns.Logger.info('settings applied', patch);
+      await refresh();
     });
 
     refs.btnLoadModel.addEventListener('click', async () => {
@@ -1008,7 +1437,7 @@ ns.UI = (() => {
       finally { refs.btnReindex.disabled = false; }
     });
 
-    refs.btnSeed.addEventListener('click', async () => {
+    refs.btnSeed5.addEventListener('click', async () => {
       const samples = [
         'Мысль появляется в паузе между действиями.',
         'Архитектура — это способ договариваться с будущим собой.',
@@ -1022,7 +1451,7 @@ ns.UI = (() => {
 
     refs.btnQueryNow.addEventListener('click', async () => {
       if (!ns.Vector.isLoaded()) { ns.Logger.warn('Load model first'); return; }
-      const text = refs.input.value.trim() || 'sample';
+      const text = refs.input.value.trim() || 'sample query';
       try {
         const qv = await ns.Vector.embed(text);
         await ns.P2P.queryPeers(qv);
@@ -1030,14 +1459,48 @@ ns.UI = (() => {
       } catch (e) { ns.Logger.error('manual query failed', e.message); }
     });
 
+    refs.btnShowSeed.addEventListener('click', () => {
+      const viewer = document.getElementById('seedViewerModal');
+      document.getElementById('seedViewerDisplay').textContent = ns.Device.getSeed();
+      viewer.classList.remove('hidden');
+    });
+
+    document.getElementById('seedViewerCloseBtn').addEventListener('click', () => {
+      document.getElementById('seedViewerModal').classList.add('hidden');
+    });
+
+    document.getElementById('seedViewerCopyBtn').addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(ns.Device.getSeed()); } catch {}
+    });
+
+    refs.btnExport.addEventListener('click', async () => {
+      const all = await ns.Storage.all();
+      const capsule = {
+        version: 6,
+        exportedAt: new Date().toISOString(),
+        deviceFingerprint: ns.Device.getFp(),
+        thoughts: all,
+      };
+      const blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `noosphere-capsule-${Date.now()}.json`; a.click();
+      URL.revokeObjectURL(url);
+    });
+
     refs.btnReset.addEventListener('click', async () => {
-      if (!confirm('Стереть все локальные данные?')) return;
+      if (!confirm('Стереть ВСЕ локальные данные? Без seed-фразы доступ не восстановить.')) return;
       try {
         await ns.Device.reset(ns.Storage);
         ns.Ephemeral.clear();
-        alert('Готово. Перезагружаю...');
         location.reload();
       } catch (e) { ns.Logger.error('reset failed', e.message); }
+    });
+
+    refs.langSwitch.addEventListener('change', async () => {
+      const lang = refs.langSwitch.value;
+      await ns.Settings.save(ns.Storage, { lang });
+      ns.I18n.apply(lang);
     });
 
     document.addEventListener('ns:thoughts-changed', refresh);
@@ -1051,67 +1514,73 @@ ns.UI = (() => {
   };
 
   const init = () => { cache(); bind(); };
-  return { init, refresh, setPill, showDeviceId };
+  return { init, refresh, setPill, showDeviceId, applyTheme, unlockMainApp, syncSettingsToForm };
 })();
 
-/* [13] APP */
+/* --------------------------------------------------------------------------
+   [18] APP
+   Boot-порядок:
+     1. Storage.open()
+     2. Device.init() — проверка есть ли seed
+     3. Если нет seed → показать onboarding → ждать
+     4. Settings.load()
+     5. UI.init() + применить тему/язык
+     6. Presence.init() + heartbeat
+     7. P2P.initSignaling() + bind
+     8. Разблокировать main app
+   -------------------------------------------------------------------------- */
 ns.App = (() => {
   const boot = async () => {
     ns.UI.init();
+    ns.Onboarding.init();
     ns.UI.setPill('idb', 'IDB: boot...', 'warn');
-    ns.UI.setPill('gun', 'GUN: boot...', 'warn');
 
     try {
       await ns.Storage.open();
       ns.UI.setPill('idb', 'IDB: OK', 'ok');
-      ns.Logger.info('IDB ready', { name: ns.Config.DB_NAME });
     } catch (e) {
       ns.UI.setPill('idb', 'IDB: ERR', 'err');
       ns.Logger.error('IDB init failed', e.message);
       return;
     }
 
-    try {
-      await ns.Device.init(ns.Storage);
-      ns.UI.showDeviceId();
-    } catch (e) { ns.Logger.error('device init failed', e.message); }
+    // Проверка: есть ли seed?
+    const { status } = await ns.Device.init(ns.Storage);
+    if (status === 'need-onboarding') {
+      ns.Logger.info('onboarding required');
+      ns.Onboarding.show();
+      await new Promise((resolve) => {
+        document.addEventListener('ns:onboarding-done', resolve, { once: true });
+      });
+    }
 
+    ns.UI.showDeviceId();
+    ns.Logger.info('device ready', { fp: ns.Device.getFp().slice(0, 16) });
+
+    // Settings
+    await ns.Settings.load(ns.Storage);
+    ns.UI.applyTheme(ns.Settings.get().theme);
+    ns.I18n.apply(ns.Settings.get().lang);
+    document.getElementById('langSwitch').value = ns.Settings.get().lang;
+    ns.UI.syncSettingsToForm();
+
+    // Presence + P2P
     try {
       ns.Presence.init();
       ns.UI.setPill('gun', 'GUN: OK', 'ok');
       ns.Presence.startHeartbeat();
+      ns.P2P.initSignaling();
+      ns.P2P.bind();
     } catch (e) {
       ns.UI.setPill('gun', 'GUN: ERR', 'err');
       ns.Logger.error('presence init failed', e.message);
     }
 
-    // Добавляем методы для P2P signaling через Presence
-    ns.Presence.sendSignaling = (toDeviceId, payload) => {
-      // Используем presence node для временного signaling (эфемерно)
-      ns.Presence.getNode().get('signaling').get(ns.Util.newId()).put({
-        from: ns.Device.get(),
-        to: toDeviceId,
-        ts: ns.Util.now(),
-        ...payload,
-      });
-    };
-
-    ns.Presence.onSignalingFrom = (fromDeviceId, handler) => {
-      // Подписка на signaling сообщения
-      ns.Presence.getNode().get('signaling').map().on((data, msgId) => {
-        if (!data || data.to !== ns.Device.get() || data.from !== fromDeviceId) return;
-        handler(data);
-      });
-    };
-
-    ns.Presence.getNode = () => {
-      // Возвращаем presence node для доступа к signaling
-      return ns.Presence._node || ns.Presence.init()._node;
-    };
-
-    ns.P2P.bind();
+    ns.UI.unlockMainApp();
     await ns.UI.refresh();
+    ns.Logger.info('app ready');
   };
+
   return { boot };
 })();
 
