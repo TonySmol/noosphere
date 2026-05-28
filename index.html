@@ -1,894 +1,962 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Noosphere · Direct MQTT</title>
-<style>
-:root{--bg:#0f1115;--panel:#161a22;--border:#242a36;--text:#e6e8ee;--muted:#8a93a6;--accent:#6aa6ff;--ok:#4ade80;--warn:#f59e0b;--err:#ef4444}
-*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-monospace,Menlo,monospace}
-.wrap{max-width:1100px;margin:0 auto;padding:16px}
-h1{font-size:16px;margin:0 0 14px;letter-spacing:.5px}
-h1 small{color:var(--muted);font-weight:normal;font-size:11px;margin-left:8px}
-h2{font-size:11px;margin:18px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
-.panel{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:10px}
-.row{display:flex;gap:8px;flex-wrap:wrap}
-.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-@media(max-width:820px){.grid-3{grid-template-columns:1fr}}
-textarea,input[type=text]{width:100%;background:#0b0d12;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:10px;font:inherit;resize:vertical}
-textarea{min-height:80px}input[type=text]{min-height:auto;padding:8px 10px}
-button{background:#1f2532;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font:inherit;cursor:pointer}
-button:hover:not(:disabled){background:#272f40}
-button.primary{background:var(--accent);color:#0b0d12;border-color:var(--accent)}
-button.secondary{background:#2a2f3a;color:var(--accent);border-color:var(--accent)}
-button.danger{background:#2a1a1d;color:var(--err);border-color:#3d1f22}
-button:disabled{opacity:.5;cursor:not-allowed}
-.status{display:inline-flex;gap:8px;flex-wrap:wrap}
-.pill{padding:3px 8px;border-radius:999px;font-size:11px;background:#1a1f2a;border:1px solid var(--border);color:var(--muted)}
-.pill.ok{color:var(--ok);border-color:#1f3d2a}.pill.warn{color:var(--warn);border-color:#3d3220}
-.pill.err{color:var(--err);border-color:#3d1f22}.pill.think{color:var(--accent);border-color:var(--accent)}
-.list{display:flex;flex-direction:column;gap:6px;min-height:60px}
-.item{background:#0b0d12;border:1px solid var(--border);border-radius:4px;padding:8px 10px}
-.item.local{border-left:3px solid #555}.item.world{border-left:3px solid var(--accent)}
-.item.ephemeral::before{content:"MQTT";font-size:9px;color:var(--accent);padding:1px 4px;border:1px solid var(--accent);border-radius:2px;margin-right:6px}
-.item .score{float:right;color:var(--muted);font-size:11px}
-.item .meta{color:var(--muted);font-size:10px;margin-top:4px}
-.item mark{background:transparent;color:var(--accent);font-weight:bold}
-.progress{height:3px;background:#1a1f2a;border-radius:2px;overflow:hidden;margin-top:6px}
-.progress>div{height:100%;background:var(--accent);width:0;transition:width .2s}
-.log{background:#07090d;border:1px solid var(--border);border-radius:4px;padding:8px;max-height:250px;overflow:auto;font-size:11px}
-.log .e{color:var(--err)}.log .w{color:var(--warn)}.log .i{color:var(--muted)}.log .s{color:var(--ok)}
-.empty{color:var(--muted);font-size:12px;padding:6px}
-.hint{font-size:11px;color:var(--muted);font-style:italic;margin-top:6px}
-.room-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
-.room-row label{font-size:11px;color:var(--muted);white-space:nowrap}
-.room-row input{flex:1;min-width:120px}
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Noosphere — local-only + embeddings + Trystero P2P</title>
+  <link rel="icon" href="data:," />
+  <style>
+    :root{
+      --bg:#0f1115; --panel:#161a22; --border:#242a36;
+      --text:#e6e8ee; --muted:#8a93a6; --accent:#6aa6ff;
+      --ok:#4ade80; --warn:#f59e0b; --err:#ef4444;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-monospace,Menlo,monospace}
+    .wrap{max-width:1100px;margin:0 auto;padding:16px}
+    h1{font-size:16px;margin:0 0 14px;letter-spacing:.5px}
+    h1 small{color:var(--muted);font-weight:normal;font-size:11px;margin-left:8px}
+    h2{font-size:11px;margin:18px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+    .panel{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:10px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+    @media (max-width:820px){.grid-3{grid-template-columns:1fr}}
+    textarea{width:100%;background:#0b0d12;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:10px;font:inherit;resize:vertical;min-height:90px}
+    button{background:#1f2532;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font:inherit;cursor:pointer}
+    button:hover:not(:disabled){background:#272f40}
+    button.primary{background:var(--accent);color:#0b0d12;border-color:var(--accent)}
+    button.secondary{background:#2a2f3a;color:var(--accent);border-color:var(--accent)}
+    button.danger{background:#2a1a1d;color:var(--err);border-color:#3d1f22}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .status{display:inline-flex;gap:8px;flex-wrap:wrap}
+    .pill{padding:3px 8px;border-radius:999px;font-size:11px;background:#1a1f2a;border:1px solid var(--border);color:var(--muted)}
+    .pill.ok{color:var(--ok);border-color:#1f3d2a}
+    .pill.warn{color:var(--warn);border-color:#3d3220}
+    .pill.err{color:var(--err);border-color:#3d1f22}
+    .pill.think{color:var(--accent);border-color:var(--accent)}
+    .list{display:flex;flex-direction:column;gap:6px;min-height:60px}
+    .item{background:#0b0d12;border:1px solid var(--border);border-radius:4px;padding:8px 10px}
+    .item.local{border-left:3px solid #555}
+    .item.world{border-left:3px solid var(--accent)}
+    .item.ephemeral::before{content:"RAM";font-size:9px;color:var(--accent);padding:1px 4px;border:1px solid var(--accent);border-radius:2px;margin-right:6px}
+    .item .score{float:right;color:var(--muted);font-size:11px}
+    .item .meta{color:var(--muted);font-size:10px;margin-top:4px}
+    .progress{height:3px;background:#1a1f2a;border-radius:2px;overflow:hidden;margin-top:6px}
+    .progress>div{height:100%;background:var(--accent);width:0;transition:width .2s}
+    .log{background:#07090d;border:1px solid var(--border);border-radius:4px;padding:8px;max-height:220px;overflow:auto;font-size:11px}
+    .log .e{color:var(--err)} .log .w{color:var(--warn)} .log .i{color:var(--muted)}
+    .empty{color:var(--muted);font-size:12px;padding:6px}
+    .hint{font-size:11px;color:var(--muted);font-style:italic;margin-top:6px}
+    code{color:#c7d2fe}
+  </style>
 </head>
+
 <body>
 <div class="wrap">
-<h1>NOOSPHERE <small>v3.0 · direct MQTT · broker.emqx.io</small></h1>
+  <h1>NOOSPHERE <small>single HTML · IDB local-only · embeddings · Trystero P2P</small></h1>
 
-<section class="panel">
-  <div class="room-row">
-    <label>ROOM:</label>
-    <input type="text" id="roomInput" value="noosphere-main-2026" />
-    <button id="btnConnect" class="primary">Connect</button>
-    <button id="btnDisconnect" class="danger" disabled>Disconnect</button>
-  </div>
-  <div class="status" id="status" style="margin-top:8px;">
-    <span class="pill" data-key="idb">IDB: ...</span>
-    <span class="pill" data-key="model">MODEL: idle</span>
-    <span class="pill" data-key="net">NET: offline</span>
-    <span class="pill" data-key="peers">PEERS: 0</span>
-    <span class="pill" data-key="indexed">INDEXED: 0</span>
-    <span class="pill" data-key="think" style="display:none">...</span>
-  </div>
-  <div class="progress"><div id="modelProgress"></div></div>
-  <div class="hint">
-    <b>v3.0:</b> Выкинули Trystero, используем прямой MQTT к <code>broker.emqx.io:8084</code> (WSS).
-    Никаких NAT проблем, никаких WebRTC fallback. 
-    Открой на ТЕЛЕФОНЕ и на ПК, введи одинаковый room, нажми Connect на обоих.
-    Соседи появятся мгновенно после heartbeat (3 сек).
-  </div>
-</section>
+  <section class="panel">
+    <div class="status" id="status">
+      <span class="pill" data-key="idb">IDB: ...</span>
+      <span class="pill" data-key="model">MODEL: idle</span>
+      <span class="pill" data-key="p2p">P2P: ...</span>
+      <span class="pill" data-key="peers">PEERS: 0</span>
+      <span class="pill" data-key="indexed">INDEXED: 0</span>
+      <span class="pill think" data-key="think" style="display:none">...</span>
+      <span class="pill" data-key="room">ROOM: ...</span>
+    </div>
+    <div class="progress"><div id="modelProgress"></div></div>
+    <div class="hint">
+      ROOM задаётся через <code>?room=xxx</code> или <code>#xxx</code>.
+      P2P требует <b>https://</b> или <b>http://localhost</b> (не file://) и доступ к <b>wss://</b> трекерам.
+    </div>
+  </section>
 
-<section class="panel">
-  <h2>thought</h2>
-  <textarea id="input" placeholder="напечатай мысль... (релевантность появится через 4 сек после паузы)"></textarea>
-  <div class="row" style="margin-top:8px;">
-    <button id="btnSave" class="secondary">Сохранить локально</button>
-    <button id="btnSaveWorld" class="primary">Сохранить + в Мир</button>
-  </div>
-</section>
+  <section class="panel">
+    <h2>thought</h2>
+    <textarea id="input" placeholder="пиши... после паузы появятся: локально, сеть, serendipity"></textarea>
+    <div class="row" style="margin-top:8px;">
+      <button id="btnLoadModel" class="primary">Load MiniLM</button>
+      <button id="btnSave" class="secondary">Save local</button>
+      <button id="btnSaveWorld" class="primary">Save + World</button>
+      <button id="btnPing" class="secondary">Ping peers</button>
+      <button id="btnReindex">Reindex missing vectors</button>
+      <button id="btnSeed">Seed 5</button>
+      <button id="btnReset" class="danger">Reset</button>
+    </div>
+    <div class="hint">
+      Save + World = ты отвечаешь на запросы peers (только topK сниппеты). Получатель ничего не сохраняет.
+    </div>
+  </section>
 
-<section class="panel">
-  <h2>live relevance</h2>
-  <div class="grid-3">
-    <div><div style="color:var(--muted);font-size:11px;margin-bottom:4px;">MY (local)</div><div class="list" id="listMine"></div></div>
-    <div><div style="color:var(--muted);font-size:11px;margin-bottom:4px;">WORLD (neighbors, RAM)</div><div class="list" id="listWorld"></div></div>
-    <div><div style="color:var(--muted);font-size:11px;margin-bottom:4px;">ADJACENT</div><div class="list" id="listAdjacent"></div></div>
-  </div>
-</section>
+  <section class="panel">
+    <h2>live relevance</h2>
+    <div class="grid-3">
+      <div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">MY (local)</div>
+        <div class="list" id="listMine"></div>
+      </div>
+      <div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">WORLD (peers, RAM)</div>
+        <div class="list" id="listWorld"></div>
+      </div>
+      <div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">SERENDIPITY (low corr mix)</div>
+        <div class="list" id="listSer"></div>
+      </div>
+    </div>
+  </section>
 
-<section class="panel">
-  <h2>diagnostics</h2>
-  <div class="row">
-    <button id="btnLoadModel" class="primary">Load MiniLM</button>
-    <button id="btnReindex">Reindex</button>
-    <button id="btnSeed">Seed 5</button>
-    <button id="btnPing">Ping neighbors</button>
-    <button id="btnReset" class="danger">Reset</button>
-  </div>
-</section>
+  <section class="panel">
+    <h2>my notes (persisted)</h2>
+    <div class="list" id="listAll"></div>
+  </section>
 
-<section class="panel">
-  <h2>my thoughts (persisted)</h2>
-  <div class="list" id="listAll"></div>
-</section>
-
-<section class="panel">
-  <h2>event log</h2>
-  <div class="log" id="log"></div>
-</section>
+  <section class="panel">
+    <h2>event log</h2>
+    <div class="log" id="log"></div>
+  </section>
 </div>
 
 <script type="module">
 /* ============================================================================
-   NOOSPHERE v3.0 — DIRECT MQTT (без Trystero)
-   ----------------------------------------------------------------------------
-   Почему Trystero не работал:
-     1. Trystero hardcoded свои relay URL которые падают (mqtt.eclipseprojects, 
-        test.mosquitto:8081 без WSS, nostr relay с "no space left")
-     2. config.relayURLs НЕ override-ит hardcoded, а merge-ит с ними
-     3. После signaling WebRTC ICE handshake падает на NAT (особенно мобильном)
-   
-   Решение: прямой MQTT через mqtt.js к broker.emqx.io:8084 (WSS).
-   
-   Архитектура:
-     - broker-based messaging (не чистый P2P, но РАБОТАЕТ)
-     - QoS 0, retain: false = эфемерность (RAM only на broker)
-     - Topics:
-         noosphere/${room}/announce/${selfId}  — векторы соседей
-         noosphere/${room}/query/${targetId}   — pull request
-         noosphere/${room}/response/${selfId}  — pull response
-         noosphere/${room}/heartbeat/${selfId} — presence (каждые 3 сек)
-   
-   Секции:
-     [1] Config  [2] Logger  [3] Util  [4] Storage  [5] Vector
-     [6] MQTT Channel  [7] Ephemeral  [8] Relevance  [9] Sync  [10] UI  [11] App
-   ============================================================================ */
-
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
-import mqtt from 'https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js';
-
-env.allowLocalModels = false;
-env.useBrowserCache = true;
-
-const ns = {};
-
-/* --------------------------------------------------------------------------
-   [1] CONFIG
-   -------------------------------------------------------------------------- */
+   [0] CONFIG
+============================================================================ */
+const ns = {}
 ns.Config = Object.freeze({
-  DB_NAME: 'noosphere_mqtt',
-  DB_VERSION: 1,
-  STORE_THOUGHTS: 'thoughts',
-  
-  // Прямой MQTT к broker.emqx.io (работает в РФ через WSS)
-  MQTT_BROKER: 'wss://broker.emqx.io:8084/mqtt',
-  MQTT_TOPIC_PREFIX: 'noosphere',
-  
+  DB: { name: 'noosphere_single_html', version: 1, store: 'notes' },
+
+  DEFAULT_ROOM: 'noosphere-room-1',
+  APP_ID: 'noosphere-single-html-v3',
+
+  // если это режется — peers не появятся (это ограничение окружения)
+  TRACKER_URLS: [
+    'wss://tracker.openwebtorrent.com',
+    'wss://tracker.btorrent.xyz',
+    'wss://tracker.fastcast.nz',
+    'wss://tracker.webtorrent.dev', // запасной (может быть недоступен)
+  ],
+
+  RTC: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] },
+
+  MODEL_ID: 'Xenova/all-MiniLM-L6-v2',
+
   LIMITS: {
-    MAX_TEXT_LENGTH: 10_000,
-    RENDER_CAP: 200,
-    DEBOUNCE_MS: 4000,
-    QUERY_TIMEOUT_MS: 3000,
-    MAX_RESULTS_PER_PEER: 5,
-    MAX_EPHEMERAL_AGE_MS: 5 * 60_000,
-    HEARTBEAT_INTERVAL_MS: 3000,
-    PEER_TIMEOUT_MS: 10000,
+    MAX_TEXT: 10_000,
+    SNIPPET: 240,
+    DEBOUNCE_MS: 900,
+    QUERY_TIMEOUT_MS: 1200,
+
+    LOCAL_TOPK: 5,
+    WORLD_TOPK: 5,
+    SER_TOPK: 5,
+
+    EPHEMERAL_TTL_MS: 5 * 60_000,
   },
-  
-  VECTOR: { MODEL_ID: 'Xenova/all-MiniLM-L6-v2' },
-  RELEVANCE: { THRESHOLD: 0.25, ADJACENCY: 0.15, MAX_CARDS: 5 },
-});
 
-/* --------------------------------------------------------------------------
-   [2] LOGGER
-   -------------------------------------------------------------------------- */
-ns.Logger = (() => {
-  const el = () => document.getElementById('log');
-  const fmt = (d) => d.toISOString().slice(11, 19);
-  const safe = (x) => {
-    try { return typeof x === 'string' ? x : JSON.stringify(x); }
-    catch { return String(x); }
-  };
-  const write = (lvl, m, d) => {
-    const line = document.createElement('div');
-    line.className = lvl;
-    const tail = d !== undefined ? ' ' + safe(d) : '';
-    line.textContent = `[${fmt(new Date())}] [${lvl.toUpperCase()}] ${m}${tail}`;
-    const box = el();
-    if (box) { box.appendChild(line); box.scrollTop = box.scrollHeight; }
-    const fn = lvl === 'e' ? 'error' : lvl === 'w' ? 'warn' : 'log';
-    try { console[fn](`[ns:${lvl}] ${m}`, d ?? ''); } catch {}
-  };
-  return {
-    info:  (m, d) => write('i', m, d),
-    warn:  (m, d) => write('w', m, d),
-    error: (m, d) => write('e', m, d),
-    success: (m, d) => write('s', m, d),
-  };
-})();
+  SER: { min: 0.12, max: 0.33 },
+})
 
-/* --------------------------------------------------------------------------
-   [3] UTIL
-   -------------------------------------------------------------------------- */
+/* ============================================================================
+   [1] UI + LOGGER
+============================================================================ */
+ns.UI = (() => {
+  const $ = (id) => document.getElementById(id)
+  const refs = {
+    input: $('input'),
+    listMine: $('listMine'),
+    listWorld: $('listWorld'),
+    listSer: $('listSer'),
+    listAll: $('listAll'),
+    status: $('status'),
+    modelProgress: $('modelProgress'),
+    log: $('log'),
+
+    btnLoadModel: $('btnLoadModel'),
+    btnSave: $('btnSave'),
+    btnSaveWorld: $('btnSaveWorld'),
+    btnPing: $('btnPing'),
+    btnReindex: $('btnReindex'),
+    btnSeed: $('btnSeed'),
+    btnReset: $('btnReset'),
+  }
+
+  const escapeHtml = (s) =>
+    String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+  const setPill = (key, text, cls = '') => {
+    const el = refs.status.querySelector(`[data-key="${key}"]`)
+    if (!el) return
+    el.textContent = text
+    el.classList.remove('ok', 'warn', 'err', 'think')
+    if (cls) el.classList.add(cls)
+  }
+
+  const setThink = (on, text = '...') => {
+    const el = refs.status.querySelector(`[data-key="think"]`)
+    if (!el) return
+    if (on) {
+      el.style.display = ''
+      el.textContent = text
+      el.classList.add('think')
+    } else {
+      el.style.display = 'none'
+      el.classList.remove('think')
+    }
+  }
+
+  const setProgress = (pct) => { refs.modelProgress.style.width = `${pct}%` }
+
+  const logLine = (lvl, msg, data) => {
+    const line = document.createElement('div')
+    line.className = lvl
+    const t = new Date().toISOString().slice(11, 19)
+    const tail = data !== undefined ? (' ' + (typeof data === 'string' ? data : JSON.stringify(data))) : ''
+    line.textContent = `[${t}] [${lvl.toUpperCase()}] ${msg}${tail}`
+    refs.log.appendChild(line)
+    refs.log.scrollTop = refs.log.scrollHeight
+    const fn = lvl === 'e' ? 'error' : lvl === 'w' ? 'warn' : 'log'
+    console[fn](`[ns:${lvl}] ${msg}`, data ?? '')
+  }
+
+  const itemHtml = ({ kind, text, score, meta, ephemeral }) => {
+    const scoreStr = (typeof score === 'number') ? score.toFixed(3) : ''
+    const cls = `item ${kind} ${ephemeral ? 'ephemeral' : ''}`
+    return `
+      <div class="${cls}">
+        <span class="score">${scoreStr}</span>
+        <div>${escapeHtml(text || '')}</div>
+        <div class="meta">${escapeHtml(meta || '')}</div>
+      </div>
+    `
+  }
+
+  const renderList = (el, itemsHtml, emptyText) => {
+    el.innerHTML = ''
+    if (!itemsHtml.length) {
+      const d = document.createElement('div')
+      d.className = 'empty'
+      d.textContent = emptyText
+      el.appendChild(d)
+      return
+    }
+    el.innerHTML = itemsHtml.join('')
+  }
+
+  return { refs, setPill, setThink, setProgress, logLine, itemHtml, renderList }
+})()
+
+/* ============================================================================
+   [2] UTIL + ROOM
+============================================================================ */
 ns.Util = {
-  selfId: 'peer-' + Math.random().toString(36).slice(2, 10),
-  newId: () => {
-    try { return crypto.randomUUID(); }
-    catch { return 'id-' + Math.random().toString(36).slice(2, 15) + Date.now().toString(36); }
-  },
   now: () => Date.now(),
-  normalizeText: (t) => typeof t === 'string' ? t.trim().slice(0, ns.Config.LIMITS.MAX_TEXT_LENGTH) : '',
-  isNonEmptyString: (v) => typeof v === 'string' && v.trim().length > 0,
-  debounce: (fn, ms) => { let t=null; return (...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms);}; },
-  escapeHtml: (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'),
-};
+  id: () => crypto.randomUUID(),
+  clamp: (x, a, b) => Math.max(a, Math.min(b, x)),
+  normalizeText: (s) => (typeof s === 'string' ? s.trim().slice(0, ns.Config.LIMITS.MAX_TEXT) : ''),
+  snippet: (s, n) => (!s ? '' : (s.length <= n ? s : s.slice(0, n - 1) + '…')),
+  debounce(fn, ms) {
+    let t = null
+    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms) }
+  },
+}
 
-/* --------------------------------------------------------------------------
-   [4] STORAGE
-   -------------------------------------------------------------------------- */
+ns.Room = (() => {
+  const url = new URL(location.href)
+  const q = url.searchParams.get('room')
+  const h = location.hash ? location.hash.slice(1) : ''
+  const room = (q || h || ns.Config.DEFAULT_ROOM).trim()
+  ns.UI.setPill('room', `ROOM: ${room}`, 'ok')
+  return room
+})()
+
+/* ============================================================================
+   [3] STORAGE (IndexedDB)
+============================================================================ */
 ns.Storage = (() => {
-  const { DB_NAME, DB_VERSION, STORE_THOUGHTS } = ns.Config;
-  let db = null;
-  const open = () => new Promise((res, rej) => {
-    if (db) return res(db);
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
+  const { name, version, store } = ns.Config.DB
+  let db = null
+
+  const open = () => new Promise((resolve, reject) => {
+    if (db) return resolve(db)
+    const req = indexedDB.open(name, version)
+
     req.onupgradeneeded = (ev) => {
-      const _db = ev.target.result;
-      if (!_db.objectStoreNames.contains(STORE_THOUGHTS)) {
-        const s = _db.createObjectStore(STORE_THOUGHTS, { keyPath: 'id' });
-        s.createIndex('createdAt', 'createdAt');
-        s.createIndex('hasVector', 'hasVector');
-        s.createIndex('published', 'published');
+      const _db = ev.target.result
+      if (!_db.objectStoreNames.contains(store)) {
+        const st = _db.createObjectStore(store, { keyPath: 'id' })
+        st.createIndex('updatedAt', 'updatedAt')
+        st.createIndex('hasVector', 'hasVector')
+        st.createIndex('published', 'published')
       }
-    };
-    req.onsuccess = (ev) => { db = ev.target.result; res(db); };
-    req.onerror = () => rej(req.error);
-  });
-  const tx = (mode = 'readonly') => db.transaction(STORE_THOUGHTS, mode).objectStore(STORE_THOUGHTS);
-  const prom = (req) => new Promise((r, j) => { req.onsuccess = () => r(req.result); req.onerror = () => j(req.error); });
-  const put = async (t) => { await open(); return prom(tx('readwrite').put(t)); };
-  const all = async () => { await open(); return prom(tx().getAll()); };
+    }
+
+    req.onsuccess = (ev) => { db = ev.target.result; resolve(db) }
+    req.onerror = () => reject(req.error)
+  })
+
+  const txStore = (mode) => db.transaction(store, mode).objectStore(store)
+  const prom = (req) => new Promise((res, rej) => { req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error) })
+
+  const put = async (row) => { await open(); return prom(txStore('readwrite').put(row)) }
+  const getAll = async () => {
+    await open()
+    const all = await prom(txStore('readonly').getAll())
+    all.sort((a, b) => b.updatedAt - a.updatedAt)
+    return all
+  }
+  const clear = async () => { await open(); return prom(txStore('readwrite').clear()) }
+
   const listUnindexed = async () => {
-    await open();
-    return new Promise((res, rej) => {
-      const out = [];
-      const req = tx().index('hasVector').openCursor(IDBKeyRange.only(0));
-      req.onsuccess = (ev) => { const c = ev.target.result; if (!c) return res(out); out.push(c.value); c.continue(); };
-      req.onerror = () => rej(req.error);
-    });
-  };
-  const clear = async () => { await open(); await prom(tx('readwrite').clear()); };
-  return { open, put, all, listUnindexed, clear };
-})();
-
-/* --------------------------------------------------------------------------
-   [5] VECTOR
-   -------------------------------------------------------------------------- */
-ns.Vector = (() => {
-  let extractor = null, loadPromise = null;
-  const load = (onProgress) => {
-    if (extractor) return Promise.resolve(extractor);
-    if (loadPromise) return loadPromise;
-    loadPromise = pipeline('feature-extraction', ns.Config.VECTOR.MODEL_ID, {
-      progress_callback: (p) => { if (onProgress && p.status === 'progress' && p.total) onProgress({ loaded: p.loaded, total: p.total }); },
-    }).then((ex) => { extractor = ex; ns.Logger.info('model loaded'); return ex; })
-      .catch((err) => { loadPromise = null; throw err; });
-    return loadPromise;
-  };
-  const embed = async (text) => {
-    if (!extractor) throw new Error('Model not loaded');
-    if (!ns.Util.isNonEmptyString(text)) return null;
-    const out = await extractor(text, { pooling: 'mean', normalize: true });
-    return Array.from(out.data);
-  };
-  const cosine = (a, b) => {
-    if (!a || !b || a.length !== b.length) return 0;
-    let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s;
-  };
-  const isLoaded = () => extractor !== null;
-  return { load, embed, cosine, isLoaded };
-})();
-
-/* --------------------------------------------------------------------------
-   [6] MQTT CHANNEL (прямой MQTT, без Trystero)
-   -------------------------------------------------------------------------- */
-ns.Channel = (() => {
-  let client = null;
-  let roomName = null;
-  const peers = new Map();            // peerId -> lastSeen
-  const queryHandlers = new Map();    // queryId -> handler
-  let heartbeatTimer = null;
-  let pruneTimer = null;
-
-  const topic = (suffix) => `${ns.Config.MQTT_TOPIC_PREFIX}/${roomName}/${suffix}`;
-
-  const init = async (room) => {
-    if (client) return;
-    roomName = room;
-    ns.Logger.info('connecting to MQTT broker: ' + ns.Config.MQTT_BROKER);
-    
+    await open()
+    const out = []
     return new Promise((resolve, reject) => {
-      try {
-        client = mqtt.connect(ns.Config.MQTT_BROKER, {
-          clientId: 'noosphere_' + ns.Util.selfId,
-          clean: true,
-          connectTimeout: 10000,
-          reconnectPeriod: 5000,
-        });
-      } catch (e) {
-        ns.Logger.error('mqtt.connect failed', e.message);
-        reject(e);
-        return;
+      const req = txStore('readonly').index('hasVector').openCursor(IDBKeyRange.only(0))
+      req.onsuccess = (ev) => {
+        const c = ev.target.result
+        if (!c) return resolve(out)
+        out.push(c.value)
+        c.continue()
       }
+      req.onerror = () => reject(req.error)
+    })
+  }
 
-      const connTimeout = setTimeout(() => {
-        if (client) { try { client.end(true); } catch {} client = null; }
-        reject(new Error('mqtt connect timeout'));
-      }, 15000);
+  return { open, put, getAll, clear, listUnindexed }
+})()
 
-      client.on('connect', () => {
-        clearTimeout(connTimeout);
-        ns.Logger.success('MQTT connected · selfId=' + ns.Util.selfId);
-        
-        // Subscribe to all topics in this room
-        const subs = [
-          topic('announce/+'),           // вектора всех соседей
-          topic('query/' + ns.Util.selfId),  // pull requests адресованные нам
-          topic('response/+'),           // pull responses от всех
-          topic('heartbeat/+'),          // presence всех соседей
-        ];
-        client.subscribe(subs, { qos: 0 }, (err) => {
-          if (err) {
-            ns.Logger.warn('subscribe error', err.message);
-          } else {
-            ns.Logger.success('subscribed to ' + subs.length + ' topics');
-          }
-        });
-        
-        // Start heartbeat
-        startHeartbeat();
-        
-        // Start prune loop
-        pruneTimer = setInterval(prunePeers, 5000);
-        
-        resolve();
-      });
+/* ============================================================================
+   [4] VECTOR (transformers.js)
+============================================================================ */
+ns.Vector = (() => {
+  let extractor = null
+  let loading = null
 
-      client.on('error', (err) => {
-        ns.Logger.warn('MQTT error', err.message);
-      });
+  const load = async (onProgressPct) => {
+    if (extractor) return extractor
+    if (loading) return loading
 
-      client.on('offline', () => {
-        ns.Logger.warn('MQTT offline');
-      });
+    const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js')
+    env.allowLocalModels = false
+    env.useBrowserCache = true
 
-      client.on('reconnect', () => {
-        ns.Logger.info('MQTT reconnecting...');
-      });
-
-      client.on('close', () => {
-        ns.Logger.warn('MQTT closed');
-      });
-
-      client.on('message', (topicStr, payload) => {
-        handleMessage(topicStr, payload);
-      });
-    });
-  };
-
-  const handleMessage = async (topicStr, payload) => {
-    let data;
-    try {
-      data = JSON.parse(payload.toString());
-    } catch {
-      return;
-    }
-    if (!data || typeof data !== 'object') return;
-    if (data.from === ns.Util.selfId) return;  // ignore own messages
-
-    const parts = topicStr.split('/');
-    // topic: noosphere/${room}/${type}/${target}
-    const type = parts[2];
-    const target = parts[3];
-
-    switch (type) {
-      case 'heartbeat':
-        peers.set(data.from, ns.Util.now());
-        updatePeerCount();
-        break;
-        
-      case 'announce':
-        peers.set(data.from, ns.Util.now());
-        updatePeerCount();
-        if (Array.isArray(data.vector) && data.vector.length > 0 && data.text) {
-          ns.Ephemeral.upsertAnnounce(data.from, {
-            text: data.text,
-            vector: data.vector,
-            id: data.id || ns.Util.newId(),
-          });
+    loading = pipeline('feature-extraction', ns.Config.MODEL_ID, {
+      progress_callback: (p) => {
+        if (p.status === 'progress' && p.total) {
+          const pct = Math.round((p.loaded / p.total) * 100)
+          onProgressPct?.(pct)
         }
-        break;
-        
-      case 'query':
-        // Pull request addressed to us
-        if (!ns.Vector.isLoaded() || !Array.isArray(data.vector)) return;
-        try {
-          const all = await ns.Storage.all();
-          const shared = all.filter((t) => t.published && Array.isArray(t.vector));
-          const scored = shared
-            .map((t) => ({ 
-              text: t.text, 
-              score: ns.Vector.cosine(data.vector, t.vector), 
-              id: t.id 
-            }))
-            .filter((r) => r.score > 0.1)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
-          
-          publish('response/' + ns.Util.selfId, {
-            queryId: data.queryId,
-            from: ns.Util.selfId,
-            results: scored,
-          });
-          ns.Logger.info('responded to query from ' + data.from.slice(0, 10) + ' with ' + scored.length + ' results');
-        } catch (e) {
-          ns.Logger.warn('query handler error', e.message);
-        }
-        break;
-        
-      case 'response':
-        // Pull response from some peer
-        if (!data.queryId) return;
-        const handler = queryHandlers.get(data.queryId);
-        if (!handler) return;
-        handler(data.from, data.results || []);
-        ns.Logger.info('got response from ' + data.from.slice(0, 10) + ' with ' + (data.results||[]).length + ' results');
-        break;
-    }
-  };
-
-  const publish = (suffix, data) => {
-    if (!client || !client.connected) {
-      ns.Logger.warn('publish skipped: MQTT not connected');
-      return false;
-    }
-    const t = topic(suffix);
-    try {
-      client.publish(t, JSON.stringify(data), { qos: 0, retain: false });
-      return true;
-    } catch (e) {
-      ns.Logger.warn('publish error', e.message);
-      return false;
-    }
-  };
-
-  const startHeartbeat = () => {
-    const sendHeartbeat = () => {
-      publish('heartbeat/' + ns.Util.selfId, {
-        from: ns.Util.selfId,
-        t: ns.Util.now(),
-      });
-    };
-    sendHeartbeat();  // immediate first beat
-    heartbeatTimer = setInterval(sendHeartbeat, ns.Config.LIMITS.HEARTBEAT_INTERVAL_MS);
-  };
-
-  const prunePeers = () => {
-    const now = ns.Util.now();
-    const timeout = ns.Config.LIMITS.PEER_TIMEOUT_MS;
-    let changed = false;
-    for (const [pid, lastSeen] of peers) {
-      if (now - lastSeen > timeout) {
-        peers.delete(pid);
-        ns.Logger.info('peer timeout: ' + pid.slice(0, 10));
-        changed = true;
       }
-    }
-    if (changed) updatePeerCount();
-  };
+    }).then((ex) => {
+      extractor = ex
+      loading = null
+      return extractor
+    }).catch((e) => {
+      loading = null
+      throw e
+    })
 
-  const leave = () => {
-    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-    if (pruneTimer) { clearInterval(pruneTimer); pruneTimer = null; }
-    if (client) {
-      try { client.end(true); } catch {}
-      client = null;
-    }
-    peers.clear();
-    queryHandlers.clear();
-    updatePeerCount();
-    ns.Logger.info('MQTT disconnected');
-  };
+    return loading
+  }
 
-  const isConnected = () => client !== null && client.connected;
+  const embed = async (text) => {
+    if (!extractor) throw new Error('MODEL_NOT_LOADED')
+    const out = await extractor(text, { pooling: 'mean', normalize: true })
+    return out.data // Float32Array normalized
+  }
 
-  const announce = (text, vector, noteId) => {
-    publish('announce/' + ns.Util.selfId, {
-      from: ns.Util.selfId,
-      text: text.slice(0, 500),  // limit payload
-      vector: vector,
-      id: noteId,
-      t: ns.Util.now(),
-    });
-  };
+  const dot = (a, b) => {
+    if (!a || !b || a.length !== b.length) return 0
+    let s = 0
+    for (let i = 0; i < a.length; i++) s += a[i] * b[i]
+    return s
+  }
 
-  const query = (vector, { timeoutMs = ns.Config.LIMITS.QUERY_TIMEOUT_MS } = {}) => {
-    if (!isConnected() || !peers.size) return Promise.resolve([]);
-    const queryId = ns.Util.newId();
-    const results = new Map();
-    const handler = (peerId, res) => {
-      results.set(peerId, res);
-      ns.Ephemeral.upsertResponse(peerId, res);
-    };
-    queryHandlers.set(queryId, handler);
-    
-    // Send query to ALL peers via wildcard-less topic (we send to query/${selfId} of each peer)
-    for (const peerId of peers.keys()) {
-      publish('query/' + peerId, {
-        queryId,
-        from: ns.Util.selfId,
-        vector,
-        t: ns.Util.now(),
-      });
-    }
-    ns.Logger.info('query sent to ' + peers.size + ' peers');
-    
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        queryHandlers.delete(queryId);
-        const collected = [];
-        for (const [peerId, res] of results) {
-          for (const r of res) collected.push({ ...r, fromPeer: peerId });
-        }
-        ns.Logger.info('query done: ' + results.size + '/' + peers.size + ' responded, ' + collected.length + ' results');
-        resolve(collected);
-      }, timeoutMs);
-    });
-  };
+  return { load, embed, dot, isLoaded: () => extractor !== null }
+})()
 
-  const ping = () => {
-    if (!isConnected()) return;
-    // Just send a heartbeat as ping
-    publish('heartbeat/' + ns.Util.selfId, {
-      from: ns.Util.selfId,
-      t: ns.Util.now(),
-      ping: true,
-    });
-  };
+/* ============================================================================
+   [5] STATE (notes in RAM)
+============================================================================ */
+ns.State = (() => {
+  const state = { notes: [], indexed: 0 }
 
-  const getActivePeers = () => [...peers.keys()];
+  const reload = async () => {
+    state.notes = await ns.Storage.getAll()
+    state.indexed = state.notes.filter(n => n && n.hasVector && n.vector).length
+    ns.UI.setPill(
+      'indexed',
+      `INDEXED: ${state.indexed}/${state.notes.length}`,
+      (state.notes.length && state.indexed === state.notes.length) ? 'ok' : 'warn'
+    )
+  }
 
-  const updatePeerCount = () => {
-    document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: peers.size } }));
-  };
+  return { state, reload }
+})()
 
-  return { init, leave, isConnected, announce, query, ping, getActivePeers };
-})();
-
-/* --------------------------------------------------------------------------
-   [7] EPHEMERAL (хранит announce + response результаты)
-   -------------------------------------------------------------------------- */
+/* ============================================================================
+   [6] EPHEMERAL WORLD cache (RAM only)
+============================================================================ */
 ns.Ephemeral = (() => {
-  const byPeer = new Map();  // peerId -> { announces: Map<id, {text,vector,ts}>, lastSeen }
+  const byPeer = new Map()
 
-  const upsertAnnounce = (peerId, announce) => {
-    let rec = byPeer.get(peerId);
-    if (!rec) {
-      rec = { announces: new Map(), lastSeen: ns.Util.now() };
-      byPeer.set(peerId, rec);
-    }
-    rec.announces.set(announce.id, { ...announce, ts: ns.Util.now() });
-    rec.lastSeen = ns.Util.now();
-    prune();
-    document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
-  };
-
-  const upsertResponse = (peerId, results) => {
-    // Responses are converted to announce-style for display
-    for (const r of results) {
-      upsertAnnounce(peerId, {
-        id: r.id || ns.Util.newId(),
-        text: r.text,
-        vector: null,  // response doesn't include vector
-        score: r.score,
-      });
-    }
-  };
+  const upsert = (peerId, results) => byPeer.set(peerId, { lastSeen: ns.Util.now(), results: results || [] })
 
   const prune = () => {
-    const now = ns.Util.now();
-    const maxAge = ns.Config.LIMITS.MAX_EPHEMERAL_AGE_MS;
-    let changed = false;
+    const ttl = ns.Config.LIMITS.EPHEMERAL_TTL_MS
+    const t = ns.Util.now()
+    for (const [peerId, rec] of byPeer) if (t - rec.lastSeen > ttl) byPeer.delete(peerId)
+  }
+
+  const allResults = () => {
+    prune()
+    const out = []
     for (const [peerId, rec] of byPeer) {
-      if (now - rec.lastSeen > maxAge) { byPeer.delete(peerId); changed = true; continue; }
-      // prune individual announces
-      for (const [id, a] of rec.announces) {
-        if (now - a.ts > maxAge) { rec.announces.delete(id); changed = true; }
-      }
+      for (const r of (rec.results || [])) out.push({ ...r, peerId, receivedAt: rec.lastSeen })
     }
-    if (changed) document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
-  };
+    return out
+  }
 
-  const allAnnounces = () => {
-    const out = [];
-    for (const [peerId, rec] of byPeer) {
-      for (const [id, a] of rec.announces) {
-        out.push({ ...a, fromPeer: peerId, receivedAt: a.ts });
-      }
-    }
-    return out;
-  };
+  const clear = () => byPeer.clear()
+  return { upsert, allResults, clear, prune }
+})()
 
-  const clear = () => {
-    byPeer.clear();
-    document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
-  };
-
-  return { upsertAnnounce, upsertResponse, allAnnounces, clear };
-})();
-
-/* --------------------------------------------------------------------------
-   [8] RELEVANCE
-   -------------------------------------------------------------------------- */
+/* ============================================================================
+   [7] RELEVANCE
+============================================================================ */
 ns.Relevance = (() => {
-  const { THRESHOLD, ADJACENCY, MAX_CARDS } = ns.Config.RELEVANCE;
-  const escapeHtml = ns.Util.escapeHtml;
-  const highlightFragment = (qt, mt) => {
-    if (!qt || !mt) return escapeHtml(mt);
-    const qT = qt.toLowerCase().match(/\w+/g) || [];
-    const mT = mt.toLowerCase().match(/\w+/g) || [];
-    if (!qT.length || !mT.length) return escapeHtml(mt);
-    const mRaw = mt.match(/\w+/g) || []; const mPos = []; let cursor = 0;
-    for (const w of mRaw) { const idx = mt.toLowerCase().indexOf(w.toLowerCase(), cursor); if (idx < 0) break; mPos.push({ start: idx, end: idx + w.length }); cursor = idx + w.length; }
-    let bestLen = 0, bestStart = -1;
-    for (let i = 0; i < mT.length && i < mPos.length; i++) {
-      for (let L = Math.min(qT.length, mT.length - i); L > bestLen; L--) {
-        if (i + L > mPos.length) break;
-        if (qT.join(' ').includes(mT.slice(i, i + L).join(' '))) { bestLen = L; bestStart = i; }
+  const rankLocalTop = (queryVec, topK) => {
+    const out = []
+    for (const n of ns.State.state.notes) {
+      if (!n?.hasVector || !n.vector) continue
+      const score = ns.Vector.dot(queryVec, n.vector)
+      out.push({ note: n, score })
+    }
+    out.sort((a, b) => b.score - a.score)
+    return out.slice(0, topK).map(({ note, score }) => ({
+      kind: 'local',
+      ephemeral: false,
+      text: ns.Util.snippet(note.text, ns.Config.LIMITS.SNIPPET),
+      score,
+      meta: `${note.published ? 'world' : 'local'} · ${new Date(note.createdAt).toISOString().slice(0,16)} · ${note.id.slice(0,6)}`
+    }))
+  }
+
+  const rankLocalLowCorr = (queryVec, { min, max, limit }) => {
+    const pool = []
+    for (const n of ns.State.state.notes) {
+      if (!n?.hasVector || !n.vector) continue
+      const score = ns.Vector.dot(queryVec, n.vector)
+      if (score >= min && score <= max) pool.push({ note: n, score })
+    }
+    pool.sort((a, b) => (a.score - b.score) + (Math.random() - 0.5) * 0.03)
+    return pool.slice(0, limit).map(({ note, score }) => ({
+      kind: 'local',
+      ephemeral: false,
+      text: ns.Util.snippet(note.text, ns.Config.LIMITS.SNIPPET),
+      score,
+      meta: `${note.published ? 'world' : 'local'} · low-corr · ${note.id.slice(0,6)}`
+    }))
+  }
+
+  const serendipityMix = (localLow, worldLow, limit) => {
+    const mix = []
+    const a = localLow.slice()
+    const b = worldLow.slice()
+    while (mix.length < limit && (a.length || b.length)) {
+      if (a.length) mix.push(a.shift())
+      if (mix.length >= limit) break
+      if (b.length) mix.push(b.shift())
+    }
+    return mix.slice(0, limit)
+  }
+
+  return { rankLocalTop, rankLocalLowCorr, serendipityMix }
+})()
+
+/* ============================================================================
+   [8] TRYSTERO LOADER (без jspm, чтобы не было 404 в логе)
+============================================================================ */
+ns.TrysteroLoader = (() => {
+  // Skypack у тебя уже грузится — ставим его первым.
+  // (Можно потом “по уму” закрепить версию: .../torrent@X.Y.Z )
+  const candidates = [
+    'https://cdn.skypack.dev/@trystero-p2p/torrent?min',
+    'https://unpkg.com/@trystero-p2p/torrent?module',
+    'https://esm.run/@trystero-p2p/torrent',
+
+    // fallback на старый неймспейс (если новый CDN отвалился)
+    'https://cdn.skypack.dev/trystero/torrent?min',
+  ]
+
+  const resolveJoinRoom = (mod) => {
+    if (typeof mod?.joinRoom === 'function') return mod.joinRoom
+    if (typeof mod?.default === 'function') return mod.default
+    if (typeof mod?.default?.joinRoom === 'function') return mod.default.joinRoom
+    return null
+  }
+
+  const loadJoinRoom = async () => {
+    const errors = []
+    for (const url of candidates) {
+      try {
+        const mod = await import(url)
+        const joinRoom = resolveJoinRoom(mod)
+        if (!joinRoom) throw new Error('joinRoom export not found')
+        ns.UI.logLine('i', 'Trystero loaded', url)
+        return joinRoom
+      } catch (e) {
+        errors.push({ url, err: String(e?.message || e) })
+        ns.UI.logLine('w', 'Trystero import failed', { url, err: String(e?.message || e) })
       }
     }
-    if (bestLen < 2 || bestStart < 0) return escapeHtml(mt);
-    const a = mPos[bestStart], b = mPos[bestStart + bestLen - 1];
-    return escapeHtml(mt.slice(0, a.start)) + '<mark>' + escapeHtml(mt.slice(a.start, b.end)) + '</mark>' + escapeHtml(mt.slice(b.end));
-  };
-  const rankAll = (qv, locals, eph) => {
-    if (!qv) return { mine: [], world: [], adjacent: [] };
-    const ls = locals.filter(t => Array.isArray(t.vector))
-      .map(t => ({ kind: 'local', source: t, score: ns.Vector.cosine(qv, t.vector) }))
-      .filter(r => r.score > THRESHOLD - ADJACENCY).sort((a,b)=>b.score-a.score);
-    const ws = eph
-      .filter(r => Array.isArray(r.vector) && r.vector.length === qv.length)
-      .map(r => ({ kind: 'world', source: r, score: ns.Vector.cosine(qv, r.vector) }))
-      .filter(r => r.score > THRESHOLD - ADJACENCY).sort((a,b)=>b.score-a.score);
-    const mine = [], world = [], adjacent = [];
-    for (const r of ls) { if (r.score >= THRESHOLD) { if (mine.length < MAX_CARDS) mine.push(r); } else if (adjacent.length < MAX_CARDS) adjacent.push(r); }
-    for (const r of ws) { if (r.score >= THRESHOLD) { if (world.length < MAX_CARDS) world.push(r); } else if (adjacent.length < MAX_CARDS) adjacent.push(r); }
-    return { mine, world, adjacent };
-  };
-  return { rankAll, highlightFragment };
-})();
+    const err = new Error('Cannot import Trystero from CDNs')
+    err.details = errors
+    throw err
+  }
 
-/* --------------------------------------------------------------------------
-   [9] SYNC
-   -------------------------------------------------------------------------- */
-ns.Sync = (() => {
-  const saveLocal = async ({ text, publishToWorld = false }) => {
-    const clean = ns.Util.normalizeText(text);
-    if (!clean) throw new Error('Empty');
-    const thought = { id: ns.Util.newId(), text: clean, createdAt: ns.Util.now(), updatedAt: ns.Util.now(), vector: null, hasVector: 0, published: !!publishToWorld };
-    if (ns.Vector.isLoaded()) {
-      try { thought.vector = await ns.Vector.embed(clean); thought.hasVector = thought.vector ? 1 : 0; }
-      catch (e) { ns.Logger.warn('embed fail', e.message); }
-    }
-    await ns.Storage.put(thought);
-    ns.Logger.info('saved', { id: thought.id.slice(0, 8), published: thought.published });
-    document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
-    
-    // Announce to world if published and connected
-    if (publishToWorld && thought.vector && ns.Channel.isConnected()) {
-      ns.Channel.announce(clean, thought.vector, thought.id);
-      ns.Logger.info('announced to neighbors');
-    }
-    
-    return thought;
-  };
-  const reindexAll = async (onProgress) => {
-    if (!ns.Vector.isLoaded()) throw new Error('Load model first');
-    const pending = await ns.Storage.listUnindexed(); let done = 0;
-    for (const t of pending) {
-      try { const v = await ns.Vector.embed(t.text); t.vector = v; t.hasVector = v ? 1 : 0; await ns.Storage.put(t); }
-      catch (e) { ns.Logger.warn('reindex fail', e.message); }
-      done++; if (onProgress) onProgress({ done, total: pending.length });
-    }
-    ns.Logger.info('reindex done', { total: pending.length });
-    document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
-  };
-  return { saveLocal, reindexAll };
-})();
+  return { loadJoinRoom }
+})()
 
-/* --------------------------------------------------------------------------
-   [10] UI
-   -------------------------------------------------------------------------- */
-ns.UI = (() => {
-  const refs = {}; let lastQuery = { text: null, vector: null };
-  const cache = () => {
-    ['input','btnSave','btnSaveWorld','btnLoadModel','btnReindex','btnSeed','btnPing','btnReset','btnConnect','btnDisconnect','roomInput','listMine','listWorld','listAdjacent','listAll','status','modelProgress']
-      .forEach((id) => { refs[id] = document.getElementById(id); });
-  };
-  const setPill = (k, t, s = '') => {
-    const el = refs.status.querySelector(`[data-key="${k}"]`); if (!el) return;
-    el.textContent = t; el.classList.remove('ok','warn','err','think'); if (s) el.classList.add(s);
-  };
-  const setThink = (active, text = 'думаю...') => {
-    const el = refs.status.querySelector('[data-key="think"]'); if (!el) return;
-    if (active) { el.style.display = ''; el.textContent = text; el.classList.add('think'); }
-    else { el.style.display = 'none'; el.classList.remove('think'); }
-  };
-  const setProgress = (pct) => { refs.modelProgress.style.width = pct + '%'; };
-  const renderLocalList = (c, items, qt) => {
-    c.innerHTML = '';
-    if (!items.length) { const d = document.createElement('div'); d.className = 'empty'; d.textContent = '(empty)'; c.appendChild(d); return; }
-    for (const r of items) {
-      const t = r.source, row = document.createElement('div'); row.className = 'item local';
-      const score = document.createElement('span'); score.className = 'score'; score.textContent = typeof r.score === 'number' ? r.score.toFixed(3) : '';
-      const body = document.createElement('div'); body.innerHTML = ns.Relevance.highlightFragment(qt, t.text);
-      const meta = document.createElement('div'); meta.className = 'meta';
-      meta.textContent = `${t.published ? 'world-shared' : 'local'} · ${new Date(t.createdAt).toISOString().slice(0,16)} · ${t.id.slice(0,6)}`;
-      row.appendChild(score); row.appendChild(body); row.appendChild(meta); c.appendChild(row);
+/* ============================================================================
+   [9] P2P
+============================================================================ */
+ns.P2P = (() => {
+  const peers = new Set()
+  let room = null
+
+  let sendReq = null, onReq = null
+  let sendRes = null, onRes = null
+
+  // ping/pong — чтобы руками проверить коннект
+  let sendPing = null, onPing = null
+  let sendPong = null, onPong = null
+
+  const pending = new Map()
+
+  const refreshPeers = () => {
+    ns.UI.setPill('peers', `PEERS: ${peers.size}`, peers.size ? 'ok' : 'warn')
+  }
+
+  const init = async () => {
+    ns.UI.setPill('p2p', 'P2P: loading...', 'warn')
+
+    const joinRoom = await ns.TrysteroLoader.loadJoinRoom()
+
+    const opts = {
+      appId: ns.Config.APP_ID,
+      rtcConfig: ns.Config.RTC,
+
+      // ключ, который trystero ожидает (важно!)
+      trackerUrls: ns.Config.TRACKER_URLS,
+
+      // совместимость с разными сборками/форками
+      trackers: ns.Config.TRACKER_URLS,
     }
-  };
-  const renderWorldList = (c, items, qt) => {
-    c.innerHTML = '';
-    if (!items.length) {
-      const d = document.createElement('div'); d.className = 'empty';
-      const p = ns.Channel.getActivePeers().length;
-      d.textContent = p ? `(no matches from ${p} peer(s))` : '(no peers connected)';
-      c.appendChild(d); return;
-    }
-    for (const r of items) {
-      const e = r.source, row = document.createElement('div'); row.className = 'item world ephemeral';
-      const score = document.createElement('span'); score.className = 'score'; score.textContent = typeof r.score === 'number' ? r.score.toFixed(3) : '';
-      const body = document.createElement('div'); body.innerHTML = ns.Relevance.highlightFragment(qt, e.text);
-      const meta = document.createElement('div'); meta.className = 'meta';
-      meta.textContent = `from:${(e.fromPeer || '?').slice(5, 13)} · ${new Date(e.receivedAt || Date.now()).toISOString().slice(11,19)} · RAM`;
-      row.appendChild(score); row.appendChild(body); row.appendChild(meta); c.appendChild(row);
-    }
-  };
-  const renderMixedList = (c, items, qt) => {
-    c.innerHTML = '';
-    if (!items.length) { const d = document.createElement('div'); d.className = 'empty'; d.textContent = '(empty)'; c.appendChild(d); return; }
-    for (const r of items) {
-      const isLocal = r.kind === 'local', text = r.source.text;
-      const row = document.createElement('div'); row.className = `item ${isLocal ? 'local' : 'world ephemeral'}`;
-      const score = document.createElement('span'); score.className = 'score'; score.textContent = typeof r.score === 'number' ? r.score.toFixed(3) : '';
-      const body = document.createElement('div'); body.innerHTML = ns.Relevance.highlightFragment(qt, text);
-      const meta = document.createElement('div'); meta.className = 'meta';
-      meta.textContent = isLocal ? `local · ${r.source.id.slice(0,6)}` : `from:${(r.source.fromPeer || '?').slice(5,13)}`;
-      row.appendChild(score); row.appendChild(body); row.appendChild(meta); c.appendChild(row);
-    }
-  };
-  const clearAll = () => { renderLocalList(refs.listMine, [], ''); renderWorldList(refs.listWorld, [], ''); renderMixedList(refs.listAdjacent, [], ''); };
-  const updateLiveRelevance = async () => {
-    if (!ns.Vector.isLoaded()) { clearAll(); return; }
-    const text = refs.input.value.trim();
-    if (!text) { clearAll(); lastQuery = { text: null, vector: null }; setThink(false); return; }
-    let qv;
-    if (lastQuery.text === text && lastQuery.vector) { qv = lastQuery.vector; }
-    else {
-      setThink(true, 'считаю вектор...');
-      try { qv = await ns.Vector.embed(text); lastQuery = { text, vector: qv }; }
-      catch (e) { setThink(false); ns.Logger.error('embed fail', e.message); return; }
-      setThink(true, 'запрашиваю пиры...');
-    }
-    if (ns.Channel.getActivePeers().length > 0 && ns.Channel.isConnected()) {
-      ns.Channel.query(qv).catch((e) => ns.Logger.warn('query fail', e.message));
-    }
-    const locals = await ns.Storage.all();
-    const eph = ns.Ephemeral.allAnnounces();
-    const { mine, world, adjacent } = ns.Relevance.rankAll(qv, locals, eph);
-    renderLocalList(refs.listMine, mine, text);
-    renderWorldList(refs.listWorld, world, text);
-    renderMixedList(refs.listAdjacent, adjacent, text);
-    setThink(false);
-  };
-  const invalidateCache = () => { lastQuery = { text: null, vector: null }; };
-  const renderAll = async () => {
-    const all = await ns.Storage.all();
-    const sorted = all.sort((a, b) => b.createdAt - a.createdAt).slice(0, ns.Config.LIMITS.RENDER_CAP);
-    refs.listAll.innerHTML = '';
-    for (const t of sorted) {
-      const row = document.createElement('div'); row.className = 'item local';
-      const body = document.createElement('div'); body.textContent = t.text;
-      const meta = document.createElement('div'); meta.className = 'meta';
-      meta.textContent = `${new Date(t.createdAt).toISOString().slice(0,16)} · ${t.published ? 'world' : 'local'} · vec:${t.hasVector ? 'yes' : 'no'} · ${t.id.slice(0,6)}`;
-      row.appendChild(body); row.appendChild(meta); refs.listAll.appendChild(row);
-    }
-    const indexed = all.filter((t) => t.hasVector).length;
-    setPill('indexed', `INDEXED: ${indexed}/${all.length}`, all.length > 0 && indexed === all.length ? 'ok' : 'warn');
-  };
-  const refresh = async () => { invalidateCache(); await renderAll(); await updateLiveRelevance(); };
-  const bind = () => {
-    const debouncedUpdate = ns.Util.debounce(async () => { setThink(false); await updateLiveRelevance(); }, ns.Config.LIMITS.DEBOUNCE_MS);
-    refs.input.addEventListener('input', () => {
-      const text = refs.input.value.trim();
-      if (!text) { clearAll(); lastQuery = { text: null, vector: null }; setThink(false); return; }
-      setThink(true, 'жду паузу...'); debouncedUpdate();
-    });
-    const disableSavers = (v) => { refs.btnSave.disabled = refs.btnSaveWorld.disabled = v; };
-    refs.btnSave.addEventListener('click', async () => {
-      try { disableSavers(true); await ns.Sync.saveLocal({ text: refs.input.value, publishToWorld: false }); refs.input.value = ''; clearAll(); await renderAll(); }
-      catch (e) { ns.Logger.error('save fail', e.message); } finally { disableSavers(false); }
-    });
-    refs.btnSaveWorld.addEventListener('click', async () => {
-      try { disableSavers(true); await ns.Sync.saveLocal({ text: refs.input.value, publishToWorld: true }); refs.input.value = ''; clearAll(); await renderAll(); }
-      catch (e) { ns.Logger.error('save fail', e.message); } finally { disableSavers(false); }
-    });
-    refs.btnLoadModel.addEventListener('click', async () => {
-      try { refs.btnLoadModel.disabled = true; setPill('model', 'MODEL: loading...', 'warn');
-        await ns.Vector.load((p) => { const pct = Math.round((p.loaded / p.total) * 100); setProgress(pct); setPill('model', `MODEL: ${pct}%`, 'warn'); });
-        setPill('model', 'MODEL: ready', 'ok'); setProgress(100);
-      } catch (e) { setPill('model', 'MODEL: err', 'err'); ns.Logger.error('model fail', e.message); } finally { refs.btnLoadModel.disabled = false; }
-    });
-    refs.btnReindex.addEventListener('click', async () => {
-      if (!ns.Vector.isLoaded()) { ns.Logger.warn('Load model first'); return; }
-      try { refs.btnReindex.disabled = true;
-        await ns.Sync.reindexAll((p) => { setPill('model', `MODEL: reindex ${p.done}/${p.total}`, 'warn'); });
-        setPill('model', 'MODEL: ready', 'ok'); invalidateCache(); await renderAll();
-      } catch (e) { ns.Logger.error('reindex fail', e.message); } finally { refs.btnReindex.disabled = false; }
-    });
-    refs.btnSeed.addEventListener('click', async () => {
-      const samples = ['Мысль появляется в паузе между действиями.','Архитектура — это способ договариваться с будущим собой.','Случайность — недооценённый инструмент поиска.','Иногда нужно просто записать, чтобы понять.','Связи между идеями важнее самих идей.'];
-      for (const s of samples) await ns.Sync.saveLocal({ text: s, publishToWorld: true });
-      invalidateCache(); await renderAll();
-    });
-    refs.btnPing.addEventListener('click', () => {
-      if (!ns.Channel.isConnected()) { ns.Logger.warn('not connected'); return; }
-      ns.Channel.ping(); ns.Logger.info('ping sent, peers=' + ns.Channel.getActivePeers().length);
-    });
-    refs.btnReset.addEventListener('click', async () => {
-      if (!confirm('Стереть все локальные заметки?')) return;
-      try { await ns.Storage.clear(); ns.Ephemeral.clear(); invalidateCache(); clearAll(); await renderAll(); ns.Logger.warn('storage cleared'); }
-      catch (e) { ns.Logger.error('reset fail', e.message); }
-    });
-    refs.btnConnect.addEventListener('click', async () => {
-      const roomName = refs.roomInput.value.trim();
-      if (!roomName) { ns.Logger.warn('room name empty'); return; }
+
+    ns.UI.logLine('i', 'P2P opts', { room: ns.Room, trackerUrls: ns.Config.TRACKER_URLS })
+
+    room = joinRoom(opts, ns.Room)
+
+    ;[sendReq, onReq]   = room.makeAction('ns:q:req')
+    ;[sendRes, onRes]   = room.makeAction('ns:q:res')
+    ;[sendPing, onPing] = room.makeAction('ns:ping')
+    ;[sendPong, onPong] = room.makeAction('ns:pong')
+
+    room.onPeerJoin?.((peerId) => {
+      peers.add(peerId)
+      refreshPeers()
+      ns.UI.logLine('i', 'peer join', peerId)
+    })
+    room.onPeerLeave?.((peerId) => {
+      peers.delete(peerId)
+      refreshPeers()
+      ns.UI.logLine('w', 'peer leave', peerId)
+    })
+
+    // Ping handlers
+    onPing((payload, peerId) => {
+      sendPong(peerId, { t: Date.now() })
+      ns.UI.logLine('i', 'ping <-', peerId)
+    })
+    onPong((payload, peerId) => {
+      ns.UI.logLine('i', 'pong <-', peerId)
+    })
+
+    // Incoming query -> answer ONLY published notes
+    onReq(async (payload, peerId) => {
       try {
-        refs.btnConnect.disabled = true; refs.roomInput.disabled = true;
-        setPill('net', 'NET: MQTT connecting...', 'warn');
-        await ns.Channel.init(roomName);
-        setPill('net', 'NET: MQTT online', 'ok');
-        refs.btnDisconnect.disabled = false;
+        if (!payload || payload.v !== 1) return
+        const requestId = payload.requestId
+        const vecArr = payload.vec
+        const k = ns.Util.clamp(payload.k ?? ns.Config.LIMITS.WORLD_TOPK, 1, 10)
+        if (!requestId || !Array.isArray(vecArr)) return
+
+        const qv = new Float32Array(vecArr)
+
+        const pool = []
+        for (const n of ns.State.state.notes) {
+          if (!n?.published || !n?.hasVector || !n.vector) continue
+          const score = ns.Vector.dot(qv, n.vector)
+          pool.push({
+            noteId: n.id,
+            text: ns.Util.snippet(n.text, ns.Config.LIMITS.SNIPPET),
+            score,
+            updatedAt: n.updatedAt,
+          })
+        }
+        pool.sort((a, b) => b.score - a.score)
+
+        sendRes(peerId, { v: 1, requestId, results: pool.slice(0, k) })
       } catch (e) {
-        setPill('net', 'NET: err', 'err');
-        ns.Logger.error('connect fail', e.message);
-      } finally { refs.btnConnect.disabled = false; }
-    });
-    refs.btnDisconnect.addEventListener('click', () => {
-      ns.Channel.leave(); setPill('net', 'NET: offline', 'warn'); setPill('peers', 'PEERS: 0', 'warn');
-      refs.btnDisconnect.disabled = true; refs.roomInput.disabled = false; ns.Ephemeral.clear();
-    });
-    document.addEventListener('ns:thoughts-changed', async () => { invalidateCache(); await renderAll(); await updateLiveRelevance(); });
-    document.addEventListener('ns:ephemeral-changed', updateLiveRelevance);
-    document.addEventListener('ns:peers', (ev) => { setPill('peers', `PEERS: ${ev.detail.count}`, ev.detail.count ? 'ok' : 'warn'); });
-  };
-  const init = () => { cache(); bind(); };
-  return { init, refresh, setPill };
-})();
+        ns.UI.logLine('w', 'req handler failed', String(e?.message || e))
+      }
+    })
 
-/* --------------------------------------------------------------------------
-   [11] APP
-   -------------------------------------------------------------------------- */
+    // Incoming responses
+    onRes((payload, peerId) => {
+      if (!payload || payload.v !== 1) return
+      const { requestId, results } = payload
+      const p = pending.get(requestId)
+      if (!p) return
+
+      const normalized = (results || []).map(r => ({
+        kind: 'world',
+        ephemeral: true,
+        text: r.text || '',
+        score: (typeof r.score === 'number') ? r.score : 0,
+        meta: `from ${String(peerId).slice(0,8)} · ${String(r.noteId || '').slice(0,6)}`,
+      }))
+
+      p.results.push(...normalized)
+      ns.Ephemeral.upsert(peerId, normalized)
+    })
+
+    ns.UI.setPill('p2p', 'P2P: online', 'ok')
+    refreshPeers()
+
+    const sweep = () => {
+      const t = ns.Util.now()
+      for (const [id, p] of pending) if (t >= p.deadline) pending.delete(id)
+      requestAnimationFrame(sweep)
+    }
+    sweep()
+  }
+
+  const queryWorld = async (queryVec, { timeoutMs, k } = {}) => {
+    if (!sendReq) return []
+    if (!peers.size) return []
+
+    const requestId = ns.Util.id()
+    const deadline = ns.Util.now() + (timeoutMs ?? ns.Config.LIMITS.QUERY_TIMEOUT_MS)
+    pending.set(requestId, { deadline, results: [] })
+
+    sendReq({ v: 1, requestId, vec: Array.from(queryVec), k: k ?? ns.Config.LIMITS.WORLD_TOPK })
+    await new Promise(r => setTimeout(r, timeoutMs ?? ns.Config.LIMITS.QUERY_TIMEOUT_MS))
+
+    const p = pending.get(requestId)
+    return (p?.results || [])
+      .filter(x => x.text)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, ns.Config.LIMITS.WORLD_TOPK)
+  }
+
+  const pingPeers = () => {
+    if (!sendPing) return
+    sendPing({ t: Date.now() }) // broadcast
+    ns.UI.logLine('i', 'ping ->', { peers: peers.size })
+  }
+
+  return { init, queryWorld, pingPeers, peersCount: () => peers.size }
+})()
+
+/* ============================================================================
+   [10] RENDER
+============================================================================ */
+ns.Render = (() => {
+  const renderAllNotes = async () => {
+    const all = ns.State.state.notes
+    const html = all.slice(0, 200).map(n => ns.UI.itemHtml({
+      kind: 'local',
+      ephemeral: false,
+      text: ns.Util.snippet(n.text, ns.Config.LIMITS.SNIPPET),
+      score: n.hasVector ? 1 : 0,
+      meta: `${n.published ? 'world' : 'local'} · vec:${n.hasVector ? 'yes' : 'no'} · ${new Date(n.createdAt).toISOString().slice(0,16)} · ${n.id.slice(0,6)}`
+    }))
+    ns.UI.renderList(ns.UI.refs.listAll, html, '(empty)')
+  }
+
+  const renderLive = ({ local, world, ser }) => {
+    ns.UI.renderList(ns.UI.refs.listMine, (local || []).map(ns.UI.itemHtml), '(empty)')
+    ns.UI.renderList(ns.UI.refs.listWorld, (world || []).map(ns.UI.itemHtml), ns.P2P.peersCount() ? '(no matches)' : '(no peers)')
+    ns.UI.renderList(ns.UI.refs.listSer, (ser || []).map(ns.UI.itemHtml), '(empty)')
+  }
+
+  return { renderAllNotes, renderLive }
+})()
+
+/* ============================================================================
+   [11] LIVE UPDATE
+============================================================================ */
+ns.Live = (() => {
+  let lastQuery = { text: null, vec: null }
+
+  const compute = async () => {
+    const text = ns.Util.normalizeText(ns.UI.refs.input.value)
+    if (!text) {
+      ns.Render.renderLive({ local: [], world: [], ser: [] })
+      ns.UI.setThink(false)
+      lastQuery = { text: null, vec: null }
+      return
+    }
+
+    if (!ns.Vector.isLoaded()) {
+      ns.UI.setThink(true, 'load model first')
+      ns.Render.renderLive({ local: [], world: [], ser: [] })
+      return
+    }
+
+    ns.UI.setThink(true, 'embedding...')
+    let qv
+    if (lastQuery.text === text && lastQuery.vec) qv = lastQuery.vec
+    else { qv = await ns.Vector.embed(text); lastQuery = { text, vec: qv } }
+
+    ns.UI.setThink(true, 'rank local...')
+    const local = (() => {
+      const out = []
+      for (const n of ns.State.state.notes) {
+        if (!n?.hasVector || !n.vector) continue
+        const score = ns.Vector.dot(qv, n.vector)
+        out.push({ note: n, score })
+      }
+      out.sort((a, b) => b.score - a.score)
+      return out.slice(0, ns.Config.LIMITS.LOCAL_TOPK).map(({ note, score }) => ({
+        kind: 'local',
+        ephemeral: false,
+        text: ns.Util.snippet(note.text, ns.Config.LIMITS.SNIPPET),
+        score,
+        meta: `${note.published ? 'world' : 'local'} · ${new Date(note.createdAt).toISOString().slice(0,16)} · ${note.id.slice(0,6)}`
+      }))
+    })()
+
+    ns.UI.setThink(true, 'query peers...')
+    const world = await ns.P2P.queryWorld(qv, { timeoutMs: ns.Config.LIMITS.QUERY_TIMEOUT_MS })
+
+    // serendipity = low corr local + low corr world
+    const localLow = ns.Relevance.rankLocalLowCorr(qv, {
+      min: ns.Config.SER.min,
+      max: ns.Config.SER.max,
+      limit: ns.Config.LIMITS.SER_TOPK
+    })
+
+    const worldLow = (ns.Ephemeral.allResults() || [])
+      .filter(x => typeof x.score === 'number' && x.score >= ns.Config.SER.min && x.score <= ns.Config.SER.max)
+      .sort((a, b) => (a.score - b.score) + (Math.random() - 0.5) * 0.03)
+      .slice(0, ns.Config.LIMITS.SER_TOPK)
+      .map(x => ({ ...x, meta: (x.meta ? x.meta + ' · ' : '') + 'low-corr' }))
+
+    const ser = ns.Relevance.serendipityMix(localLow, worldLow, ns.Config.LIMITS.SER_TOPK)
+
+    ns.Render.renderLive({ local, world, ser })
+    ns.UI.setThink(false)
+  }
+
+  const debounced = ns.Util.debounce(() => {
+    ns.UI.setThink(false)
+    compute().catch(e => ns.UI.logLine('e', 'live compute failed', String(e?.message || e)))
+  }, ns.Config.LIMITS.DEBOUNCE_MS)
+
+  const invalidate = () => { lastQuery = { text: null, vec: null } }
+
+  return { compute, debounced, invalidate }
+})()
+
+/* ============================================================================
+   [12] ACTIONS
+============================================================================ */
+ns.Actions = (() => {
+  const save = async ({ publish }) => {
+    const text = ns.Util.normalizeText(ns.UI.refs.input.value)
+    if (!text) return
+
+    const note = {
+      id: ns.Util.id(),
+      text,
+      createdAt: ns.Util.now(),
+      updatedAt: ns.Util.now(),
+      published: !!publish,
+      vector: null,
+      hasVector: 0,
+    }
+
+    if (ns.Vector.isLoaded()) {
+      ns.UI.setThink(true, 'embedding (save)...')
+      note.vector = await ns.Vector.embed(text)
+      note.hasVector = note.vector ? 1 : 0
+      ns.UI.setThink(false)
+    }
+
+    await ns.Storage.put(note)
+    ns.UI.refs.input.value = ''
+    ns.Live.invalidate()
+    await ns.State.reload()
+    await ns.Render.renderAllNotes()
+    await ns.Live.compute()
+  }
+
+  const reindexMissing = async () => {
+    if (!ns.Vector.isLoaded()) { ns.UI.logLine('w', 'Load model first'); return }
+    const pending = await ns.Storage.listUnindexed()
+    for (let i = 0; i < pending.length; i++) {
+      const n = pending[i]
+      ns.UI.setThink(true, `reindex ${i + 1}/${pending.length}`)
+      try {
+        n.vector = await ns.Vector.embed(n.text)
+        n.hasVector = n.vector ? 1 : 0
+        n.updatedAt = ns.Util.now()
+        await ns.Storage.put(n)
+      } catch (e) {
+        ns.UI.logLine('w', 'reindex failed', String(e?.message || e))
+      }
+    }
+    ns.UI.setThink(false)
+    ns.Live.invalidate()
+    await ns.State.reload()
+    await ns.Render.renderAllNotes()
+    await ns.Live.compute()
+  }
+
+  const seed5 = async () => {
+    const samples = [
+      'Мысль появляется в паузе между действиями.',
+      'Архитектура — это способ договариваться с будущим собой.',
+      'Случайность — недооценённый инструмент поиска.',
+      'Иногда нужно просто записать, чтобы понять.',
+      'Связи между идеями важнее самих идей.',
+    ]
+    for (const s of samples) {
+      ns.UI.refs.input.value = s
+      await save({ publish: true })
+    }
+  }
+
+  const reset = async () => {
+    if (!confirm('Стереть все локальные заметки?')) return
+    await ns.Storage.clear()
+    ns.Ephemeral.clear()
+    ns.Live.invalidate()
+    ns.UI.refs.input.value = ''
+    await ns.State.reload()
+    await ns.Render.renderAllNotes()
+    await ns.Live.compute()
+    ns.UI.logLine('w', 'storage cleared')
+  }
+
+  return { save, reindexMissing, seed5, reset }
+})()
+
+/* ============================================================================
+   [13] BOOT
+============================================================================ */
 ns.App = (() => {
-  const boot = async () => {
-    ns.UI.init();
-    ns.UI.setPill('idb', 'IDB: boot...', 'warn');
-    ns.UI.setPill('net', 'NET: offline', 'warn');
-    try { await ns.Storage.open(); ns.UI.setPill('idb', 'IDB: OK', 'ok'); ns.Logger.success('IDB ready'); }
-    catch (e) { ns.UI.setPill('idb', 'IDB: ERR', 'err'); ns.Logger.error('IDB fail', e.message); return; }
-    await ns.UI.refresh();
-    ns.Logger.success('app ready. Enter room, click Connect, open same on 2nd device.');
-    ns.Logger.info('Using direct MQTT to broker.emqx.io:8084 (WSS). No Trystero, no WebRTC, no NAT issues.');
-  };
-  return { boot };
-})();
+  const bind = () => {
+    ns.UI.refs.input.addEventListener('input', () => {
+      const t = ns.UI.refs.input.value.trim()
+      if (!t) { ns.Live.invalidate(); ns.Live.compute(); return }
+      ns.UI.setThink(true, 'waiting pause...')
+      ns.Live.debounced()
+    })
 
-ns.App.boot();
+    ns.UI.refs.btnLoadModel.addEventListener('click', async () => {
+      try {
+        ns.UI.refs.btnLoadModel.disabled = true
+        ns.UI.setPill('model', 'MODEL: loading...', 'warn')
+        ns.UI.setProgress(0)
+
+        await ns.Vector.load((pct) => {
+          ns.UI.setProgress(pct)
+          ns.UI.setPill('model', `MODEL: ${pct}%`, 'warn')
+        })
+
+        ns.UI.setProgress(100)
+        ns.UI.setPill('model', 'MODEL: ready', 'ok')
+        ns.UI.logLine('i', 'model loaded')
+        ns.Live.invalidate()
+        await ns.Live.compute()
+      } catch (e) {
+        ns.UI.setPill('model', 'MODEL: ERR', 'err')
+        ns.UI.logLine('e', 'model load failed', String(e?.message || e))
+      } finally {
+        ns.UI.refs.btnLoadModel.disabled = false
+      }
+    })
+
+    ns.UI.refs.btnSave.addEventListener('click', async () => {
+      ns.UI.refs.btnSave.disabled = ns.UI.refs.btnSaveWorld.disabled = true
+      try { await ns.Actions.save({ publish: false }) }
+      catch (e) { ns.UI.logLine('e', 'save failed', String(e?.message || e)) }
+      finally { ns.UI.refs.btnSave.disabled = ns.UI.refs.btnSaveWorld.disabled = false }
+    })
+
+    ns.UI.refs.btnSaveWorld.addEventListener('click', async () => {
+      ns.UI.refs.btnSave.disabled = ns.UI.refs.btnSaveWorld.disabled = true
+      try { await ns.Actions.save({ publish: true }) }
+      catch (e) { ns.UI.logLine('e', 'save world failed', String(e?.message || e)) }
+      finally { ns.UI.refs.btnSave.disabled = ns.UI.refs.btnSaveWorld.disabled = false }
+    })
+
+    ns.UI.refs.btnPing.addEventListener('click', () => ns.P2P.pingPeers())
+
+    ns.UI.refs.btnReindex.addEventListener('click', async () => {
+      ns.UI.refs.btnReindex.disabled = true
+      try { await ns.Actions.reindexMissing() }
+      finally { ns.UI.refs.btnReindex.disabled = false }
+    })
+
+    ns.UI.refs.btnSeed.addEventListener('click', async () => {
+      ns.UI.refs.btnSeed.disabled = true
+      try { await ns.Actions.seed5() }
+      finally { ns.UI.refs.btnSeed.disabled = false }
+    })
+
+    ns.UI.refs.btnReset.addEventListener('click', ns.Actions.reset)
+  }
+
+  const boot = async () => {
+    ns.UI.setPill('idb', 'IDB: boot...', 'warn')
+    try {
+      await ns.Storage.open()
+      ns.UI.setPill('idb', 'IDB: OK', 'ok')
+    } catch (e) {
+      ns.UI.setPill('idb', 'IDB: ERR', 'err')
+      ns.UI.logLine('e', 'IDB init failed', String(e?.message || e))
+      return
+    }
+
+    ns.UI.setPill('model', 'MODEL: idle', 'warn')
+    ns.UI.setPill('p2p', 'P2P: boot...', 'warn')
+    ns.UI.setPill('peers', 'PEERS: 0', 'warn')
+
+    await ns.State.reload()
+    await ns.Render.renderAllNotes()
+    await ns.Live.compute()
+
+    bind()
+
+    try {
+      await ns.P2P.init()
+    } catch (e) {
+      ns.UI.setPill('p2p', 'P2P: ERR', 'err')
+      ns.UI.logLine('e', 'P2P init failed', { msg: String(e?.message || e), details: e?.details || null })
+    }
+
+    ns.UI.logLine('i', 'app ready', { room: ns.Room })
+  }
+
+  return { boot }
+})()
+
+ns.App.boot()
 </script>
 </body>
 </html>
