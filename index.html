@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Noosphere v4.3 / Resilient P2P</title>
+<title>Noosphere v4.4 / True P2P</title>
 <style>
   :root {
     --bg:#0f1115; --panel:#161a22; --border:#242a36;
@@ -73,7 +73,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>NOOSPHERE / v4.3 <small>resilient p2p · true ephemeral</small></h1>
+  <h1>NOOSPHERE / v4.4 <small>true p2p · ephemeral world</small></h1>
 
   <div id="alertBox"></div>
 
@@ -82,13 +82,13 @@
       <span class="pill" data-key="idb">IDB: ...</span>
       <span class="pill" data-key="sig">SIGNAL: ...</span>
       <span class="pill" data-key="peers">ONLINE: 0</span>
-      <span class="pill" data-key="rtc">RTC: 0</span>
+      <span class="pill" data-key="rtc">RTC: 0 | MB: 0</span>
       <span class="pill" data-key="model">MODEL: idle</span>
       <span class="pill" data-key="indexed">INDEXED: 0</span>
     </div>
     <div class="device-id" id="deviceId">device: ...</div>
     <div class="progress"><div id="modelProgress"></div></div>
-    <div class="hint">Мировые заметки НЕ сохраняются на диск — только в RAM. Автор оффлайн = данные исчезли.</div>
+    <div class="hint">Мировые заметки НЕ сохраняются на диск — только в RAM. Автор оффлайн = данные исчезли. RTC = WebRTC канал, MB = Gun mailbox fallback.</div>
   </section>
 
   <section class="panel">
@@ -99,7 +99,7 @@
       <button id="btnSaveWorld" class="primary">Save + World</button>
       <div style="flex:1"></div>
     </div>
-    <div class="hint">Save local = только твоё устройство. Save + World = локально + отвечаешь на запросы пиров (они видят в RAM).</div>
+    <div class="hint">Save local = только твоё устройство. Save + World = локально + отвечаешь на запросы пиров.</div>
   </section>
 
   <section class="panel">
@@ -126,7 +126,7 @@
       <button id="btnLoadModel" class="primary">Load MiniLM</button>
       <button id="btnReindex">Reindex local</button>
       <button id="btnSeed">Seed 5 local</button>
-      <button id="btnQueryNow">Query peers now</button>
+      <button id="btnTestConn" class="secondary">Test connection</button>
       <button id="btnReloadGun">Reload Gun</button>
       <button id="btnReset" class="danger">Reset device</button>
     </div>
@@ -145,29 +145,15 @@
 
 <script type="module">
 /* ============================================================================
-   NOOSPHERE v4.3 — RESILIENT P2P
+   NOOSPHERE v4.4 — TRUE P2P (BUG-FIXED)
    ----------------------------------------------------------------------------
-   Архитектура (как задумано изначально):
-     1. Заметки хранятся ТОЛЬКО на устройстве автора (IndexedDB).
-     2. Gun используется исключительно как:
-        a) presence  — кто сейчас онлайн (deviceId -> lastSeen)
-        b) signaling — обмен SDP для WebRTC
-        c) mailbox   — fallback, если WebRTC не пробился через NAT
-     3. Чужие заметки никогда не пишутся на диск — только в RAM (ns.Ephemeral).
-     4. Когда пишешь мысль — клиент запрашивает у всех онлайн-пиров (через signaling):
-        "что у тебя похожего?" → получает ответы → показывает в UI из RAM.
-     5. Автор закрыл вкладку → его данные больше не отвечают → исчезают у всех.
+   Фиксы v4.4:
+     - Спам "peer offline" / "peer filtered by TTL" устранён (флаги + удаление из Map)
+     - RTC и mailbox считаются отдельно (UI: "RTC: X | MB: Y")
+     - Кнопка Test connection — форсирует запрос всем онлайн-пирам
+     - queryPeers логирует каждую попытку и транспорт (RTC vs mailbox)
 
-   Фиксы v4.3:
-     - Grace period 30с при старте: показываем "warming up" пока snapshot фильтруется
-     - Немедленный первый heartbeat (не ждём 15с)
-     - TTL увеличен до 120с
-     - Логирование "peer filtered by TTL" для диагностики
-     - Snapshot записи не диспатчат peer-offline
-     - Multi-CDN Gun loader с retry (jsdelivr → unpkg → cdnjs)
-     - Изоляция вкладок через sessionStorage
-
-   Секции (по зависимостям):
+   Секции:
      [1] Config  [2] Logger  [3] Util  [4] GunLoader  [5] Device  [6] Storage
      [7] Vector  [8] Ephemeral  [9] Signaling  [10] P2P  [11] Relevance
      [12] Sync  [13] UI  [14] App
@@ -180,9 +166,7 @@ env.useBrowserCache    = true;
 
 const ns = (window.__ns = {});
 
-/* --------------------------------------------------------------------------
-   [1] CONFIG
-   -------------------------------------------------------------------------- */
+/* [1] CONFIG */
 ns.Config = Object.freeze({
   DB_NAME: 'noosphere_v4',
   DB_VERSION: 1,
@@ -211,9 +195,9 @@ ns.Config = Object.freeze({
     RENDER_CAP: 300,
     DEBOUNCE_QUERY_MS: 600,
     PRESENCE_INTERVAL_MS: 15_000,
-    PRESENCE_TTL_MS: 120_000,       // 2 минуты
+    PRESENCE_TTL_MS: 120_000,
     PRESENCE_RECHECK_MS: 5_000,
-    PRESENCE_WARMUP_MS: 30_000,     // 30 секунд grace period
+    PRESENCE_WARMUP_MS: 30_000,
     QUERY_TIMEOUT_MS: 5000,
     MAX_PEERS_TO_QUERY: 10,
     MAX_RESULTS_PER_PEER: 3,
@@ -226,9 +210,7 @@ ns.Config = Object.freeze({
   RELEVANCE: { THRESHOLD: 0.25, ADJACENCY: 0.15, MAX_CARDS: 5 },
 });
 
-/* --------------------------------------------------------------------------
-   [2] LOGGER
-   -------------------------------------------------------------------------- */
+/* [2] LOGGER */
 ns.Logger = (() => {
   const el = () => document.getElementById('log');
   const fmt = (d) => d.toISOString().slice(11, 19);
@@ -250,9 +232,7 @@ ns.Logger = (() => {
   };
 })();
 
-/* --------------------------------------------------------------------------
-   [3] UTIL
-   -------------------------------------------------------------------------- */
+/* [3] UTIL */
 ns.Util = {
   newId: () => (crypto.randomUUID
     ? crypto.randomUUID()
@@ -277,9 +257,7 @@ ns.Util = {
   },
 };
 
-/* --------------------------------------------------------------------------
-   [4] GUN LOADER (multi-CDN с retry)
-   -------------------------------------------------------------------------- */
+/* [4] GUN LOADER */
 ns.GunLoader = (() => {
   let loaded = false;
   let loadPromise = null;
@@ -296,9 +274,8 @@ ns.GunLoader = (() => {
 
     script.onload = () => {
       clearTimeout(timeout);
-      if (typeof window.Gun !== 'undefined') {
-        resolve(url);
-      } else {
+      if (typeof window.Gun !== 'undefined') resolve(url);
+      else {
         script.remove();
         reject(new Error(`Gun not defined after loading ${url}`));
       }
@@ -333,9 +310,7 @@ ns.GunLoader = (() => {
             ns.Logger.warn(`Gun load failed: ${e.message}`);
           }
         }
-        if (attempt < retries) {
-          await new Promise(r => setTimeout(r, 1000));
-        }
+        if (attempt < retries) await new Promise(r => setTimeout(r, 1000));
       }
       throw new Error(`all Gun CDN URLs failed after ${retries} attempts`);
     })();
@@ -351,13 +326,10 @@ ns.GunLoader = (() => {
   };
 
   const isLoaded = () => loaded;
-
   return { load, reload, isLoaded };
 })();
 
-/* --------------------------------------------------------------------------
-   [5] DEVICE
-   -------------------------------------------------------------------------- */
+/* [5] DEVICE */
 ns.Device = (() => {
   const META_KEY = 'deviceFingerprint';
   let fp = null;
@@ -385,9 +357,7 @@ ns.Device = (() => {
   return { init, get, reset };
 })();
 
-/* --------------------------------------------------------------------------
-   [6] STORAGE (только локальные заметки, никакого source='world')
-   -------------------------------------------------------------------------- */
+/* [6] STORAGE */
 ns.Storage = (() => {
   const { DB_NAME, DB_VERSION, STORE_THOUGHTS, STORE_META } = ns.Config;
   let db = null;
@@ -446,9 +416,7 @@ ns.Storage = (() => {
   return { open, put, get, remove, all, listUnindexed, getMeta, putMeta, clearAll };
 })();
 
-/* --------------------------------------------------------------------------
-   [7] VECTOR (MiniLM через transformers.js)
-   -------------------------------------------------------------------------- */
+/* [7] VECTOR */
 ns.Vector = (() => {
   let extractor = null;
   let loadPromise = null;
@@ -488,14 +456,12 @@ ns.Vector = (() => {
   return { load, embed, cosine, isLoaded };
 })();
 
-/* --------------------------------------------------------------------------
-   [8] EPHEMERAL (in-memory, никогда не на диск)
-   -------------------------------------------------------------------------- */
+/* [8] EPHEMERAL */
 ns.Ephemeral = (() => {
   const byPeer = new Map();
 
-  const upsert = (peerDeviceId, results) => {
-    byPeer.set(peerDeviceId, { results, lastSeen: ns.Util.now() });
+  const upsert = (peerDeviceId, results, viaTransport) => {
+    byPeer.set(peerDeviceId, { results, lastSeen: ns.Util.now(), viaTransport });
     prune();
     document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
   };
@@ -523,7 +489,7 @@ ns.Ephemeral = (() => {
     const out = [];
     for (const [devId, rec] of byPeer) {
       for (const r of rec.results) {
-        out.push({ ...r, fromDevice: devId, receivedAt: rec.lastSeen });
+        out.push({ ...r, fromDevice: devId, receivedAt: rec.lastSeen, viaTransport: rec.viaTransport });
       }
     }
     return out;
@@ -543,21 +509,16 @@ ns.Ephemeral = (() => {
   return { upsert, removePeer, allResults, clear, bindPresence };
 })();
 
-/* --------------------------------------------------------------------------
-   [9] SIGNALING (Gun как presence + signaling + mailbox)
-   Фиксы v4.3:
-     - Grace period 30с при старте (warming up)
-     - Немедленный первый heartbeat
-     - TTL 120с
-     - Логирование "peer filtered by TTL"
-     - Snapshot записи не диспатчат peer-offline
+/* [9] SIGNALING
+   Фикс v4.4: onlinePeers хранит {lastSeen, offlineDispatched, ttlLogged}
+   updatePeerCount диспатчит offline один раз и УДАЛЯЕТ пира из Map
    -------------------------------------------------------------------------- */
 ns.Signaling = (() => {
   const { GUN_PRESENCE_NS, GUN_SIGNALING_NS, GUN_MAILBOX_NS, GUN_RELAYS } = ns.Config;
   let gun = null;
   let presenceNode = null, signalingNode = null, mailboxNode = null;
 
-  const onlinePeers = new Map();
+  const onlinePeers = new Map(); // deviceId -> {lastSeen, offlineDispatched, ttlLogged}
   const mailboxHandlers = new Map();
   const signalingHandlers = new Map();
   let recheckTimer = null;
@@ -631,7 +592,8 @@ ns.Signaling = (() => {
 
   const handlePresenceUpdate = (devId, lastSeen, isSnapshot) => {
     const wasOnline = isOnline(devId);
-    onlinePeers.set(devId, { lastSeen });
+    // Сбрасываем флаги — пир снова живой
+    onlinePeers.set(devId, { lastSeen, offlineDispatched: false, ttlLogged: false });
     const nowOnline = isOnline(devId);
 
     if (nowOnline && !wasOnline && devId !== ns.Device.get()) {
@@ -639,9 +601,7 @@ ns.Signaling = (() => {
       document.dispatchEvent(new CustomEvent('ns:peer-online', { detail: { deviceId: devId } }));
     }
     
-    if (!isSnapshot) {
-      updatePeerCount();
-    }
+    if (!isSnapshot) updatePeerCount();
   };
 
   const isOnline = (devId) => {
@@ -651,7 +611,9 @@ ns.Signaling = (() => {
     const age = ns.Util.now() - rec.lastSeen;
     const online = age < ns.Config.LIMITS.PRESENCE_TTL_MS;
     
-    if (!online && age < ns.Config.LIMITS.PRESENCE_TTL_MS * 2 && age > 0) {
+    // Лог один раз (флаг ttlLogged)
+    if (!online && !rec.ttlLogged && age < ns.Config.LIMITS.PRESENCE_TTL_MS * 2 && age > 0) {
+      rec.ttlLogged = true;
       ns.Logger.info(`peer filtered by TTL`, { 
         dev: devId.slice(0,10), 
         age: Math.round(age/1000) + 's',
@@ -669,19 +631,28 @@ ns.Signaling = (() => {
     }
 
     let n = 0;
-    const nowOff = [];
-    for (const [devId] of onlinePeers) {
-      if (devId === ns.Device.get()) continue;
-      if (isOnline(devId)) n++;
-      else nowOff.push(devId);
-    }
+    const toRemove = [];
     
-    for (const devId of nowOff) {
-      if (onlinePeers.has(devId) && onlinePeers.get(devId).lastSeen > 0) {
-        onlinePeers.get(devId).offlineDispatched = true;
+    for (const [devId, rec] of onlinePeers) {
+      if (devId === ns.Device.get()) continue;
+      
+      const age = ns.Util.now() - rec.lastSeen;
+      const online = age < ns.Config.LIMITS.PRESENCE_TTL_MS;
+      
+      if (online) {
+        n++;
+      } else if (!rec.offlineDispatched) {
+        // Диспатчим offline ОДИН раз
+        rec.offlineDispatched = true;
+        ns.Logger.info('peer went offline', { dev: devId.slice(0, 12), age: Math.round(age/1000) + 's' });
         document.dispatchEvent(new CustomEvent('ns:peer-offline', { detail: { deviceId: devId } }));
+        toRemove.push(devId);
       }
     }
+    
+    // Удаляем протухших из Map (чтобы не спамить на следующем recheck)
+    for (const devId of toRemove) onlinePeers.delete(devId);
+    
     document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: n } }));
   };
 
@@ -766,18 +737,27 @@ ns.Signaling = (() => {
   };
 })();
 
-/* --------------------------------------------------------------------------
-   [10] P2P (WebRTC preferred, mailbox fallback)
+/* [10] P2P
+   Фикс v4.4: 
+     - queryPeers логирует каждую попытку и транспорт
+     - Отдельный счётчик mailbox-ответов
+     - updateRtcCount обновляет pill с обоими счётчиками
    -------------------------------------------------------------------------- */
 ns.P2P = (() => {
   const connections = new Map();
   const channels = new Map();
   const pendingQueries = new Map();
+  
+  // Счётчики транспортов
+  let rtcResponseCount = 0;
+  let mailboxResponseCount = 0;
 
   const updateRtcCount = () => {
-    let n = 0;
-    for (const [, ch] of channels) if (ch.readyState === 'open') n++;
-    document.dispatchEvent(new CustomEvent('ns:rtc', { detail: { count: n } }));
+    let openChannels = 0;
+    for (const [, ch] of channels) if (ch.readyState === 'open') openChannels++;
+    document.dispatchEvent(new CustomEvent('ns:rtc', { 
+      detail: { rtc: openChannels, mb: mailboxResponseCount } 
+    }));
   };
 
   const ensureConnection = (peerDeviceId, asInitiator) => {
@@ -816,7 +796,7 @@ ns.P2P = (() => {
         const onDataChannelOpen = (dc) => {
           clearTimeout(timeout);
           channels.set(peerDeviceId, dc);
-          dc.onmessage = (ev) => handleIncomingMessage(peerDeviceId, ev.data);
+          dc.onmessage = (ev) => handleIncomingMessage(peerDeviceId, ev.data, 'rtc');
           dc.onclose = () => {
             cleanup(peerDeviceId);
             updateRtcCount();
@@ -872,17 +852,17 @@ ns.P2P = (() => {
     if (ch) { try { ch.close(); } catch {} channels.delete(peerDeviceId); }
   };
 
-  const handleIncomingMessage = (fromDeviceId, rawData) => {
+  const handleIncomingMessage = (fromDeviceId, rawData, transport) => {
     try {
       const msg = typeof rawData === 'string' ? JSON.parse(rawData) : JSON.parse(new TextDecoder().decode(rawData));
-      if (msg.type === 'query') handleIncomingQuery(fromDeviceId, msg);
-      else if (msg.type === 'response') handleIncomingResponse(fromDeviceId, msg);
+      if (msg.type === 'query') handleIncomingQuery(fromDeviceId, msg, transport);
+      else if (msg.type === 'response') handleIncomingResponse(fromDeviceId, msg, transport);
     } catch (e) {
       ns.Logger.warn('incoming message parse failed', e.message);
     }
   };
 
-  const handleIncomingQuery = async (fromDeviceId, msg) => {
+  const handleIncomingQuery = async (fromDeviceId, msg, transport) => {
     if (!ns.Vector.isLoaded()) return;
     try {
       const locals = await ns.Storage.all();
@@ -903,16 +883,23 @@ ns.P2P = (() => {
       } else {
         ns.Signaling.sendMailbox(fromDeviceId, `resp-${msg.queryId}-${ns.Device.get()}`, response);
       }
+      ns.Logger.info('responded to query', { from: fromDeviceId.slice(0, 10), results: scored.length, via: transport });
     } catch (e) {
       ns.Logger.warn('query handling failed', e.message);
     }
   };
 
-  const handleIncomingResponse = (fromDeviceId, msg) => {
+  const handleIncomingResponse = (fromDeviceId, msg, transport) => {
     const pending = pendingQueries.get(msg.queryId);
     if (!pending) return;
-    pending.results.set(fromDeviceId, msg.results || []);
-    ns.Ephemeral.upsert(fromDeviceId, msg.results || []);
+    pending.results.set(fromDeviceId, { results: msg.results || [], transport });
+    
+    // Считаем транспорты
+    if (transport === 'rtc') rtcResponseCount++;
+    else mailboxResponseCount++;
+    updateRtcCount();
+    
+    ns.Ephemeral.upsert(fromDeviceId, msg.results || [], transport);
   };
 
   const queryPeers = async (vector, { limit = 3, timeoutMs = ns.Config.LIMITS.QUERY_TIMEOUT_MS } = {}) => {
@@ -920,19 +907,21 @@ ns.P2P = (() => {
     const peers = ns.Signaling.getOnlinePeers()
       .slice(0, ns.Config.LIMITS.MAX_PEERS_TO_QUERY);
     if (!peers.length) {
-      ns.Logger.info('no peers online to query');
+      ns.Logger.info('queryPeers: no peers online');
       return [];
     }
 
     const queryId = ns.Util.newId();
     const query = { type: 'query', queryId, vector, limit };
 
+    ns.Logger.info('queryPeers: sending to', { peers: peers.length, queryId: queryId.slice(0,8) });
+
     const pending = { results: new Map(), timer: null };
     pendingQueries.set(queryId, pending);
 
     const unsubResponse = ns.Signaling.onAnyResponse((data, msgId) => {
       if (data.queryId === queryId) {
-        handleIncomingResponse(data.from, data);
+        handleIncomingResponse(data.from, data, 'mailbox');
       }
     });
 
@@ -944,6 +933,7 @@ ns.P2P = (() => {
           'RTC setup timeout'
         );
         ch.send(JSON.stringify(query));
+        ns.Logger.info('query sent via RTC', { to: peerId.slice(0, 10) });
       } catch (e) {
         ns.Logger.warn(`RTC to ${peerId.slice(0, 8)} failed, using mailbox`, e.message);
         ns.Signaling.sendMailbox(peerId, `q-${queryId}-${peerId}-${ns.Util.newId()}`, query);
@@ -956,11 +946,18 @@ ns.P2P = (() => {
       pending.timer = setTimeout(() => {
         unsubResponse();
         const collected = [];
-        for (const [peerId, results] of pending.results) {
-          for (const r of results) collected.push({ ...r, fromDevice: peerId });
+        let rtcCount = 0, mbCount = 0;
+        for (const [peerId, { results, transport }] of pending.results) {
+          for (const r of results) collected.push({ ...r, fromDevice: peerId, viaTransport: transport });
+          if (transport === 'rtc') rtcCount++; else mbCount++;
         }
         pendingQueries.delete(queryId);
-        ns.Logger.info('query done', { queried: peers.length, responded: pending.results.size });
+        ns.Logger.info('query done', { 
+          queried: peers.length, 
+          responded: pending.results.size,
+          rtc: rtcCount,
+          mailbox: mbCount
+        });
         resolve(collected);
       }, timeoutMs);
     });
@@ -974,12 +971,16 @@ ns.P2P = (() => {
     });
   };
 
-  return { bind, queryPeers, updateRtcCount };
+  const resetCounters = () => {
+    rtcResponseCount = 0;
+    mailboxResponseCount = 0;
+    updateRtcCount();
+  };
+
+  return { bind, queryPeers, updateRtcCount, resetCounters };
 })();
 
-/* --------------------------------------------------------------------------
-   [11] RELEVANCE
-   -------------------------------------------------------------------------- */
+/* [11] RELEVANCE */
 ns.Relevance = (() => {
   const { THRESHOLD, ADJACENCY, MAX_CARDS } = ns.Config.RELEVANCE;
   const escapeHtml = ns.Util.escapeHtml;
@@ -1055,9 +1056,7 @@ ns.Relevance = (() => {
   return { rankAll, highlightFragment };
 })();
 
-/* --------------------------------------------------------------------------
-   [12] SYNC
-   -------------------------------------------------------------------------- */
+/* [12] SYNC */
 ns.Sync = (() => {
   const saveLocal = async ({ text, publishToWorld = false }) => {
     const clean = ns.Util.normalizeText(text);
@@ -1103,15 +1102,13 @@ ns.Sync = (() => {
   return { saveLocal, reindexAll };
 })();
 
-/* --------------------------------------------------------------------------
-   [13] UI
-   -------------------------------------------------------------------------- */
+/* [13] UI */
 ns.UI = (() => {
   const refs = {};
 
   const cache = () => {
     ['input','btnSave','btnSaveWorld','btnLoadModel','btnReindex','btnSeed',
-     'btnQueryNow','btnReloadGun','btnReset','listMine','listWorld','listAdjacent',
+     'btnTestConn','btnReloadGun','btnReset','listMine','listWorld','listAdjacent',
      'listAll','status','modelProgress','deviceId','alertBox']
       .forEach((id) => { refs[id] = document.getElementById(id); });
   };
@@ -1185,7 +1182,7 @@ ns.UI = (() => {
       const meta = document.createElement('div');
       meta.className = 'meta';
       meta.textContent =
-        `from:${(e.fromDevice || '?').slice(0,10)} | ${new Date(e.receivedAt || Date.now()).toISOString().slice(11,19)} | RAM only`;
+        `from:${(e.fromDevice || '?').slice(0,10)} | ${e.viaTransport || '?'} | ${new Date(e.receivedAt || Date.now()).toISOString().slice(11,19)} | RAM only`;
       row.appendChild(score); row.appendChild(body); row.appendChild(meta);
       container.appendChild(row);
     }
@@ -1211,7 +1208,7 @@ ns.UI = (() => {
       const meta = document.createElement('div');
       meta.className = 'meta';
       if (isLocal) meta.textContent = `local adjacent | ${r.source.id.slice(0,8)}`;
-      else meta.textContent = `world adjacent | from:${(r.source.fromDevice || '?').slice(0,10)}`;
+      else meta.textContent = `world adjacent | from:${(r.source.fromDevice || '?').slice(0,10)} | ${r.source.viaTransport || '?'}`;
       row.appendChild(score); row.appendChild(body); row.appendChild(meta);
       container.appendChild(row);
     }
@@ -1356,14 +1353,19 @@ ns.UI = (() => {
       await refresh();
     });
 
-    refs.btnQueryNow.addEventListener('click', async () => {
-      if (!ns.Vector.isLoaded()) { ns.Logger.warn('Load model first'); return; }
-      const text = refs.input.value.trim() || 'sample query';
+    refs.btnTestConn.addEventListener('click', async () => {
+      if (!ns.Vector.isLoaded()) {
+        ns.Logger.warn('Load model first');
+        return;
+      }
+      ns.P2P.resetCounters();
+      const testVector = new Array(384).fill(0).map(() => Math.random() - 0.5);
       try {
-        const qv = await ns.Vector.embed(text);
-        await ns.P2P.queryPeers(qv);
-        await refresh();
-      } catch (e) { ns.Logger.error('manual query failed', e.message); }
+        const results = await ns.P2P.queryPeers(testVector, { limit: 1 });
+        ns.Logger.info('test connection done', { results: results.length });
+      } catch (e) {
+        ns.Logger.error('test connection failed', e.message);
+      }
     });
 
     refs.btnReloadGun.addEventListener('click', async () => {
@@ -1405,13 +1407,11 @@ ns.UI = (() => {
       }
     });
     document.addEventListener('ns:rtc', (ev) => {
-      setPill('rtc', `RTC: ${ev.detail.count}`, ev.detail.count ? 'ok' : 'warn');
+      const { rtc, mb } = ev.detail;
+      setPill('rtc', `RTC: ${rtc} | MB: ${mb}`, (rtc || mb) ? 'ok' : 'warn');
     });
     document.addEventListener('ns:peer-online', (ev) => {
       ns.Logger.info('peer online', { dev: ev.detail.deviceId.slice(0, 12) });
-    });
-    document.addEventListener('ns:peer-offline', (ev) => {
-      ns.Logger.info('peer offline', { dev: ev.detail.deviceId.slice(0, 12) });
     });
   };
 
@@ -1419,9 +1419,7 @@ ns.UI = (() => {
   return { init, refresh, setPill, showDeviceId, showAlert };
 })();
 
-/* --------------------------------------------------------------------------
-   [14] APP
-   -------------------------------------------------------------------------- */
+/* [14] APP */
 ns.App = (() => {
   const boot = async () => {
     ns.UI.init();
@@ -1451,7 +1449,7 @@ ns.App = (() => {
     } catch (e) {
       ns.UI.setPill('sig', 'SIGNAL: ERR', 'err');
       ns.Logger.error('signaling init failed', e.message);
-      ns.UI.showAlert('Failed to load Gun from all CDN sources. Check your internet connection or try "Reload Gun" button. Error: ' + e.message);
+      ns.UI.showAlert('Failed to load Gun. Error: ' + e.message);
     }
 
     ns.P2P.bind();
