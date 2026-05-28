@@ -2,1569 +2,1114 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>Noosphere</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Noosphere · Direct Nostr (polished)</title>
+<link rel="icon" href="data:," />
 <style>
-:root {
-  --bg: #0a0a0f;
-  --panel: #13131a;
-  --panel-2: #1a1a24;
-  --border: #24242e;
-  --text: #e8e8f0;
-  --muted: #8888a0;
-  --accent: #7c5cff;
-  --accent-2: #5c8cff;
-  --ok: #4ade80;
-  --warn: #fbbf24;
-  --err: #f87171;
-  --card: #16161f;
-}
-html[data-theme="light"] {
-  --bg: #f6f6fa;
-  --panel: #ffffff;
-  --panel-2: #f0f0f6;
-  --border: #e0e0ea;
-  --text: #1a1a24;
-  --muted: #666680;
-  --card: #ffffff;
-}
-* { box-sizing: border-box; }
-html, body {
-  margin: 0; padding: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  height: 100vh;
-  overflow: hidden;
-}
-body { display: flex; flex-direction: column; }
-
-/* Header */
-.header {
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-  padding: 10px 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
-.header .title {
-  font-weight: 600;
-  font-size: 16px;
-  letter-spacing: .5px;
-}
-.header .spacer { flex: 1; }
-.header button {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 4px 10px;
-  border-radius: 6px;
-  font-size: 14px;
-  cursor: pointer;
-}
-.header button:hover { background: var(--panel-2); }
-
-/* Main tabs */
-.main-tabs {
-  display: flex;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.main-tab {
-  flex: 1;
-  padding: 10px;
-  text-align: center;
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--muted);
-  border-bottom: 2px solid transparent;
-  transition: all .15s;
-}
-.main-tab.active {
-  color: var(--text);
-  border-bottom-color: var(--accent);
-}
-
-/* Content */
-.content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px;
-  padding-bottom: 80px;
-}
-.view { display: none; }
-.view.active { display: block; }
-
-/* Composer */
-.composer {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px;
-  margin-bottom: 12px;
-  position: relative;
-  touch-action: pan-y;
-}
-.composer textarea {
-  width: 100%;
-  background: transparent;
-  border: none;
-  color: var(--text);
-  font: inherit;
-  resize: none;
-  min-height: 60px;
-  outline: none;
-}
-.composer textarea::placeholder { color: var(--muted); }
-.composer .swipe-hint {
-  text-align: center;
-  font-size: 10px;
-  color: var(--muted);
-  margin-top: 6px;
-  opacity: .6;
-}
-.composer .swipe-hint .arrow {
-  display: inline-block;
-  animation: up 1.5s infinite;
-}
-@keyframes up {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
-}
-.composer .countdown {
-  position: absolute;
-  top: 6px; right: 10px;
-  font-size: 10px;
-  color: var(--accent);
-  font-weight: 600;
-}
-.composer .actions {
-  display: flex;
-  gap: 6px;
-  margin-top: 8px;
-}
-.btn {
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 7px 14px;
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: all .15s;
-}
-.btn:hover:not(:disabled) { background: #222230; border-color: var(--accent); }
-.btn:disabled { opacity: .4; cursor: not-allowed; }
-.btn.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: white;
-  flex: 1;
-}
-.btn.primary:hover:not(:disabled) { background: #6a4aee; }
-.btn.ghost { background: transparent; }
-
-/* Sub-tabs (Мои мысли / Мир / Смежные) */
-.sub-tabs {
-  display: flex;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 3px;
-  margin-bottom: 12px;
-  gap: 2px;
-}
-.sub-tab {
-  flex: 1;
-  padding: 7px 10px;
-  text-align: center;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--muted);
-  border-radius: 5px;
-  transition: all .15s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-}
-.sub-tab.active {
-  background: var(--panel-2);
-  color: var(--text);
-}
-.sub-tab .badge {
-  background: var(--border);
-  color: var(--muted);
-  padding: 0 5px;
-  border-radius: 8px;
-  font-size: 10px;
-  min-width: 16px;
-}
-.sub-tab.active .badge {
-  background: rgba(124,92,255,.25);
-  color: var(--accent);
-}
-
-/* Cards */
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
-  animation: fadeIn .25s;
-}
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.card.mine { border-left: 3px solid var(--muted); }
-.card.world { border-left: 3px solid var(--accent); }
-.card.adjacent { border-left: 3px solid var(--accent-2); }
-.card .head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 4px;
-}
-.card .tag {
-  font-size: 9px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  background: var(--panel-2);
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: .5px;
-  font-weight: 600;
-}
-.card.world .tag { background: rgba(124,92,255,.15); color: var(--accent); }
-.card.adjacent .tag { background: rgba(92,140,255,.15); color: var(--accent-2); }
-.card .score {
-  font-size: 11px;
-  color: var(--muted);
-  font-family: ui-monospace, monospace;
-}
-.card .text {
-  font-size: 13px;
-  line-height: 1.5;
-  word-wrap: break-word;
-}
-.card .text mark {
-  background: transparent;
-  color: var(--accent);
-  font-weight: 600;
-}
-.card .meta {
-  margin-top: 6px;
-  font-size: 10px;
-  color: var(--muted);
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.pub-status {
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 9px;
-  font-weight: 600;
-}
-.pub-ok { background: rgba(74,222,128,.15); color: var(--ok); }
-.pub-err { background: rgba(248,113,113,.15); color: var(--err); }
-.pub-pending { background: rgba(251,191,36,.15); color: var(--warn); }
-
-/* Empty */
-.empty {
-  text-align: center;
-  color: var(--muted);
-  padding: 32px 16px;
-  font-size: 12px;
-}
-.empty .icon { font-size: 26px; margin-bottom: 6px; opacity: .5; }
-
-/* Status bar */
-.status-bar {
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-  padding: 5px 14px;
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-  font-size: 10px;
-  flex-shrink: 0;
-}
-.chip {
-  padding: 2px 7px;
-  border-radius: 10px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.chip .dot {
-  width: 5px; height: 5px; border-radius: 50%;
-  background: var(--muted);
-}
-.chip.ok { color: var(--ok); border-color: rgba(74,222,128,.3); }
-.chip.ok .dot { background: var(--ok); box-shadow: 0 0 5px var(--ok); }
-.chip.warn { color: var(--warn); border-color: rgba(251,191,36,.3); }
-.chip.warn .dot { background: var(--warn); }
-.chip.err { color: var(--err); border-color: rgba(248,113,113,.3); }
-.chip.err .dot { background: var(--err); }
-
-/* Settings drawer */
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.6);
-  z-index: 99;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity .25s;
-}
-.overlay.show { opacity: 1; pointer-events: auto; }
-.drawer {
-  position: fixed;
-  top: 0; right: -100%;
-  width: 320px;
-  max-width: 92vw;
-  height: 100%;
-  background: var(--panel);
-  border-left: 1px solid var(--border);
-  z-index: 100;
-  transition: right .25s;
-  overflow-y: auto;
-  padding: 16px;
-}
-.drawer.open { right: 0; }
-.drawer h3 {
-  margin: 0 0 16px 0;
-  font-size: 15px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.drawer .close {
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 22px;
-  padding: 0;
-  line-height: 1;
-}
-.setting {
-  margin-bottom: 16px;
-}
-.setting label {
-  display: block;
-  font-size: 11px;
-  color: var(--muted);
-  margin-bottom: 5px;
-  text-transform: uppercase;
-  letter-spacing: .4px;
-}
-.setting input[type="text"],
-.setting select {
-  width: 100%;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 8px 10px;
-  border-radius: 6px;
-  font: inherit;
-  font-size: 13px;
-}
-.setting input[type="range"] {
-  width: 100%;
-  accent-color: var(--accent);
-}
-.setting .row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.setting .val {
-  font-size: 12px;
-  color: var(--accent);
-  font-weight: 600;
-  font-family: ui-monospace, monospace;
-}
-.setting .seg {
-  display: flex;
-  gap: 4px;
-}
-.setting .seg button {
-  flex: 1;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  padding: 6px 10px;
-  border-radius: 5px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.setting .seg button.active {
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
-}
-.setting .btn {
-  width: 100%;
-  margin-bottom: 6px;
-}
-.pubkey {
-  font-family: ui-monospace, monospace;
-  font-size: 10px;
-  color: var(--muted);
-  word-break: break-all;
-  cursor: pointer;
-  padding: 6px 8px;
-  background: var(--panel-2);
-  border-radius: 5px;
-  border: 1px solid var(--border);
-}
-
-/* Toast */
-.toast {
-  position: fixed;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%) translateY(80px);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 10px 18px;
-  border-radius: 8px;
-  font-size: 12px;
-  z-index: 200;
-  transition: transform .25s;
-  box-shadow: 0 4px 20px rgba(0,0,0,.4);
-  max-width: 90vw;
-}
-.toast.show { transform: translateX(-50%) translateY(0); }
-.toast.err { border-color: var(--err); }
-.toast.ok { border-color: var(--ok); }
-.toast.warn { border-color: var(--warn); }
-
-/* Log */
-.log {
-  background: #06060a;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px;
-  max-height: 220px;
-  overflow-y: auto;
-  font-family: ui-monospace, monospace;
-  font-size: 10px;
-  line-height: 1.5;
-}
-html[data-theme="light"] .log { background: #f0f0f6; }
-.log .e { color: var(--err); }
-.log .w { color: var(--warn); }
-.log .i { color: var(--muted); }
-.log .s { color: var(--ok); }
-
-/* Model label */
-.model-label {
-  font-size: 10px;
-  color: var(--muted);
-  padding: 3px 8px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  display: inline-block;
-  margin-bottom: 10px;
-}
-
-/* Progress */
-.progress {
-  height: 2px;
-  background: var(--border);
-  overflow: hidden;
-  border-radius: 2px;
-  margin-top: 6px;
-}
-.progress > div {
-  height: 100%;
-  background: var(--accent);
-  width: 0;
-  transition: width .2s;
-}
-
-@media (max-width: 640px) {
-  .content { padding: 10px; padding-bottom: 70px; }
-  .drawer { width: 100%; max-width: 100vw; }
-}
+:root{--bg:#0f1115;--panel:#161a22;--border:#242a36;--text:#e6e8ee;--muted:#8a93a6;--accent:#6aa6ff;--ok:#4ade80;--warn:#f59e0b;--err:#ef4444}
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-monospace,Menlo,monospace}
+.wrap{max-width:1100px;margin:0 auto;padding:16px}
+h1{font-size:16px;margin:0 0 14px;letter-spacing:.5px}
+h1 small{color:var(--muted);font-weight:normal;font-size:11px;margin-left:8px}
+h2{font-size:11px;margin:18px 0 6px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:10px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media(max-width:820px){.grid-3{grid-template-columns:1fr}}
+textarea,input[type=text]{width:100%;background:#0b0d12;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:10px;font:inherit;resize:vertical}
+textarea{min-height:80px}input[type=text]{min-height:auto;padding:8px 10px}
+button{background:#1f2532;color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font:inherit;cursor:pointer}
+button:hover:not(:disabled){background:#272f40}
+button.primary{background:var(--accent);color:#0b0d12;border-color:var(--accent)}
+button.secondary{background:#2a2f3a;color:var(--accent);border-color:var(--accent)}
+button.danger{background:#2a1a1d;color:var(--err);border-color:#3d1f22}
+button:disabled{opacity:.5;cursor:not-allowed}
+.status{display:inline-flex;gap:8px;flex-wrap:wrap}
+.pill{padding:3px 8px;border-radius:999px;font-size:11px;background:#1a1f2a;border:1px solid var(--border);color:var(--muted)}
+.pill.ok{color:var(--ok);border-color:#1f3d2a}.pill.warn{color:var(--warn);border-color:#3d3220}
+.pill.err{color:var(--err);border-color:#3d1f22}.pill.think{color:var(--accent);border-color:var(--accent)}
+.list{display:flex;flex-direction:column;gap:6px;min-height:60px}
+.item{background:#0b0d12;border:1px solid var(--border);border-radius:4px;padding:8px 10px}
+.item.local{border-left:3px solid #555}.item.world{border-left:3px solid var(--accent)}
+.item.ephemeral::before{content:"NOSTR";font-size:9px;color:var(--accent);padding:1px 4px;border:1px solid var(--accent);border-radius:2px;margin-right:6px}
+.item .score{float:right;color:var(--muted);font-size:11px}
+.item .meta{color:var(--muted);font-size:10px;margin-top:4px}
+.item mark{background:transparent;color:var(--accent);font-weight:bold}
+.progress{height:3px;background:#1a1f2a;border-radius:2px;overflow:hidden;margin-top:6px}
+.progress>div{height:100%;background:var(--accent);width:0;transition:width .2s}
+.log{background:#07090d;border:1px solid var(--border);border-radius:4px;padding:8px;max-height:250px;overflow:auto;font-size:11px}
+.log .e{color:var(--err)}.log .w{color:var(--warn)}.log .i{color:var(--muted)}.log .s{color:var(--ok)}
+.empty{color:var(--muted);font-size:12px;padding:6px}
+.hint{font-size:11px;color:var(--muted);font-style:italic;margin-top:6px}
+.room-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+.room-row label{font-size:11px;color:var(--muted);white-space:nowrap}
+.room-row input{flex:1;min-width:120px}
+code{color:#c7d2fe}
 </style>
 </head>
+
 <body>
+<div class="wrap">
+<h1>NOOSPHERE <small>v5.3 · Direct Nostr · kind 1 · polished</small></h1>
 
-<div class="header">
-  <div class="title">Noosphere</div>
-  <div class="spacer"></div>
-  <button id="btnSettings" title="Настройки">☰</button>
+<section class="panel">
+  <div class="room-row">
+    <label>ROOM:</label>
+    <input type="text" id="roomInput" value="noosphere-direct-2026" />
+    <button id="btnConnect" class="primary">Connect</button>
+    <button id="btnDisconnect" class="danger" disabled>Disconnect</button>
+  </div>
+
+  <div class="status" id="status" style="margin-top:8px;">
+    <span class="pill" data-key="idb">IDB: ...</span>
+    <span class="pill" data-key="model">MODEL: idle</span>
+    <span class="pill" data-key="net">NET: offline</span>
+    <span class="pill" data-key="me">ME: ...</span>
+    <span class="pill" data-key="peers">PEERS: 0</span>
+    <span class="pill" data-key="world">WORLD: 0</span>
+    <span class="pill" data-key="indexed">INDEXED: 0</span>
+    <span class="pill" data-key="think" style="display:none">...</span>
+  </div>
+
+  <div class="progress"><div id="modelProgress"></div></div>
+
+  <div class="hint">
+    Это “Direct Nostr”: события реально уходят на relays (они могут их хранить).
+    Мы делаем приближение “эпhemeral” так: получаем только окно <b>последних 5 минут</b> и чистим RAM по TTL.<br>
+    Чтобы проверить: открой на телефоне и ПК, одинаковый room, Connect. Нажми Load MiniLM, потом “Save + World” — на втором появится WORLD.
+  </div>
+</section>
+
+<section class="panel">
+  <h2>thought</h2>
+  <textarea id="input" placeholder="напечатай мысль... (релевантность через 4 сек после паузы)"></textarea>
+  <div class="row" style="margin-top:8px;">
+    <button id="btnSave" class="secondary">Сохранить локально</button>
+    <button id="btnSaveWorld" class="primary">Сохранить + в Мир</button>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>live relevance</h2>
+  <div class="grid-3">
+    <div><div style="color:var(--muted);font-size:11px;margin-bottom:4px;">MY (local)</div><div class="list" id="listMine"></div></div>
+    <div><div style="color:var(--muted);font-size:11px;margin-bottom:4px;">WORLD (neighbors, RAM)</div><div class="list" id="listWorld"></div></div>
+    <div><div style="color:var(--muted);font-size:11px;margin-bottom:4px;">ADJACENT</div><div class="list" id="listAdjacent"></div></div>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>diagnostics</h2>
+  <div class="row">
+    <button id="btnLoadModel" class="primary">Load MiniLM</button>
+    <button id="btnReindex">Reindex</button>
+    <button id="btnSeed">Seed 5</button>
+    <button id="btnReset" class="danger">Reset</button>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>my thoughts (persisted)</h2>
+  <div class="list" id="listAll"></div>
+</section>
+
+<section class="panel">
+  <h2>event log</h2>
+  <div class="log" id="log"></div>
+</section>
 </div>
-
-<div class="main-tabs">
-  <div class="main-tab active" data-main="stream">Поток</div>
-  <div class="main-tab" data-main="history">История</div>
-</div>
-
-<div class="status-bar">
-  <span class="chip" id="chipNet"><span class="dot"></span>offline</span>
-  <span class="chip" id="chipModel"><span class="dot"></span>model</span>
-  <span class="chip" id="chipPeers"><span class="dot"></span>0 peers</span>
-  <span class="chip" id="chipWorld"><span class="dot"></span>0 world</span>
-</div>
-
-<div class="content">
-  <!-- STREAM VIEW -->
-  <div class="view active" id="view-stream">
-    <div class="composer" id="composer">
-      <div class="countdown" id="countdown"></div>
-      <textarea id="input" placeholder="О чём думаешь?"></textarea>
-      <div class="swipe-hint"><span class="arrow">↑</span> смахните вверх для публикации</div>
-      <div class="actions">
-        <button class="btn ghost" id="btnSaveLocal">Сохранить</button>
-        <button class="btn primary" id="btnPublish">Отправить</button>
-      </div>
-      <div class="progress"><div id="modelProgress"></div></div>
-    </div>
-    
-    <div class="sub-tabs">
-      <div class="sub-tab active" data-sub="mine">Мои мысли<span class="badge" id="badgeMine">0</span></div>
-      <div class="sub-tab" data-sub="world">Мир<span class="badge" id="badgeWorld">0</span></div>
-      <div class="sub-tab" data-sub="adjacent">Смежные<span class="badge" id="badgeAdj">0</span></div>
-    </div>
-    
-    <div class="sub-view active" id="sub-mine"><div id="listMine"></div></div>
-    <div class="sub-view" id="sub-world" style="display:none"><div id="listWorld"></div></div>
-    <div class="sub-view" id="sub-adjacent" style="display:none"><div id="listAdjacent"></div></div>
-  </div>
-  
-  <!-- HISTORY VIEW -->
-  <div class="view" id="view-history">
-    <div class="model-label">Модель: MiniLM (25 МБ)</div>
-    <div id="listHistory"></div>
-  </div>
-</div>
-
-<!-- Settings drawer -->
-<div class="overlay" id="overlay"></div>
-<div class="drawer" id="drawer">
-  <h3>
-    Настройки
-    <button class="close" id="btnClose">×</button>
-  </h3>
-  
-  <div class="setting">
-    <label>Язык / Language</label>
-    <div class="seg" data-opt="lang">
-      <button data-val="ru" class="active">Русский</button>
-      <button data-val="en">English</button>
-    </div>
-  </div>
-  
-  <div class="setting">
-    <label>Тема</label>
-    <div class="seg" data-opt="theme">
-      <button data-val="auto" class="active">Авто</button>
-      <button data-val="light">День</button>
-      <button data-val="dark">Ночь</button>
-    </div>
-  </div>
-  
-  <div class="setting">
-    <label>Room</label>
-    <input type="text" id="setRoom" />
-  </div>
-  
-  <div class="setting">
-    <div class="row">
-      <label>Порог релевантности</label>
-      <span class="val" id="valThreshold">0.25</span>
-    </div>
-    <input type="range" id="setThreshold" min="0.1" max="0.7" step="0.05" value="0.25" />
-  </div>
-  
-  <div class="setting">
-    <div class="row">
-      <label>Дельта смежности</label>
-      <span class="val" id="valAdj">0.15</span>
-    </div>
-    <input type="range" id="setAdj" min="0.05" max="0.3" step="0.05" value="0.15" />
-  </div>
-  
-  <div class="setting">
-    <label>Мин. волн</label>
-    <div class="seg" data-opt="minWave">
-      <button data-val="0" class="active">0</button>
-      <button data-val="1">1</button>
-      <button data-val="3">3</button>
-      <button data-val="5">5</button>
-    </div>
-  </div>
-  
-  <div class="setting">
-    <label>Макс. карточек</label>
-    <div class="seg" data-opt="maxCards">
-      <button data-val="3">3</button>
-      <button data-val="5" class="active">5</button>
-      <button data-val="10">10</button>
-    </div>
-  </div>
-  
-  <div class="setting" style="margin-top:20px;">
-    <button class="btn" id="btnExport">💾 Скачать капсулу</button>
-    <button class="btn" id="btnImport">📥 Импортировать капсулу</button>
-    <button class="btn" id="btnReindex">🔄 Пересоздать векторы</button>
-    <button class="btn" id="btnReset" style="color:var(--err)">🗑 Сбросить всё</button>
-    <button class="btn primary" id="btnApply">Применить</button>
-  </div>
-  
-  <div class="setting" style="margin-top:16px;">
-    <label>Pubkey</label>
-    <div class="pubkey" id="pubkeyDisplay" title="Click to copy">—</div>
-  </div>
-  
-  <div class="setting">
-    <label>Log</label>
-    <div class="log" id="log"></div>
-  </div>
-</div>
-
-<div class="toast" id="toast"></div>
-<input type="file" id="fileInput" style="display:none" accept=".json" />
 
 <script type="module">
 /* ============================================================================
-   NOOSPHERE v7.0 — final
-   UI 1:1 с serendipity 15 rc, backend: рабочий Nostr (v5.2 proven)
+   NOOSPHERE v5.3 — DIRECT NOSTR (polished)
+   ----------------------------------------------------------------------------
+   Что “полирнуто” относительно твоего рабочего v5.2:
+   1) WORLD/PEERS/INDEXED pills обновляются корректно (раньше WORLD часто залипал).
+   2) Периодическая чистка RAM (peers+world) даже без новых событий.
+   3) Connect/Disconnect: безопасный ре-коннект (если нажал Connect повторно).
+   4) Subscribe: берём окно since=now-5m и ре-сабскрайб каждые 30с как у тебя,
+      но без лишнего шума + с защитой от двойных подписок.
+   5) Publish: лимит текста, throttle, и честные логи по relays (allSettled).
+   6) Протокол контента: v=1, {text, vector}. Принимаем и игнорим мусор.
    ============================================================================ */
-import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
+
+/* --------------------------------------------------------------------------
+   Imports
+   -------------------------------------------------------------------------- */
+import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 import * as nostrMod from 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
 
 const pipeline = tfMod.pipeline || (tfMod.default && tfMod.default.pipeline);
 const tfEnv = tfMod.env || (tfMod.default && tfMod.default.env);
 const { SimplePool, finalizeEvent, generateSecretKey, getPublicKey } = nostrMod;
 
+if (!pipeline) throw new Error('transformers pipeline not found');
+if (!SimplePool) throw new Error('nostr-tools SimplePool not found');
+
 if (tfEnv) {
   tfEnv.allowLocalModels = false;
   tfEnv.useBrowserCache = true;
 }
 
-/* ---------- CONFIG ---------- */
-const CFG = {
-  DB_NAME: 'noosphere_v7',
-  DB_VERSION: 1,
+const ns = {};
+window.ns = ns; // удобно дебажить из консоли
+
+/* --------------------------------------------------------------------------
+   [1] CONFIG
+   -------------------------------------------------------------------------- */
+ns.Config = Object.freeze({
+  DB_NAME: 'noosphere_direct_nostr',
+  DB_VERSION: 2,
   STORE_THOUGHTS: 'thoughts',
   STORE_KEYS: 'keys',
-  
-  // Только 3 ПРОВЕРЕННЫХ рабочих relay (остальные упали в логах)
+
+  // relays можно менять, но лучше 3-6 штук (баланс надёжность/шум)
   NOSTR_RELAYS: [
     'wss://relay.damus.io',
     'wss://nos.lol',
     'wss://relay.snort.social',
+    'wss://relay.nostr.band',
   ],
-  
-  KIND_THOUGHT: 1,
-  WINDOW_SEC: 600,
-  RESUB_INTERVAL_MS: 30000,
-  MAX_EPHEMERAL_AGE_MS: 10 * 60_000,
-  PUBLISH_THROTTLE_MS: 1000,
-  MODEL_ID: 'Xenova/all-MiniLM-L6-v2',
-  
-  settings: {
-    room: 'noosphere-2026',
-    lang: 'ru',
-    theme: 'auto',
-    threshold: 0.25,
-    adjDelta: 0.15,
-    minWave: 0,
-    maxCards: 5,
-    debounceSec: 4,
+
+  KIND_THOUGHT: 1,             // kind 1 text note
+  ROOM_TAG: 't',               // используем '#t' фильтр
+  WINDOW_SEC: 300,             // subscribe окно (5 минут)
+  RESUB_INTERVAL_MS: 30_000,   // как у тебя: ре-саб каждые 30 сек
+
+  LIMITS: {
+    MAX_TEXT_LENGTH: 10_000,
+    PUBLISH_TEXT_LENGTH: 500,     // что реально шлём в мир
+    DEBOUNCE_MS: 4000,
+    MAX_EPHEMERAL_AGE_MS: 5 * 60_000,
+    PUBLISH_THROTTLE_MS: 1500,
+    RENDER_CAP: 200,
   },
-};
 
-try {
-  const saved = localStorage.getItem('noosphere_settings_v7');
-  if (saved) Object.assign(CFG.settings, JSON.parse(saved));
-} catch {}
+  VECTOR: { MODEL_ID: 'Xenova/all-MiniLM-L6-v2' },
+  RELEVANCE: { THRESHOLD: 0.25, ADJACENCY: 0.15, MAX_CARDS: 5 },
 
-const saveSettings = () => {
-  try { localStorage.setItem('noosphere_settings_v7', JSON.stringify(CFG.settings)); } catch {}
-};
+  PEER_TTL_MS: 60_000,        // peer активен если виделся в последнюю минуту
+  PRUNE_TICK_MS: 10_000,      // чистка RAM каждые 10 сек
+});
 
-/* ---------- TOAST ---------- */
-const Toast = (() => {
-  let hideTimer = null;
-  return {
-    show(msg, type = '', durationMs = 3000) {
-      const t = document.getElementById('toast');
-      if (!t) return;
-      t.textContent = msg;
-      t.className = 'toast show ' + type;
-      if (hideTimer) clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => { t.className = 'toast ' + type; }, durationMs);
-    }
-  };
-})();
-
-/* ---------- LOGGER ---------- */
-const Log = (() => {
+/* --------------------------------------------------------------------------
+   [2] LOGGER
+   -------------------------------------------------------------------------- */
+ns.Logger = (() => {
+  const el = () => document.getElementById('log');
   const fmt = (d) => d.toISOString().slice(11, 19);
   const safe = (x) => {
-    try { return typeof x === 'string' ? x : JSON.stringify(x).slice(0, 200); }
+    try { return typeof x === 'string' ? x : JSON.stringify(x); }
     catch { return String(x); }
   };
   const write = (lvl, m, d) => {
     const line = document.createElement('div');
     line.className = lvl;
     const tail = d !== undefined ? ' ' + safe(d) : '';
-    line.textContent = '[' + fmt(new Date()) + '] [' + lvl.toUpperCase() + '] ' + m + tail;
-    const box = document.getElementById('log');
+    line.textContent = `[${fmt(new Date())}] [${lvl.toUpperCase()}] ${m}${tail}`;
+    const box = el();
     if (box) { box.appendChild(line); box.scrollTop = box.scrollHeight; }
     const fn = lvl === 'e' ? 'error' : lvl === 'w' ? 'warn' : 'log';
-    try { console[fn]('[ns:' + lvl + '] ' + m, d !== undefined ? d : ''); } catch {}
+    try { console[fn](`[ns:${lvl}] ${m}`, d ?? ''); } catch {}
   };
   return {
-    info: (m, d) => write('i', m, d),
-    warn: (m, d) => write('w', m, d),
-    error: (m, d) => write('e', m, d),
+    info:    (m, d) => write('i', m, d),
+    warn:    (m, d) => write('w', m, d),
+    error:   (m, d) => write('e', m, d),
     success: (m, d) => write('s', m, d),
   };
 })();
 
-/* ---------- UTIL ---------- */
-const Util = {
-  newId: () => {
-    try { return crypto.randomUUID(); }
-    catch { return 'id-' + Math.random().toString(36).slice(2, 15) + Date.now().toString(36); }
-  },
+/* --------------------------------------------------------------------------
+   [3] UTIL
+   -------------------------------------------------------------------------- */
+ns.Util = {
   now: () => Date.now(),
-  escapeHtml: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+  newId: () => (crypto.randomUUID ? crypto.randomUUID() : ('id-' + Math.random().toString(36).slice(2) + Date.now().toString(36))),
+  normalizeText: (t) => typeof t === 'string' ? t.trim().slice(0, ns.Config.LIMITS.MAX_TEXT_LENGTH) : '',
+  isNonEmptyString: (v) => typeof v === 'string' && v.trim().length > 0,
+  debounce: (fn, ms) => {
+    let t = null;
+    return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+  },
+  escapeHtml: (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'),
+  toHex: (u8) => Array.from(u8).map(b => b.toString(16).padStart(2, '0')).join(''),
+  fromHex: (hex) => new Uint8Array((hex.match(/.{1,2}/g) || []).map(b => parseInt(b, 16))),
 };
 
-/* ---------- STORAGE ---------- */
-const Storage = (() => {
+/* --------------------------------------------------------------------------
+   [4] STORAGE (IndexedDB)
+   -------------------------------------------------------------------------- */
+ns.Storage = (() => {
+  const { DB_NAME, DB_VERSION, STORE_THOUGHTS, STORE_KEYS } = ns.Config;
   let db = null;
+
   const open = () => new Promise((res, rej) => {
     if (db) return res(db);
-    const req = indexedDB.open(CFG.DB_NAME, CFG.DB_VERSION);
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (ev) => {
       const _db = ev.target.result;
-      if (!_db.objectStoreNames.contains(CFG.STORE_THOUGHTS)) {
-        const s = _db.createObjectStore(CFG.STORE_THOUGHTS, { keyPath: 'id' });
+
+      if (!_db.objectStoreNames.contains(STORE_THOUGHTS)) {
+        const s = _db.createObjectStore(STORE_THOUGHTS, { keyPath: 'id' });
         s.createIndex('createdAt', 'createdAt');
         s.createIndex('hasVector', 'hasVector');
+        s.createIndex('published', 'published');
       }
-      if (!_db.objectStoreNames.contains(CFG.STORE_KEYS)) {
-        _db.createObjectStore(CFG.STORE_KEYS, { keyPath: 'k' });
+
+      if (!_db.objectStoreNames.contains(STORE_KEYS)) {
+        _db.createObjectStore(STORE_KEYS, { keyPath: 'k' });
       }
     };
     req.onsuccess = (ev) => { db = ev.target.result; res(db); };
     req.onerror = () => rej(req.error);
   });
+
   const tx = (store, mode) => db.transaction(store, mode || 'readonly').objectStore(store);
-  const prom = (req) => new Promise((r, j) => {
-    req.onsuccess = () => r(req.result);
-    req.onerror = () => j(req.error);
-  });
-  return {
-    open,
-    put: async (t) => { await open(); return prom(tx(CFG.STORE_THOUGHTS, 'readwrite').put(t)); },
-    all: async () => { await open(); return prom(tx(CFG.STORE_THOUGHTS).getAll()); },
-    listUnindexed: async () => {
-      await open();
-      return new Promise((res, rej) => {
-        const out = [];
-        const req = tx(CFG.STORE_THOUGHTS).index('hasVector').openCursor(IDBKeyRange.only(0));
-        req.onsuccess = (ev) => {
-          const c = ev.target.result;
-          if (!c) return res(out);
-          out.push(c.value); c.continue();
-        };
-        req.onerror = () => rej(req.error);
-      });
-    },
-    clear: async () => { await open(); await prom(tx(CFG.STORE_THOUGHTS, 'readwrite').clear()); },
-    putKey: async (k, v) => { await open(); return prom(tx(CFG.STORE_KEYS, 'readwrite').put({ k, v })); },
-    delKey: async (k) => { await open(); return prom(tx(CFG.STORE_KEYS, 'readwrite').delete(k)); },
-    getKey: async (k) => {
-      await open();
-      const r = await prom(tx(CFG.STORE_KEYS).get(k));
-      return r ? r.v : null;
-    },
+  const prom = (req) => new Promise((r, j) => { req.onsuccess = () => r(req.result); req.onerror = () => j(req.error); });
+
+  const putThought = async (t) => { await open(); return prom(tx(STORE_THOUGHTS, 'readwrite').put(t)); };
+  const allThoughts = async () => { await open(); return prom(tx(STORE_THOUGHTS).getAll()); };
+
+  const listUnindexed = async () => {
+    await open();
+    return new Promise((res, rej) => {
+      const out = [];
+      const req = tx(STORE_THOUGHTS).index('hasVector').openCursor(IDBKeyRange.only(0));
+      req.onsuccess = (ev) => {
+        const c = ev.target.result;
+        if (!c) return res(out);
+        out.push(c.value);
+        c.continue();
+      };
+      req.onerror = () => rej(req.error);
+    });
   };
+
+  const clearThoughts = async () => { await open(); await prom(tx(STORE_THOUGHTS, 'readwrite').clear()); };
+
+  const putKey = async (k, v) => { await open(); return prom(tx(STORE_KEYS, 'readwrite').put({ k, v })); };
+  const getKey = async (k) => { await open(); const r = await prom(tx(STORE_KEYS).get(k)); return r ? r.v : null; };
+
+  return { open, putThought, allThoughts, listUnindexed, clearThoughts, putKey, getKey };
 })();
 
-/* ---------- VECTOR ---------- */
-const Vector = (() => {
-  let extractor = null, loadPromise = null;
-  return {
-    load: (onProgress) => {
-      if (extractor) return Promise.resolve(extractor);
-      if (loadPromise) return loadPromise;
-      loadPromise = pipeline('feature-extraction', CFG.MODEL_ID, {
-        progress_callback: (p) => {
-          if (onProgress && p.status === 'progress' && p.total) {
-            onProgress({ loaded: p.loaded, total: p.total });
-          }
-        },
-      }).then((ex) => {
-        extractor = ex;
-        Log.success('model loaded');
-        return ex;
-      }).catch((err) => {
-        loadPromise = null;
-        throw err;
-      });
-      return loadPromise;
-    },
-    embed: async (text) => {
-      if (!extractor) throw new Error('Model not loaded');
-      if (!text || !text.trim()) return null;
-      const out = await extractor(text, { pooling: 'mean', normalize: true });
-      return Array.from(out.data);
-    },
-    cosine: (a, b) => {
-      if (!a || !b || a.length !== b.length) return 0;
-      let s = 0;
-      for (let i = 0; i < a.length; i++) s += a[i] * b[i];
-      return s;
-    },
-    isLoaded: () => extractor !== null,
+/* --------------------------------------------------------------------------
+   [5] VECTOR (transformers.js)
+   -------------------------------------------------------------------------- */
+ns.Vector = (() => {
+  let extractor = null;
+  let loadPromise = null;
+
+  const load = (onProgress) => {
+    if (extractor) return Promise.resolve(extractor);
+    if (loadPromise) return loadPromise;
+
+    loadPromise = pipeline('feature-extraction', ns.Config.VECTOR.MODEL_ID, {
+      progress_callback: (p) => {
+        if (onProgress && p.status === 'progress' && p.total) onProgress({ loaded: p.loaded, total: p.total });
+      },
+    }).then((ex) => {
+      extractor = ex;
+      ns.Logger.success('model loaded');
+      return ex;
+    }).catch((err) => { loadPromise = null; throw err; });
+
+    return loadPromise;
   };
+
+  const embed = async (text) => {
+    if (!extractor) throw new Error('MODEL_NOT_LOADED');
+    if (!ns.Util.isNonEmptyString(text)) return null;
+    const out = await extractor(text, { pooling: 'mean', normalize: true });
+    // возвращаем массив чисел (как у тебя), чтобы IDB и JSON были простыми
+    return Array.from(out.data);
+  };
+
+  const cosine = (a, b) => {
+    if (!a || !b || a.length !== b.length) return 0;
+    let s = 0;
+    for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+    return s;
+  };
+
+  const isLoaded = () => extractor !== null;
+  return { load, embed, cosine, isLoaded };
 })();
 
-/* ---------- NOSTR CHANNEL (v5.2 proven code) ---------- */
-const Channel = (() => {
-  let pool = null, sk = null, pk = null, roomName = null;
-  let sub = null, resubTimer = null;
-  const peers = new Map();
-  const worldEvents = new Map();
+/* --------------------------------------------------------------------------
+   [6] EPHEMERAL WORLD (RAM)
+   -------------------------------------------------------------------------- */
+ns.Ephemeral = (() => {
+  // pubkey -> { lastSeen, events: Map<eventId, {id,text,vector,ts}> }
+  const byPeer = new Map();
+
+  const upsert = (peerId, announce) => {
+    let rec = byPeer.get(peerId);
+    if (!rec) {
+      rec = { events: new Map(), lastSeen: ns.Util.now() };
+      byPeer.set(peerId, rec);
+    }
+    rec.events.set(announce.id, { ...announce, ts: ns.Util.now() });
+    rec.lastSeen = ns.Util.now();
+    document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
+  };
+
+  const prune = () => {
+    const now = ns.Util.now();
+    const maxAge = ns.Config.LIMITS.MAX_EPHEMERAL_AGE_MS;
+    let changed = false;
+
+    for (const [peerId, rec] of byPeer) {
+      if (now - rec.lastSeen > maxAge) { byPeer.delete(peerId); changed = true; continue; }
+      for (const [id, e] of rec.events) {
+        if (now - e.ts > maxAge) { rec.events.delete(id); changed = true; }
+      }
+      if (rec.events.size === 0 && (now - rec.lastSeen > maxAge / 2)) { byPeer.delete(peerId); changed = true; }
+    }
+
+    if (changed) document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
+  };
+
+  const allAnnounces = () => {
+    const out = [];
+    for (const [peerId, rec] of byPeer) {
+      for (const e of rec.events.values()) out.push({ ...e, fromPeer: peerId, receivedAt: e.ts });
+    }
+    return out;
+  };
+
+  const stats = () => {
+    let events = 0;
+    for (const rec of byPeer.values()) events += rec.events.size;
+    return { peers: byPeer.size, events };
+  };
+
+  const clear = () => { byPeer.clear(); document.dispatchEvent(new CustomEvent('ns:ephemeral-changed')); };
+
+  return { upsert, prune, allAnnounces, stats, clear };
+})();
+
+/* --------------------------------------------------------------------------
+   [7] NOSTR CHANNEL (kind 1 + room tag)
+   -------------------------------------------------------------------------- */
+ns.Channel = (() => {
+  let pool = null;
+  let sk = null;
+  let pk = null;
+
+  let roomName = null;
+  let sub = null;
+  let resubTimer = null;
+  let pruneTimer = null;
+
+  // “peers” тут = pubkeys, от которых пришёл хотя бы 1 event недавно
+  const peers = new Map(); // pubkey -> lastSeenMs
   let lastPublishAt = 0;
-  const publishStatus = new Map();
-  
+
+  const isConnected = () => pool !== null;
+
+  const ensureKeys = async () => {
+    let skHex = await ns.Storage.getKey('nostr_sk_hex');
+    if (!skHex) {
+      const newSk = generateSecretKey();
+      skHex = ns.Util.toHex(newSk);
+      await ns.Storage.putKey('nostr_sk_hex', skHex);
+      ns.Logger.success('generated new Nostr identity');
+    }
+    sk = ns.Util.fromHex(skHex);
+    pk = getPublicKey(sk);
+    document.dispatchEvent(new CustomEvent('ns:me', { detail: { pubkey: pk } }));
+    ns.Logger.success('pubkey: ' + pk.slice(0, 16) + '...');
+  };
+
+  const handleEvent = (event) => {
+    // пропускаем свои
+    if (event.pubkey === pk) return;
+
+    // peers
+    peers.set(event.pubkey, ns.Util.now());
+
+    // parse content (наш протокол)
+    try {
+      const content = JSON.parse(event.content);
+      if (!content || content.v !== 1) return;
+      if (!ns.Util.isNonEmptyString(content.text)) return;
+      if (!Array.isArray(content.vector)) return;
+
+      // sanity: вектор должен быть хоть какой-то длины
+      if (content.vector.length < 64) return;
+
+      ns.Ephemeral.upsert(event.pubkey, {
+        id: event.id,
+        text: content.text,
+        vector: content.vector,
+      });
+
+      document.dispatchEvent(new CustomEvent('ns:peers'));
+      document.dispatchEvent(new CustomEvent('ns:world'));
+    } catch {
+      // не наш event — игнор
+    }
+  };
+
   const doSubscribe = () => {
     if (!pool) return;
-    const since = Math.floor(Date.now() / 1000) - CFG.WINDOW_SEC;
+
+    const since = Math.floor(Date.now() / 1000) - ns.Config.WINDOW_SEC;
+
+    // закрываем прошлую подписку
     if (sub) { try { sub.close(); } catch {} sub = null; }
+
     const filter = {
-      kinds: [CFG.KIND_THOUGHT],
-      '#t': [roomName],
-      since: since,
+      kinds: [ns.Config.KIND_THOUGHT],
+      ['#' + ns.Config.ROOM_TAG]: [roomName],
+      since,
+      limit: 200,
     };
-    sub = pool.subscribeMany(CFG.NOSTR_RELAYS, [filter], {
-      onevent: (event) => {
-        if (event.pubkey === pk) return;
-        peers.set(event.pubkey, Util.now());
-        document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: peers.size } }));
-        try {
-          const content = JSON.parse(event.content);
-          if (content.text && Array.isArray(content.vector)) {
-            worldEvents.set(event.id, {
-              pubkey: event.pubkey,
-              text: content.text,
-              vector: content.vector,
-              ts: event.created_at * 1000,
-              id: event.id,
-            });
-            document.dispatchEvent(new CustomEvent('ns:world', { detail: { count: worldEvents.size } }));
-            document.dispatchEvent(new CustomEvent('ns:world-event', { detail: {
-              id: event.id,
-              text: content.text,
-              vector: content.vector,
-              fromPeer: event.pubkey,
-              receivedAt: Util.now(),
-            } }));
-          }
-        } catch {}
-      },
-      oneose: () => {
-        document.dispatchEvent(new CustomEvent('ns:world', { detail: { count: worldEvents.size } }));
-      },
+
+    sub = pool.subscribeMany(ns.Config.NOSTR_RELAYS, [filter], {
+      onevent: handleEvent,
+      oneose: () => ns.Logger.success(`subscribed: room="${roomName}", since=${new Date(since*1000).toLocaleTimeString()}`),
     });
   };
-  
-  return {
-    init: async (room) => {
-      if (pool) return;
-      roomName = room;
-      Log.info('initializing Nostr client...');
-      
-      let skHex = await Storage.getKey('nostr_sk');
-      if (!skHex) {
-        const newSk = generateSecretKey();
-        skHex = Array.from(newSk).map(b => b.toString(16).padStart(2, '0')).join('');
-        await Storage.putKey('nostr_sk', skHex);
-        Log.success('generated new Nostr identity');
-      }
-      
-      sk = new Uint8Array(skHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
-      pk = getPublicKey(sk);
-      Log.success('pubkey: ' + pk.slice(0, 16) + '...');
-      document.dispatchEvent(new CustomEvent('ns:pubkey', { detail: { pk } }));
-      
-      pool = new SimplePool();
-      Log.info('connecting to ' + CFG.NOSTR_RELAYS.length + ' relays');
-      CFG.NOSTR_RELAYS.forEach(url => Log.info('  → ' + url.replace('wss://', '')));
-      
-      doSubscribe();
-      resubTimer = setInterval(doSubscribe, CFG.RESUB_INTERVAL_MS);
-      document.dispatchEvent(new CustomEvent('ns:net', { detail: { online: true } }));
-      Log.success('channel ready');
-    },
-    
-    publish: async ({ text, vector, noteId }) => {
-      if (!pool || !sk) return { ok: false, errors: ['not connected'] };
-      const now = Date.now();
-      if (now - lastPublishAt < CFG.PUBLISH_THROTTLE_MS) {
-        return { ok: false, errors: ['throttled'] };
-      }
-      lastPublishAt = now;
-      
-      try {
-        const event = finalizeEvent({
-          kind: CFG.KIND_THOUGHT,
-          created_at: Math.floor(Date.now() / 1000),
-          tags: [
-            ['t', roomName],
-            ['client', 'noosphere-v7'],
-          ],
-          content: JSON.stringify({
-            text: text.slice(0, 500),
-            vector: vector,
-            id: noteId,
-          }),
-        }, sk);
-        
-        const results = await Promise.allSettled(pool.publish(CFG.NOSTR_RELAYS, event));
-        const latency = Date.now() - now;
-        
-        let okCount = 0;
-        const errors = [];
-        results.forEach((r, i) => {
-          const url = CFG.NOSTR_RELAYS[i].replace('wss://', '').replace(/\/$/, '');
-          if (r.status === 'fulfilled' && r.value === true) {
-            okCount++;
-          } else {
-            const err = r.status === 'rejected'
-              ? (r.reason && r.reason.message ? r.reason.message : 'network')
-              : 'rejected';
-            errors.push(url + ': ' + err);
-          }
-        });
-        
-        if (okCount > 0) {
-          Log.success('published to ' + okCount + '/' + CFG.NOSTR_RELAYS.length + ' (' + latency + 'ms)');
-        } else {
-          Log.error('publish failed on all relays');
-          errors.forEach(e => Log.warn('  ' + e));
-        }
-        
-        return { ok: okCount > 0, okCount, total: CFG.NOSTR_RELAYS.length, errors };
-      } catch (e) {
-        Log.error('publish err: ' + e.message);
-        return { ok: false, errors: [e.message] };
-      }
-    },
-    
-    leave: () => {
-      if (resubTimer) { clearInterval(resubTimer); resubTimer = null; }
-      if (sub) { try { sub.close(); } catch {} sub = null; }
-      if (pool) { try { pool.close(CFG.NOSTR_RELAYS); } catch {} pool = null; }
-      peers.clear();
-      worldEvents.clear();
-      document.dispatchEvent(new CustomEvent('ns:net', { detail: { online: false } }));
-      document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: 0 } }));
-      document.dispatchEvent(new CustomEvent('ns:world', { detail: { count: 0 } }));
-    },
-    
-    isConnected: () => pool !== null,
-    getPublishStatus: (id) => publishStatus.get(id) || null,
-    setPublishStatus: (id, status) => publishStatus.set(id, status),
-    
-    resetIdentity: async () => {
-      await Storage.delKey('nostr_sk');
-      location.reload();
-    },
-  };
-})();
 
-/* ---------- RELEVANCE ---------- */
-const Relevance = (() => {
-  const escapeHtml = Util.escapeHtml;
-  const highlight = (qt, mt) => {
-    if (!qt || !mt) return escapeHtml(mt);
-    const qT = qt.toLowerCase().match(/\w+/g) || [];
-    const mT = mt.toLowerCase().match(/\w+/g) || [];
-    if (!qT.length || !mT.length) return escapeHtml(mt);
-    const mRaw = mt.match(/\w+/g) || [];
-    const mPos = [];
-    let cursor = 0;
-    for (const w of mRaw) {
-      const idx = mt.toLowerCase().indexOf(w.toLowerCase(), cursor);
-      if (idx < 0) break;
-      mPos.push({ start: idx, end: idx + w.length });
-      cursor = idx + w.length;
-    }
-    let bestLen = 0, bestStart = -1;
-    for (let i = 0; i < mT.length && i < mPos.length; i++) {
-      for (let L = Math.min(qT.length, mT.length - i); L > bestLen; L--) {
-        if (i + L > mPos.length) break;
-        if (qT.join(' ').includes(mT.slice(i, i + L).join(' '))) {
-          bestLen = L; bestStart = i;
-        }
-      }
-    }
-    if (bestLen < 2 || bestStart < 0) return escapeHtml(mt);
-    const a = mPos[bestStart], b = mPos[bestStart + bestLen - 1];
-    return escapeHtml(mt.slice(0, a.start)) +
-           '<mark>' + escapeHtml(mt.slice(a.start, b.end)) + '</mark>' +
-           escapeHtml(mt.slice(b.end));
+  const prunePeers = () => {
+    const now = ns.Util.now();
+    const ttl = ns.Config.PEER_TTL_MS;
+    for (const [pub, lastSeen] of peers) if (now - lastSeen > ttl) peers.delete(pub);
   };
-  
-  const rank = (qv, locals, world) => {
-    if (!qv) return { mine: [], world: [], adjacent: [] };
-    const { threshold, adjDelta, maxCards } = CFG.settings;
-    
-    const ls = locals.filter(t => Array.isArray(t.vector))
-      .map(t => ({ source: t, score: Vector.cosine(qv, t.vector) }))
-      .filter(r => r.score > threshold - adjDelta)
-      .sort((a, b) => b.score - a.score);
-    
-    const ws = world
-      .filter(r => Array.isArray(r.vector) && r.vector.length === qv.length)
-      .map(r => ({ source: r, score: Vector.cosine(qv, r.vector) }))
-      .filter(r => r.score > threshold - adjDelta)
-      .sort((a, b) => b.score - a.score);
-    
-    const mine = [], worldOut = [], adjacent = [];
-    for (const r of ls) {
-      if (r.score >= threshold) { if (mine.length < maxCards) mine.push(r); }
-      else if (adjacent.length < maxCards) adjacent.push(r);
-    }
-    for (const r of ws) {
-      if (r.score >= threshold) { if (worldOut.length < maxCards) worldOut.push(r); }
-      else if (adjacent.length < maxCards) adjacent.push(r);
-    }
-    return { mine, world: worldOut, adjacent };
-  };
-  
-  return { rank, highlight };
-})();
 
-/* ---------- APP STATE ---------- */
-const App = (() => {
-  let lastQuery = { text: null, vector: null };
-  let debounceTimer = null;
-  let countdownTimer = null;
-  let worldBuffer = []; // кэш world events
-  
-  const setChip = (id, text, status) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    el.className = 'chip ' + (status || '');
-    el.innerHTML = '<span class="dot"></span>' + text;
+  const getActivePeers = () => {
+    prunePeers();
+    return Array.from(peers.keys());
   };
-  
-  const setProgress = (pct) => {
-    const el = document.getElementById('modelProgress');
-    if (el) el.style.width = pct + '%';
+
+  const connect = async (room) => {
+    // безопасный ре-коннект
+    if (pool) await disconnect();
+
+    roomName = room;
+    await ensureKeys();
+
+    pool = new SimplePool();
+
+    ns.Logger.info('connecting relays', ns.Config.NOSTR_RELAYS);
+
+    doSubscribe();
+
+    resubTimer = setInterval(() => doSubscribe(), ns.Config.RESUB_INTERVAL_MS);
+
+    // периодическая чистка RAM и pills даже если тишина
+    pruneTimer = setInterval(() => {
+      prunePeers();
+      ns.Ephemeral.prune();
+      document.dispatchEvent(new CustomEvent('ns:peers'));
+      document.dispatchEvent(new CustomEvent('ns:world'));
+    }, ns.Config.PRUNE_TICK_MS);
+
+    return true;
   };
-  
-  const renderCard = (r, qt, type) => {
-    const s = r.source;
-    const card = document.createElement('div');
-    card.className = 'card ' + type;
-    
-    let tagLabel = type === 'mine' ? 'LOCAL' : type === 'world' ? 'NOSTR' : 'СМЕЖНО';
-    let pubStatus = '';
-    
-    if (type === 'mine' && s.published) {
-      const st = Channel.getPublishStatus(s.id);
-      if (st === 'ok') pubStatus = '<span class="pub-status pub-ok">✓ pub</span>';
-      else if (st === 'err') pubStatus = '<span class="pub-status pub-err">✗ fail</span>';
-      else if (st === 'pending') pubStatus = '<span class="pub-status pub-pending">...</span>';
-      else pubStatus = '<span class="pub-status pub-ok">✓ pub</span>';
-    } else if (type === 'mine') {
-      pubStatus = '<span class="pub-status">local</span>';
+
+  const publishThought = async (text, vector, noteId) => {
+    if (!pool || !sk) return false;
+
+    const now = Date.now();
+    if (now - lastPublishAt < ns.Config.LIMITS.PUBLISH_THROTTLE_MS) {
+      ns.Logger.warn('publish throttled (wait ~1.5s)');
+      return false;
     }
-    
-    const metaInfo = type === 'world'
-      ? 'from: ' + (s.fromPeer || '?').slice(0, 10) + ' · RAM'
-      : new Date(s.createdAt || s.receivedAt || Date.now()).toLocaleTimeString();
-    
-    card.innerHTML = 
-      '<div class="head">' +
-        '<span class="tag">' + tagLabel + '</span>' +
-        '<span class="score">' + r.score.toFixed(3) + '</span>' +
-      '</div>' +
-      '<div class="text">' + Relevance.highlight(qt, s.text) + '</div>' +
-      '<div class="meta">' + pubStatus + '<span>' + metaInfo + '</span></div>';
-    
-    return card;
-  };
-  
-  const renderEmpty = (container, msg) => {
-    container.innerHTML = '<div class="empty"><div class="icon">◇</div>' + msg + '</div>';
-  };
-  
-  const renderList = (container, items, qt, type) => {
-    container.innerHTML = '';
-    if (!items.length) {
-      renderEmpty(container, type === 'world' ? 'нет соседей в комнате' : type === 'adjacent' ? 'нет смежных мыслей' : 'ещё ничего не сохранено');
-      return;
-    }
-    items.forEach(r => container.appendChild(renderCard(r, qt, type)));
-  };
-  
-  const updateRelevance = async () => {
-    const text = document.getElementById('input').value.trim();
-    if (!text) {
-      renderList(document.getElementById('listMine'), [], '', 'mine');
-      renderList(document.getElementById('listWorld'), [], '', 'world');
-      renderList(document.getElementById('listAdjacent'), [], '', 'adjacent');
-      document.getElementById('badgeMine').textContent = '0';
-      document.getElementById('badgeWorld').textContent = '0';
-      document.getElementById('badgeAdj').textContent = '0';
-      lastQuery = { text: null, vector: null };
-      return;
-    }
-    if (!Vector.isLoaded()) return;
-    
-    let qv;
-    if (lastQuery.text === text && lastQuery.vector) {
-      qv = lastQuery.vector;
+    lastPublishAt = now;
+
+    const payload = {
+      v: 1,
+      id: noteId,
+      text: text.slice(0, ns.Config.LIMITS.PUBLISH_TEXT_LENGTH),
+      vector,
+      ts: Date.now(),
+    };
+
+    const ev = finalizeEvent({
+      kind: ns.Config.KIND_THOUGHT,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [
+        [ns.Config.ROOM_TAG, roomName],
+        ['client', 'noosphere'],
+      ],
+      content: JSON.stringify(payload),
+    }, sk);
+
+    // pool.publish -> массив Promise<boolean>
+    const settled = await Promise.allSettled(pool.publish(ns.Config.NOSTR_RELAYS, ev));
+    const ok = settled.filter(r => r.status === 'fulfilled' && r.value === true).length;
+
+    if (ok > 0) {
+      ns.Logger.success(`published to ${ok}/${ns.Config.NOSTR_RELAYS.length}`);
+      settled.forEach((r, i) => {
+        if (r.status === 'rejected') ns.Logger.warn('relay fail ' + ns.Config.NOSTR_RELAYS[i], r.reason?.message || String(r.reason));
+      });
+      return true;
     } else {
-      try {
-        qv = await Vector.embed(text);
-        lastQuery = { text, vector: qv };
-      } catch (e) {
-        return;
+      ns.Logger.error('publish failed on all relays');
+      settled.forEach((r, i) => {
+        const err = r.status === 'rejected' ? (r.reason?.message || String(r.reason)) : (r.value === false ? 'rejected by relay' : 'unknown');
+        ns.Logger.warn('  ' + ns.Config.NOSTR_RELAYS[i], err);
+      });
+      return false;
+    }
+  };
+
+  const disconnect = async () => {
+    if (resubTimer) { clearInterval(resubTimer); resubTimer = null; }
+    if (pruneTimer) { clearInterval(pruneTimer); pruneTimer = null; }
+
+    if (sub) { try { sub.close(); } catch {} sub = null; }
+
+    if (pool) {
+      try { pool.close(ns.Config.NOSTR_RELAYS); } catch {}
+      pool = null;
+    }
+
+    peers.clear();
+    ns.Ephemeral.clear();
+
+    ns.Logger.info('disconnected');
+  };
+
+  return { connect, disconnect, isConnected, publishThought, getActivePeers };
+})();
+
+/* --------------------------------------------------------------------------
+   [8] RELEVANCE
+   -------------------------------------------------------------------------- */
+ns.Relevance = (() => {
+  const { THRESHOLD, ADJACENCY, MAX_CARDS } = ns.Config.RELEVANCE;
+
+  const highlightFragment = (queryText, matchText) => {
+    const esc = ns.Util.escapeHtml;
+    if (!queryText || !matchText) return esc(matchText || '');
+
+    const q = (queryText.toLowerCase().match(/\w+/g) || []);
+    const m = (matchText.toLowerCase().match(/\w+/g) || []);
+    if (!q.length || !m.length) return esc(matchText);
+
+    // простой подсвет 2+ слов подряд (как у тебя, но чуть стабильней)
+    const qStr = q.join(' ');
+    for (let i = 0; i < m.length; i++) {
+      for (let L = Math.min(6, m.length - i); L >= 2; L--) {
+        const part = m.slice(i, i + L).join(' ');
+        if (qStr.includes(part)) {
+          // грубая подсветка: найдём подстроку в исходном
+          const idx = matchText.toLowerCase().indexOf(part);
+          if (idx >= 0) {
+            const a = idx, b = idx + part.length;
+            return esc(matchText.slice(0, a)) + '<mark>' + esc(matchText.slice(a, b)) + '</mark>' + esc(matchText.slice(b));
+          }
+        }
       }
     }
-    
-    const locals = await Storage.all();
-    const { mine, world, adjacent } = Relevance.rank(qv, locals, worldBuffer);
-    
-    renderList(document.getElementById('listMine'), mine, text, 'mine');
-    renderList(document.getElementById('listWorld'), world, text, 'world');
-    renderList(document.getElementById('listAdjacent'), adjacent, text, 'adjacent');
-    
-    document.getElementById('badgeMine').textContent = mine.length;
-    document.getElementById('badgeWorld').textContent = world.length;
-    document.getElementById('badgeAdj').textContent = adjacent.length;
+    return esc(matchText);
   };
-  
-  const renderHistory = async () => {
-    const container = document.getElementById('listHistory');
-    const all = await Storage.all();
-    const sorted = all.sort((a, b) => b.createdAt - a.createdAt);
-    container.innerHTML = '';
-    if (!sorted.length) {
-      renderEmpty(container, 'история пуста');
-      return;
+
+  const rankAll = (queryVec, localThoughts, ephAnnounces) => {
+    if (!queryVec) return { mine: [], world: [], adjacent: [] };
+
+    const localScored = localThoughts
+      .filter((t) => Array.isArray(t.vector))
+      .map((t) => ({ kind: 'local', source: t, score: ns.Vector.cosine(queryVec, t.vector) }))
+      .filter((r) => r.score > THRESHOLD - ADJACENCY)
+      .sort((a, b) => b.score - a.score);
+
+    const worldScored = ephAnnounces
+      .filter((e) => Array.isArray(e.vector))
+      .map((e) => ({ kind: 'world', source: e, score: ns.Vector.cosine(queryVec, e.vector) }))
+      .filter((r) => r.score > THRESHOLD - ADJACENCY)
+      .sort((a, b) => b.score - a.score);
+
+    const mine = [], world = [], adjacent = [];
+    for (const r of localScored) {
+      if (r.score >= THRESHOLD) { if (mine.length < MAX_CARDS) mine.push(r); }
+      else { if (adjacent.length < MAX_CARDS) adjacent.push(r); }
     }
-    sorted.forEach(t => {
-      const card = document.createElement('div');
-      card.className = 'card mine';
-      let pubStatus = '';
-      if (t.published) {
-        const st = Channel.getPublishStatus(t.id);
-        if (st === 'ok') pubStatus = '<span class="pub-status pub-ok">✓ pub</span>';
-        else if (st === 'err') pubStatus = '<span class="pub-status pub-err">✗ fail</span>';
-        else pubStatus = '<span class="pub-status pub-ok">✓ pub</span>';
-      } else {
-        pubStatus = '<span class="pub-status">local</span>';
-      }
-      card.innerHTML =
-        '<div class="head"><span class="tag">' + (t.published ? 'WORLD' : 'LOCAL') + '</span>' +
-        '<span class="score">' + new Date(t.createdAt).toLocaleString() + '</span></div>' +
-        '<div class="text">' + Util.escapeHtml(t.text) + '</div>' +
-        '<div class="meta">' + pubStatus +
-        '<span>vec:' + (t.hasVector ? 'yes' : 'no') + '</span>' +
-        '<span>' + t.id.slice(0, 6) + '</span></div>';
-      container.appendChild(card);
-    });
+    for (const r of worldScored) {
+      if (r.score >= THRESHOLD) { if (world.length < MAX_CARDS) world.push(r); }
+      else { if (adjacent.length < MAX_CARDS) adjacent.push(r); }
+    }
+
+    return { mine, world, adjacent };
   };
-  
-  const save = async ({ publishToWorld }) => {
-    const input = document.getElementById('input');
-    const text = input.value.trim();
-    if (!text) return;
-    
+
+  return { rankAll, highlightFragment };
+})();
+
+/* --------------------------------------------------------------------------
+   [9] SYNC
+   -------------------------------------------------------------------------- */
+ns.Sync = (() => {
+  const saveLocal = async ({ text, publishToWorld }) => {
+    const clean = ns.Util.normalizeText(text);
+    if (!clean) throw new Error('Empty thought');
+
     const thought = {
-      id: Util.newId(),
-      text: text,
-      createdAt: Util.now(),
-      updatedAt: Util.now(),
+      id: ns.Util.newId(),
+      text: clean,
+      createdAt: ns.Util.now(),
+      updatedAt: ns.Util.now(),
       vector: null,
       hasVector: 0,
       published: !!publishToWorld,
     };
-    
-    if (Vector.isLoaded()) {
-      try {
-        thought.vector = await Vector.embed(text);
-        thought.hasVector = thought.vector ? 1 : 0;
-      } catch (e) {
-        Log.warn('embed fail: ' + e.message);
-      }
+
+    // для нормальной работы relevance лучше всегда иметь вектор
+    if (ns.Vector.isLoaded()) {
+      thought.vector = await ns.Vector.embed(clean);
+      thought.hasVector = thought.vector ? 1 : 0;
+    } else {
+      // локально можно хранить и без модели, но в мир — не выпускаем без вектора
+      if (publishToWorld) throw new Error('Load model first (vector required to publish)');
     }
-    
-    await Storage.put(thought);
-    
+
+    await ns.Storage.putThought(thought);
+    document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
+
     if (publishToWorld) {
-      if (!Channel.isConnected()) {
-        Toast.show('⚠ подключись к Nostr', 'warn');
-        Channel.setPublishStatus(thought.id, 'err');
-      } else if (thought.vector) {
-        Channel.setPublishStatus(thought.id, 'pending');
-        const r = await Channel.publish({ text, vector: thought.vector, noteId: thought.id });
-        Channel.setPublishStatus(thought.id, r.ok ? 'ok' : 'err');
-        if (r.ok) {
-          Toast.show('✓ опубликовано (' + r.okCount + '/' + r.total + ' relay)', 'ok');
-        } else {
-          Toast.show('✗ publish failed', 'err');
-        }
-      } else {
-        Channel.setPublishStatus(thought.id, 'err');
-        Toast.show('✗ нет вектора (загрузи модель)', 'err');
-      }
-    } else {
-      Toast.show('✓ сохранено локально', 'ok');
+      if (!ns.Channel.isConnected()) throw new Error('Not connected to Nostr (press Connect)');
+      const ok = await ns.Channel.publishThought(clean, thought.vector, thought.id);
+      if (!ok) throw new Error('Publish failed (all relays rejected/unreachable)');
     }
-    
-    input.value = '';
-    await updateRelevance();
-    await renderHistory();
+
+    return thought;
   };
-  
-  const startCountdown = () => {
-    const el = document.getElementById('countdown');
-    let remaining = CFG.settings.debounceSec;
-    el.textContent = remaining + 'с';
-    if (countdownTimer) clearInterval(countdownTimer);
-    countdownTimer = setInterval(() => {
-      remaining--;
-      if (remaining > 0) el.textContent = remaining + 'с';
-      else { clearInterval(countdownTimer); countdownTimer = null; el.textContent = ''; }
-    }, 1000);
-  };
-  
-  const stopCountdown = () => {
-    if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
-    document.getElementById('countdown').textContent = '';
-  };
-  
-  const applyTheme = () => {
-    const theme = CFG.settings.theme;
-    if (theme === 'auto') {
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
-    } else {
-      document.documentElement.setAttribute('data-theme', theme);
+
+  const reindexMissing = async (onProgress) => {
+    if (!ns.Vector.isLoaded()) throw new Error('Load model first');
+    const pending = await ns.Storage.listUnindexed();
+    let done = 0;
+    for (const t of pending) {
+      try {
+        const v = await ns.Vector.embed(t.text);
+        t.vector = v;
+        t.hasVector = v ? 1 : 0;
+        t.updatedAt = ns.Util.now();
+        await ns.Storage.putThought(t);
+      } catch (e) {
+        ns.Logger.warn('reindex failed', e.message);
+      }
+      done++;
+      onProgress?.({ done, total: pending.length });
     }
+    document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
   };
-  
-  const init = async () => {
-    // apply saved settings
-    document.getElementById('setRoom').value = CFG.settings.room;
-    document.getElementById('setThreshold').value = CFG.settings.threshold;
-    document.getElementById('setAdj').value = CFG.settings.adjDelta;
-    document.getElementById('valThreshold').textContent = CFG.settings.threshold;
-    document.getElementById('valAdj').textContent = CFG.settings.adjDelta;
-    
-    // segmented controls
-    document.querySelectorAll('.seg').forEach(seg => {
-      const opt = seg.dataset.opt;
-      const val = String(CFG.settings[opt]);
-      seg.querySelectorAll('button').forEach(b => {
-        b.classList.toggle('active', b.dataset.val === val);
-        b.onclick = () => {
-          seg.querySelectorAll('button').forEach(x => x.classList.remove('active'));
-          b.classList.add('active');
-          const v = b.dataset.val;
-          CFG.settings[opt] = /^\d+$/.test(v) ? parseInt(v) : v;
-          saveSettings();
-          if (opt === 'theme') applyTheme();
-          if (opt === 'maxCards') updateRelevance();
-        };
-      });
-    });
-    
-    applyTheme();
-    
-    // Main tabs
-    document.querySelectorAll('.main-tab').forEach(t => {
-      t.onclick = () => {
-        document.querySelectorAll('.main-tab').forEach(x => x.classList.remove('active'));
-        t.classList.add('active');
-        const main = t.dataset.main;
-        document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + main));
-        if (main === 'history') renderHistory();
-      };
-    });
-    
-    // Sub tabs
-    document.querySelectorAll('.sub-tab').forEach(t => {
-      t.onclick = () => {
-        document.querySelectorAll('.sub-tab').forEach(x => x.classList.remove('active'));
-        t.classList.add('active');
-        const sub = t.dataset.sub;
-        document.getElementById('sub-mine').style.display = sub === 'mine' ? '' : 'none';
-        document.getElementById('sub-world').style.display = sub === 'world' ? '' : 'none';
-        document.getElementById('sub-adjacent').style.display = sub === 'adjacent' ? '' : 'none';
-      };
-    });
-    
-    // Input
-    const input = document.getElementById('input');
-    input.addEventListener('input', () => {
-      const text = input.value.trim();
-      if (!text) {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        stopCountdown();
-        updateRelevance();
-        return;
-      }
-      if (debounceTimer) clearTimeout(debounceTimer);
-      startCountdown();
-      debounceTimer = setTimeout(() => {
-        stopCountdown();
-        updateRelevance();
-      }, CFG.settings.debounceSec * 1000);
-    });
-    
-    // Swipe up to publish
-    const composer = document.getElementById('composer');
-    let touchStartY = 0;
-    composer.addEventListener('touchstart', (e) => {
-      touchStartY = e.touches[0].clientY;
-    }, { passive: true });
-    composer.addEventListener('touchend', (e) => {
-      const dy = touchStartY - e.changedTouches[0].clientY;
-      if (dy > 50) {
-        save({ publishToWorld: true });
-      }
-    });
-    
-    // Buttons
-    document.getElementById('btnSaveLocal').onclick = () => save({ publishToWorld: false });
-    document.getElementById('btnPublish').onclick = () => save({ publishToWorld: true });
-    
-    // Settings drawer
-    const drawer = document.getElementById('drawer');
-    const overlay = document.getElementById('overlay');
-    document.getElementById('btnSettings').onclick = () => {
-      drawer.classList.add('open');
-      overlay.classList.add('show');
-    };
-    const closeDrawer = () => {
-      drawer.classList.remove('open');
-      overlay.classList.remove('show');
-    };
-    document.getElementById('btnClose').onclick = closeDrawer;
-    overlay.onclick = closeDrawer;
-    
-    // Settings inputs
-    document.getElementById('setRoom').oninput = (e) => {
-      CFG.settings.room = e.target.value.trim() || 'noosphere-2026';
-    };
-    document.getElementById('setThreshold').oninput = (e) => {
-      CFG.settings.threshold = parseFloat(e.target.value);
-      document.getElementById('valThreshold').textContent = CFG.settings.threshold;
-      updateRelevance();
-    };
-    document.getElementById('setAdj').oninput = (e) => {
-      CFG.settings.adjDelta = parseFloat(e.target.value);
-      document.getElementById('valAdj').textContent = CFG.settings.adjDelta;
-      updateRelevance();
-    };
-    
-    // Capsule export
-    document.getElementById('btnExport').onclick = async () => {
-      const all = await Storage.all();
-      const capsule = {
-        version: 7,
-        exported: new Date().toISOString(),
-        notes: all.map(n => ({
-          id: n.id, text: n.text, createdAt: n.createdAt,
-          vector: n.vector, published: n.published,
-        })),
-      };
-      const blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'noosphere-capsule-' + new Date().toISOString().slice(0, 10) + '.json';
-      a.click();
-      URL.revokeObjectURL(url);
-      Toast.show('✓ капсула скачана', 'ok');
-    };
-    
-    // Capsule import
-    document.getElementById('btnImport').onclick = () => document.getElementById('fileInput').click();
-    document.getElementById('fileInput').onchange = async (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      try {
-        const data = JSON.parse(await file.text());
-        if (!data || !Array.isArray(data.notes)) throw new Error('bad format');
-        let imported = 0;
-        for (const n of data.notes) {
-          if (!n.id || !n.text) continue;
-          await Storage.put({
-            id: n.id, text: n.text,
-            createdAt: n.createdAt || Util.now(),
-            updatedAt: Util.now(),
-            vector: n.vector || null,
-            hasVector: n.vector ? 1 : 0,
-            published: !!n.published,
-          });
-          imported++;
-        }
-        await updateRelevance();
-        await renderHistory();
-        Toast.show('✓ импортировано ' + imported, 'ok');
-      } catch (e) {
-        Toast.show('✗ ' + e.message, 'err');
-      }
-      e.target.value = '';
-    };
-    
-    // Reindex
-    document.getElementById('btnReindex').onclick = async () => {
-      if (!Vector.isLoaded()) { Toast.show('загрузи модель', 'warn'); return; }
-      const pending = await Storage.listUnindexed();
-      let done = 0;
-      for (const t of pending) {
-        try {
-          const v = await Vector.embed(t.text);
-          t.vector = v; t.hasVector = v ? 1 : 0;
-          await Storage.put(t);
-        } catch {}
-        done++;
-      }
-      Toast.show('✓ пересоздано ' + done, 'ok');
-      await updateRelevance();
-      await renderHistory();
-    };
-    
-    // Reset
-    document.getElementById('btnReset').onclick = async () => {
-      if (!confirm('Стереть все заметки?')) return;
-      await Storage.clear();
-      worldBuffer = [];
-      await updateRelevance();
-      await renderHistory();
-      Toast.show('✓ очищено', 'ok');
-    };
-    
-    // Apply
-    document.getElementById('btnApply').onclick = async () => {
-      saveSettings();
-      closeDrawer();
-      // reconnect with new room
-      Channel.leave();
-      try {
-        setChip('chipNet', 'connecting', 'warn');
-        await Channel.init(CFG.settings.room);
-        setChip('chipNet', 'online', 'ok');
-        Toast.show('✓ применено, подключено', 'ok');
-      } catch (e) {
-        setChip('chipNet', 'offline', 'err');
-        Toast.show('✗ ' + e.message, 'err');
-      }
-    };
-    
-    // Events from channel
-    document.addEventListener('ns:peers', (ev) => {
-      setChip('chipPeers', ev.detail.count + ' peers', ev.detail.count ? 'ok' : '');
-    });
-    document.addEventListener('ns:world', (ev) => {
-      setChip('chipWorld', ev.detail.count + ' world', ev.detail.count ? 'ok' : '');
-    });
-    document.addEventListener('ns:world-event', (ev) => {
-      const e = ev.detail;
-      worldBuffer.push(e);
-      // prune old
-      const cutoff = Util.now() - CFG.MAX_EPHEMERAL_AGE_MS;
-      worldBuffer = worldBuffer.filter(w => w.receivedAt > cutoff);
-      updateRelevance();
-    });
-    document.addEventListener('ns:net', (ev) => {
-      setChip('chipNet', ev.detail.online ? 'online' : 'offline', ev.detail.online ? 'ok' : 'err');
-    });
-    document.addEventListener('ns:pubkey', (ev) => {
-      const el = document.getElementById('pubkeyDisplay');
-      el.textContent = ev.detail.pk;
-      el.onclick = async () => {
-        try {
-          await navigator.clipboard.writeText(ev.detail.pk);
-          Toast.show('✓ pubkey скопирован', 'ok');
-        } catch {}
-      };
-    });
-    
-    // Boot
-    try {
-      await Storage.open();
-      Log.success('IDB ready');
-    } catch (e) {
-      Log.error('IDB fail: ' + e.message);
-      Toast.show('IDB error', 'err');
-      return;
-    }
-    
-    // auto-load model
-    (async () => {
-      try {
-        setChip('chipModel', 'loading...', 'warn');
-        await Vector.load((p) => {
-          if (p.total) {
-            const pct = Math.round((p.loaded / p.total) * 100);
-            setProgress(pct);
-            setChip('chipModel', 'model ' + pct + '%', 'warn');
-          }
-        });
-        setChip('chipModel', 'model ready', 'ok');
-        setProgress(100);
-      } catch (e) {
-        setChip('chipModel', 'model err', 'err');
-        Log.error('model load fail: ' + e.message);
-      }
-    })();
-    
-    // auto-connect
-    (async () => {
-      try {
-        setChip('chipNet', 'connecting', 'warn');
-        await Channel.init(CFG.settings.room);
-        setChip('chipNet', 'online', 'ok');
-      } catch (e) {
-        setChip('chipNet', 'offline', 'err');
-        Log.error('connect fail: ' + e.message);
-      }
-    })();
-    
-    await renderHistory();
-    Log.success('Noosphere v7.0 ready');
-  };
-  
-  return { init };
+
+  return { saveLocal, reindexMissing };
 })();
 
-App.init();
+/* --------------------------------------------------------------------------
+   [10] UI
+   -------------------------------------------------------------------------- */
+ns.UI = (() => {
+  const refs = {};
+  let lastQuery = { text: null, vector: null };
+
+  const cache = () => {
+    [
+      'input','btnSave','btnSaveWorld','btnLoadModel','btnReindex','btnSeed','btnReset',
+      'btnConnect','btnDisconnect','roomInput',
+      'listMine','listWorld','listAdjacent','listAll',
+      'status','modelProgress'
+    ].forEach((id) => refs[id] = document.getElementById(id));
+  };
+
+  const setPill = (k, t, s) => {
+    const el = refs.status.querySelector(`[data-key="${k}"]`);
+    if (!el) return;
+    el.textContent = t;
+    el.classList.remove('ok','warn','err','think');
+    if (s) el.classList.add(s);
+  };
+
+  const setThink = (active, text) => {
+    const el = refs.status.querySelector('[data-key="think"]');
+    if (!el) return;
+    if (active) {
+      el.style.display = '';
+      el.textContent = text || 'думаю...';
+      el.classList.add('think');
+    } else {
+      el.style.display = 'none';
+      el.classList.remove('think');
+    }
+  };
+
+  const setProgress = (pct) => refs.modelProgress.style.width = pct + '%';
+
+  const renderLocalList = (container, items, queryText) => {
+    container.innerHTML = '';
+    if (!items.length) return container.appendChild(Object.assign(document.createElement('div'), { className:'empty', textContent:'(empty)' }));
+
+    for (const r of items) {
+      const t = r.source;
+      const row = document.createElement('div');
+      row.className = 'item local';
+
+      const score = document.createElement('span');
+      score.className = 'score';
+      score.textContent = (typeof r.score === 'number') ? r.score.toFixed(3) : '';
+
+      const body = document.createElement('div');
+      body.innerHTML = ns.Relevance.highlightFragment(queryText, t.text);
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = `${t.published ? 'world-shared' : 'local'} · ${new Date(t.createdAt).toISOString().slice(0,16)} · ${t.id.slice(0,6)}`;
+
+      row.appendChild(score); row.appendChild(body); row.appendChild(meta);
+      container.appendChild(row);
+    }
+  };
+
+  const renderWorldList = (container, items, queryText) => {
+    container.innerHTML = '';
+    if (!items.length) {
+      const p = ns.Channel.getActivePeers().length;
+      const msg = p ? `(no matches from ${p} peer(s))` : '(no peers yet)';
+      return container.appendChild(Object.assign(document.createElement('div'), { className:'empty', textContent: msg }));
+    }
+
+    for (const r of items) {
+      const e = r.source;
+      const row = document.createElement('div');
+      row.className = 'item world ephemeral';
+
+      const score = document.createElement('span');
+      score.className = 'score';
+      score.textContent = (typeof r.score === 'number') ? r.score.toFixed(3) : '';
+
+      const body = document.createElement('div');
+      body.innerHTML = ns.Relevance.highlightFragment(queryText, e.text);
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = `from:${(e.fromPeer || '?').slice(0, 10)} · ${new Date(e.receivedAt || Date.now()).toISOString().slice(11,19)} · RAM`;
+
+      row.appendChild(score); row.appendChild(body); row.appendChild(meta);
+      container.appendChild(row);
+    }
+  };
+
+  const renderMixedList = (container, items, queryText) => {
+    container.innerHTML = '';
+    if (!items.length) return container.appendChild(Object.assign(document.createElement('div'), { className:'empty', textContent:'(empty)' }));
+
+    for (const r of items) {
+      const isLocal = r.kind === 'local';
+      const text = r.source.text;
+
+      const row = document.createElement('div');
+      row.className = 'item ' + (isLocal ? 'local' : 'world ephemeral');
+
+      const score = document.createElement('span');
+      score.className = 'score';
+      score.textContent = (typeof r.score === 'number') ? r.score.toFixed(3) : '';
+
+      const body = document.createElement('div');
+      body.innerHTML = ns.Relevance.highlightFragment(queryText, text);
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = isLocal ? `local · ${r.source.id.slice(0,6)}` : `from:${(r.source.fromPeer || '?').slice(0,10)}`;
+
+      row.appendChild(score); row.appendChild(body); row.appendChild(meta);
+      container.appendChild(row);
+    }
+  };
+
+  const clearColumns = () => {
+    renderLocalList(refs.listMine, [], '');
+    renderWorldList(refs.listWorld, [], '');
+    renderMixedList(refs.listAdjacent, [], '');
+  };
+
+  const updateLiveRelevance = async () => {
+    if (!ns.Vector.isLoaded()) { clearColumns(); return; }
+
+    const text = refs.input.value.trim();
+    if (!text) {
+      clearColumns();
+      lastQuery = { text: null, vector: null };
+      setThink(false);
+      return;
+    }
+
+    let qv;
+    if (lastQuery.text === text && lastQuery.vector) {
+      qv = lastQuery.vector;
+    } else {
+      setThink(true, 'считаю вектор...');
+      qv = await ns.Vector.embed(text);
+      lastQuery = { text, vector: qv };
+    }
+
+    setThink(true, 'считаю релевантность...');
+    const locals = await ns.Storage.allThoughts();
+    const eph = ns.Ephemeral.allAnnounces();
+    const { mine, world, adjacent } = ns.Relevance.rankAll(qv, locals, eph);
+
+    renderLocalList(refs.listMine, mine, text);
+    renderWorldList(refs.listWorld, world, text);
+    renderMixedList(refs.listAdjacent, adjacent, text);
+    setThink(false);
+  };
+
+  const renderAll = async () => {
+    const all = await ns.Storage.allThoughts();
+    all.sort((a, b) => b.createdAt - a.createdAt);
+
+    refs.listAll.innerHTML = '';
+    for (const t of all.slice(0, ns.Config.LIMITS.RENDER_CAP)) {
+      const row = document.createElement('div');
+      row.className = 'item local';
+
+      const body = document.createElement('div');
+      body.textContent = t.text;
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = `${new Date(t.createdAt).toISOString().slice(0,16)} · ${t.published ? 'world' : 'local'} · vec:${t.hasVector ? 'yes' : 'no'} · ${t.id.slice(0,6)}`;
+
+      row.appendChild(body);
+      row.appendChild(meta);
+      refs.listAll.appendChild(row);
+    }
+
+    const indexed = all.filter(t => t.hasVector).length;
+    setPill('indexed', `INDEXED: ${indexed}/${all.length}`, (all.length && indexed === all.length) ? 'ok' : 'warn');
+  };
+
+  const refreshPills = () => {
+    const peers = ns.Channel.getActivePeers().length;
+    const world = ns.Ephemeral.stats().events;
+
+    setPill('peers', `PEERS: ${peers}`, peers ? 'ok' : 'warn');
+    setPill('world', `WORLD: ${world}`, world ? 'ok' : 'warn');
+  };
+
+  const refresh = async () => {
+    lastQuery = { text: null, vector: null };
+    await renderAll();
+    await updateLiveRelevance();
+    refreshPills();
+  };
+
+  const bind = () => {
+    const debouncedUpdate = ns.Util.debounce(async () => {
+      try {
+        setThink(false);
+        await updateLiveRelevance();
+      } catch (e) {
+        setThink(false);
+        ns.Logger.error('live relevance failed', e.message);
+      }
+    }, ns.Config.LIMITS.DEBOUNCE_MS);
+
+    refs.input.addEventListener('input', () => {
+      const text = refs.input.value.trim();
+      if (!text) {
+        clearColumns();
+        lastQuery = { text: null, vector: null };
+        setThink(false);
+        return;
+      }
+      setThink(true, 'жду паузу...');
+      debouncedUpdate();
+    });
+
+    const disableSavers = (v) => { refs.btnSave.disabled = refs.btnSaveWorld.disabled = v; };
+
+    refs.btnSave.addEventListener('click', async () => {
+      try {
+        disableSavers(true);
+        await ns.Sync.saveLocal({ text: refs.input.value, publishToWorld: false });
+        refs.input.value = '';
+        clearColumns();
+        await refresh();
+      } catch (e) {
+        ns.Logger.error('save failed', e.message);
+      } finally {
+        disableSavers(false);
+      }
+    });
+
+    refs.btnSaveWorld.addEventListener('click', async () => {
+      try {
+        disableSavers(true);
+        await ns.Sync.saveLocal({ text: refs.input.value, publishToWorld: true });
+        refs.input.value = '';
+        clearColumns();
+        await refresh();
+      } catch (e) {
+        ns.Logger.error('save+world failed', e.message);
+      } finally {
+        disableSavers(false);
+      }
+    });
+
+    refs.btnLoadModel.addEventListener('click', async () => {
+      try {
+        refs.btnLoadModel.disabled = true;
+        setPill('model', 'MODEL: loading...', 'warn');
+
+        await ns.Vector.load((p) => {
+          const pct = p.total ? Math.round((p.loaded / p.total) * 100) : 0;
+          setProgress(pct);
+          setPill('model', `MODEL: ${pct}%`, 'warn');
+        });
+
+        setProgress(100);
+        setPill('model', 'MODEL: ready', 'ok');
+        await refresh();
+      } catch (e) {
+        setPill('model', 'MODEL: err', 'err');
+        ns.Logger.error('model load failed', e.message);
+      } finally {
+        refs.btnLoadModel.disabled = false;
+      }
+    });
+
+    refs.btnReindex.addEventListener('click', async () => {
+      if (!ns.Vector.isLoaded()) return ns.Logger.warn('Load model first');
+      try {
+        refs.btnReindex.disabled = true;
+        await ns.Sync.reindexMissing((p) => setPill('model', `MODEL: reindex ${p.done}/${p.total}`, 'warn'));
+        setPill('model', 'MODEL: ready', 'ok');
+        await refresh();
+      } catch (e) {
+        ns.Logger.error('reindex failed', e.message);
+      } finally {
+        refs.btnReindex.disabled = false;
+      }
+    });
+
+    refs.btnSeed.addEventListener('click', async () => {
+      const samples = [
+        'Мысль появляется в паузе между действиями.',
+        'Архитектура — это способ договариваться с будущим собой.',
+        'Случайность — недооценённый инструмент поиска.',
+        'Иногда нужно просто записать, чтобы понять.',
+        'Связи между идеями важнее самих идей.',
+      ];
+      try {
+        for (const s of samples) await ns.Sync.saveLocal({ text: s, publishToWorld: true });
+        await refresh();
+      } catch (e) {
+        ns.Logger.error('seed failed', e.message);
+      }
+    });
+
+    refs.btnReset.addEventListener('click', async () => {
+      if (!confirm('Стереть все локальные заметки?')) return;
+      try {
+        await ns.Storage.clearThoughts();
+        ns.Ephemeral.clear();
+        await refresh();
+        ns.Logger.warn('storage cleared');
+      } catch (e) {
+        ns.Logger.error('reset failed', e.message);
+      }
+    });
+
+    refs.btnConnect.addEventListener('click', async () => {
+      const room = refs.roomInput.value.trim();
+      if (!room) return ns.Logger.warn('room name empty');
+
+      try {
+        refs.btnConnect.disabled = true;
+        refs.btnDisconnect.disabled = true;
+        refs.roomInput.disabled = true;
+
+        setPill('net', 'NET: connecting...', 'warn');
+        await ns.Channel.connect(room);
+        setPill('net', 'NET: online', 'ok');
+
+        refs.btnDisconnect.disabled = false;
+        refreshPills();
+      } catch (e) {
+        setPill('net', 'NET: err', 'err');
+        ns.Logger.error('connect failed', e.message);
+        refs.roomInput.disabled = false;
+      } finally {
+        refs.btnConnect.disabled = false;
+      }
+    });
+
+    refs.btnDisconnect.addEventListener('click', async () => {
+      refs.btnDisconnect.disabled = true;
+      try {
+        await ns.Channel.disconnect();
+        setPill('net', 'NET: offline', 'warn');
+        refreshPills();
+      } catch (e) {
+        ns.Logger.error('disconnect failed', e.message);
+      } finally {
+        refs.roomInput.disabled = false;
+      }
+    });
+
+    // обновление pills по событиям
+    document.addEventListener('ns:ephemeral-changed', () => refreshPills());
+    document.addEventListener('ns:peers', () => refreshPills());
+    document.addEventListener('ns:world', () => refreshPills());
+    document.addEventListener('ns:thoughts-changed', refresh);
+
+    document.addEventListener('ns:me', (ev) => {
+      const pk = ev.detail?.pubkey || '';
+      setPill('me', 'ME: ' + (pk ? pk.slice(0, 10) : '...'), pk ? 'ok' : 'warn');
+    });
+  };
+
+  const init = () => { cache(); bind(); };
+  return { init, refresh, setPill, setThink, setProgress };
+})();
+
+/* --------------------------------------------------------------------------
+   [11] APP
+   -------------------------------------------------------------------------- */
+ns.App = (() => {
+  const boot = async () => {
+    ns.UI.init();
+    ns.UI.setPill('idb', 'IDB: boot...', 'warn');
+    ns.UI.setPill('model', 'MODEL: idle', 'warn');
+    ns.UI.setPill('net', 'NET: offline', 'warn');
+    ns.UI.setPill('me', 'ME: ...', 'warn');
+    ns.UI.setPill('peers', 'PEERS: 0', 'warn');
+    ns.UI.setPill('world', 'WORLD: 0', 'warn');
+    ns.UI.setPill('indexed', 'INDEXED: 0', 'warn');
+
+    // room из URL (если есть) -> input
+    try {
+      const u = new URL(location.href);
+      const room = u.searchParams.get('room') || (location.hash ? location.hash.slice(1) : '');
+      if (room) document.getElementById('roomInput').value = room;
+    } catch {}
+
+    try {
+      await ns.Storage.open();
+      ns.UI.setPill('idb', 'IDB: OK', 'ok');
+      ns.Logger.success('IDB ready');
+    } catch (e) {
+      ns.UI.setPill('idb', 'IDB: ERR', 'err');
+      ns.Logger.error('IDB failed', e.message);
+      return;
+    }
+
+    await ns.UI.refresh();
+    ns.Logger.success('app ready');
+  };
+
+  return { boot };
+})();
+
+ns.App.boot();
 </script>
 </body>
 </html>
