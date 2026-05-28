@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Noosphere · Direct Nostr</title>
+<title>Noosphere · Direct MQTT</title>
 <style>
 :root{--bg:#0f1115;--panel:#161a22;--border:#242a36;--text:#e6e8ee;--muted:#8a93a6;--accent:#6aa6ff;--ok:#4ade80;--warn:#f59e0b;--err:#ef4444}
 *{box-sizing:border-box}html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font:14px/1.45 ui-monospace,Menlo,monospace}
@@ -30,7 +30,7 @@ button:disabled{opacity:.5;cursor:not-allowed}
 .list{display:flex;flex-direction:column;gap:6px;min-height:60px}
 .item{background:#0b0d12;border:1px solid var(--border);border-radius:4px;padding:8px 10px}
 .item.local{border-left:3px solid #555}.item.world{border-left:3px solid var(--accent)}
-.item.ephemeral::before{content:"NOSTR";font-size:9px;color:var(--accent);padding:1px 4px;border:1px solid var(--accent);border-radius:2px;margin-right:6px}
+.item.ephemeral::before{content:"MQTT";font-size:9px;color:var(--accent);padding:1px 4px;border:1px solid var(--accent);border-radius:2px;margin-right:6px}
 .item .score{float:right;color:var(--muted);font-size:11px}
 .item .meta{color:var(--muted);font-size:10px;margin-top:4px}
 .item mark{background:transparent;color:var(--accent);font-weight:bold}
@@ -47,12 +47,12 @@ button:disabled{opacity:.5;cursor:not-allowed}
 </head>
 <body>
 <div class="wrap">
-<h1>NOOSPHERE <small>v5.0 · Direct Nostr · без Trystero</small></h1>
+<h1>NOOSPHERE <small>v3.1 · direct MQTT · broker.emqx.io</small></h1>
 
 <section class="panel">
   <div class="room-row">
     <label>ROOM:</label>
-    <input type="text" id="roomInput" value="noosphere-direct-2026" />
+    <input type="text" id="roomInput" value="noosphere-main-2026" />
     <button id="btnConnect" class="primary">Connect</button>
     <button id="btnDisconnect" class="danger" disabled>Disconnect</button>
   </div>
@@ -66,15 +66,15 @@ button:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="progress"><div id="modelProgress"></div></div>
   <div class="hint">
-    <b>v5.0:</b> Выкинул Trystero. Прямой Nostr через nostr-tools к relay.damus.io + nos.lol.
-    Свой протокол на kind 30078. Открой на ТЕЛЕФОНЕ и на ПК, одинаковый room, Connect.
-    Через 3-5 сек должны появиться соседи.
+    <b>v3.1:</b> Синтаксические фиксы импортов.
+    Открой на ТЕЛЕФОНЕ и на ПК, введи одинаковый room, нажми Connect на обоих.
+    Соседи появятся через 3-5 секунд после heartbeat.
   </div>
 </section>
 
 <section class="panel">
   <h2>thought</h2>
-  <textarea id="input" placeholder="напечатай мысль... (релевантность через 4 сек после паузы)"></textarea>
+  <textarea id="input" placeholder="напечатай мысль... (релевантность появится через 4 сек после паузы)"></textarea>
   <div class="row" style="margin-top:8px;">
     <button id="btnSave" class="secondary">Сохранить локально</button>
     <button id="btnSaveWorld" class="primary">Сохранить + в Мир</button>
@@ -114,42 +114,31 @@ button:disabled{opacity:.5;cursor:not-allowed}
 
 <script type="module">
 /* ============================================================================
-   NOOSPHERE v5.0 — DIRECT NOSTR (без Trystero)
+   NOOSPHERE v3.1 — DIRECT MQTT
    ----------------------------------------------------------------------------
-   Почему Trystero/nostr не работал:
-     - relayURLs в config НЕ переопределяют hardcoded relay, а merge-ятся с ними
-     - hardcoded relay (nostromo.social, circum.space, etc.) падают или платные
-     - после signaling всё равно нужен WebRTC, который падает на NAT
-   
-   Решение: прямой Nostr client через nostr-tools
-     - Свой протокол на kind 30078 (custom event)
-     - Subscribe к events с tag 'd' = roomName
-     - Каждый клиент публикует свои мысли как events
-     - Каждый клиент подписывается на room и получает мысли других
-     - Query/response через ephemeral events (kind 23078)
-   
-   Преимущества:
-     - relay.damus.io и nos.lol стабильные и бесплатные
-     - Нет WebRTC = нет NAT проблем
-     - Events живут на relay (можно читать асинхронно)
-     - Децентрализованно, тысячи relay
-   
-   Секции:
-     [1] Config  [2] Logger  [3] Util  [4] Storage  [5] Vector
-     [6] Nostr Channel  [7] Ephemeral  [8] Relevance  [9] Sync  [10] UI  [11] App
+   Фиксы v3.1:
+     1. mqtt.js UMD build не имеет default export в ESM.
+        Используем namespace import: import * as mqttMod
+        + нормализация: mqttConnect = mqttMod.connect || mqttMod.default?.connect
+     
+     2. transformers.js env тоже через namespace import.
+     
+     3. Все импорты через namespace для надёжности UMD ↔ ESM.
    ============================================================================ */
 
-// Namespace imports
+// Namespace imports — работают одинаково для UMD и ESM
 import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
-import * as nostrMod from 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
+import * as mqttMod from 'https://unpkg.com/mqtt@5.3.5/dist/mqtt.min.js';
 
+// Нормализация: берём pipeline/env/connect из namespace или из default
 const pipeline = tfMod.pipeline || (tfMod.default && tfMod.default.pipeline);
-const tfEnv = tfMod.env || (tfMod.default && tfMod.default.env);
-const { SimplePool, finalizeEvent, generateSecretKey, getPublicKey } = nostrMod;
+const tfEnv    = tfMod.env      || (tfMod.default && tfMod.default.env);
+const mqttConnect = mqttMod.connect || (mqttMod.default && mqttMod.default.connect);
 
-if (!pipeline) throw new Error('transformers pipeline not found');
-if (!SimplePool) throw new Error('nostr-tools SimplePool not found');
+if (!pipeline) throw new Error('transformers pipeline not found in module');
+if (!mqttConnect) throw new Error('mqtt.connect not found in module');
 
+// Настраиваем transformers.js чтобы не искал модели локально
 if (tfEnv) {
   tfEnv.allowLocalModels = false;
   tfEnv.useBrowserCache = true;
@@ -161,30 +150,22 @@ const ns = {};
    [1] CONFIG
    -------------------------------------------------------------------------- */
 ns.Config = Object.freeze({
-  DB_NAME: 'noosphere_direct_nostr',
+  DB_NAME: 'noosphere_mqtt',
   DB_VERSION: 1,
   STORE_THOUGHTS: 'thoughts',
-  STORE_KEYS: 'keys',
   
-  // Nostr relay (стабильные, бесплатные)
-  NOSTR_RELAYS: [
-    'wss://relay.damus.io',
-    'wss://nos.lol',
-    'wss://relay.snort.social',
-  ],
-  
-  // Nostr event kinds
-  KIND_THOUGHT: 30078,      // published thoughts (addressable)
-  KIND_EPHEMERAL: 23078,    // ephemeral query/response
+  MQTT_BROKER: 'wss://broker.emqx.io:8084/mqtt',
+  MQTT_TOPIC_PREFIX: 'noosphere',
   
   LIMITS: {
     MAX_TEXT_LENGTH: 10_000,
     RENDER_CAP: 200,
     DEBOUNCE_MS: 4000,
-    QUERY_TIMEOUT_MS: 5000,
+    QUERY_TIMEOUT_MS: 3000,
     MAX_RESULTS_PER_PEER: 5,
     MAX_EPHEMERAL_AGE_MS: 5 * 60_000,
-    HEARTBEAT_INTERVAL_MS: 10000,
+    HEARTBEAT_INTERVAL_MS: 3000,
+    PEER_TIMEOUT_MS: 10000,
   },
   
   VECTOR: { MODEL_ID: 'Xenova/all-MiniLM-L6-v2' },
@@ -212,8 +193,8 @@ ns.Logger = (() => {
     try { console[fn]('[ns:' + lvl + '] ' + m, d !== undefined ? d : ''); } catch {}
   };
   return {
-    info: (m, d) => write('i', m, d),
-    warn: (m, d) => write('w', m, d),
+    info:  (m, d) => write('i', m, d),
+    warn:  (m, d) => write('w', m, d),
     error: (m, d) => write('e', m, d),
     success: (m, d) => write('s', m, d),
   };
@@ -223,7 +204,7 @@ ns.Logger = (() => {
    [3] UTIL
    -------------------------------------------------------------------------- */
 ns.Util = {
-  selfId: null,  // будет установлен после генерации ключа
+  selfId: 'peer-' + Math.random().toString(36).slice(2, 10),
   newId: () => {
     try { return crypto.randomUUID(); }
     catch { return 'id-' + Math.random().toString(36).slice(2, 15) + Date.now().toString(36); }
@@ -242,7 +223,7 @@ ns.Util = {
    [4] STORAGE
    -------------------------------------------------------------------------- */
 ns.Storage = (() => {
-  const { DB_NAME, DB_VERSION, STORE_THOUGHTS, STORE_KEYS } = ns.Config;
+  const { DB_NAME, DB_VERSION, STORE_THOUGHTS } = ns.Config;
   let db = null;
   
   const open = () => new Promise((res, rej) => {
@@ -256,28 +237,25 @@ ns.Storage = (() => {
         s.createIndex('hasVector', 'hasVector');
         s.createIndex('published', 'published');
       }
-      if (!_db.objectStoreNames.contains(STORE_KEYS)) {
-        _db.createObjectStore(STORE_KEYS, { keyPath: 'k' });
-      }
     };
     req.onsuccess = (ev) => { db = ev.target.result; res(db); };
     req.onerror = () => rej(req.error);
   });
   
-  const tx = (store, mode) => db.transaction(store, mode || 'readonly').objectStore(store);
+  const tx = (mode) => db.transaction(STORE_THOUGHTS, mode || 'readonly').objectStore(STORE_THOUGHTS);
   const prom = (req) => new Promise((r, j) => {
     req.onsuccess = () => r(req.result);
     req.onerror = () => j(req.error);
   });
   
-  const put = async (t) => { await open(); return prom(tx(STORE_THOUGHTS, 'readwrite').put(t)); };
-  const all = async () => { await open(); return prom(tx(STORE_THOUGHTS).getAll()); };
+  const put = async (t) => { await open(); return prom(tx('readwrite').put(t)); };
+  const all = async () => { await open(); return prom(tx().getAll()); };
   
   const listUnindexed = async () => {
     await open();
     return new Promise((res, rej) => {
       const out = [];
-      const req = tx(STORE_THOUGHTS).index('hasVector').openCursor(IDBKeyRange.only(0));
+      const req = tx().index('hasVector').openCursor(IDBKeyRange.only(0));
       req.onsuccess = (ev) => {
         const c = ev.target.result;
         if (!c) return res(out);
@@ -288,16 +266,9 @@ ns.Storage = (() => {
     });
   };
   
-  const clear = async () => { await open(); await prom(tx(STORE_THOUGHTS, 'readwrite').clear()); };
+  const clear = async () => { await open(); await prom(tx('readwrite').clear()); };
   
-  const putKey = async (k, v) => { await open(); return prom(tx(STORE_KEYS, 'readwrite').put({ k, v })); };
-  const getKey = async (k) => {
-    await open();
-    const result = await prom(tx(STORE_KEYS).get(k));
-    return result ? result.v : null;
-  };
-  
-  return { open, put, all, listUnindexed, clear, putKey, getKey };
+  return { open, put, all, listUnindexed, clear };
 })();
 
 /* --------------------------------------------------------------------------
@@ -346,158 +317,149 @@ ns.Vector = (() => {
 })();
 
 /* --------------------------------------------------------------------------
-   [6] NOSTR CHANNEL (прямой клиент через nostr-tools)
+   [6] MQTT CHANNEL
    -------------------------------------------------------------------------- */
 ns.Channel = (() => {
-  let pool = null;
-  let sk = null;  // secret key (Uint8Array)
-  let pk = null;  // public key (hex string)
+  let client = null;
   let roomName = null;
-  let sub = null;
-  const peers = new Map();  // pubkey -> lastSeen
+  const peers = new Map();
   const queryHandlers = new Map();
   let heartbeatTimer = null;
+  let pruneTimer = null;
+  
+  const topic = (suffix) => ns.Config.MQTT_TOPIC_PREFIX + '/' + roomName + '/' + suffix;
   
   const init = async (room) => {
-    if (pool) return;
+    if (client) return;
     roomName = room;
+    ns.Logger.info('connecting to MQTT: ' + ns.Config.MQTT_BROKER);
     
-    ns.Logger.info('initializing Nostr client...');
-    
-    // Load or generate keys
-    let skHex = await ns.Storage.getKey('nostr_sk');
-    if (!skHex) {
-      const newSk = generateSecretKey();
-      skHex = Array.from(newSk).map(b => b.toString(16).padStart(2, '0')).join('');
-      await ns.Storage.putKey('nostr_sk', skHex);
-      ns.Logger.success('generated new Nostr identity');
-    }
-    
-    sk = new Uint8Array(skHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
-    pk = getPublicKey(sk);
-    ns.Util.selfId = pk.slice(0, 16);
-    ns.Logger.success('pubkey: ' + pk.slice(0, 16) + '...');
-    
-    // Create pool
-    pool = new SimplePool();
-    
-    ns.Logger.info('connecting to relays: ' + ns.Config.NOSTR_RELAYS.join(', '));
-    
-    // Subscribe to room events
-    const filter = {
-      kinds: [ns.Config.KIND_THOUGHT],
-      '#d': [roomName],
-      since: Math.floor(Date.now() / 1000) - 3600,  // last hour
-    };
-    
-    sub = pool.subscribeMany(ns.Config.NOSTR_RELAYS, [filter], {
-      onevent: (event) => {
-        handleThoughtEvent(event);
-      },
-      oneose: () => {
-        ns.Logger.success('subscribed to room: ' + roomName);
-      },
-    });
-    
-    // Also subscribe to ephemeral queries addressed to us
-    const queryFilter = {
-      kinds: [ns.Config.KIND_EPHEMERAL],
-      '#p': [pk],
-      since: Math.floor(Date.now() / 1000) - 60,
-    };
-    
-    pool.subscribeMany(ns.Config.NOSTR_RELAYS, [queryFilter], {
-      onevent: (event) => {
-        handleQueryEvent(event);
-      },
-    });
-    
-    // Start heartbeat
-    startHeartbeat();
-    
-    ns.Logger.success('channel ready');
-  };
-  
-  const handleThoughtEvent = (event) => {
-    if (event.pubkey === pk) return;  // ignore own events
-    
-    peers.set(event.pubkey, ns.Util.now());
-    updatePeerCount();
-    
-    try {
-      const content = JSON.parse(event.content);
-      if (content.text && Array.isArray(content.vector)) {
-        ns.Ephemeral.upsert(event.pubkey, {
-          text: content.text,
-          vector: content.vector,
-          id: event.id,
+    return new Promise((resolve, reject) => {
+      try {
+        client = mqttConnect(ns.Config.MQTT_BROKER, {
+          clientId: 'noosphere_' + ns.Util.selfId + '_' + Date.now(),
+          clean: true,
+          connectTimeout: 10000,
+          reconnectPeriod: 5000,
         });
+      } catch (e) {
+        ns.Logger.error('mqttConnect failed', e.message);
+        reject(e);
+        return;
       }
-    } catch (e) {
-      ns.Logger.warn('parse thought event err', e.message);
+      
+      const connTimeout = setTimeout(() => {
+        if (client) { try { client.end(true); } catch {} client = null; }
+        reject(new Error('mqtt connect timeout'));
+      }, 15000);
+      
+      client.on('connect', () => {
+        clearTimeout(connTimeout);
+        ns.Logger.success('MQTT connected · selfId=' + ns.Util.selfId);
+        
+        const subs = [
+          topic('announce/+'),
+          topic('query/' + ns.Util.selfId),
+          topic('response/+'),
+          topic('heartbeat/+'),
+        ];
+        client.subscribe(subs, { qos: 0 }, (err) => {
+          if (err) ns.Logger.warn('subscribe err', err.message);
+          else ns.Logger.success('subscribed to ' + subs.length + ' topics');
+        });
+        
+        startHeartbeat();
+        pruneTimer = setInterval(prunePeers, 5000);
+        resolve();
+      });
+      
+      client.on('error', (err) => {
+        ns.Logger.warn('MQTT error', err && err.message ? err.message : String(err));
+      });
+      
+      client.on('offline', () => ns.Logger.warn('MQTT offline'));
+      client.on('reconnect', () => ns.Logger.info('MQTT reconnecting...'));
+      client.on('close', () => ns.Logger.warn('MQTT closed'));
+      
+      client.on('message', (topicStr, payload) => {
+        handleMessage(topicStr, payload);
+      });
+    });
+  };
+  
+  const handleMessage = async (topicStr, payload) => {
+    let data;
+    try {
+      data = JSON.parse(payload.toString());
+    } catch { return; }
+    if (!data || typeof data !== 'object') return;
+    if (data.from === ns.Util.selfId) return;
+    
+    const parts = topicStr.split('/');
+    const type = parts[2];
+    
+    switch (type) {
+      case 'heartbeat':
+        peers.set(data.from, ns.Util.now());
+        updatePeerCount();
+        break;
+        
+      case 'announce':
+        peers.set(data.from, ns.Util.now());
+        updatePeerCount();
+        if (Array.isArray(data.vector) && data.vector.length > 0 && data.text) {
+          ns.Ephemeral.upsertAnnounce(data.from, {
+            text: data.text,
+            vector: data.vector,
+            id: data.id || ns.Util.newId(),
+          });
+        }
+        break;
+        
+      case 'query':
+        if (!ns.Vector.isLoaded() || !Array.isArray(data.vector)) return;
+        try {
+          const all = await ns.Storage.all();
+          const shared = all.filter((t) => t.published && Array.isArray(t.vector));
+          const scored = shared
+            .map((t) => ({
+              text: t.text,
+              score: ns.Vector.cosine(data.vector, t.vector),
+              id: t.id,
+            }))
+            .filter((r) => r.score > 0.1)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
+          
+          publish('response/' + ns.Util.selfId, {
+            queryId: data.queryId,
+            from: ns.Util.selfId,
+            results: scored,
+          });
+          ns.Logger.info('responded to query from ' + (data.from || '').slice(0, 10) + ' with ' + scored.length + ' results');
+        } catch (e) {
+          ns.Logger.warn('query handler err', e.message);
+        }
+        break;
+        
+      case 'response':
+        if (!data.queryId) return;
+        const handler = queryHandlers.get(data.queryId);
+        if (!handler) return;
+        handler(data.from, data.results || []);
+        ns.Logger.info('got response from ' + (data.from || '').slice(0, 10) + ' with ' + ((data.results || []).length) + ' results');
+        break;
     }
   };
   
-  const handleQueryEvent = async (event) => {
-    if (!ns.Vector.isLoaded()) return;
-    
-    try {
-      const query = JSON.parse(event.content);
-      if (!query.queryId || !Array.isArray(query.vector)) return;
-      
-      const all = await ns.Storage.all();
-      const shared = all.filter((t) => t.published && Array.isArray(t.vector));
-      const scored = shared
-        .map((t) => ({
-          text: t.text,
-          score: ns.Vector.cosine(query.vector, t.vector),
-          id: t.id,
-        }))
-        .filter((r) => r.score > 0.1)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
-      
-      // Send response as ephemeral event
-      const responseEvent = finalizeEvent({
-        kind: ns.Config.KIND_EPHEMERAL,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [
-          ['p', event.pubkey],  // addressed to requester
-          ['q', query.queryId], // query id
-        ],
-        content: JSON.stringify({
-          queryId: query.queryId,
-          results: scored,
-        }),
-      }, sk);
-      
-      await pool.publish(ns.Config.NOSTR_RELAYS, responseEvent);
-      ns.Logger.info('responded to query from ' + event.pubkey.slice(0, 10) + ' with ' + scored.length + ' results');
-    } catch (e) {
-      ns.Logger.warn('query handler err', e.message);
+  const publish = (suffix, data) => {
+    if (!client || !client.connected) {
+      ns.Logger.warn('publish skipped: not connected');
+      return false;
     }
-  };
-  
-  const publishThought = async (text, vector, noteId) => {
-    if (!pool || !sk) return false;
-    
+    const t = topic(suffix);
     try {
-      const event = finalizeEvent({
-        kind: ns.Config.KIND_THOUGHT,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [
-          ['d', roomName],  // room identifier (addressable)
-          ['t', 'noosphere'],
-        ],
-        content: JSON.stringify({
-          text: text.slice(0, 500),
-          vector: vector,
-          id: noteId,
-        }),
-      }, sk);
-      
-      await pool.publish(ns.Config.NOSTR_RELAYS, event);
-      ns.Logger.info('published thought to Nostr');
+      client.publish(t, JSON.stringify(data), { qos: 0, retain: false });
       return true;
     } catch (e) {
       ns.Logger.warn('publish err', e.message);
@@ -505,58 +467,80 @@ ns.Channel = (() => {
     }
   };
   
+  const startHeartbeat = () => {
+    const sendHeartbeat = () => {
+      publish('heartbeat/' + ns.Util.selfId, {
+        from: ns.Util.selfId,
+        t: ns.Util.now(),
+      });
+    };
+    sendHeartbeat();
+    heartbeatTimer = setInterval(sendHeartbeat, ns.Config.LIMITS.HEARTBEAT_INTERVAL_MS);
+  };
+  
+  const prunePeers = () => {
+    const now = ns.Util.now();
+    const timeout = ns.Config.LIMITS.PEER_TIMEOUT_MS;
+    let changed = false;
+    for (const [pid, lastSeen] of peers) {
+      if (now - lastSeen > timeout) {
+        peers.delete(pid);
+        ns.Logger.info('peer timeout: ' + pid.slice(0, 10));
+        changed = true;
+      }
+    }
+    if (changed) updatePeerCount();
+  };
+  
+  const leave = () => {
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    if (pruneTimer) { clearInterval(pruneTimer); pruneTimer = null; }
+    if (client) {
+      try { client.end(true); } catch {}
+      client = null;
+    }
+    peers.clear();
+    queryHandlers.clear();
+    updatePeerCount();
+    ns.Logger.info('MQTT disconnected');
+  };
+  
+  const isConnected = () => client !== null && client.connected;
+  
+  const announce = (text, vector, noteId) => {
+    publish('announce/' + ns.Util.selfId, {
+      from: ns.Util.selfId,
+      text: text.slice(0, 500),
+      vector: vector,
+      id: noteId,
+      t: ns.Util.now(),
+    });
+  };
+  
   const query = (vector, opts) => {
     const timeoutMs = (opts && opts.timeoutMs) || ns.Config.LIMITS.QUERY_TIMEOUT_MS;
-    if (!pool || !peers.size) return Promise.resolve([]);
-    
+    if (!isConnected() || !peers.size) return Promise.resolve([]);
     const queryId = ns.Util.newId();
     const results = new Map();
     const handler = (peerId, res) => {
       results.set(peerId, res);
+      ns.Ephemeral.upsertResponse(peerId, res);
     };
     queryHandlers.set(queryId, handler);
     
-    // Subscribe to responses
-    const responseFilter = {
-      kinds: [ns.Config.KIND_EPHEMERAL],
-      '#p': [pk],
-      '#q': [queryId],
-      since: Math.floor(Date.now() / 1000),
-    };
-    
-    const responseSub = pool.subscribeMany(ns.Config.NOSTR_RELAYS, [responseFilter], {
-      onevent: (event) => {
-        try {
-          const response = JSON.parse(event.content);
-          if (response.queryId === queryId) {
-            handler(event.pubkey, response.results || []);
-            ns.Ephemeral.upsertResponse(event.pubkey, response.results || []);
-          }
-        } catch (e) {}
-      },
-    });
-    
-    // Send query to all peers
-    const queryEvent = finalizeEvent({
-      kind: ns.Config.KIND_EPHEMERAL,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [['t', 'noosphere-query']],
-      content: JSON.stringify({
+    for (const peerId of peers.keys()) {
+      publish('query/' + peerId, {
         queryId: queryId,
+        from: ns.Util.selfId,
         vector: vector,
-      }),
-    }, sk);
-    
-    pool.publish(ns.Config.NOSTR_RELAYS, queryEvent).catch((e) => {
-      ns.Logger.warn('query publish err', e.message);
-    });
-    
+        t: ns.Util.now(),
+      });
+    }
     ns.Logger.info('query sent to ' + peers.size + ' peers');
     
     return new Promise((resolve) => {
       setTimeout(() => {
         queryHandlers.delete(queryId);
-        try { responseSub.close(); } catch {}
         const collected = [];
         for (const [peerId, res] of results) {
           for (const r of res) collected.push(Object.assign({}, r, { fromPeer: peerId }));
@@ -567,54 +551,22 @@ ns.Channel = (() => {
     });
   };
   
-  const startHeartbeat = () => {
-    const sendHeartbeat = () => {
-      // Just touch the network to keep connection alive
-      if (pool && sk) {
-        const heartbeatEvent = finalizeEvent({
-          kind: ns.Config.KIND_EPHEMERAL,
-          created_at: Math.floor(Date.now() / 1000),
-          tags: [['t', 'noosphere-heartbeat']],
-          content: JSON.stringify({ from: pk, t: ns.Util.now() }),
-        }, sk);
-        pool.publish(ns.Config.NOSTR_RELAYS, heartbeatEvent).catch(() => {});
-      }
-    };
-    heartbeatTimer = setInterval(sendHeartbeat, ns.Config.LIMITS.HEARTBEAT_INTERVAL_MS);
+  const ping = () => {
+    if (!isConnected()) return;
+    publish('heartbeat/' + ns.Util.selfId, {
+      from: ns.Util.selfId,
+      t: ns.Util.now(),
+      ping: true,
+    });
   };
   
-  const leave = () => {
-    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-    if (sub) { try { sub.close(); } catch {} sub = null; }
-    if (pool) { try { pool.close(ns.Config.NOSTR_RELAYS); } catch {} pool = null; }
-    peers.clear();
-    queryHandlers.clear();
-    updatePeerCount();
-    ns.Logger.info('disconnected from Nostr');
-  };
-  
-  const isConnected = () => pool !== null;
-  
-  const getActivePeers = () => {
-    const now = ns.Util.now();
-    const ttl = 60000;
-    const out = [];
-    for (const [pub, lastSeen] of peers) {
-      if (now - lastSeen < ttl) out.push(pub);
-      else peers.delete(pub);
-    }
-    return out;
-  };
+  const getActivePeers = () => [...peers.keys()];
   
   const updatePeerCount = () => {
     document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: peers.size } }));
   };
   
-  const ping = () => {
-    // Heartbeat serves as ping
-  };
-  
-  return { init, leave, isConnected, publishThought, query, ping, getActivePeers };
+  return { init, leave, isConnected, announce, query, ping, getActivePeers };
 })();
 
 /* --------------------------------------------------------------------------
@@ -623,7 +575,7 @@ ns.Channel = (() => {
 ns.Ephemeral = (() => {
   const byPeer = new Map();
   
-  const upsert = (peerId, announce) => {
+  const upsertAnnounce = (peerId, announce) => {
     let rec = byPeer.get(peerId);
     if (!rec) {
       rec = { announces: new Map(), lastSeen: ns.Util.now() };
@@ -637,7 +589,7 @@ ns.Ephemeral = (() => {
   
   const upsertResponse = (peerId, results) => {
     for (const r of results) {
-      upsert(peerId, {
+      upsertAnnounce(peerId, {
         id: r.id || ns.Util.newId(),
         text: r.text,
         vector: null,
@@ -674,7 +626,7 @@ ns.Ephemeral = (() => {
     document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
   };
   
-  return { upsert, upsertResponse, allAnnounces, clear };
+  return { upsertAnnounce, upsertResponse, allAnnounces, clear };
 })();
 
 /* --------------------------------------------------------------------------
@@ -702,10 +654,7 @@ ns.Relevance = (() => {
     for (let i = 0; i < mT.length && i < mPos.length; i++) {
       for (let L = Math.min(qT.length, mT.length - i); L > bestLen; L--) {
         if (i + L > mPos.length) break;
-        if (qT.join(' ').includes(mT.slice(i, i + L).join(' '))) {
-          bestLen = L;
-          bestStart = i;
-        }
+        if (qT.join(' ').includes(mT.slice(i, i + L).join(' '))) { bestLen = L; bestStart = i; }
       }
     }
     if (bestLen < 2 || bestStart < 0) return escapeHtml(mt);
@@ -728,14 +677,12 @@ ns.Relevance = (() => {
       .sort((a, b) => b.score - a.score);
     const mine = [], world = [], adjacent = [];
     for (const r of ls) {
-      if (r.score >= THRESHOLD) {
-        if (mine.length < MAX_CARDS) mine.push(r);
-      } else if (adjacent.length < MAX_CARDS) adjacent.push(r);
+      if (r.score >= THRESHOLD) { if (mine.length < MAX_CARDS) mine.push(r); }
+      else if (adjacent.length < MAX_CARDS) adjacent.push(r);
     }
     for (const r of ws) {
-      if (r.score >= THRESHOLD) {
-        if (world.length < MAX_CARDS) world.push(r);
-      } else if (adjacent.length < MAX_CARDS) adjacent.push(r);
+      if (r.score >= THRESHOLD) { if (world.length < MAX_CARDS) world.push(r); }
+      else if (adjacent.length < MAX_CARDS) adjacent.push(r);
     }
     return { mine, world, adjacent };
   };
@@ -772,7 +719,8 @@ ns.Sync = (() => {
     document.dispatchEvent(new CustomEvent('ns:thoughts-changed'));
     
     if (publishToWorld && thought.vector && ns.Channel.isConnected()) {
-      await ns.Channel.publishThought(clean, thought.vector, thought.id);
+      ns.Channel.announce(clean, thought.vector, thought.id);
+      ns.Logger.info('announced to neighbors');
     }
     return thought;
   };
@@ -884,7 +832,7 @@ ns.UI = (() => {
       body.innerHTML = ns.Relevance.highlightFragment(qt, e.text);
       const meta = document.createElement('div');
       meta.className = 'meta';
-      meta.textContent = 'from:' + (e.fromPeer || '?').slice(0, 10) + ' · ' + new Date(e.receivedAt || Date.now()).toISOString().slice(11,19) + ' · RAM';
+      meta.textContent = 'from:' + (e.fromPeer || '?').slice(5, 13) + ' · ' + new Date(e.receivedAt || Date.now()).toISOString().slice(11,19) + ' · RAM';
       row.appendChild(score);
       row.appendChild(body);
       row.appendChild(meta);
@@ -913,7 +861,7 @@ ns.UI = (() => {
       body.innerHTML = ns.Relevance.highlightFragment(qt, text);
       const meta = document.createElement('div');
       meta.className = 'meta';
-      meta.textContent = isLocal ? ('local · ' + r.source.id.slice(0,6)) : ('from:' + (r.source.fromPeer || '?').slice(0,10));
+      meta.textContent = isLocal ? ('local · ' + r.source.id.slice(0,6)) : ('from:' + (r.source.fromPeer || '?').slice(5,13));
       row.appendChild(score);
       row.appendChild(body);
       row.appendChild(meta);
@@ -1117,9 +1065,9 @@ ns.UI = (() => {
       try {
         refs.btnConnect.disabled = true;
         refs.roomInput.disabled = true;
-        setPill('net', 'NET: Nostr connecting...', 'warn');
+        setPill('net', 'NET: MQTT connecting...', 'warn');
         await ns.Channel.init(roomName);
-        setPill('net', 'NET: Nostr online', 'ok');
+        setPill('net', 'NET: MQTT online', 'ok');
         refs.btnDisconnect.disabled = false;
       } catch (e) {
         setPill('net', 'NET: err', 'err');
@@ -1174,7 +1122,7 @@ ns.App = (() => {
     }
     await ns.UI.refresh();
     ns.Logger.success('app ready. Enter room, click Connect, open same on 2nd device.');
-    ns.Logger.info('Using direct Nostr to relay.damus.io + nos.lol. No Trystero, no WebRTC.');
+    ns.Logger.info('Using direct MQTT to broker.emqx.io:8084 (WSS). No NAT issues.');
   };
   return { boot };
 })();
