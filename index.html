@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Noosphere Demo v1.1</title>
+<title>Noosphere v2.0</title>
 <style>
   :root {
     --bg:#0f1115; --panel:#161a22; --border:#242a36;
@@ -70,29 +70,29 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>NOOSPHERE DEMO <small>v1.1 · local only · 4s debounce</small></h1>
+  <h1>NOOSPHERE <small>v2.0 · true P2P via BitTorrent DHT</small></h1>
 
   <section class="panel">
     <div class="status" id="status">
       <span class="pill" data-key="idb">IDB: ...</span>
       <span class="pill" data-key="model">MODEL: idle</span>
-      <span class="pill" data-key="channel">CHANNEL: ...</span>
-      <span class="pill" data-key="peers">TABS: 0</span>
+      <span class="pill" data-key="mesh">MESH: ...</span>
+      <span class="pill" data-key="peers">PEERS: 0</span>
       <span class="pill" data-key="indexed">INDEXED: 0</span>
       <span class="pill" data-key="think" style="display:none">...</span>
     </div>
     <div class="progress"><div id="modelProgress"></div></div>
-    <div class="hint">Открой эту страницу в 2-3 вкладках — они будут обмениваться запросами. Debounce 4 секунды: перестань печатать, и через 4 сек увидишь релевантность.</div>
+    <div class="hint">Настоящий P2P: signaling через BitTorrent DHT, данные напрямую между устройствами. Ничего не хранится на серверах.</div>
   </section>
 
   <section class="panel">
     <h2>thought</h2>
-    <textarea id="input" placeholder="напечатай мысль... (релевантность появится через 4 сек после паузы)"></textarea>
+    <textarea id="input" placeholder="напечатай мысль... (релевантность через 4 сек)"></textarea>
     <div class="row" style="margin-top:8px;">
       <button id="btnSave" class="secondary">Сохранить локально</button>
       <button id="btnSaveWorld" class="primary">Сохранить + в Мир</button>
     </div>
-    <div class="hint">«Сохранить» = только эта вкладка. «Сохранить + в Мир» = отвечает на запросы других вкладок.</div>
+    <div class="hint">«Сохранить» = только твоё устройство. «Сохранить + в Мир» = отвечаешь на запросы других устройств в сети.</div>
   </section>
 
   <section class="panel">
@@ -103,7 +103,7 @@
         <div class="list" id="listMine"></div>
       </div>
       <div>
-        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">WORLD (other tabs, RAM)</div>
+        <div style="color:var(--muted); font-size:11px; margin-bottom:4px;">WORLD (peers, RAM)</div>
         <div class="list" id="listWorld"></div>
       </div>
       <div>
@@ -119,7 +119,7 @@
       <button id="btnLoadModel" class="primary">Load MiniLM</button>
       <button id="btnReindex">Reindex</button>
       <button id="btnSeed">Seed 5</button>
-      <button id="btnPing">Ping tabs</button>
+      <button id="btnQueryNow">Query peers</button>
       <button id="btnReset" class="danger">Reset</button>
     </div>
   </section>
@@ -137,27 +137,27 @@
 
 <script type="module">
 /* ============================================================================
-   NOOSPHERE DEMO v1.1
+   NOOSPHERE v2.0 — TRUE P2P VIA BITTORRENT DHT
    ----------------------------------------------------------------------------
-   Изменения относительно v1.0:
-     - Пустое поле = пустые колонки (было: показывалась "лента последних")
-     - Debounce: 4 секунды (было: 400 мс)
-     - Кеш последнего queryVector: не пересчитываем embed для того же текста
-     - Pill "think": показывает что ждём debounce или считаем embed
+   Архитектура:
+     1. Storage (IDB) — только локальные заметки, векторы.
+     2. Vector (MiniLM) — с умным кешем через Cache API браузера.
+     3. Mesh (Trystero + BitTorrent) — децентрализованный P2P:
+        - signaling через публичные BitTorrent трекеры
+        - данные через WebRTC DataChannel (напрямую между устройствами)
+        - никакого центрального сервера
+     4. Ephemeral (RAM) — чужие ответы, 5 минут TTL.
+     5. UI — debounce 4s, кеш последнего queryVector, очистка при пустом поле.
 
-   Архитектура (без изменений):
-     1. Заметки + векторы — ТОЛЬКО в локальном IndexedDB.
-     2. Обмен между вкладками — BroadcastChannel API.
-     3. Эмбеддинги — transformers.js (MiniLM, ONNX).
-     4. Чужие ответы — 5 минут в RAM, потом исчезают.
-
-   Секции:
+   Порядок секций (зависимости по возрастанию):
      [1] Config  [2] Logger  [3] Util  [4] Storage  [5] Vector
-     [6] Channel  [7] Ephemeral  [8] Relevance  [9] Sync  [10] UI  [11] App
+     [6] Mesh  [7] Ephemeral  [8] Relevance  [9] Sync  [10] UI  [11] App
    ============================================================================ */
 
 import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
+import { joinRoom } from 'https://esm.sh/trystero@0.20.0/bittorrent';
 
+// transformers.js: используем Cache API браузера для модели
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
@@ -165,22 +165,26 @@ const ns = {};
 
 /* --------------------------------------------------------------------------
    [1] CONFIG
+   Централизованные константы. Любые настройки меняются только здесь.
    -------------------------------------------------------------------------- */
 ns.Config = Object.freeze({
-  DB_NAME: 'noosphere_demo',
+  DB_NAME: 'noosphere_v2',
   DB_VERSION: 1,
   STORE_THOUGHTS: 'thoughts',
 
-  CHANNEL_NAME: 'noosphere-demo-v1',
+  // Trystero config: appId изолирует нашу "комнату" от других приложений
+  MESH_APP_ID: 'noosphere_v2_public',
+  MESH_ROOM: 'main',
 
   LIMITS: {
     MAX_TEXT_LENGTH: 10_000,
     RENDER_CAP: 200,
-    DEBOUNCE_MS: 4000,                  // 4 секунды (было 400)
-    QUERY_TIMEOUT_MS: 2000,
-    MAX_PEERS_TO_QUERY: 10,
+    DEBOUNCE_MS: 4000,
+    QUERY_TIMEOUT_MS: 3000,
+    MAX_PEERS_TO_QUERY: 15,
     MAX_RESULTS_PER_PEER: 5,
     MAX_EPHEMERAL_AGE_MS: 5 * 60_000,
+    CACHE_PROBE_MS: 500, // если модель загрузилась быстрее — значит из кеша
   },
 
   VECTOR: { MODEL_ID: 'Xenova/all-MiniLM-L6-v2' },
@@ -189,6 +193,7 @@ ns.Config = Object.freeze({
 
 /* --------------------------------------------------------------------------
    [2] LOGGER
+   Минимальный логгер. Пишет в UI и в консоль.
    -------------------------------------------------------------------------- */
 ns.Logger = (() => {
   const el = () => document.getElementById('log');
@@ -218,20 +223,33 @@ ns.Logger = (() => {
    [3] UTIL
    -------------------------------------------------------------------------- */
 ns.Util = {
-  tabId: 'tab-' + Math.random().toString(36).slice(2, 10),
+  peerId: 'p-' + Math.random().toString(36).slice(2, 10),
   newId: () => crypto.randomUUID(),
   now: () => Date.now(),
   normalizeText: (t) => typeof t === 'string' ? t.trim().slice(0, ns.Config.LIMITS.MAX_TEXT_LENGTH) : '',
   isNonEmptyString: (v) => typeof v === 'string' && v.trim().length > 0,
   debounce: (fn, ms) => {
     let t = null;
-    return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+    const debounced = (...args) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...args), ms);
+    };
+    debounced.cancel = () => clearTimeout(t);
+    return debounced;
   },
   escapeHtml: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+  withTimeout: (promise, ms, errMsg) => {
+    let timer;
+    const timeout = new Promise((_, rej) => {
+      timer = setTimeout(() => rej(new Error(errMsg || `timeout ${ms}ms`)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  },
 };
 
 /* --------------------------------------------------------------------------
-   [4] STORAGE
+   [4] STORAGE (IndexedDB)
+   Хранит только локальные заметки. Чужих тут не бывает.
    -------------------------------------------------------------------------- */
 ns.Storage = (() => {
   const { DB_NAME, DB_VERSION, STORE_THOUGHTS } = ns.Config;
@@ -283,7 +301,9 @@ ns.Storage = (() => {
 })();
 
 /* --------------------------------------------------------------------------
-   [5] VECTOR
+   [5] VECTOR (MiniLM)
+   Умный кеш: при повторной загрузке модель берётся из Cache API, прогрессбар
+   не моргает. Детектим "быструю" загрузку (< CACHE_PROBE_MS) = from cache.
    -------------------------------------------------------------------------- */
 ns.Vector = (() => {
   let extractor = null;
@@ -292,17 +312,33 @@ ns.Vector = (() => {
   const load = (onProgress) => {
     if (extractor) return Promise.resolve(extractor);
     if (loadPromise) return loadPromise;
+
+    let progressFired = false;
+    const probeTimer = setTimeout(() => {
+      if (!progressFired) {
+        onProgress?.({ status: 'loading', hint: 'first time, downloading ~25MB...' });
+      }
+    }, ns.Config.LIMITS.CACHE_PROBE_MS);
+
     loadPromise = pipeline('feature-extraction', ns.Config.VECTOR.MODEL_ID, {
       progress_callback: (p) => {
-        if (onProgress && p.status === 'progress' && p.total) {
-          onProgress({ loaded: p.loaded, total: p.total });
+        progressFired = true;
+        if (p.status === 'progress' && p.total) {
+          onProgress?.({ loaded: p.loaded, total: p.total, fromCache: false });
         }
       },
     }).then((ex) => {
+      clearTimeout(probeTimer);
       extractor = ex;
-      ns.Logger.info('model loaded');
+      const fromCache = !progressFired;
+      ns.Logger.info('model ready', { fromCache });
+      onProgress?.({ done: true, fromCache });
       return ex;
-    }).catch((err) => { loadPromise = null; throw err; });
+    }).catch((err) => {
+      clearTimeout(probeTimer);
+      loadPromise = null;
+      throw err;
+    });
     return loadPromise;
   };
 
@@ -325,165 +361,208 @@ ns.Vector = (() => {
 })();
 
 /* --------------------------------------------------------------------------
-   [6] CHANNEL
+   [6] MESH (Trystero + BitTorrent DHT)
+   Децентрализованный P2P:
+     - signaling через публичные BitTorrent трекеры
+     - данные через WebRTC DataChannel
+     - без центрального сервера
+
+   Протокол (два action'а):
+     query:   { queryId, vector, limit }
+     response:{ queryId, results }
    -------------------------------------------------------------------------- */
-ns.Channel = (() => {
-  let channel = null;
-  const knownTabs = new Map();
-  const queryHandlers = new Map();
+ns.Mesh = (() => {
+  let room = null;
+  let sendQuery = null, getQuery = null;
+  let sendResponse = null, getResponse = null;
+  const peers = new Map(); // peerId -> { joinedAt }
+  const queryHandlers = new Map(); // queryId -> { resolve, results }
+  let queryIdCounter = 0;
 
   const init = () => {
-    if (typeof BroadcastChannel === 'undefined') {
-      ns.Logger.error('BroadcastChannel not supported');
+    try {
+      room = joinRoom(
+        { appId: ns.Config.MESH_APP_ID },
+        ns.Config.MESH_ROOM
+      );
+
+      // Peer tracking
+      room.onPeerJoin((peerId) => {
+        peers.set(peerId, { joinedAt: ns.Util.now() });
+        ns.Logger.info('peer joined', { peer: peerId.slice(0, 10), total: peers.size });
+        updatePeerCount();
+      });
+
+      room.onPeerLeave((peerId) => {
+        peers.delete(peerId);
+        ns.Logger.info('peer left', { peer: peerId.slice(0, 10), total: peers.size });
+        ns.Ephemeral.removePeer(peerId);
+        updatePeerCount();
+      });
+
+      // Query action: я спрашиваю у всех
+      [sendQuery, getQuery] = room.makeAction('query');
+      getQuery(handleIncomingQuery);
+
+      // Response action: мне отвечают (point-to-point)
+      [sendResponse, getResponse] = room.makeAction('response');
+      getResponse(handleIncomingResponse);
+
+      ns.Logger.info('mesh initialized', { room: ns.Config.MESH_ROOM, self: ns.Util.peerId });
+    } catch (e) {
+      ns.Logger.error('mesh init failed', e.message);
+      throw e;
+    }
+  };
+
+  // Кто-то спрашивает меня — отвечаю из своих published заметок
+  const handleIncomingQuery = async (data, peerId) => {
+    if (!data || !data.queryId || !Array.isArray(data.vector)) return;
+    if (!ns.Vector.isLoaded()) {
+      ns.Logger.warn('incoming query ignored: model not loaded');
       return;
     }
-    channel = new BroadcastChannel(ns.Config.CHANNEL_NAME);
-    channel.onmessage = handleMessage;
-    ns.Logger.info('BroadcastChannel ready', { tab: ns.Util.tabId });
-  };
-
-  const handleMessage = (ev) => {
-    const msg = ev.data;
-    if (!msg || typeof msg !== 'object') return;
-    if (msg.from === ns.Util.tabId) return;
-
-    switch (msg.type) {
-      case 'ping':
-        knownTabs.set(msg.from, ns.Util.now());
-        send({ type: 'pong', from: ns.Util.tabId });
-        updateTabCount();
-        break;
-      case 'pong':
-        knownTabs.set(msg.from, ns.Util.now());
-        updateTabCount();
-        break;
-      case 'query':
-        handleQuery(msg);
-        break;
-      case 'response':
-        handleResponse(msg);
-        break;
-    }
-  };
-
-  const handleQuery = async (msg) => {
-    if (!ns.Vector.isLoaded()) return;
     try {
       const all = await ns.Storage.all();
       const shared = all.filter((t) => t.published && Array.isArray(t.vector));
       const scored = shared
-        .map((t) => ({ text: t.text, score: ns.Vector.cosine(msg.vector, t.vector) }))
+        .map((t) => ({ text: t.text, score: ns.Vector.cosine(data.vector, t.vector) }))
         .filter((r) => r.score > 0.1)
         .sort((a, b) => b.score - a.score)
-        .slice(0, ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
+        .slice(0, data.limit || ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
 
-      send({ type: 'response', from: ns.Util.tabId, queryId: msg.queryId, results: scored });
-      ns.Logger.info('responded to query', { to: msg.from.slice(0, 12), n: scored.length });
+      // Отвечаю только спрашивающему (point-to-point)
+      sendResponse({ queryId: data.queryId, results: scored }, peerId);
+      ns.Logger.info('responded to peer', { peer: peerId.slice(0, 10), n: scored.length });
     } catch (e) {
       ns.Logger.warn('query handling failed', e.message);
     }
   };
 
-  const handleResponse = (msg) => {
-    const handler = queryHandlers.get(msg.queryId);
+  // Мне пришёл ответ от пира
+  const handleIncomingResponse = (data, peerId) => {
+    if (!data || !data.queryId) return;
+    const handler = queryHandlers.get(data.queryId);
     if (!handler) return;
-    handler(msg.from, msg.results || []);
+    handler.results.set(peerId, data.results || []);
+    ns.Ephemeral.upsert(peerId, data.results || []);
+    ns.Logger.info('response received', { peer: peerId.slice(0, 10), n: (data.results || []).length });
   };
 
-  const send = (msg) => {
-    if (!channel) return;
-    try { channel.postMessage(msg); } catch (e) {}
+  const updatePeerCount = () => {
+    document.dispatchEvent(new CustomEvent('ns:peers', { detail: { count: peers.size } }));
   };
 
-  const ping = () => send({ type: 'ping', from: ns.Util.tabId });
+  // Публичный API: разослать query всем пирам, собрать ответы с таймаутом
+  const query = async (vector, { timeoutMs = ns.Config.LIMITS.QUERY_TIMEOUT_MS, limit = ns.Config.LIMITS.MAX_RESULTS_PER_PEER } = {}) => {
+    if (!room || !ns.Vector.isLoaded()) return [];
+    if (peers.size === 0) {
+      ns.Logger.info('query skipped: no peers');
+      return [];
+    }
 
-  const query = (vector, { timeoutMs = ns.Config.LIMITS.QUERY_TIMEOUT_MS } = {}) => {
-    const queryId = ns.Util.newId();
-    const results = new Map();
-    const handler = (fromTabId, res) => {
-      results.set(fromTabId, res);
-      ns.Ephemeral.upsert(fromTabId, res);
-    };
+    const queryId = `q-${++queryIdCounter}-${ns.Util.now()}`;
+    const handler = { results: new Map() };
     queryHandlers.set(queryId, handler);
-    send({ type: 'query', from: ns.Util.tabId, queryId, vector });
-    ns.Logger.info('query sent', { id: queryId.slice(0, 8) });
+
+    try {
+      sendQuery({ queryId, vector, limit });
+      ns.Logger.info('query broadcasted', { queryId, peers: peers.size });
+    } catch (e) {
+      ns.Logger.warn('query broadcast failed', e.message);
+      queryHandlers.delete(queryId);
+      return [];
+    }
 
     return new Promise((resolve) => {
       setTimeout(() => {
         queryHandlers.delete(queryId);
         const collected = [];
-        for (const [tabId, res] of results) {
-          for (const r of res) collected.push({ ...r, fromTab: tabId });
+        for (const [peerId, results] of handler.results) {
+          for (const r of results) collected.push({ ...r, fromPeer: peerId });
         }
-        ns.Logger.info('query done', { responded: results.size, total: collected.length });
+        ns.Logger.info('query done', { responded: handler.results.size, total: collected.length });
         resolve(collected);
       }, timeoutMs);
     });
   };
 
-  const getActiveTabs = () => {
-    const now = ns.Util.now();
-    const ttl = 30_000;
-    const out = [];
-    for (const [tabId, lastSeen] of knownTabs) {
-      if (now - lastSeen < ttl) out.push(tabId);
-      else knownTabs.delete(tabId);
+  const getPeerCount = () => peers.size;
+
+  const leave = () => {
+    if (room) {
+      try { room.leave(); } catch (e) {}
+      room = null;
     }
-    return out;
   };
 
-  const updateTabCount = () => {
-    document.dispatchEvent(new CustomEvent('ns:tabs', { detail: { count: getActiveTabs().length } }));
-  };
-
-  const startPingLoop = () => {
-    ping();
-    setInterval(() => { ping(); updateTabCount(); }, 10_000);
-  };
-
-  return { init, ping, query, getActiveTabs, startPingLoop };
+  return { init, query, getPeerCount, leave };
 })();
 
 /* --------------------------------------------------------------------------
-   [7] EPHEMERAL
+   [7] EPHEMERAL (RAM, 5 min TTL)
+   Чужие ответы живут в памяти 5 минут, потом исчезают.
+   Никогда не пишутся на диск.
    -------------------------------------------------------------------------- */
 ns.Ephemeral = (() => {
-  const byTab = new Map();
+  const byPeer = new Map();
+  let pruneTimer = null;
 
-  const upsert = (tabId, results) => {
-    byTab.set(tabId, { results, lastSeen: ns.Util.now() });
-    prune();
+  const upsert = (peerId, results) => {
+    byPeer.set(peerId, { results, lastSeen: ns.Util.now() });
+    schedulePrune();
     document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
+  };
+
+  const removePeer = (peerId) => {
+    if (byPeer.delete(peerId)) {
+      document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
+    }
+  };
+
+  const schedulePrune = () => {
+    if (pruneTimer) return;
+    pruneTimer = setTimeout(() => {
+      pruneTimer = null;
+      prune();
+    }, 30_000);
   };
 
   const prune = () => {
     const now = ns.Util.now();
     const maxAge = ns.Config.LIMITS.MAX_EPHEMERAL_AGE_MS;
     let changed = false;
-    for (const [tabId, rec] of byTab) {
-      if (now - rec.lastSeen > maxAge) { byTab.delete(tabId); changed = true; }
+    for (const [peerId, rec] of byPeer) {
+      if (now - rec.lastSeen > maxAge) {
+        byPeer.delete(peerId);
+        changed = true;
+      }
     }
     if (changed) document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
   };
 
   const allResults = () => {
     const out = [];
-    for (const [tabId, rec] of byTab) {
-      for (const r of rec.results) out.push({ ...r, fromTab: tabId, receivedAt: rec.lastSeen });
+    for (const [peerId, rec] of byPeer) {
+      for (const r of rec.results) {
+        out.push({ ...r, fromPeer: peerId, receivedAt: rec.lastSeen });
+      }
     }
     return out;
   };
 
   const clear = () => {
-    byTab.clear();
+    byPeer.clear();
     document.dispatchEvent(new CustomEvent('ns:ephemeral-changed'));
   };
 
-  return { upsert, allResults, clear };
+  return { upsert, removePeer, allResults, clear };
 })();
 
 /* --------------------------------------------------------------------------
    [8] RELEVANCE
+   Ранжирование: локальные + чужие по cosine similarity.
+   Подсветка самого длинного совпавшего n-gram.
    -------------------------------------------------------------------------- */
 ns.Relevance = (() => {
   const { THRESHOLD, ADJACENCY, MAX_CARDS } = ns.Config.RELEVANCE;
@@ -558,9 +637,12 @@ ns.Sync = (() => {
     if (!clean) throw new Error('Empty thought');
 
     const thought = {
-      id: ns.Util.newId(), text: clean,
-      createdAt: ns.Util.now(), updatedAt: ns.Util.now(),
-      vector: null, hasVector: 0,
+      id: ns.Util.newId(),
+      text: clean,
+      createdAt: ns.Util.now(),
+      updatedAt: ns.Util.now(),
+      vector: null,
+      hasVector: 0,
       published: !!publishToWorld,
     };
 
@@ -568,7 +650,7 @@ ns.Sync = (() => {
       try {
         thought.vector = await ns.Vector.embed(clean);
         thought.hasVector = thought.vector ? 1 : 0;
-      } catch (e) { ns.Logger.warn('embed failed', e.message); }
+      } catch (e) { ns.Logger.warn('embed failed on save', e.message); }
     }
 
     await ns.Storage.put(thought);
@@ -599,20 +681,19 @@ ns.Sync = (() => {
 
 /* --------------------------------------------------------------------------
    [10] UI
-   Фиксы v1.1:
-     - Кеш последнего query (текст + вектор) — не пересчитываем embed
-     - Пустое поле = очистка всех колонок
-     - Pill "think" показывает состояние ожидания
+   Ключевые особенности:
+     - Кеш последнего queryVector (текст тот же → не считаем embed)
+     - Пустое поле = мгновенная очистка
+     - Pill "think" показывает состояние: жду паузу / считаю / запрашиваю
+     - Debounce 4 секунды
    -------------------------------------------------------------------------- */
 ns.UI = (() => {
   const refs = {};
-
-  // Кеш последнего запроса: { text, vector }
   let lastQuery = { text: null, vector: null };
 
   const cache = () => {
     ['input','btnSave','btnSaveWorld','btnLoadModel','btnReindex','btnSeed',
-     'btnPing','btnReset','listMine','listWorld','listAdjacent','listAll',
+     'btnQueryNow','btnReset','listMine','listWorld','listAdjacent','listAll',
      'status','modelProgress']
       .forEach((id) => { refs[id] = document.getElementById(id); });
   };
@@ -634,7 +715,6 @@ ns.UI = (() => {
       el.classList.add('think');
     } else {
       el.style.display = 'none';
-      el.classList.remove('think');
     }
   };
 
@@ -645,7 +725,8 @@ ns.UI = (() => {
     if (!items.length) {
       const d = document.createElement('div');
       d.className = 'empty'; d.textContent = '(empty)';
-      container.appendChild(d); return;
+      container.appendChild(d);
+      return;
     }
     for (const r of items) {
       const t = r.source;
@@ -669,8 +750,8 @@ ns.UI = (() => {
     if (!items.length) {
       const d = document.createElement('div');
       d.className = 'empty';
-      const tabs = ns.Channel.getActiveTabs().length;
-      d.textContent = tabs ? `(no matches from ${tabs} tab(s))` : '(no other tabs open)';
+      const peers = ns.Mesh.getPeerCount();
+      d.textContent = peers ? `(no matches from ${peers} peer(s))` : '(no peers online)';
       container.appendChild(d);
       return;
     }
@@ -685,7 +766,7 @@ ns.UI = (() => {
       body.innerHTML = ns.Relevance.highlightFragment(queryText, e.text);
       const meta = document.createElement('div');
       meta.className = 'meta';
-      meta.textContent = `from:${(e.fromTab || '?').slice(4,12)} · ${new Date(e.receivedAt || Date.now()).toISOString().slice(11,19)} · RAM`;
+      meta.textContent = `from:${(e.fromPeer || '?').slice(0,10)} · ${new Date(e.receivedAt || Date.now()).toISOString().slice(11,19)} · RAM`;
       row.appendChild(score); row.appendChild(body); row.appendChild(meta);
       container.appendChild(row);
     }
@@ -696,7 +777,8 @@ ns.UI = (() => {
     if (!items.length) {
       const d = document.createElement('div');
       d.className = 'empty'; d.textContent = '(empty)';
-      container.appendChild(d); return;
+      container.appendChild(d);
+      return;
     }
     for (const r of items) {
       const isLocal = r.kind === 'local';
@@ -710,7 +792,7 @@ ns.UI = (() => {
       body.innerHTML = ns.Relevance.highlightFragment(queryText, text);
       const meta = document.createElement('div');
       meta.className = 'meta';
-      meta.textContent = isLocal ? `local · ${r.source.id.slice(0,6)}` : `from:${(r.source.fromTab || '?').slice(4,12)}`;
+      meta.textContent = isLocal ? `local · ${r.source.id.slice(0,6)}` : `from:${(r.source.fromPeer || '?').slice(0,10)}`;
       row.appendChild(score); row.appendChild(body); row.appendChild(meta);
       container.appendChild(row);
     }
@@ -726,8 +808,6 @@ ns.UI = (() => {
     if (!ns.Vector.isLoaded()) { clearAll(); return; }
 
     const text = refs.input.value.trim();
-
-    // ПУСТОЕ ПОЛЕ = ОЧИЩАЕМ ВСЁ (фикс v1.1)
     if (!text) {
       clearAll();
       lastQuery = { text: null, vector: null };
@@ -735,28 +815,30 @@ ns.UI = (() => {
       return;
     }
 
-    // Кеш: если текст тот же что и в прошлый раз — не пересчитываем embed
     let qv;
     if (lastQuery.text === text && lastQuery.vector) {
       qv = lastQuery.vector;
-      ns.Logger.info('relevance: cache hit (same text)');
+      ns.Logger.info('relevance: cache hit');
     } else {
       setThink(true, 'считаю вектор...');
       try {
         qv = await ns.Vector.embed(text);
         lastQuery = { text, vector: qv };
-        ns.Logger.info('relevance: embed computed', { len: text.length });
       } catch (e) {
         setThink(false);
         ns.Logger.error('embed failed', e.message);
         return;
       }
-      setThink(true, 'запрашиваю пиры...');
     }
 
-    const activeTabs = ns.Channel.getActiveTabs();
-    if (activeTabs.length > 0) {
-      ns.Channel.query(qv).catch((e) => ns.Logger.warn('query failed', e.message));
+    setThink(true, 'запрашиваю сеть...');
+    const peersOnline = ns.Mesh.getPeerCount();
+    if (peersOnline > 0) {
+      try {
+        await ns.Mesh.query(qv);
+      } catch (e) {
+        ns.Logger.warn('mesh query failed', e.message);
+      }
     }
 
     const locals = await ns.Storage.all();
@@ -769,7 +851,6 @@ ns.UI = (() => {
     setThink(false);
   };
 
-  // Сбрасываем кеш при изменении списка заметок (сохранение/реиндекс)
   const invalidateCache = () => {
     lastQuery = { text: null, vector: null };
   };
@@ -800,7 +881,6 @@ ns.UI = (() => {
   };
 
   const bind = () => {
-    // Debounced-обновление (4 сек)
     const debouncedUpdate = ns.Util.debounce(async () => {
       setThink(false);
       await updateLiveRelevance();
@@ -809,7 +889,7 @@ ns.UI = (() => {
     refs.input.addEventListener('input', () => {
       const text = refs.input.value.trim();
       if (!text) {
-        // Сразу очищаем при удалении, не ждём 4 секунды
+        debouncedUpdate.cancel();
         clearAll();
         lastQuery = { text: null, vector: null };
         setThink(false);
@@ -846,14 +926,19 @@ ns.UI = (() => {
     refs.btnLoadModel.addEventListener('click', async () => {
       try {
         refs.btnLoadModel.disabled = true;
-        setPill('model', 'MODEL: loading...', 'warn');
+        setPill('model', 'MODEL: checking cache...', 'warn');
         await ns.Vector.load((p) => {
-          const pct = Math.round((p.loaded / p.total) * 100);
-          setProgress(pct);
-          setPill('model', `MODEL: ${pct}%`, 'warn');
+          if (p.done) {
+            setPill('model', p.fromCache ? 'MODEL: ready (cached)' : 'MODEL: ready', 'ok');
+            setProgress(100);
+          } else if (p.status === 'loading') {
+            setPill('model', 'MODEL: ' + p.hint, 'warn');
+          } else if (p.total) {
+            const pct = Math.round((p.loaded / p.total) * 100);
+            setProgress(pct);
+            setPill('model', `MODEL: ${pct}%`, 'warn');
+          }
         });
-        setPill('model', 'MODEL: ready', 'ok');
-        setProgress(100);
       } catch (e) {
         setPill('model', 'MODEL: err', 'err');
         ns.Logger.error('model load failed', e.message);
@@ -887,9 +972,14 @@ ns.UI = (() => {
       await renderAll();
     });
 
-    refs.btnPing.addEventListener('click', () => {
-      ns.Channel.ping();
-      ns.Logger.info('ping sent', { tabs: ns.Channel.getActiveTabs().length });
+    refs.btnQueryNow.addEventListener('click', async () => {
+      if (!ns.Vector.isLoaded()) { ns.Logger.warn('Load model first'); return; }
+      const text = refs.input.value.trim() || 'sample query';
+      try {
+        const qv = await ns.Vector.embed(text);
+        await ns.Mesh.query(qv);
+        await updateLiveRelevance();
+      } catch (e) { ns.Logger.error('manual query failed', e.message); }
     });
 
     refs.btnReset.addEventListener('click', async () => {
@@ -909,11 +999,9 @@ ns.UI = (() => {
       await renderAll();
       await updateLiveRelevance();
     });
-
     document.addEventListener('ns:ephemeral-changed', updateLiveRelevance);
-
-    document.addEventListener('ns:tabs', (ev) => {
-      setPill('peers', `TABS: ${ev.detail.count}`, ev.detail.count ? 'ok' : 'warn');
+    document.addEventListener('ns:peers', (ev) => {
+      setPill('peers', `PEERS: ${ev.detail.count}`, ev.detail.count ? 'ok' : 'warn');
     });
   };
 
@@ -923,17 +1011,19 @@ ns.UI = (() => {
 
 /* --------------------------------------------------------------------------
    [11] APP
+   Boot-порядок: Storage → Vector (lazy) → Mesh → UI.
+   Cleanup при закрытии вкладки.
    -------------------------------------------------------------------------- */
 ns.App = (() => {
   const boot = async () => {
     ns.UI.init();
     ns.UI.setPill('idb', 'IDB: boot...', 'warn');
-    ns.UI.setPill('channel', 'CHANNEL: boot...', 'warn');
+    ns.UI.setPill('mesh', 'MESH: boot...', 'warn');
 
     try {
       await ns.Storage.open();
       ns.UI.setPill('idb', 'IDB: OK', 'ok');
-      ns.Logger.info('IDB ready', { tab: ns.Util.tabId });
+      ns.Logger.info('IDB ready');
     } catch (e) {
       ns.UI.setPill('idb', 'IDB: ERR', 'err');
       ns.Logger.error('IDB failed', e.message);
@@ -941,17 +1031,39 @@ ns.App = (() => {
     }
 
     try {
-      ns.Channel.init();
-      ns.Channel.startPingLoop();
-      ns.UI.setPill('channel', 'CHANNEL: OK', 'ok');
+      ns.Mesh.init();
+      ns.UI.setPill('mesh', 'MESH: OK', 'ok');
     } catch (e) {
-      ns.UI.setPill('channel', 'CHANNEL: ERR', 'err');
-      ns.Logger.error('Channel failed', e.message);
+      ns.UI.setPill('mesh', 'MESH: ERR', 'err');
+      ns.Logger.error('Mesh failed (local mode)', e.message);
+    }
+
+    // Автовосстановление модели из кеша (если была загружена ранее)
+    try {
+      await ns.Vector.load((p) => {
+        if (p.done) {
+          ns.UI.setPill('model', p.fromCache ? 'MODEL: ready (cached)' : 'MODEL: ready', 'ok');
+        } else if (p.status === 'loading') {
+          ns.UI.setPill('model', 'MODEL: ' + p.hint, 'warn');
+        } else if (p.total) {
+          const pct = Math.round((p.loaded / p.total) * 100);
+          ns.UI.setPill('model', `MODEL: ${pct}%`, 'warn');
+        }
+      });
+    } catch (e) {
+      // Не критично — пользователь может загрузить вручную
+      ns.Logger.warn('model auto-load skipped', e.message);
     }
 
     await ns.UI.refresh();
-    ns.Logger.info('app ready (debounce 4s)');
+    ns.Logger.info('app ready');
   };
+
+  // Cleanup при закрытии вкладки
+  window.addEventListener('beforeunload', () => {
+    try { ns.Mesh.leave(); } catch (e) {}
+  });
+
   return { boot };
 })();
 
