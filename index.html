@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Noosphere Demo</title>
+<title>Noosphere Demo v1.1</title>
 <style>
   :root {
     --bg:#0f1115; --panel:#161a22; --border:#242a36;
@@ -41,6 +41,7 @@
   .pill.ok   { color:var(--ok);   border-color:#1f3d2a; }
   .pill.warn { color:var(--warn); border-color:#3d3220; }
   .pill.err  { color:var(--err);  border-color:#3d1f22; }
+  .pill.think { color:var(--accent); border-color:var(--accent); }
 
   .list { display:flex; flex-direction:column; gap:6px; min-height:60px; }
   .item { background:#0b0d12; border:1px solid var(--border);
@@ -69,7 +70,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>NOOSPHERE DEMO <small>local only · broadcast between tabs</small></h1>
+  <h1>NOOSPHERE DEMO <small>v1.1 · local only · 4s debounce</small></h1>
 
   <section class="panel">
     <div class="status" id="status">
@@ -78,14 +79,15 @@
       <span class="pill" data-key="channel">CHANNEL: ...</span>
       <span class="pill" data-key="peers">TABS: 0</span>
       <span class="pill" data-key="indexed">INDEXED: 0</span>
+      <span class="pill" data-key="think" style="display:none">...</span>
     </div>
     <div class="progress"><div id="modelProgress"></div></div>
-    <div class="hint">Открой эту страницу в 2-3 вкладках — они будут обмениваться запросами через BroadcastChannel. Ничего не уходит в интернет.</div>
+    <div class="hint">Открой эту страницу в 2-3 вкладках — они будут обмениваться запросами. Debounce 4 секунды: перестань печатать, и через 4 сек увидишь релевантность.</div>
   </section>
 
   <section class="panel">
     <h2>thought</h2>
-    <textarea id="input" placeholder="напечатай мысль..."></textarea>
+    <textarea id="input" placeholder="напечатай мысль... (релевантность появится через 4 сек после паузы)"></textarea>
     <div class="row" style="margin-top:8px;">
       <button id="btnSave" class="secondary">Сохранить локально</button>
       <button id="btnSaveWorld" class="primary">Сохранить + в Мир</button>
@@ -135,16 +137,21 @@
 
 <script type="module">
 /* ============================================================================
-   NOOSPHERE DEMO — MINIMAL WORKING VERSION
+   NOOSPHERE DEMO v1.1
    ----------------------------------------------------------------------------
-   Архитектура:
-     1. Заметки + векторы хранятся ТОЛЬКО в локальном IndexedDB.
-     2. Обмен запросами между вкладками через BroadcastChannel API.
-        (Встроен в браузер, не требует сервера, работает 100%.)
-     3. Эмбеддинги через transformers.js (MiniLM, ONNX, в браузере).
-     4. Чужие ответы живут 5 минут в RAM, потом исчезают.
+   Изменения относительно v1.0:
+     - Пустое поле = пустые колонки (было: показывалась "лента последних")
+     - Debounce: 4 секунды (было: 400 мс)
+     - Кеш последнего queryVector: не пересчитываем embed для того же текста
+     - Pill "think": показывает что ждём debounce или считаем embed
 
-   Порядок секций:
+   Архитектура (без изменений):
+     1. Заметки + векторы — ТОЛЬКО в локальном IndexedDB.
+     2. Обмен между вкладками — BroadcastChannel API.
+     3. Эмбеддинги — transformers.js (MiniLM, ONNX).
+     4. Чужие ответы — 5 минут в RAM, потом исчезают.
+
+   Секции:
      [1] Config  [2] Logger  [3] Util  [4] Storage  [5] Vector
      [6] Channel  [7] Ephemeral  [8] Relevance  [9] Sync  [10] UI  [11] App
    ============================================================================ */
@@ -169,7 +176,7 @@ ns.Config = Object.freeze({
   LIMITS: {
     MAX_TEXT_LENGTH: 10_000,
     RENDER_CAP: 200,
-    DEBOUNCE_MS: 400,
+    DEBOUNCE_MS: 4000,                  // 4 секунды (было 400)
     QUERY_TIMEOUT_MS: 2000,
     MAX_PEERS_TO_QUERY: 10,
     MAX_RESULTS_PER_PEER: 5,
@@ -224,8 +231,7 @@ ns.Util = {
 };
 
 /* --------------------------------------------------------------------------
-   [4] STORAGE (IndexedDB)
-   Хранит ТОЛЬКО локальные заметки пользователя.
+   [4] STORAGE
    -------------------------------------------------------------------------- */
 ns.Storage = (() => {
   const { DB_NAME, DB_VERSION, STORE_THOUGHTS } = ns.Config;
@@ -277,7 +283,7 @@ ns.Storage = (() => {
 })();
 
 /* --------------------------------------------------------------------------
-   [5] VECTOR (MiniLM)
+   [5] VECTOR
    -------------------------------------------------------------------------- */
 ns.Vector = (() => {
   let extractor = null;
@@ -319,41 +325,33 @@ ns.Vector = (() => {
 })();
 
 /* --------------------------------------------------------------------------
-   [6] CHANNEL (BroadcastChannel API)
-   Обмен сообщениями между вкладками одного браузера.
-   
-   Протокол:
-     - { type: 'ping', from: tabId }              → запрос "кто тут?"
-     - { type: 'pong', from: tabId }              → ответ "я тут"
-     - { type: 'query', from, queryId, vector }   → "что у тебя похожего?"
-     - { type: 'response', from, queryId, results } → ответ с top-N
+   [6] CHANNEL
    -------------------------------------------------------------------------- */
 ns.Channel = (() => {
   let channel = null;
-  const knownTabs = new Map(); // tabId -> lastSeen
-  const queryHandlers = new Map(); // queryId -> handler
+  const knownTabs = new Map();
+  const queryHandlers = new Map();
 
   const init = () => {
     if (typeof BroadcastChannel === 'undefined') {
-      ns.Logger.error('BroadcastChannel not supported in this browser');
+      ns.Logger.error('BroadcastChannel not supported');
       return;
     }
     channel = new BroadcastChannel(ns.Config.CHANNEL_NAME);
     channel.onmessage = handleMessage;
-    ns.Logger.info('BroadcastChannel initialized', { name: ns.Config.CHANNEL_NAME, tab: ns.Util.tabId });
+    ns.Logger.info('BroadcastChannel ready', { tab: ns.Util.tabId });
   };
 
   const handleMessage = (ev) => {
     const msg = ev.data;
     if (!msg || typeof msg !== 'object') return;
-    if (msg.from === ns.Util.tabId) return; // своё сообщение игнорим
+    if (msg.from === ns.Util.tabId) return;
 
     switch (msg.type) {
       case 'ping':
         knownTabs.set(msg.from, ns.Util.now());
         send({ type: 'pong', from: ns.Util.tabId });
         updateTabCount();
-        ns.Logger.info('ping received', { from: msg.from.slice(0, 12) });
         break;
       case 'pong':
         knownTabs.set(msg.from, ns.Util.now());
@@ -369,27 +367,17 @@ ns.Channel = (() => {
   };
 
   const handleQuery = async (msg) => {
-    if (!ns.Vector.isLoaded()) {
-      ns.Logger.warn('query ignored: model not loaded');
-      return;
-    }
+    if (!ns.Vector.isLoaded()) return;
     try {
       const all = await ns.Storage.all();
       const shared = all.filter((t) => t.published && Array.isArray(t.vector));
-      
       const scored = shared
         .map((t) => ({ text: t.text, score: ns.Vector.cosine(msg.vector, t.vector) }))
         .filter((r) => r.score > 0.1)
         .sort((a, b) => b.score - a.score)
         .slice(0, ns.Config.LIMITS.MAX_RESULTS_PER_PEER);
 
-      send({
-        type: 'response',
-        from: ns.Util.tabId,
-        queryId: msg.queryId,
-        results: scored,
-      });
-
+      send({ type: 'response', from: ns.Util.tabId, queryId: msg.queryId, results: scored });
       ns.Logger.info('responded to query', { to: msg.from.slice(0, 12), n: scored.length });
     } catch (e) {
       ns.Logger.warn('query handling failed', e.message);
@@ -404,24 +392,21 @@ ns.Channel = (() => {
 
   const send = (msg) => {
     if (!channel) return;
-    try { channel.postMessage(msg); }
-    catch (e) { ns.Logger.warn('send failed', e.message); }
+    try { channel.postMessage(msg); } catch (e) {}
   };
 
   const ping = () => send({ type: 'ping', from: ns.Util.tabId });
 
   const query = (vector, { timeoutMs = ns.Config.LIMITS.QUERY_TIMEOUT_MS } = {}) => {
     const queryId = ns.Util.newId();
-    const results = new Map(); // tabId -> results[]
-
+    const results = new Map();
     const handler = (fromTabId, res) => {
       results.set(fromTabId, res);
       ns.Ephemeral.upsert(fromTabId, res);
     };
     queryHandlers.set(queryId, handler);
-
     send({ type: 'query', from: ns.Util.tabId, queryId, vector });
-    ns.Logger.info('query sent', { queryId: queryId.slice(0, 8) });
+    ns.Logger.info('query sent', { id: queryId.slice(0, 8) });
 
     return new Promise((resolve) => {
       setTimeout(() => {
@@ -448,11 +433,9 @@ ns.Channel = (() => {
   };
 
   const updateTabCount = () => {
-    const n = getActiveTabs().length;
-    document.dispatchEvent(new CustomEvent('ns:tabs', { detail: { count: n } }));
+    document.dispatchEvent(new CustomEvent('ns:tabs', { detail: { count: getActiveTabs().length } }));
   };
 
-  // Периодический пинг чтобы видеть кто онлайн
   const startPingLoop = () => {
     ping();
     setInterval(() => { ping(); updateTabCount(); }, 10_000);
@@ -462,7 +445,7 @@ ns.Channel = (() => {
 })();
 
 /* --------------------------------------------------------------------------
-   [7] EPHEMERAL (RAM, 5 min TTL)
+   [7] EPHEMERAL
    -------------------------------------------------------------------------- */
 ns.Ephemeral = (() => {
   const byTab = new Map();
@@ -575,12 +558,9 @@ ns.Sync = (() => {
     if (!clean) throw new Error('Empty thought');
 
     const thought = {
-      id: ns.Util.newId(),
-      text: clean,
-      createdAt: ns.Util.now(),
-      updatedAt: ns.Util.now(),
-      vector: null,
-      hasVector: 0,
+      id: ns.Util.newId(), text: clean,
+      createdAt: ns.Util.now(), updatedAt: ns.Util.now(),
+      vector: null, hasVector: 0,
       published: !!publishToWorld,
     };
 
@@ -619,9 +599,16 @@ ns.Sync = (() => {
 
 /* --------------------------------------------------------------------------
    [10] UI
+   Фиксы v1.1:
+     - Кеш последнего query (текст + вектор) — не пересчитываем embed
+     - Пустое поле = очистка всех колонок
+     - Pill "think" показывает состояние ожидания
    -------------------------------------------------------------------------- */
 ns.UI = (() => {
   const refs = {};
+
+  // Кеш последнего запроса: { text, vector }
+  let lastQuery = { text: null, vector: null };
 
   const cache = () => {
     ['input','btnSave','btnSaveWorld','btnLoadModel','btnReindex','btnSeed',
@@ -634,8 +621,21 @@ ns.UI = (() => {
     const el = refs.status.querySelector(`[data-key="${k}"]`);
     if (!el) return;
     el.textContent = t;
-    el.classList.remove('ok','warn','err');
+    el.classList.remove('ok','warn','err','think');
     if (s) el.classList.add(s);
+  };
+
+  const setThink = (active, text = 'думаю...') => {
+    const el = refs.status.querySelector('[data-key="think"]');
+    if (!el) return;
+    if (active) {
+      el.style.display = '';
+      el.textContent = text;
+      el.classList.add('think');
+    } else {
+      el.style.display = 'none';
+      el.classList.remove('think');
+    }
   };
 
   const setProgress = (pct) => { refs.modelProgress.style.width = pct + '%'; };
@@ -724,33 +724,54 @@ ns.UI = (() => {
 
   const updateLiveRelevance = async () => {
     if (!ns.Vector.isLoaded()) { clearAll(); return; }
-    const text = refs.input.value.trim();
-    const locals = await ns.Storage.all();
-    const eph = ns.Ephemeral.allResults();
 
+    const text = refs.input.value.trim();
+
+    // ПУСТОЕ ПОЛЕ = ОЧИЩАЕМ ВСЁ (фикс v1.1)
     if (!text) {
-      renderLocalList(refs.listMine,
-        locals.filter(t => t.hasVector).sort((a,b) => b.createdAt - a.createdAt)
-              .slice(0, ns.Config.RELEVANCE.MAX_CARDS).map(t => ({ source: t, score: null })), '');
-      renderWorldList(refs.listWorld,
-        eph.slice(0, ns.Config.RELEVANCE.MAX_CARDS).map(r => ({ source: r, score: null })), '');
-      renderMixedList(refs.listAdjacent, [], '');
+      clearAll();
+      lastQuery = { text: null, vector: null };
+      setThink(false);
       return;
     }
 
-    try {
-      const qv = await ns.Vector.embed(text);
-      const activeTabs = ns.Channel.getActiveTabs();
-      if (activeTabs.length > 0) {
-        ns.Channel.query(qv).catch((e) => ns.Logger.warn('query failed', e.message));
+    // Кеш: если текст тот же что и в прошлый раз — не пересчитываем embed
+    let qv;
+    if (lastQuery.text === text && lastQuery.vector) {
+      qv = lastQuery.vector;
+      ns.Logger.info('relevance: cache hit (same text)');
+    } else {
+      setThink(true, 'считаю вектор...');
+      try {
+        qv = await ns.Vector.embed(text);
+        lastQuery = { text, vector: qv };
+        ns.Logger.info('relevance: embed computed', { len: text.length });
+      } catch (e) {
+        setThink(false);
+        ns.Logger.error('embed failed', e.message);
+        return;
       }
-      const { mine, world, adjacent } = ns.Relevance.rankAll(qv, locals, eph);
-      renderLocalList(refs.listMine, mine, text);
-      renderWorldList(refs.listWorld, world, text);
-      renderMixedList(refs.listAdjacent, adjacent, text);
-    } catch (e) {
-      ns.Logger.error('relevance failed', e.message);
+      setThink(true, 'запрашиваю пиры...');
     }
+
+    const activeTabs = ns.Channel.getActiveTabs();
+    if (activeTabs.length > 0) {
+      ns.Channel.query(qv).catch((e) => ns.Logger.warn('query failed', e.message));
+    }
+
+    const locals = await ns.Storage.all();
+    const eph = ns.Ephemeral.allResults();
+    const { mine, world, adjacent } = ns.Relevance.rankAll(qv, locals, eph);
+    renderLocalList(refs.listMine, mine, text);
+    renderWorldList(refs.listWorld, world, text);
+    renderMixedList(refs.listAdjacent, adjacent, text);
+
+    setThink(false);
+  };
+
+  // Сбрасываем кеш при изменении списка заметок (сохранение/реиндекс)
+  const invalidateCache = () => {
+    lastQuery = { text: null, vector: null };
   };
 
   const renderAll = async () => {
@@ -772,11 +793,31 @@ ns.UI = (() => {
     setPill('indexed', `INDEXED: ${indexed}/${all.length}`, all.length > 0 && indexed === all.length ? 'ok' : 'warn');
   };
 
-  const refresh = async () => { await renderAll(); await updateLiveRelevance(); };
+  const refresh = async () => {
+    invalidateCache();
+    await renderAll();
+    await updateLiveRelevance();
+  };
 
   const bind = () => {
-    const debouncedUpdate = ns.Util.debounce(updateLiveRelevance, ns.Config.LIMITS.DEBOUNCE_MS);
-    refs.input.addEventListener('input', debouncedUpdate);
+    // Debounced-обновление (4 сек)
+    const debouncedUpdate = ns.Util.debounce(async () => {
+      setThink(false);
+      await updateLiveRelevance();
+    }, ns.Config.LIMITS.DEBOUNCE_MS);
+
+    refs.input.addEventListener('input', () => {
+      const text = refs.input.value.trim();
+      if (!text) {
+        // Сразу очищаем при удалении, не ждём 4 секунды
+        clearAll();
+        lastQuery = { text: null, vector: null };
+        setThink(false);
+        return;
+      }
+      setThink(true, 'жду паузу...');
+      debouncedUpdate();
+    });
 
     const disableSavers = (v) => { refs.btnSave.disabled = refs.btnSaveWorld.disabled = v; };
 
@@ -785,7 +826,8 @@ ns.UI = (() => {
         disableSavers(true);
         await ns.Sync.saveLocal({ text: refs.input.value, publishToWorld: false });
         refs.input.value = '';
-        await refresh();
+        clearAll();
+        await renderAll();
       } catch (e) { ns.Logger.error('save failed', e.message); }
       finally { disableSavers(false); }
     });
@@ -795,7 +837,8 @@ ns.UI = (() => {
         disableSavers(true);
         await ns.Sync.saveLocal({ text: refs.input.value, publishToWorld: true });
         refs.input.value = '';
-        await refresh();
+        clearAll();
+        await renderAll();
       } catch (e) { ns.Logger.error('save failed', e.message); }
       finally { disableSavers(false); }
     });
@@ -811,7 +854,6 @@ ns.UI = (() => {
         });
         setPill('model', 'MODEL: ready', 'ok');
         setProgress(100);
-        await refresh();
       } catch (e) {
         setPill('model', 'MODEL: err', 'err');
         ns.Logger.error('model load failed', e.message);
@@ -826,7 +868,8 @@ ns.UI = (() => {
           setPill('model', `MODEL: reindex ${p.done}/${p.total}`, 'warn');
         });
         setPill('model', 'MODEL: ready', 'ok');
-        await refresh();
+        invalidateCache();
+        await renderAll();
       } catch (e) { ns.Logger.error('reindex failed', e.message); }
       finally { refs.btnReindex.disabled = false; }
     });
@@ -840,7 +883,8 @@ ns.UI = (() => {
         'Связи между идеями важнее самих идей.',
       ];
       for (const s of samples) await ns.Sync.saveLocal({ text: s, publishToWorld: true });
-      await refresh();
+      invalidateCache();
+      await renderAll();
     });
 
     refs.btnPing.addEventListener('click', () => {
@@ -853,13 +897,21 @@ ns.UI = (() => {
       try {
         await ns.Storage.clear();
         ns.Ephemeral.clear();
-        await refresh();
+        invalidateCache();
+        clearAll();
+        await renderAll();
         ns.Logger.warn('storage cleared');
       } catch (e) { ns.Logger.error('reset failed', e.message); }
     });
 
-    document.addEventListener('ns:thoughts-changed', refresh);
+    document.addEventListener('ns:thoughts-changed', async () => {
+      invalidateCache();
+      await renderAll();
+      await updateLiveRelevance();
+    });
+
     document.addEventListener('ns:ephemeral-changed', updateLiveRelevance);
+
     document.addEventListener('ns:tabs', (ev) => {
       setPill('peers', `TABS: ${ev.detail.count}`, ev.detail.count ? 'ok' : 'warn');
     });
@@ -871,7 +923,6 @@ ns.UI = (() => {
 
 /* --------------------------------------------------------------------------
    [11] APP
-   Порядок запуска: Storage → Channel → UI
    -------------------------------------------------------------------------- */
 ns.App = (() => {
   const boot = async () => {
@@ -882,7 +933,7 @@ ns.App = (() => {
     try {
       await ns.Storage.open();
       ns.UI.setPill('idb', 'IDB: OK', 'ok');
-      ns.Logger.info('IDB ready', { name: ns.Config.DB_NAME, tab: ns.Util.tabId });
+      ns.Logger.info('IDB ready', { tab: ns.Util.tabId });
     } catch (e) {
       ns.UI.setPill('idb', 'IDB: ERR', 'err');
       ns.Logger.error('IDB failed', e.message);
@@ -899,7 +950,7 @@ ns.App = (() => {
     }
 
     await ns.UI.refresh();
-    ns.Logger.info('app ready');
+    ns.Logger.info('app ready (debounce 4s)');
   };
   return { boot };
 })();
