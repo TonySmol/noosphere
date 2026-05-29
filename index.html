@@ -1,1173 +1,1862 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#0a0a0a">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0f">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://huggingface.co data: blob: wss:;">
-<title>NOOmium</title>
-<style>
-:root {
-  --bg: #0a0a0a;
-  --fg: #ededed;
-  --dim: #666;
-  --line: #1f1f1f;
-  --accent: #7c5cff;
-  --world: #0ea5e9;
-  --seren: #4ade80;
-  --warn: #fbbf24;
-  --err: #ef4444;
-  --mono: ui-monospace, 'SF Mono', Monaco, Consolas, monospace;
-  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+<title>Noosphere</title>
+<style id="LOOM_CSS">
+:root{
+  --bg:#0a0a0f;--surface:#13131a;--surface-hover:#1a1a24;
+  --border:#24242e;--text-main:#e8e8f0;--text-muted:#8888a0;
+  --brand:#7c5cff;--brand-glow:rgba(124,92,255,.2);
+  --world:#0ea5e9;--world-glow:rgba(14,165,233,.2);
+  --seren:#4ade80;--seren-glow:rgba(74,222,128,.2);
+  --warn:#fbbf24;--warn-glow:rgba(251,191,36,.18);
+  --danger:#f87171;--radius:12px;
+  --font:14px/1.6 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --panel:#111827;--br:#1f2a44;--acc:#60a5fa;--ok:#22c55e;--muted:#99a7bf;
+  --btn-bg:#18233a;--btn-text:#f8fbff;--btn-br:#223156;
+  --btn-pr-bg:#7c5cff;--btn-pr-text:#fff;
+  --topH:52px;--left:320px;
 }
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body {
-  height: 100dvh; overflow: hidden;
-  background: var(--bg); color: var(--fg);
-  font: 14px/1.5 var(--sans);
-  -webkit-font-smoothing: antialiased;
-  -webkit-tap-highlight-color: transparent;
+html[data-theme="light"]{
+  --bg:#f3f4f6;--surface:#fff;--surface-hover:#f9fafb;
+  --border:#e5e7eb;--text-main:#111827;--text-muted:#6b7280;
+  --panel:#fff;--br:#d7dfea;--acc:#2563eb;--muted:#5b6374;
+  --btn-bg:#f3f6fb;--btn-text:#0b1020;--btn-br:#d7dfea;
 }
-body { display: flex; flex-direction: column; }
-button { font: inherit; cursor: pointer; border: none; background: none; color: inherit; }
-input, textarea, select { font: inherit; color: inherit; background: none; border: none; outline: none; }
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text-main);font:var(--font)}
+body{display:flex;flex-direction:column}
+button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,textarea,select{font:inherit;color:inherit;background:none;border:none;outline:none}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px}
+::-webkit-scrollbar-thumb:hover{background:var(--surface-hover)}
 
-.topbar {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 14px; border-bottom: 1px solid var(--line);
-  flex-shrink: 0;
-}
-.brand { font: 600 14px var(--mono); letter-spacing: .3px; }
-.spacer { flex: 1; }
-.icon-btn {
-  padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
-  color: var(--dim); transition: .15s;
-  min-width: 36px; min-height: 36px;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.icon-btn:hover { color: var(--fg); border-color: var(--dim); }
+.navbar{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--surface);border-bottom:1px solid var(--border);z-index:10}
+.navbar-title{font-weight:700;font-size:16px;letter-spacing:.2px;background:linear-gradient(to right,var(--brand),var(--world));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.navbar-actions{display:flex;gap:6px}
+.icon-btn{padding:6px 10px;border:1px solid var(--border);border-radius:8px;color:var(--text-main);transition:.2s;display:inline-flex;align-items:center;gap:6px;min-height:36px}
+.icon-btn:hover{background:var(--surface-hover);border-color:var(--brand)}
 
-.status {
-  display: flex; gap: 10px; padding: 6px 14px;
-  border-bottom: 1px solid var(--line);
-  font: 11px var(--mono); color: var(--dim);
-  flex-shrink: 0; flex-wrap: wrap;
-}
-.s { display: inline-flex; align-items: center; gap: 5px; }
-.dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.s.ok { color: var(--seren); }
-.s.warn { color: var(--warn); }
-.s.err { color: var(--err); }
-.s.busy .dot { animation: blink 1s infinite; }
-@keyframes blink { 50% { opacity: .3; } }
+.status-bar{display:flex;gap:8px;padding:8px 16px;background:var(--surface);border-bottom:1px solid var(--border);font-size:11px;flex-wrap:wrap}
+.badge-status{padding:4px 10px;border-radius:20px;background:var(--surface-hover);border:1px solid var(--border);display:flex;align-items:center;gap:6px;color:var(--text-muted);font-weight:500;transition:.3s}
+.badge-status .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.badge-status.active{color:var(--world);border-color:var(--world-glow);background:var(--world-glow)}
+.badge-status.ready{color:var(--seren);border-color:var(--seren-glow)}
+.badge-status.warn{color:var(--warn);border-color:var(--warn-glow);background:var(--warn-glow)}
+.badge-status.alone{color:var(--text-muted);border-color:var(--border)}
+.badge-status.busy .dot{animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 
-.tabs { display: flex; border-bottom: 1px solid var(--line); flex-shrink: 0; }
-.tab {
-  flex: 1; padding: 11px; text-align: center;
-  font: 12px var(--mono); color: var(--dim);
-  border-bottom: 2px solid transparent; transition: .15s;
-  text-transform: uppercase; letter-spacing: .5px;
-  display: inline-flex; justify-content: center; align-items: center; gap: 6px;
-}
-.tab.active { color: var(--fg); border-color: var(--fg); }
-.tab .n {
-  font-size: 10px; padding: 1px 5px;
-  background: var(--line); border-radius: 8px;
-}
+.main-tabs{display:flex;background:var(--surface);border-bottom:1px solid var(--border)}
+.tab{flex:1;text-align:center;padding:12px;color:var(--text-muted);font-weight:500;border-bottom:2px solid transparent;transition:.2s;display:flex;justify-content:center;align-items:center;gap:6px;cursor:pointer}
+.tab.active{color:var(--text-main);border-color:var(--brand)}
+.tab .tab-count{font-size:10px;font-family:monospace;background:var(--surface-hover);border:1px solid var(--border);padding:1px 6px;border-radius:10px}
 
-.work {
-  flex: 1; overflow-y: auto; padding: 14px;
-  -webkit-overflow-scrolling: touch;
-}
-.view { display: none; }
-.view.active { display: block; }
+.workspace{flex:1;overflow-y:auto;overflow-x:hidden;padding:16px;position:relative;scroll-behavior:smooth}
+.view-layer{display:none;animation:fade .2s ease-out}
+.view-layer.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
 
-.editor {
-  border: 1px solid var(--line); border-radius: 8px;
-  padding: 12px; margin-bottom: 14px;
-  position: relative;
-}
-.editor textarea {
-  width: 100%; min-height: 72px; resize: vertical;
-  font-size: 15px; line-height: 1.5;
-}
-.editor textarea::placeholder { color: var(--dim); }
-.editor-meta {
-  display: flex; justify-content: space-between; align-items: center;
-  margin-top: 6px; font: 11px var(--mono); color: var(--dim);
-}
-.editor-btns { display: flex; gap: 8px; margin-top: 12px; }
-.btn {
-  padding: 10px 14px; border: 1px solid var(--line); border-radius: 6px;
-  font: 13px var(--sans); font-weight: 500; transition: .15s;
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  min-height: 40px; flex: 1;
-}
-.btn:hover:not(:disabled) { border-color: var(--dim); }
-.btn:disabled { opacity: .4; cursor: not-allowed; }
-.btn-primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
-.btn-primary:hover:not(:disabled) { opacity: .9; }
+.editor-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:20px;box-shadow:0 4px 6px -1px rgba(0,0,0,.1)}
+.editor-textarea{width:100%;min-height:84px;background:transparent;border:none;resize:vertical;outline:none;font-size:15px;line-height:1.55;color:inherit;font-family:inherit}
+.editor-textarea::placeholder{color:var(--text-muted)}
+.editor-meta{display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:11px;color:var(--text-muted)}
+.editor-meta-actions{display:flex;gap:14px}
+.link-btn{color:var(--text-muted);font-size:11px;font-weight:600;transition:.2s;padding:2px 0;background:none;border:none;cursor:pointer}
+.link-btn:hover{color:var(--brand)}
+.editor-controls{display:flex;gap:8px;margin-top:14px}
 
-.progress-bar {
-  position: absolute; bottom: 0; left: 0; right: 0;
-  height: 2px; background: var(--line); overflow: hidden;
-}
-.progress-bar .fill {
-  height: 100%; background: var(--accent);
-  width: 0; transition: width .3s;
-}
+.btn{padding:8px 16px;border-radius:8px;font-weight:600;font-size:13px;transition:.2s;border:1px solid transparent;flex:1;display:flex;justify-content:center;align-items:center;gap:6px;cursor:pointer;font-family:inherit}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn-ghost{background:var(--surface-hover);color:var(--text-main);border-color:var(--border)}
+.btn-ghost:hover:not(:disabled){border-color:var(--brand)}
+.btn-primary{background:var(--btn-pr-bg);color:var(--btn-pr-text);border-color:var(--btn-pr-bg)}
+.btn-primary:hover:not(:disabled){filter:brightness(1.1)}
+kbd{font-family:monospace;font-size:10px;background:rgba(127,127,127,.14);border:1px solid var(--border);border-radius:4px;padding:1px 5px}
 
-.filters {
-  display: flex; gap: 2px; padding: 3px;
-  background: var(--line); border-radius: 6px;
-  margin-bottom: 14px;
-}
-.fbtn {
-  flex: 1; padding: 7px 8px;
-  font: 11px var(--mono); color: var(--dim);
-  border-radius: 4px; transition: .15s;
-  text-transform: uppercase; letter-spacing: .3px;
-  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-}
-.fbtn.active { background: var(--bg); color: var(--fg); }
-.fbtn .n {
-  font-size: 10px; padding: 1px 5px;
-  background: var(--bg); border-radius: 6px;
-}
-.fbtn.active .n { background: var(--line); }
+.filter-tabs{display:flex;gap:4px;background:var(--surface);padding:4px;border-radius:10px;border:1px solid var(--border);margin-bottom:16px}
+.f-tab{flex:1;padding:6px;text-align:center;border-radius:6px;font-size:12px;font-weight:600;color:var(--text-muted);transition:.2s;display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;background:none;border:none}
+.f-tab.active{background:var(--surface-hover);color:var(--text-main);box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.f-tab .counter{background:var(--border);padding:2px 6px;border-radius:12px;font-size:10px;font-family:monospace}
+.f-tab.active[data-filter="local"] .counter{background:var(--brand-glow);color:var(--brand)}
+.f-tab.active[data-filter="world"] .counter{background:var(--world-glow);color:var(--world)}
+.f-tab.active[data-filter="seren"] .counter{background:var(--seren-glow);color:var(--seren)}
 
-.carousel { display: none; }
-.carousel.active { display: block; }
-.track {
-  display: flex; gap: 10px;
-  overflow-x: auto; overflow-y: hidden;
-  scroll-snap-type: x mandatory;
-  padding: 2px;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-.track::-webkit-scrollbar { display: none; }
+.node-list{display:none;flex-direction:column;gap:12px}
+.node-list.active{display:flex}
 
-.card {
-  flex: 0 0 calc(100% - 4px);
-  scroll-snap-align: start; scroll-snap-stop: always;
-  border: 1px solid var(--line); border-radius: 8px;
-  padding: 12px 12px 12px 16px;
-  position: relative; overflow: hidden;
-  min-width: 280px;
-  display: flex; flex-direction: column;
-}
-@media (min-width: 768px) { .card { flex: 0 0 calc(50% - 8px); } }
-@media (min-width: 1100px) { .card { flex: 0 0 calc(33.333% - 8px); } }
-.card::before {
-  content: ''; position: absolute;
-  left: 0; top: 0; bottom: 0; width: 3px;
-}
-.card.t-local::before { background: var(--accent); }
-.card.t-world::before { background: var(--world); }
-.card.t-seren::before { background: var(--seren); }
-.card.peer { opacity: .95; }
+.note-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 14px 14px 18px;position:relative;overflow:hidden;animation:slideUp .3s ease-out backwards}
+@keyframes slideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.note-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px}
+.note-card.t-local::before{background:var(--brand)}
+.note-card.t-world::before{background:var(--world)}
+.note-card.t-seren::before{background:var(--seren)}
+.note-card.peer{background:linear-gradient(180deg,var(--surface),var(--surface))}
 
-.card-head {
-  display: flex; justify-content: space-between;
-  align-items: center; gap: 8px;
-  margin-bottom: 8px; flex-shrink: 0;
-}
-.card-tag {
-  font: 10px var(--mono); font-weight: 600;
-  padding: 2px 6px; border-radius: 3px;
-  text-transform: uppercase; letter-spacing: .5px;
-  background: var(--line); color: var(--dim);
-}
-.t-local .card-tag { color: var(--accent); }
-.t-world .card-tag { color: var(--world); }
-.t-seren .card-tag { color: var(--seren); }
-.card-score { font: 11px var(--mono); color: var(--dim); }
-.card-body {
-  font-size: 14px; line-height: 1.5;
-  white-space: pre-wrap; word-wrap: break-word;
-  max-height: 160px; overflow-y: auto;
-  flex: 1;
-}
-.card-body mark {
-  background: transparent; color: var(--accent);
-  font-weight: 600;
-}
-.card-foot {
-  display: flex; gap: 4px; flex-wrap: wrap;
-  margin-top: 10px; flex-shrink: 0;
-}
-.card-act {
-  font: 11px var(--mono); color: var(--dim);
-  padding: 5px 8px; border: 1px solid var(--line);
-  border-radius: 4px; transition: .15s;
-  min-height: 28px;
-}
-.card-act:hover { color: var(--fg); border-color: var(--dim); }
-.card-act.danger:hover { color: var(--err); border-color: var(--err); }
-.card-hint {
-  font: 11px var(--mono); color: var(--dim);
-  font-style: italic;
-}
+.note-header{display:flex;justify-content:space-between;margin-bottom:8px;align-items:center;gap:8px}
+.note-type{font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:.5px;white-space:nowrap}
+.t-local .note-type{background:var(--brand-glow);color:var(--brand)}
+.t-world .note-type{background:var(--world-glow);color:var(--world)}
+.t-seren .note-type{background:var(--seren-glow);color:var(--seren)}
+.note-score{font-family:monospace;font-size:11px;color:var(--text-muted);white-space:nowrap}
+.note-content{font-size:14px;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}
+.note-content mark{background:var(--brand-glow);color:var(--brand);padding:0 2px;border-radius:3px;font-weight:600}
+.note-foot{display:flex;align-items:center;justify-content:space-between;margin-top:12px;gap:8px}
+.note-hint{font-size:11px;color:var(--text-muted);font-style:italic;opacity:.8}
+.note-actions{display:flex;gap:4px;flex-wrap:wrap;opacity:.55;transition:.2s;margin-left:auto}
+.note-card:hover .note-actions{opacity:1}
+.note-act{font-size:11px;font-weight:600;color:var(--text-muted);padding:4px 9px;border-radius:6px;border:1px solid var(--border);transition:.15s;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer;background:none;font-family:inherit}
+.note-act:hover{color:var(--text-main);border-color:var(--brand);background:var(--surface-hover)}
+.note-act.danger:hover{color:var(--danger);border-color:var(--danger)}
 
-.empty {
-  text-align: center; color: var(--dim);
-  padding: 40px 20px; font: 12px var(--mono);
-  width: 100%;
-}
-.empty .hint {
-  margin-top: 8px; font-size: 11px; opacity: .7;
-}
+.empty-state{padding:40px 20px;text-align:center;color:var(--text-muted);display:flex;flex-direction:column;align-items:center;gap:12px}
+.empty-state svg{width:48px;height:48px;opacity:.2}
+.empty-state .btn{flex:0}
+.spinner{width:28px;height:28px;border:3px solid var(--border);border-top-color:var(--world);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 
-.hist-bar { display: flex; gap: 8px; margin-bottom: 14px; }
-.hist-bar input {
-  flex: 1; padding: 9px 12px;
-  background: var(--line); border-radius: 6px;
-  min-height: 40px;
-}
-.hist-bar select {
-  padding: 9px 10px; background: var(--line);
-  border-radius: 6px; min-height: 40px;
-  font: 12px var(--mono);
-}
-.hist-bar select option { background: var(--bg); }
+.base-stats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 12px;flex:1;min-width:80px}
+.stat .num{font-size:18px;font-weight:700}
+.stat .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted)}
+.base-controls{display:flex;gap:8px;align-items:center;margin-bottom:14px}
+.base-search{flex:1;background:var(--surface);border:1px solid var(--border);padding:9px 12px;border-radius:8px;transition:.2s;color:inherit;font-family:inherit}
+.base-search:focus{border-color:var(--brand);outline:none}
+.base-sort{background:var(--surface);border:1px solid var(--border);padding:9px 10px;border-radius:8px;font-size:12px;color:inherit;font-family:inherit}
+.base-sort option{background:var(--surface);color:var(--text-main)}
 
-.overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,.6);
-  z-index: 100; opacity: 0; pointer-events: none; transition: .2s;
-}
-.overlay.open { opacity: 1; pointer-events: auto; }
-.drawer {
-  position: fixed; top: 0; right: -400px;
-  width: 360px; max-width: 100%; height: 100%;
-  background: var(--bg); border-left: 1px solid var(--line);
-  z-index: 101; transition: .25s;
-  padding: 20px; overflow-y: auto;
-}
-.drawer.open { right: 0; }
-.drawer h3 {
-  font: 600 16px var(--sans); margin-bottom: 20px;
-  display: flex; justify-content: space-between; align-items: center;
-}
-.drawer .close {
-  font-size: 24px; color: var(--dim);
-  min-width: 36px; min-height: 36px;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.drawer .close:hover { color: var(--err); }
+.toast-ns{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120px);background:var(--text-main);color:var(--bg);padding:10px 20px;border-radius:30px;font-weight:600;font-size:13px;transition:.3s cubic-bezier(.175,.885,.32,1.275);z-index:1000;box-shadow:0 10px 25px rgba(0,0,0,.2);max-width:90vw;text-align:center;opacity:0;pointer-events:none}
+.toast-ns.show{transform:translateX(-50%) translateY(0);opacity:1}
+.toast-ns.ok{background:var(--seren);color:#04130a}
+.toast-ns.err{background:var(--danger);color:#160404}
+.toast-ns.info{background:var(--world);color:#021019}
 
-.field { margin-bottom: 18px; }
-.field label {
-  display: block; font: 11px var(--mono); color: var(--dim);
-  margin-bottom: 6px; text-transform: uppercase; letter-spacing: .5px;
-}
-.field input[type="text"] {
-  width: 100%; padding: 10px 12px;
-  background: var(--line); border-radius: 6px;
-  min-height: 40px;
-}
-.field input[type="range"] { width: 100%; accent-color: var(--accent); }
-.field .row { display: flex; justify-content: space-between; align-items: center; }
-.field .val {
-  font: 12px var(--mono); color: var(--accent);
-  font-weight: 600;
-}
-.field .hint {
-  font: 11px var(--mono); color: var(--dim);
-  margin-top: 5px; line-height: 1.4;
-}
+.drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(3px);z-index:100;opacity:0;pointer-events:none;transition:.2s}
+.drawer-overlay.open{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:-400px;width:360px;max-width:100%;height:100%;background:var(--surface);border-left:1px solid var(--border);z-index:101;transition:.3s cubic-bezier(.16,1,.3,1);padding:20px;overflow-y:auto}
+.drawer.open{right:0}
+.drawer-header{display:flex;justify-content:space-between;margin-bottom:24px;font-size:18px;font-weight:700;align-items:center}
+.drawer-close{font-size:24px;color:var(--text-muted);transition:.2s;line-height:1;cursor:pointer;background:none;border:none}
+.drawer-close:hover{color:var(--danger)}
+.drawer-section{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);font-weight:700;margin:24px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.drawer p{color:var(--text-muted);margin-bottom:10px;line-height:1.55}
+.drawer b{color:var(--text-main);font-weight:600}
 
-.section {
-  font: 11px var(--mono); color: var(--dim);
-  text-transform: uppercase; letter-spacing: .5px;
-  margin: 22px 0 10px; padding-bottom: 6px;
-  border-bottom: 1px solid var(--line);
-}
-.btn-row { display: flex; gap: 8px; }
-.btn-row .btn { flex: 1; }
+.form-group{margin-bottom:20px}
+.form-label{display:block;font-size:11px;text-transform:uppercase;font-weight:700;color:var(--text-muted);margin-bottom:8px;letter-spacing:.5px}
+.form-hint{font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.4}
+.form-input{width:100%;background:var(--bg);border:1px solid var(--border);padding:10px 12px;border-radius:8px;transition:.2s;color:inherit;font-family:inherit}
+.form-input:focus{border-color:var(--brand);outline:none}
+.form-range{width:100%;accent-color:var(--brand)}
+.val-display{float:right;font-family:monospace;color:var(--brand);font-weight:bold}
+.btn-row{display:flex;gap:8px}
 
-.toast {
-  position: fixed; bottom: 20px; left: 50%;
-  transform: translateX(-50%) translateY(100px);
-  background: var(--fg); color: var(--bg);
-  padding: 10px 20px; border-radius: 4px;
-  font: 12px var(--mono); z-index: 1000;
-  transition: .25s; max-width: 90vw; text-align: center;
-}
-.toast.show { transform: translateX(-50%) translateY(0); }
-.toast.ok { background: var(--seren); color: #000; }
-.toast.err { background: var(--err); color: #fff; }
-.toast.info { background: var(--world); color: #000; }
+#loom-root{display:none}
+body.show-app #app-root{display:flex;flex-direction:column;flex:1;min-height:0}
+body.show-app #loom-root{display:none}
 
-.copied-flash {
-  position: fixed; top: 50%; left: 50%;
-  transform: translate(-50%, -50%) scale(0);
-  background: var(--fg); color: var(--bg);
-  padding: 20px 40px; border-radius: 8px;
-  font: 16px var(--mono); font-weight: 600;
-  z-index: 2000; opacity: 0;
-  transition: all .3s;
-}
-.copied-flash.show {
-  transform: translate(-50%, -50%) scale(1);
-  opacity: 1;
+@media (max-width:600px){
+  .workspace{padding:12px}
+  .drawer{width:100%}
+  .editor-card{padding:12px}
 }
 </style>
 </head>
-<body>
+<body class="show-app">
+<div id="loom-root"></div>
+<div id="app-root"></div>
 
-<header class="topbar">
-  <div class="brand">NOOmium</div>
-  <div class="spacer"></div>
-  <button class="icon-btn" id="btnHelp" title="Как это работает">?</button>
-  <button class="icon-btn" id="btnSettings" title="Настройки">⚙</button>
-</header>
+<script type="application/json" id="LOOM_META">
+{"name":"Noosphere","version":"2.0.0","createdAt":"2026-05-29T00:00:00.000Z","updatedAt":"2026-05-29T00:00:00.000Z","description":"P2P thought resonator — every thought becomes a vector seeking resonance across Nostr peers.","protected":{"bootloaderId":"LOOM_BOOT","bootloaderVersion":"2.5.0","runProfile":"app","entryApp":"App.Noosphere"},"conventions":{"moduleTypes":["core","ui","app"],"loadOrder":["core","ui","app"],"naming":"Namespace.Name"}}
+</script>
+<script type="application/json" id="LOOM_GUIDE">
+{"rules":["Правки — только в капсулах (manifest/contract/code).","Бутлоадер меняется только в релизах.","Сначала меняй manifest/contract, затем code.","Экспорты перечислены в manifest.exports.","Без сайд-эффектов в фабриках модулей.","Зависимости объявляются в manifest.dependsOn.","Весь UI рендерится в #app-root из App.Noosphere."],"flows":{"add":["создай капсулу","manifest","contract","code","Health","Rebuild"]}}
+</script>
 
-<div class="status">
-  <span class="s busy" id="stDB"><span class="dot"></span>DB</span>
-  <span class="s busy" id="stAI"><span class="dot"></span>AI</span>
-  <span class="s busy" id="stNet"><span class="dot"></span>NET</span>
-  <span class="s" id="stPeers"><span class="dot"></span>0 peers</span>
-</div>
+<!-- =================== MODULE CAPSULES =================== -->
 
-<nav class="tabs">
-  <button class="tab active" data-view="stream">Поток</button>
-  <button class="tab" data-view="history">База <span class="n" id="baseCount">0</span></button>
-</nav>
+<!-- LOOM:BEGIN_MODULE name="Core.NsConfig" -->
+<script type="application/json" data-role="manifest">
+{"name":"Core.NsConfig","type":"core","version":"1.0.0","dependsOn":["Core.Store","Core.Logger"],"exports":["get","set","getAll","save","reset","defaults"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"get":{"args":[{"type":"string"},{"type":"any","optional":true}],"returns":{"type":"any"}},"set":{"args":[{"type":"string"},{"type":"any"}],"returns":{"type":"void"}},"getAll":{"args":[],"returns":{"type":"object"}},"save":{"args":[],"returns":{"type":"void"}},"reset":{"args":[],"returns":{"type":"void"}},"defaults":{"args":[],"returns":{"type":"object"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var log = ctx.require("Core.Logger");
+  var store = ctx.require("Core.Store");
+  var KEY = "noosphere:cfg";
 
-<main class="work">
-  <section class="view active" id="view-stream">
-    <div class="editor">
-      <textarea id="input" placeholder="О чём думаешь?" autocomplete="off" autocapitalize="sentences"></textarea>
-      <div class="editor-meta">
-        <span id="charCount">0</span>
-        <span id="debounce"></span>
-      </div>
-      <div class="editor-btns">
-        <button class="btn" id="btnSavePrivate">Сохранить лично</button>
-        <button class="btn btn-primary" id="btnSaveShared">Поделиться P2P</button>
-      </div>
-      <div class="progress-bar"><div class="fill" id="modelProgress"></div></div>
-    </div>
-
-    <div class="filters">
-      <button class="fbtn active" data-filter="local">Локально <span class="n" id="cntLocal">0</span></button>
-      <button class="fbtn" data-filter="world">Мир <span class="n" id="cntWorld">0</span></button>
-      <button class="fbtn" data-filter="seren">Озарения <span class="n" id="cntSeren">0</span></button>
-    </div>
-
-    <div class="carousel active" id="c-local"><div class="track"></div></div>
-    <div class="carousel" id="c-world"><div class="track"></div></div>
-    <div class="carousel" id="c-seren"><div class="track"></div></div>
-  </section>
-
-  <section class="view" id="view-history">
-    <div class="hist-bar">
-      <input type="text" id="histSearch" placeholder="Поиск по базе…">
-      <select id="histSort">
-        <option value="new">Новые</option>
-        <option value="old">Старые</option>
-        <option value="az">А→Я</option>
-      </select>
-    </div>
-    <div class="carousel active" id="c-history"><div class="track"></div></div>
-  </section>
-</main>
-
-<div class="overlay" id="overlay"></div>
-<aside class="drawer" id="drawer">
-  <h3>Настройки <button class="close" id="btnClose">×</button></h3>
-
-  <div class="field">
-    <label>Комната (Nostr topic)</label>
-    <input type="text" id="setRoom" placeholder="noomium-core">
-    <div class="hint">Узлы в одной комнате слышат вас.</div>
-  </div>
-
-  <div class="field">
-    <div class="row"><label>Порог совпадения</label><span class="val" id="valThresh">0.30</span></div>
-    <input type="range" id="setThresh" min="0.1" max="0.7" step="0.05">
-  </div>
-
-  <div class="field">
-    <div class="row"><label>Дельта озарений</label><span class="val" id="valSeren">0.15</span></div>
-    <input type="range" id="setSeren" min="0.05" max="0.3" step="0.01">
-  </div>
-
-  <div class="section">Капсулы .noo</div>
-  <div class="field">
-    <div class="btn-row">
-      <button class="btn" id="btnExport">Экспорт</button>
-      <button class="btn" id="btnImport">Импорт</button>
-    </div>
-    <input type="file" id="importFile" accept=".noo,.json" style="display:none">
-    <div class="hint">Дубли по хэшу текста пропускаются автоматически.</div>
-  </div>
-
-  <div class="section">Опасно</div>
-  <div class="field">
-    <button class="btn" id="btnApply" style="width:100%; margin-bottom:8px;">Применить и перезагрузить</button>
-    <button class="btn" id="btnWipe" style="width:100%; color:var(--err);">Стереть базу</button>
-  </div>
-</aside>
-
-<aside class="drawer" id="helpDrawer">
-  <h3>Как это работает <button class="close" id="btnCloseHelp">×</button></h3>
-  <p style="color:var(--dim); line-height:1.6; margin-bottom:14px;">
-    NOOmium превращает мысль в вектор и ищет резонанс в вашей базе и у других узлов в комнате.
-  </p>
-  <div class="section">Дорожки</div>
-  <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
-    <b style="color:var(--accent)">Локально</b> — точные совпадения в вашей базе.
-  </p>
-  <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
-    <b style="color:var(--world)">Мир</b> — совпадения от активных узлов (пока они в сети).
-  </p>
-  <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
-    <b style="color:var(--seren)">Озарения</b> — близкие, но не точные мысли.
-  </p>
-  <div class="section">Эфемерность</div>
-  <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
-    Запросы и ответы живут ~2 минуты. Заметки не хранятся на серверах — только у вас и у того, кто поделился.
-  </p>
-  <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
-    Выдача «Мира» живая: peer вышел — его карточки исчезают при следующем обновлении.
-  </p>
-  <div class="section">Горячие клавиши</div>
-  <p style="color:var(--dim); font:12px var(--mono); margin-bottom:4px;">Ctrl+Enter — сохранить</p>
-  <p style="color:var(--dim); font:12px var(--mono); margin-bottom:4px;">Ctrl+Shift+Enter — поделиться</p>
-  <p style="color:var(--dim); font:12px var(--mono); margin-bottom:4px;">/ — в редактор</p>
-  <p style="color:var(--dim); font:12px var(--mono);">Esc — закрыть панели</p>
-</aside>
-
-<div class="toast" id="toast"></div>
-<div class="copied-flash" id="copiedFlash">✓ скопировано</div>
-
-<script type="module">
-import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
-import * as nostrMod from 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
-
-/* =========================================================
- * GLOBAL ERROR HANDLING
- * ========================================================= */
-window.addEventListener('error', (e) => {
-  console.error('Global error:', e.error);
-});
-
-window.addEventListener('unhandledrejection', (e) => {
-  // Suppress noisy nostr-tools relay connection errors
-  if (e.reason?.message?.includes('relay connection closed')) {
-    e.preventDefault();
-    return;
-  }
-  console.error('Unhandled rejection:', e.reason);
-});
-
-/* =========================================================
- * CONFIG
- * ========================================================= */
-const C = {
-  DB: 'noomium_v8',
-  STORE: 'notes',
-  RELAYS: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.snort.social'],
-  K_QUERY: 21000,
-  K_ANSWER: 21001,
-  MODEL: 'Xenova/all-MiniLM-L6-v2',
-  DIM: 384,
-  DEBOUNCE: 800,
-  PEER_TTL: 60000,
-  HEARTBEAT: 30000,
-  SUB_WINDOW: 120,
-  QUERY_RATE_LIMIT: 2000, // min ms between queries
-  state: {
-    room: 'noomium-core',
+  var defaults = {
+    room: "noosphere-core",
+    theme: "dark",
     threshold: 0.30,
-    serendipity: 0.15
-  }
-};
-
-try {
-  const s = localStorage.getItem('noomium_cfg');
-  if (s) Object.assign(C.state, JSON.parse(s));
-} catch {}
-
-/* =========================================================
- * UTILS
- * ========================================================= */
-const uuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-  const r = Math.random() * 16 | 0;
-  return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-});
-
-const fnv1a = (s) => {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return 'h' + (h >>> 0).toString(16);
-};
-
-const esc = (s) => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-let toastTimer;
-const toast = (msg, type = '') => {
-  const el = document.getElementById('toast');
-  el.className = `toast show ${type}`;
-  el.textContent = msg;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.className = 'toast', 2500);
-};
-
-const flashCopied = () => {
-  const el = document.getElementById('copiedFlash');
-  el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 800);
-};
-
-const setStatus = (id, text, cls = '') => {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.className = `s ${cls}`;
-  el.innerHTML = `<span class="dot"></span>${esc(text)}`;
-};
-
-/* =========================================================
- * DB — IndexedDB wrapper with retry
- * ========================================================= */
-const DB = (() => {
-  let db = null;
-
-  const open = () => new Promise((res, rej) => {
-    if (db) return res(db);
-    const req = indexedDB.open(C.DB, 1);
-    req.onupgradeneeded = e => {
-      const d = e.target.result;
-      if (!d.objectStoreNames.contains(C.STORE)) {
-        d.createObjectStore(C.STORE, { keyPath: 'id' });
-      }
-    };
-    req.onsuccess = e => { db = e.target.result; res(db); };
-    req.onerror = () => rej(req.error);
-  });
-
-  const tx = async (mode, fn, retries = 3) => {
-    const d = await open();
-    return new Promise((res, rej) => {
-      const attempt = (n) => {
-        try {
-          const t = d.transaction(C.STORE, mode);
-          const s = t.objectStore(C.STORE);
-          const r = fn(s);
-          r.onsuccess = () => res(r.result);
-          r.onerror = () => {
-            if (n > 0) setTimeout(() => attempt(n - 1), 100);
-            else rej(r.error);
-          };
-        } catch (err) {
-          if (n > 0) setTimeout(() => attempt(n - 1), 100);
-          else rej(err);
-        }
-      };
-      attempt(retries);
-    });
+    serendipity: 0.15,
+    relays: ["wss://relay.damus.io","wss://nos.lol","wss://relay.snort.social"],
+    kQuery: 21000,
+    kAnswer: 21001,
+    model: "Xenova/all-MiniLM-L6-v2",
+    dim: 384,
+    debounce: 800,
+    peerTTL: 60000,
+    heartbeat: 30000,
+    subWindow: 300,
+    queryRateLimit: 2000,
+    dbName: "ns_core_v12",
+    storeName: "notes",
+    capsuleExt: "capsul"
   };
 
+  var state = Object.assign({}, defaults);
+  try {
+    var saved = store ? store.get(KEY, null) : null;
+    if (saved && typeof saved === "object") Object.assign(state, saved);
+  } catch(e){ if(log) log.warn("Config load failed", String(e)); }
+
   return {
-    put: (note) => tx('readwrite', s => s.put(note)),
-    get: (id) => tx('readonly', s => s.get(id)),
-    del: (id) => tx('readwrite', s => s.delete(id)),
-    all: () => tx('readonly', s => s.getAll()),
-    clear: () => tx('readwrite', s => s.clear()),
-    reset: async () => {
-      if (db) { db.close(); db = null; }
-      await new Promise(r => {
-        const req = indexedDB.deleteDatabase(C.DB);
-        req.onsuccess = req.onerror = req.onblocked = () => r();
+    defaults: function(){ return Object.assign({}, defaults); },
+    get: function(k, def){ return state.hasOwnProperty(k) ? state[k] : def; },
+    set: function(k, v){ state[k] = v; },
+    getAll: function(){ return Object.assign({}, state); },
+    save: function(){
+      try { if (store) store.set(KEY, state); }
+      catch(e){ if(log) log.warn("Config save failed", String(e)); }
+    },
+    reset: function(){
+      state = Object.assign({}, defaults);
+      try { if (store) store.remove(KEY); } catch(_){}
+    }
+  };
+}
+</script>
+<!-- LOOM:END_MODULE -->
+
+<!-- LOOM:BEGIN_MODULE name="Core.NsUtils" -->
+<script type="application/json" data-role="manifest">
+{"name":"Core.NsUtils","type":"core","version":"1.0.0","dependsOn":[],"exports":["uuid","fnv1a","esc","escRe","plural","word","ts"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"uuid":{"args":[],"returns":{"type":"string"}},"fnv1a":{"args":[{"type":"string"}],"returns":{"type":"string"}},"esc":{"args":[{"type":"any"}],"returns":{"type":"string"}},"escRe":{"args":[{"type":"string"}],"returns":{"type":"string"}},"plural":{"args":[{"type":"number"},{"type":"string"},{"type":"string"},{"type":"string"}],"returns":{"type":"string"}},"word":{"args":[{"type":"string"},{"type":"number"}],"returns":{"type":"string"}},"ts":{"args":[],"returns":{"type":"number"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  function uuid(){
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function(c){
+      var r = Math.random() * 16 | 0;
+      return (c === "x" ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+  }
+  function fnv1a(s){
+    var h = 2166136261;
+    for (var i=0; i<s.length; i++){
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return "h" + (h >>> 0).toString(16);
+  }
+  function esc(s){
+    return String(s==null ? "" : s).replace(/[&<>"']/g, function(c){
+      return ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"})[c];
+    });
+  }
+  function escRe(s){ return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+  function plural(n, one, few, many){
+    n = Math.abs(n);
+    var m10 = n % 10, m100 = n % 100;
+    if (m10 === 1 && m100 !== 11) return one;
+    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+    return many;
+  }
+
+  var words = {
+    symbols: function(n){ return n + " " + plural(n, "символ", "символа", "символов"); },
+    peers:   function(n){ return n + " " + plural(n, "узел", "узла", "узлов"); },
+    thoughts:function(n){ return n + " " + plural(n, "мысль", "мысли", "мыслей"); },
+    samples: function(n){ return n + " " + plural(n, "пример", "примера", "примеров"); }
+  };
+  function word(key, n){
+    var fn = words[key];
+    return fn ? fn(n) : String(n);
+  }
+  function ts(){ return Date.now(); }
+
+  return { uuid:uuid, fnv1a:fnv1a, esc:esc, escRe:escRe, plural:plural, word:word, ts:ts };
+}
+</script>
+<!-- LOOM:END_MODULE -->
+
+<!-- LOOM:BEGIN_MODULE name="Core.NsDB" -->
+<script type="application/json" data-role="manifest">
+{"name":"Core.NsDB","type":"core","version":"1.0.0","dependsOn":["Core.NsConfig","Core.Logger"],"exports":["put","get","del","all","clear","bulkPut","reset"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"put":{"args":[{"type":"object"}],"returns":{"type":"promise"}},"get":{"args":[{"type":"string"}],"returns":{"type":"promise"}},"del":{"args":[{"type":"string"}],"returns":{"type":"promise"}},"all":{"args":[],"returns":{"type":"promise"}},"clear":{"args":[],"returns":{"type":"promise"}},"bulkPut":{"args":[{"type":"array"}],"returns":{"type":"promise"}},"reset":{"args":[],"returns":{"type":"promise"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var cfg = ctx.require("Core.NsConfig");
+  var log = ctx.require("Core.Logger");
+  var db = null;
+
+  function dbName(){ return cfg.get("dbName", "ns_core_v12"); }
+  function storeName(){ return cfg.get("storeName", "notes"); }
+
+  function open(){
+    return new Promise(function(res, rej){
+      if (db) return res(db);
+      try {
+        var req = indexedDB.open(dbName(), 1);
+        req.onupgradeneeded = function(e){
+          var d = e.target.result;
+          var sn = storeName();
+          if (!d.objectStoreNames.contains(sn)){
+            d.createObjectStore(sn, { keyPath: "id" });
+          }
+        };
+        req.onsuccess = function(e){ db = e.target.result; res(db); };
+        req.onerror = function(){ rej(req.error); };
+        req.onblocked = function(){ rej(new Error("DB blocked")); };
+      } catch(err){ rej(err); }
+    });
+  }
+
+  function tx(mode, fn, retries){
+    if (retries === undefined) retries = 3;
+    return open().then(function(d){
+      return new Promise(function(res, rej){
+        function attempt(n){
+          try {
+            var sn = storeName();
+            var t = d.transaction(sn, mode);
+            var s = t.objectStore(sn);
+            var r = fn(s);
+            r.onsuccess = function(){ res(r.result); };
+            r.onerror = function(){
+              if (n > 0) setTimeout(function(){ attempt(n - 1); }, 100);
+              else rej(r.error);
+            };
+          } catch(err){
+            if (n > 0) setTimeout(function(){ attempt(n - 1); }, 100);
+            else rej(err);
+          }
+        }
+        attempt(retries);
+      });
+    });
+  }
+
+  return {
+    put: function(note){ return tx("readwrite", function(s){ return s.put(note); }); },
+    get: function(id){ return tx("readonly", function(s){ return s.get(id); }); },
+    del: function(id){ return tx("readwrite", function(s){ return s.delete(id); }); },
+    all: function(){ return tx("readonly", function(s){ return s.getAll(); }); },
+    clear: function(){ return tx("readwrite", function(s){ return s.clear(); }); },
+    bulkPut: function(notes){
+      return open().then(function(d){
+        return new Promise(function(res, rej){
+          try {
+            var sn = storeName();
+            var t = d.transaction(sn, "readwrite");
+            var s = t.objectStore(sn);
+            for (var i=0; i<notes.length; i++) s.put(notes[i]);
+            t.oncomplete = function(){ res(notes.length); };
+            t.onerror = function(){ rej(t.error); };
+          } catch(err){ rej(err); }
+        });
+      });
+    },
+    reset: function(){
+      if (db){ try{ db.close(); }catch(_){} db = null; }
+      return new Promise(function(r){
+        try {
+          var req = indexedDB.deleteDatabase(dbName());
+          req.onsuccess = req.onerror = req.onblocked = function(){ r(); };
+        } catch(_){ r(); }
       });
     }
   };
-})();
+}
+</script>
+<!-- LOOM:END_MODULE -->
 
-/* =========================================================
- * AI — embeddings with lexical fallback + progress
- * ========================================================= */
-const AI = (() => {
-  let ext = null;
-  const cache = new Map();
+<!-- LOOM:BEGIN_MODULE name="Core.NsAI" -->
+<script type="application/json" data-role="manifest">
+{"name":"Core.NsAI","type":"core","version":"1.0.0","dependsOn":["Core.NsConfig","Core.Logger","Core.Bus"],"exports":["load","embed","cosine","ready","getMode","onProgress"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"load":{"args":[{"type":"function","optional":true}],"returns":{"type":"promise"}},"embed":{"args":[{"type":"string"}],"returns":{"type":"promise"}},"cosine":{"args":[{"type":"array"},{"type":"array"}],"returns":{"type":"number"}},"ready":{"args":[],"returns":{"type":"boolean"}},"getMode":{"args":[],"returns":{"type":"string"}},"onProgress":{"args":[{"type":"function"}],"returns":{"type":"void"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var cfg = ctx.require("Core.NsConfig");
+  var log = ctx.require("Core.Logger");
+  var bus = ctx.require("Core.Bus");
+  var ext = null;
+  var mode = "loading";
+  var cache = Object.create(null);
+  var progressFns = [];
 
-  const hashEmbed = (text) => {
-    const v = new Float32Array(C.DIM);
-    const tokens = text.toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
-    for (const t of tokens) {
-      let h = 2166136261;
-      for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); }
-      v[Math.abs(h) % C.DIM] += 1;
-      const h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
-      v[Math.abs(h2) % C.DIM] += 0.5;
+  function hashEmbed(text){
+    var DIM = cfg.get("dim", 384);
+    var v = new Float32Array(DIM);
+    var tokens = (text || "").toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
+    for (var t=0; t<tokens.length; t++){
+      var tok = tokens[t];
+      var h = 2166136261;
+      for (var i=0; i<tok.length; i++){
+        h ^= tok.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      v[Math.abs(h) % DIM] += 1;
+      var h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
+      v[Math.abs(h2) % DIM] += 0.5;
     }
-    let n = 0;
-    for (let i = 0; i < C.DIM; i++) n += v[i] * v[i];
+    var n = 0;
+    for (var i=0; i<DIM; i++) n += v[i] * v[i];
     n = Math.sqrt(n) || 1;
-    for (let i = 0; i < C.DIM; i++) v[i] /= n;
+    for (var i=0; i<DIM; i++) v[i] /= n;
     return Array.from(v);
-  };
+  }
 
   return {
-    mode: 'loading',
-    ready: () => ext !== null || AI.mode === 'demo',
+    ready: function(){ return ext !== null || mode === "demo"; },
+    getMode: function(){ return mode; },
+    onProgress: function(fn){ if (typeof fn === "function") progressFns.push(fn); },
 
-    load: async (onProgress) => {
-      if (ext) return;
-      const { env, pipeline } = tfMod;
-      if (env) { env.allowLocalModels = false; env.useBrowserCache = true; }
-      try {
-        ext = await pipeline('feature-extraction', C.MODEL, {
-          progress_callback: p => {
-            if (p.status === 'progress' && p.total > 0) {
-              onProgress?.(p.loaded / p.total * 100);
+    load: function(onProgress){
+      if (ext || mode === "demo") return Promise.resolve();
+      var MODEL = cfg.get("model", "Xenova/all-MiniLM-L6-v2");
+      return Promise.resolve().then(function(){
+        return import("https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2");
+      }).then(function(mod){
+        if (mod.env){
+          mod.env.allowLocalModels = false;
+          mod.env.useBrowserCache = true;
+        }
+        return mod.pipeline("feature-extraction", MODEL, {
+          quantized: true,
+          progress_callback: function(p){
+            if (p.status === "progress" && p.total > 0){
+              var pct = p.loaded / p.total * 100;
+              if (typeof onProgress === "function") onProgress(pct);
+              for (var i=0; i<progressFns.length; i++){
+                try { progressFns[i](pct); } catch(_){}
+              }
+              if (bus && bus.emit) bus.emit("ns:ai:progress", { pct: pct });
             }
           }
         });
-        AI.mode = 'model';
-      } catch (err) {
-        console.warn('Model load failed, using demo mode:', err);
-        AI.mode = 'demo';
-      }
+      }).then(function(pipe){
+        ext = pipe;
+        mode = "model";
+        if (log) log.info("AI model loaded: " + MODEL);
+      }).catch(function(err){
+        if (log) log.warn("AI model load failed, fallback to hash", String(err && err.message || err));
+        mode = "demo";
+      });
     },
 
-    embed: async (text) => {
-      const t = (text || '').trim();
-      if (!t) return null;
-      if (cache.has(t)) return cache.get(t);
-      let v;
-      if (ext) {
-        const out = await ext(t, { pooling: 'mean', normalize: true });
-        v = Array.from(out.data);
+    embed: function(text){
+      var t = (text || "").trim();
+      if (!t) return Promise.resolve(null);
+      if (cache[t]) return Promise.resolve(cache[t]);
+      var p;
+      if (ext){
+        p = Promise.resolve().then(function(){
+          return ext(t, { pooling: "mean", normalize: true });
+        }).then(function(out){
+          return Array.from(out.data);
+        }).catch(function(err){
+          if (log) log.warn("embed failed, fallback to hash", String(err && err.message || err));
+          return hashEmbed(t);
+        });
       } else {
-        v = hashEmbed(t);
+        p = Promise.resolve(hashEmbed(t));
       }
-      cache.set(t, v);
-      return v;
+      return p.then(function(v){ cache[t] = v; return v; });
     },
 
-    cosine: (a, b) => {
+    cosine: function(a, b){
       if (!a || !b || a.length !== b.length) return 0;
-      let s = 0;
-      for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+      var s = 0;
+      for (var i=0; i<a.length; i++) s += a[i] * b[i];
       return s;
     }
   };
-})();
+}
+</script>
+<!-- LOOM:END_MODULE -->
 
-/* =========================================================
- * NET — Nostr P2P with rate limiting + validation
- * ========================================================= */
-const Net = (() => {
-  const { SimplePool, generateSecretKey, getPublicKey, finalizeEvent } = nostrMod;
-  let pool = null, sk = null, pk = null;
-  let queryId = null;
-  const peers = new Map();
-  const answers = [];
-  let onUpdate = null;
-  let heartbeatTimer = null;
-  let lastQueryTime = 0;
+<!-- LOOM:BEGIN_MODULE name="Core.NsNet" -->
+<script type="application/json" data-role="manifest">
+{"name":"Core.NsNet","type":"core","version":"1.0.0","dependsOn":["Core.NsConfig","Core.NsDB","Core.NsAI","Core.Logger","Core.Bus"],"exports":["init","send","activeAnswers","peerCount","stop","onPeers"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"init":{"args":[{"type":"function","optional":true}],"returns":{"type":"promise"}},"send":{"args":[{"type":"array"}],"returns":{"type":"void"}},"activeAnswers":{"args":[],"returns":{"type":"array"}},"peerCount":{"args":[],"returns":{"type":"number"}},"stop":{"args":[],"returns":{"type":"void"}},"onPeers":{"args":[{"type":"function"}],"returns":{"type":"void"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var cfg = ctx.require("Core.NsConfig");
+  var DB  = ctx.require("Core.NsDB");
+  var AI  = ctx.require("Core.NsAI");
+  var log = ctx.require("Core.Logger");
+  var bus = ctx.require("Core.Bus");
 
-  const validateEvent = (ev) => {
-    if (!ev || typeof ev !== 'object') return false;
-    if (typeof ev.id !== 'string' || ev.id.length !== 64) return false;
-    if (typeof ev.pubkey !== 'string' || ev.pubkey.length !== 64) return false;
-    if (typeof ev.kind !== 'number') return false;
+  var pool = null, sk = null, pk = null;
+  var queryId = null;
+  var peers = new Map();
+  var answers = [];
+  var onUpdate = null;
+  var heartbeatTimer = null;
+  var lastQueryTime = 0;
+  var nostrMod = null;
+  var sub = null;
+  var peerListeners = [];
+  var started = false;
+
+  function notifyPeers(){
+    var n = peers.size;
+    for (var i=0; i<peerListeners.length; i++){
+      try { peerListeners[i](n); } catch(_){}
+    }
+    if (bus && bus.emit) bus.emit("ns:net:peers", { count: n });
+  }
+
+  function validateEvent(ev){
+    if (!ev || typeof ev !== "object") return false;
+    if (typeof ev.id !== "string" || ev.id.length !== 64) return false;
+    if (typeof ev.pubkey !== "string" || ev.pubkey.length !== 64) return false;
+    if (typeof ev.kind !== "number") return false;
     if (!Array.isArray(ev.tags)) return false;
     return true;
-  };
+  }
 
-  const onEvent = async (ev) => {
-    if (!validateEvent(ev)) return;
-    if (ev.pubkey === pk) return;
+  function onEvent(ev){
+    try {
+      if (!validateEvent(ev)) return;
+      if (ev.pubkey === pk) return;
 
-    peers.set(ev.pubkey, Date.now());
+      var hadBefore = peers.has(ev.pubkey);
+      peers.set(ev.pubkey, Date.now());
+      if (!hadBefore) notifyPeers();
 
-    if (ev.kind === C.K_QUERY) {
-      try {
-        const q = JSON.parse(ev.content);
-        if (!q.vector || !Array.isArray(q.vector)) return;
-        const all = await DB.all();
-        const floor = C.state.threshold - C.state.serendipity;
-        for (const n of all) {
-          if (!n.shared || !n.vector) continue;
-          if (AI.cosine(q.vector, n.vector) >= floor) {
-            const ans = finalizeEvent({
-              kind: C.K_ANSWER,
-              created_at: Math.floor(Date.now() / 1000),
-              tags: [['t', C.state.room], ['e', ev.id]],
-              content: JSON.stringify({ text: n.text, vector: n.vector })
-            }, sk);
-            pool.publish(C.RELAYS, ans);
+      var K_QUERY = cfg.get("kQuery", 21000);
+      var K_ANSWER = cfg.get("kAnswer", 21001);
+      var room = cfg.get("room", "noosphere-core");
+
+      if (ev.kind === K_QUERY){
+        var q;
+        try { q = JSON.parse(ev.content); } catch(_){ return; }
+        if (!q || !q.vector || !Array.isArray(q.vector)) return;
+        DB.all().then(function(all){
+          var floor = cfg.get("threshold", 0.30) - cfg.get("serendipity", 0.15);
+          var toSend = [];
+          for (var i=0; i<all.length; i++){
+            var n = all[i];
+            if (!n || !n.shared || !n.vector) continue;
+            if (AI.cosine(q.vector, n.vector) >= floor) toSend.push(n);
+          }
+          for (var j=0; j<toSend.length; j++){
+            try {
+              var ans = nostrMod.finalizeEvent({
+                kind: K_ANSWER,
+                created_at: Math.floor(Date.now() / 1000),
+                tags: [["t", room], ["e", ev.id]],
+                content: JSON.stringify({ text: toSend[j].text, vector: toSend[j].vector })
+              }, sk);
+              pool.publish(cfg.get("relays", []), ans);
+            } catch(e){ if(log) log.warn("answer publish failed", String(e)); }
+          }
+        }).catch(function(e){ if(log) log.warn("DB.all in onEvent failed", String(e)); });
+      }
+
+      if (ev.kind === K_ANSWER){
+        var eTag = null;
+        for (var i=0; i<ev.tags.length; i++){
+          if (ev.tags[i] && ev.tags[i][0] === "e"){ eTag = ev.tags[i][1]; break; }
+        }
+        if (eTag && eTag === queryId){
+          var d;
+          try { d = JSON.parse(ev.content); } catch(_){ return; }
+          if (d && d.text && d.vector){
+            var dup = false;
+            for (var j=0; j<answers.length; j++){ if (answers[j].id === ev.id){ dup = true; break; } }
+            if (!dup){
+              answers.push({
+                id: ev.id,
+                text: d.text,
+                vector: d.vector,
+                peer: ev.pubkey.slice(0, 6),
+                fullPubkey: ev.pubkey,
+                createdAt: Date.now()
+              });
+              if (typeof onUpdate === "function") onUpdate();
+            }
           }
         }
-      } catch {}
-    }
-
-    if (ev.kind === C.K_ANSWER) {
-      const eTag = ev.tags.find(t => t[0] === 'e');
-      if (eTag && eTag[1] === queryId) {
-        try {
-          const d = JSON.parse(ev.content);
-          if (d.text && d.vector && !answers.some(a => a.id === ev.id)) {
-            answers.push({
-              id: ev.id,
-              text: d.text,
-              vector: d.vector,
-              peer: ev.pubkey.slice(0, 8),
-              fullPubkey: ev.pubkey
-            });
-            onUpdate?.();
-          }
-        } catch {}
       }
+    } catch(err){
+      if (log) log.warn("onEvent error", String(err && err.message || err));
     }
-  };
+  }
 
-  const startHeartbeat = () => {
+  function startHeartbeat(){
     if (heartbeatTimer) clearInterval(heartbeatTimer);
-    heartbeatTimer = setInterval(() => {
-      const now = Date.now();
-      let removed = 0;
-      for (const [pubkey, lastSeen] of peers) {
-        if (now - lastSeen > C.PEER_TTL) {
-          peers.delete(pubkey);
-          removed++;
-        }
+    var hb = cfg.get("heartbeat", 30000);
+    var ttl = cfg.get("peerTTL", 60000);
+    heartbeatTimer = setInterval(function(){
+      var now = Date.now();
+      var removed = 0;
+      peers.forEach(function(ts, pubkey){
+        if (now - ts > ttl){ peers.delete(pubkey); removed++; }
+      });
+      if (removed > 0){
+        notifyPeers();
+        if (typeof onUpdate === "function") onUpdate();
       }
-      setStatus('stPeers',
-        `${peers.size} peer${peers.size !== 1 ? 's' : ''}`,
-        peers.size > 0 ? 'ok' : '');
-      if (removed > 0) onUpdate?.();
-    }, C.HEARTBEAT);
-  };
+    }, hb);
+  }
 
   return {
-    init: (cb) => {
+    onPeers: function(fn){ if (typeof fn === "function") peerListeners.push(fn); },
+
+    init: function(cb){
+      if (started) return Promise.resolve();
       onUpdate = cb;
-      let keyHex = localStorage.getItem('noomium_sk');
-      if (!keyHex) {
-        const raw = generateSecretKey();
-        keyHex = Array.from(raw).map(b => b.toString(16).padStart(2, '0')).join('');
-        localStorage.setItem('noomium_sk', keyHex);
-      }
-      sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
-      pk = getPublicKey(sk);
-      pool = new SimplePool();
+      return Promise.resolve().then(function(){
+        return import("https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm");
+      }).then(function(mod){
+        nostrMod = mod;
+        var KEY = "noosphere:sk";
+        var keyHex = null;
+        try { keyHex = localStorage.getItem(KEY); } catch(_){}
+        if (!keyHex){
+          var raw = mod.generateSecretKey();
+          keyHex = Array.from(raw).map(function(b){ return b.toString(16).padStart(2,"0"); }).join("");
+          try { localStorage.setItem(KEY, keyHex); } catch(_){}
+        }
+        sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(function(b){ return parseInt(b, 16); }));
+        pk = mod.getPublicKey(sk);
+        pool = new mod.SimplePool();
 
-      const now = Math.floor(Date.now() / 1000);
-      pool.subscribeMany(C.RELAYS, [{
-        kinds: [C.K_QUERY, C.K_ANSWER],
-        '#t': [C.state.room],
-        since: now - C.SUB_WINDOW
-      }], { onevent: onEvent });
+        var now = Math.floor(Date.now() / 1000);
+        var room = cfg.get("room", "noosphere-core");
+        var K_QUERY = cfg.get("kQuery", 21000);
+        var K_ANSWER = cfg.get("kAnswer", 21001);
+        var subWindow = cfg.get("subWindow", 300);
 
-      setStatus('stNet', 'NET', 'ok');
-      setStatus('stPeers', '0 peers', '');
-      startHeartbeat();
+        try {
+          sub = pool.subscribeMany(cfg.get("relays", []), [{
+            kinds: [K_QUERY, K_ANSWER],
+            "#t": [room],
+            since: now - subWindow
+          }], { onevent: onEvent });
+        } catch(e){ if(log) log.warn("subscribe failed", String(e)); }
+
+        started = true;
+        startHeartbeat();
+        notifyPeers();
+        if (log) log.info("Nostr net started, room=" + room);
+      }).catch(function(err){
+        if (log) log.error("nostr-tools load failed", String(err && err.message || err));
+        throw err;
+      });
     },
 
-    send: (vector) => {
-      if (!pool) return;
-      
-      // Rate limiting
-      const now = Date.now();
-      if (now - lastQueryTime < C.QUERY_RATE_LIMIT) return;
+    send: function(vector){
+      if (!pool || !nostrMod) return;
+      var now = Date.now();
+      var rate = cfg.get("queryRateLimit", 2000);
+      if (now - lastQueryTime < rate) return;
       lastQueryTime = now;
-      
+
       answers.length = 0;
-      const ev = finalizeEvent({
-        kind: C.K_QUERY,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [['t', C.state.room]],
-        content: JSON.stringify({ vector })
-      }, sk);
-      queryId = ev.id;
-      pool.publish(C.RELAYS, ev);
+      try {
+        var ev = nostrMod.finalizeEvent({
+          kind: cfg.get("kQuery", 21000),
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [["t", cfg.get("room", "noosphere-core")]],
+          content: JSON.stringify({ vector: vector })
+        }, sk);
+        queryId = ev.id;
+        pool.publish(cfg.get("relays", []), ev);
+        if (typeof onUpdate === "function") onUpdate();
+      } catch(e){ if(log) log.warn("publish failed", String(e)); }
     },
 
-    activeAnswers: () => answers.filter(a => peers.has(a.fullPubkey)),
-    peerCount: () => peers.size
+    activeAnswers: function(){
+      var out = [];
+      for (var i=0; i<answers.length; i++){
+        if (peers.has(answers[i].fullPubkey)) out.push(answers[i]);
+      }
+      return out;
+    },
+
+    peerCount: function(){ return peers.size; },
+
+    stop: function(){
+      if (heartbeatTimer){ clearInterval(heartbeatTimer); heartbeatTimer = null; }
+      if (sub && typeof sub.close === "function"){ try{ sub.close(); }catch(_){} }
+      if (pool && typeof pool.close === "function"){ try{ pool.close(); }catch(_){} }
+      started = false;
+    }
   };
-})();
+}
+</script>
+<!-- LOOM:END_MODULE -->
 
-/* =========================================================
- * UI — render only
- * ========================================================= */
-const UI = {
-  registry: new Map(),
+<!-- LOOM:BEGIN_MODULE name="UI.NsTheme" -->
+<script type="application/json" data-role="manifest">
+{"name":"UI.NsTheme","type":"ui","version":"1.0.0","dependsOn":["Core.NsConfig"],"exports":["mount","set","get","toggle"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"mount":{"args":[],"returns":{"type":"void"}},"set":{"args":[{"type":"string"}],"returns":{"type":"void"}},"get":{"args":[],"returns":{"type":"string"}},"toggle":{"args":[],"returns":{"type":"void"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var cfg = ctx.require("Core.NsConfig");
+  function apply(t){
+    var theme = (t === "light") ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", theme);
+  }
+  return {
+    mount: function(){ apply(cfg.get("theme", "dark")); },
+    set: function(t){ apply(t); cfg.set("theme", t === "light" ? "light" : "dark"); },
+    get: function(){ return cfg.get("theme", "dark") === "light" ? "light" : "dark"; },
+    toggle: function(){ set(get() === "light" ? "dark" : "light"); }
+  };
+  function set(t){ apply(t); cfg.set("theme", t === "light" ? "light" : "dark"); }
+  function get(){ return cfg.get("theme", "dark") === "light" ? "light" : "dark"; }
+}
+</script>
+<!-- LOOM:END_MODULE -->
 
-  card: (item, type, query) => {
-    UI.registry.set(item.id, item);
-    const isPeer = !!item.peer;
-    const label = isPeer ? `peer · ${item.peer}`
-      : (item.shared ? 'shared' : 'private');
+<!-- LOOM:BEGIN_MODULE name="UI.NsStatus" -->
+<script type="application/json" data-role="manifest">
+{"name":"UI.NsStatus","type":"ui","version":"1.0.0","dependsOn":["Core.NsUtils","Core.NsNet"],"exports":["mount","set","renderNetwork","renderAI"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"mount":{"args":[{"type":"any"}],"returns":{"type":"void"}},"set":{"args":[{"type":"string"},{"type":"string"},{"type":"string","optional":true}],"returns":{"type":"void"}},"renderNetwork":{"args":[{"type":"number"},{"type":"boolean","optional":true}],"returns":{"type":"void"}},"renderAI":{"args":[{"type":"string"},{"type":"string","optional":true}],"returns":{"type":"void"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var U = ctx.require("Core.NsUtils");
+  var Net = ctx.require("Core.NsNet");
+  var root = null;
 
-    const score = typeof item.score === 'number'
-      ? (item.score * 100).toFixed(0) + '%'
-      : item.createdAt ? new Date(item.createdAt).toLocaleDateString('ru-RU') : '';
+  function set(id, text, cls){
+    if (!root) return;
+    var el = root.querySelector("#" + id);
+    var txtEl = root.querySelector("#" + id + "Text");
+    if (!el || !txtEl) return;
+    el.className = "badge-status " + (cls || "");
+    txtEl.textContent = text;
+  }
 
-    let html = esc(item.text);
-    if (query) {
-      const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-      for (const w of words) {
-        html = html.replace(new RegExp(`(${escRe(w)})`, 'gi'), '<mark>$1</mark>');
+  return {
+    mount: function(host){
+      root = host;
+      if (!root || !Net || !Net.onPeers) return;
+      Net.onPeers(function(n){ renderNetwork(n, true); });
+    },
+    set: set,
+    renderNetwork: function(n, online){
+      if (n === undefined) n = Net.peerCount();
+      if (!online){ set("stNetwork", "Сеть недоступна", "warn"); return; }
+      if (n > 0) set("stNetwork", "В сети · " + U.word("peers", n), "active");
+      else set("stNetwork", "Слушаю · один в комнате", "alone");
+    },
+    renderAI: function(text, cls){
+      set("stAI", text, cls || "");
+    }
+  };
+}
+</script>
+<!-- LOOM:END_MODULE -->
+
+<!-- LOOM:BEGIN_MODULE name="UI.NsRenderer" -->
+<script type="application/json" data-role="manifest">
+{"name":"UI.NsRenderer","type":"ui","version":"1.0.0","dependsOn":["Core.NsUtils"],"exports":["card","render","empty","lookup","clearRegistry"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"card":{"args":[{"type":"object"},{"type":"string"},{"type":"string","optional":true}],"returns":{"type":"string"}},"render":{"args":[{"type":"string"},{"type":"array"},{"type":"string"},{"type":"string","optional":true}],"returns":{"type":"void"}},"empty":{"args":[{"type":"string"},{"type":"string"},{"type":"object","optional":true}],"returns":{"type":"void"}},"lookup":{"args":[{"type":"string"}],"returns":{"type":"object"}},"clearRegistry":{"args":[],"returns":{"type":"void"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var U = ctx.require("Core.NsUtils");
+  var registry = Object.create(null);
+
+  function card(item, type, qText){
+    registry[item.id] = item;
+    var isPeer = !!item.peer;
+
+    var textHTML = U.esc(item.text);
+    if (qText){
+      var words = qText.toLowerCase().split(/\s+/).filter(function(w){ return w.length > 2; });
+      for (var i=0; i<words.length; i++){
+        var re = new RegExp("(" + U.escRe(words[i]) + ")", "gi");
+        textHTML = textHTML.replace(re, "<mark>$1</mark>");
       }
     }
 
-    const foot = isPeer
-      ? `<div class="card-foot"><span class="card-hint">прочитать · понять · написать своё</span></div>`
-      : `<div class="card-foot">
-          <button class="card-act" data-act="toggle" data-id="${item.id}">${item.shared ? 'скрыть' : 'поделиться'}</button>
-          <button class="card-act" data-act="copy" data-id="${item.id}">копировать</button>
-          <button class="card-act danger" data-act="del" data-id="${item.id}">удалить</button>
-        </div>`;
+    var typeLabel;
+    if (isPeer) typeLabel = "УЗЕЛ · " + item.peer;
+    else typeLabel = item.shared ? "МОЁ · ОБЩЕЕ" : "МОЁ · ЛИЧНОЕ";
 
-    return `<div class="card t-${type}${isPeer ? ' peer' : ''}" data-id="${item.id}">
-      <div class="card-head">
-        <span class="card-tag">${label}</span>
-        <span class="card-score">${score}</span>
-      </div>
-      <div class="card-body">${html}</div>
-      ${foot}
-    </div>`;
-  },
+    var scoreRender;
+    if (typeof item.score === "number") scoreRender = (item.score * 100).toFixed(1) + "%";
+    else if (item.createdAt) scoreRender = new Date(item.createdAt).toLocaleDateString("ru-RU");
+    else scoreRender = "";
 
-  render: (id, items, type, query) => {
-    const track = document.querySelector(`#${id} .track`);
-    if (!track) return;
-    if (!items.length) {
-      track.innerHTML = '<div class="empty">пусто</div>';
+    var foot;
+    if (isPeer){
+      foot = '<div class="note-foot"><span class="note-hint">прочитать · понять · написать своё</span></div>';
+    } else {
+      foot = '<div class="note-foot"><div class="note-actions">' +
+        '<button class="note-act" data-act="find" data-id="'+item.id+'">⌖ Резонанс</button>' +
+        '<button class="note-act" data-act="toggle" data-id="'+item.id+'">'+(item.shared ? '🔒 Скрыть' : '📡 Поделиться')+'</button>' +
+        '<button class="note-act" data-act="copy" data-id="'+item.id+'">⧉ Копировать</button>' +
+        '<button class="note-act danger" data-act="del" data-id="'+item.id+'">🗑 Удалить</button>' +
+        '</div></div>';
+    }
+
+    return '<div class="note-card '+type+(isPeer?' peer':'')+'" style="animation-delay:'+(Math.random()*0.12).toFixed(3)+'s">' +
+      '<div class="note-header"><span class="note-type">'+U.esc(typeLabel)+'</span><span class="note-score">'+U.esc(scoreRender)+'</span></div>' +
+      '<div class="note-content">'+textHTML+'</div>' +
+      foot +
+      '</div>';
+  }
+
+  function render(id, items, type, query){
+    var el = document.querySelector("#" + id);
+    if (!el) return;
+    if (!items || !items.length){
+      empty(id, "Пусто", {});
       return;
     }
-    track.innerHTML = items.map(i => UI.card(i, type, query)).join('');
-  },
-
-  empty: (id, msg, hint = '') => {
-    const track = document.querySelector(`#${id} .track`);
-    if (track) track.innerHTML = `<div class="empty">${esc(msg)}${hint ? `<div class="hint">${esc(hint)}</div>` : ''}</div>`;
-  }
-};
-
-/* =========================================================
- * APP LOGIC
- * ========================================================= */
-let debounce = null;
-let lastVec = null;
-let lastText = null;
-
-const search = async () => {
-  const text = document.getElementById('input').value.trim();
-  if (!text || !AI.ready()) {
-    ['local', 'world', 'seren'].forEach(k => {
-      UI.empty(`c-${k}`, k === 'local' ? 'начните печатать' : '—');
-      document.getElementById(`cnt${k.charAt(0).toUpperCase() + k.slice(1)}`).textContent = '0';
-    });
-    return;
+    var html = "";
+    for (var i=0; i<items.length; i++) html += card(items[i], type, query);
+    el.innerHTML = html;
   }
 
-  const qv = await AI.embed(text);
-  if (!qv) return;
-
-  if (!lastVec || AI.cosine(qv, lastVec) < 0.98) {
-    lastVec = qv;
-    Net.send(qv);
-  }
-
-  const all = await DB.all();
-  const scored = all.filter(n => n.vector).map(n => ({ ...n, score: AI.cosine(qv, n.vector) }));
-  const worldScored = Net.activeAnswers().map(a => ({ ...a, score: AI.cosine(qv, a.vector) }));
-
-  const TH = C.state.threshold;
-  const SD = C.state.serendipity;
-
-  const local = scored.filter(n => n.score >= TH).sort((a, b) => b.score - a.score);
-  const world = worldScored.filter(n => n.score >= TH).sort((a, b) => b.score - a.score);
-  const seren = [...scored, ...worldScored]
-    .filter(n => n.score >= (TH - SD) && n.score < TH)
-    .sort((a, b) => b.score - a.score);
-
-  UI.render('c-local', local, 'local', text);
-  UI.render('c-world', world, 'world', text);
-  UI.render('c-seren', seren, 'seren', text);
-
-  document.getElementById('cntLocal').textContent = local.length;
-  document.getElementById('cntWorld').textContent = world.length;
-  document.getElementById('cntSeren').textContent = seren.length;
-};
-
-const renderHistory = async () => {
-  const all = await DB.all();
-  document.getElementById('baseCount').textContent = all.length;
-
-  const q = document.getElementById('histSearch').value.trim().toLowerCase();
-  const sort = document.getElementById('histSort').value;
-  let list = all.slice();
-  if (q) list = list.filter(n => n.text.toLowerCase().includes(q));
-  if (sort === 'old') list.sort((a, b) => a.createdAt - b.createdAt);
-  else if (sort === 'az') list.sort((a, b) => a.text.localeCompare(b.text, 'ru'));
-  else list.sort((a, b) => b.createdAt - a.createdAt);
-
-  UI.render('c-history', list, 'local', q || null);
-};
-
-const saveNote = async (shared) => {
-  const text = document.getElementById('input').value.trim();
-  if (!text) { toast('пусто', 'err'); return; }
-  if (!AI.ready()) { toast('ИИ не готов', 'err'); return; }
-  const vector = await AI.embed(text);
-  await DB.put({
-    id: uuid(), text, vector, shared,
-    createdAt: Date.now(), hash: fnv1a(text)
-  });
-  document.getElementById('input').value = '';
-  lastVec = null;
-  toast(shared ? 'видимо узлам' : 'лично', 'ok');
-  search();
-  renderHistory();
-};
-
-const onAction = async (act, id) => {
-  if (act === 'copy') {
-    const n = await DB.get(id);
-    if (n) {
-      try {
-        await navigator.clipboard.writeText(n.text);
-        flashCopied();
-      } catch { toast('не удалось', 'err'); }
+  function empty(id, msg, opts){
+    var c = document.querySelector("#" + id);
+    if (!c) return;
+    opts = opts || {};
+    if (opts.loading){
+      c.innerHTML = '<div class="empty-state"><div class="spinner"></div><div>'+U.esc(msg)+'</div></div>';
+      return;
     }
-  } else if (act === 'del') {
-    if (confirm('удалить?')) {
-      await DB.del(id);
-      toast('удалено', 'info');
-      search(); renderHistory();
-    }
-  } else if (act === 'toggle') {
-    const n = await DB.get(id);
-    if (n) {
-      n.shared = !n.shared;
-      await DB.put(n);
-      toast(n.shared ? 'shared' : 'private', 'ok');
-      search(); renderHistory();
-    }
+    var action = opts.actionLabel
+      ? '<button class="btn btn-ghost" data-act="'+U.esc(opts.actionId||"")+'">'+U.esc(opts.actionLabel)+'</button>'
+      : '';
+    c.innerHTML = '<div class="empty-state">' +
+      '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>' +
+      '<div>'+U.esc(msg)+'</div>' +
+      action +
+      '</div>';
   }
-};
 
-const exportData = async () => {
-  const notes = await DB.all();
-  if (!notes.length) { toast('нечего экспортировать', 'err'); return; }
-  const capsule = {
-    app: 'noomium', format: 'noo', version: 1,
-    exportedAt: Date.now(), notes
-  };
-  const blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `noomium-${new Date().toISOString().slice(0, 10)}.noo`;
-  a.click();
-  URL.revokeObjectURL(url);
-  toast(`экспорт ${notes.length}`, 'ok');
-};
-
-const sanitizeNote = (raw) => {
-  if (!raw || typeof raw !== 'object') return null;
-  if (typeof raw.text !== 'string' || raw.text.length > 10000) return null;
   return {
-    id: typeof raw.id === 'string' ? raw.id : uuid(),
-    text: raw.text.trim(),
-    vector: Array.isArray(raw.vector) ? raw.vector : null,
-    shared: !!raw.shared,
-    createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),
-    hash: typeof raw.hash === 'string' ? raw.hash : fnv1a(raw.text)
+    card:card, render:render, empty:empty,
+    lookup: function(id){ return registry[id] || null; },
+    clearRegistry: function(){ registry = Object.create(null); }
   };
-};
-
-const importData = async (file) => {
-  try {
-    const data = JSON.parse(await file.text());
-    const notes = Array.isArray(data) ? data : data.notes;
-    if (!Array.isArray(notes)) throw new Error('bad format');
-
-    const existing = await DB.all();
-    const byHash = new Map(existing.filter(n => n.hash).map(n => [n.hash, n]));
-    const byId = new Map(existing.map(n => [n.id, n]));
-
-    let added = 0, skipped = 0;
-    for (const raw of notes) {
-      const note = sanitizeNote(raw);
-      if (!note) { skipped++; continue; }
-      if (byHash.has(note.hash)) { skipped++; continue; }
-      if (byId.has(note.id) && byId.get(note.id).text === note.text) { skipped++; continue; }
-
-      if (AI.ready() && !note.vector) {
-        try { note.vector = await AI.embed(note.text); } catch {}
-      }
-      await DB.put(note);
-      byHash.set(note.hash, note);
-      byId.set(note.id, note);
-      added++;
-    }
-    toast(`импорт: +${added} / ~${skipped}`, 'ok');
-    search(); renderHistory();
-  } catch (e) { toast('импорт: ' + e.message, 'err'); }
-};
-
-/* =========================================================
- * BOOT
- * ========================================================= */
-const bind = () => {
-  document.querySelectorAll('.tab').forEach(t => {
-    t.onclick = () => {
-      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-      t.classList.add('active');
-      document.getElementById(`view-${t.dataset.view}`).classList.add('active');
-      if (t.dataset.view === 'history') renderHistory();
-    };
-  });
-
-  document.querySelectorAll('.fbtn').forEach(f => {
-    f.onclick = () => {
-      document.querySelectorAll('.fbtn').forEach(x => x.classList.remove('active'));
-      document.querySelectorAll('.carousel').forEach(c => c.classList.remove('active'));
-      f.classList.add('active');
-      document.getElementById(`c-${f.dataset.filter}`).classList.add('active');
-    };
-  });
-
-  const input = document.getElementById('input');
-  input.addEventListener('input', () => {
-    const text = input.value;
-    document.getElementById('charCount').textContent = text.length;
-    const label = document.getElementById('debounce');
-
-    if (text === lastText) return;
-    lastText = text;
-
-    clearTimeout(debounce);
-    label.textContent = '...';
-    debounce = setTimeout(() => { label.textContent = ''; search(); }, C.DEBOUNCE);
-  });
-
-  document.getElementById('btnSavePrivate').onclick = () => saveNote(false);
-  document.getElementById('btnSaveShared').onclick = () => saveNote(true);
-
-  document.getElementById('histSearch').addEventListener('input', () => {
-    clearTimeout(debounce);
-    debounce = setTimeout(renderHistory, 200);
-  });
-  document.getElementById('histSort').onchange = renderHistory;
-
-  document.querySelector('.work').addEventListener('click', e => {
-    const el = e.target.closest('[data-act]');
-    if (el) onAction(el.dataset.act, el.dataset.id);
-  });
-
-  const openDrawer = (d) => {
-    document.getElementById(d).classList.add('open');
-    document.getElementById('overlay').classList.add('open');
-  };
-  const closeDrawers = () => {
-    document.querySelectorAll('.drawer').forEach(d => d.classList.remove('open'));
-    document.getElementById('overlay').classList.remove('open');
-  };
-
-  document.getElementById('btnSettings').onclick = () => openDrawer('drawer');
-  document.getElementById('btnHelp').onclick = () => openDrawer('helpDrawer');
-  document.getElementById('btnClose').onclick = closeDrawers;
-  document.getElementById('btnCloseHelp').onclick = closeDrawers;
-  document.getElementById('overlay').onclick = closeDrawers;
-
-  document.getElementById('setRoom').value = C.state.room;
-  document.getElementById('setThresh').value = C.state.threshold;
-  document.getElementById('setSeren').value = C.state.serendipity;
-  document.getElementById('valThresh').textContent = C.state.threshold.toFixed(2);
-  document.getElementById('valSeren').textContent = C.state.serendipity.toFixed(2);
-
-  document.getElementById('setThresh').oninput = e => {
-    C.state.threshold = parseFloat(e.target.value);
-    document.getElementById('valThresh').textContent = C.state.threshold.toFixed(2);
-  };
-  document.getElementById('setSeren').oninput = e => {
-    C.state.serendipity = parseFloat(e.target.value);
-    document.getElementById('valSeren').textContent = C.state.serendipity.toFixed(2);
-  };
-
-  document.getElementById('btnApply').onclick = () => {
-    C.state.room = document.getElementById('setRoom').value.trim() || 'noomium-core';
-    localStorage.setItem('noomium_cfg', JSON.stringify(C.state));
-    location.reload();
-  };
-
-  document.getElementById('btnWipe').onclick = async () => {
-    if (confirm('стереть всё?')) {
-      await DB.reset();
-      toast('база стёрта', 'info');
-      setTimeout(() => location.reload(), 500);
-    }
-  };
-
-  document.getElementById('btnExport').onclick = exportData;
-  document.getElementById('btnImport').onclick = () => document.getElementById('importFile').click();
-  document.getElementById('importFile').onchange = e => {
-    if (e.target.files[0]) importData(e.target.files[0]);
-    e.target.value = '';
-  };
-
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeDrawers();
-    if (e.key === '/' && document.activeElement !== input
-      && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) {
-      e.preventDefault(); input.focus();
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault();
-      if (document.activeElement === input) saveNote(e.shiftKey);
-    }
-  });
-};
-
-const boot = async () => {
-  bind();
-
-  const progressBar = document.getElementById('modelProgress');
-
-  await Promise.allSettled([
-    DB.all().then(() => setStatus('stDB', 'DB', 'ok')).catch(() => setStatus('stDB', 'DB', 'err')),
-    AI.load(pct => {
-      progressBar.style.width = pct + '%';
-      setStatus('stAI', `AI ${Math.round(pct)}%`, 'busy');
-    }).then(() => {
-      progressBar.style.width = '100%';
-      setTimeout(() => progressBar.style.opacity = '0', 500);
-      setStatus('stAI', AI.mode === 'model' ? 'AI' : 'AI·demo', 'ok');
-    }).catch(() => setStatus('stAI', 'AI', 'err')),
-    new Promise((res) => {
-      try {
-        Net.init(() => search());
-        setStatus('stNet', 'NET', 'ok');
-      } catch {
-        setStatus('stNet', 'NET', 'err');
-      }
-      res();
-    })
-  ]);
-
-  UI.empty('c-local', 'начните печатать', 'первые результаты через ~1 сек');
-  UI.empty('c-world', '—');
-  UI.empty('c-seren', '—');
-
-  renderHistory();
-};
-
-boot();
+}
 </script>
+<!-- LOOM:END_MODULE -->
+
+<!-- LOOM:BEGIN_MODULE name="UI.NsDrawers" -->
+<script type="application/json" data-role="manifest">
+{"name":"UI.NsDrawers","type":"ui","version":"1.0.0","dependsOn":["Core.NsConfig","Core.NsUtils"],"exports":["mount","open","close","bindSettings"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"mount":{"args":[{"type":"any"}],"returns":{"type":"void"}},"open":{"args":[{"type":"string"}],"returns":{"type":"void"}},"close":{"args":[],"returns":{"type":"void"}},"bindSettings":{"args":[{"type":"function"},{"type":"function"},{"type":"function"}],"returns":{"type":"void"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var cfg = ctx.require("Core.NsConfig");
+  var U = ctx.require("Core.NsUtils");
+  var root = null;
+
+  function openDrawer(id){
+    if (!root) return;
+    var d = root.querySelector("#" + id);
+    var o = root.querySelector("#" + id + "Overlay");
+    if (d) d.classList.add("open");
+    if (o) o.classList.add("open");
+  }
+  function closeAll(){
+    if (!root) return;
+    var ds = root.querySelectorAll(".drawer");
+    var os = root.querySelectorAll(".drawer-overlay");
+    for (var i=0; i<ds.length; i++) ds[i].classList.remove("open");
+    for (var i=0; i<os.length; i++) os[i].classList.remove("open");
+  }
+
+  return {
+    mount: function(host){ root = host; },
+    open: openDrawer,
+    close: closeAll,
+    bindSettings: function(onApply, onWipe, onSeed){
+      if (!root) return;
+      var cfgTheme  = root.querySelector("#cfgTheme");
+      var cfgRoom   = root.querySelector("#cfgRoom");
+      var cfgThresh = root.querySelector("#cfgThresh");
+      var cfgSeren  = root.querySelector("#cfgSeren");
+      var valThresh = root.querySelector("#valThresh");
+      var valSeren  = root.querySelector("#valSeren");
+
+      if (cfgTheme)  cfgTheme.value  = cfg.get("theme", "dark");
+      if (cfgRoom)   cfgRoom.value   = cfg.get("room", "noosphere-core");
+      if (cfgThresh) cfgThresh.value = cfg.get("threshold", 0.30);
+      if (cfgSeren)  cfgSeren.value  = cfg.get("serendipity", 0.15);
+      if (valThresh) valThresh.textContent = Number(cfg.get("threshold", 0.30)).toFixed(2);
+      if (valSeren)  valSeren.textContent  = Number(cfg.get("serendipity", 0.15)).toFixed(2);
+
+      if (cfgThresh){
+        cfgThresh.oninput = function(e){
+          var v = parseFloat(e.target.value);
+          if (valThresh) valThresh.textContent = v.toFixed(2);
+        };
+      }
+      if (cfgSeren){
+        cfgSeren.oninput = function(e){
+          var v = parseFloat(e.target.value);
+          if (valSeren) valSeren.textContent = v.toFixed(2);
+        };
+      }
+      if (cfgTheme){
+        cfgTheme.onchange = function(e){
+          document.documentElement.setAttribute("data-theme", e.target.value);
+        };
+      }
+
+      var saveBtn = root.querySelector("#btnSaveConfig");
+      if (saveBtn) saveBtn.onclick = function(){
+        cfg.set("theme", cfgTheme ? cfgTheme.value : "dark");
+        cfg.set("room", (cfgRoom ? cfgRoom.value.trim() : "") || "noosphere-core");
+        cfg.set("threshold", parseFloat(cfgThresh ? cfgThresh.value : "0.30"));
+        cfg.set("serendipity", parseFloat(cfgSeren ? cfgSeren.value : "0.15"));
+        cfg.save();
+        if (typeof onApply === "function") onApply();
+      };
+
+      var wipeBtn = root.querySelector("#btnWipeDB");
+      if (wipeBtn) wipeBtn.onclick = function(){
+        if (typeof onWipe === "function") onWipe();
+      };
+
+      var seedBtn = root.querySelector("#btnSeed");
+      if (seedBtn) seedBtn.onclick = function(){
+        if (typeof onSeed === "function") onSeed();
+        closeAll();
+      };
+    }
+  };
+}
+</script>
+<!-- LOOM:END_MODULE -->
+
+<!-- LOOM:BEGIN_MODULE name="App.Noosphere" -->
+<script type="application/json" data-role="manifest">
+{"name":"App.Noosphere","type":"app","version":"2.0.0","dependsOn":["Core.Logger","Core.Bus","Core.Store","Core.NsConfig","Core.NsUtils","Core.NsDB","Core.NsAI","Core.NsNet","UI.NsTheme","UI.NsStatus","UI.NsRenderer","UI.NsDrawers","UI.Toast"],"exports":["mount","unmount"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"mount":{"args":[],"returns":{"type":"void"}},"unmount":{"args":[],"returns":{"type":"void"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var log      = ctx.require("Core.Logger");
+  var bus      = ctx.require("Core.Bus");
+  var Toast    = ctx.require("UI.Toast");
+  var cfg      = ctx.require("Core.NsConfig");
+  var U        = ctx.require("Core.NsUtils");
+  var DB       = ctx.require("Core.NsDB");
+  var AI       = ctx.require("Core.NsAI");
+  var Net      = ctx.require("Core.NsNet");
+  var Theme    = ctx.require("UI.NsTheme");
+  var Status   = ctx.require("UI.NsStatus");
+  var Renderer = ctx.require("UI.NsRenderer");
+  var Drawers  = ctx.require("UI.NsDrawers");
+
+  var lastVector = null;
+  var searchTimer = null;
+  var baseTimer = null;
+  var bound = false;
+  var keyHandler = null;
+  var lastQueryAt = 0;
+
+  var SAMPLES = [
+    'Сознание — это, возможно, то, как информация ощущается изнутри.',
+    'Мозг — машина предсказаний, постоянно минимизирующая удивление.',
+    'Города ведут себя как живые организмы со своим обменом веществ.',
+    'Сложный процент — самая мощная сила для терпеливых.',
+    'Письмо — это мышление, ставшее видимым: пишешь и понимаешь, что знаешь.',
+    'Энтропия всегда растёт, но жизнь строит локальные островки порядка.',
+    'Хороший дизайн убирает решения, а не добавляет опции.',
+    'Случайные открытия любят блуждающий, хорошо связанный ум.'
+  ];
+
+  function toast(msg, type){
+    if (Toast && type === "ok" && Toast.success) return Toast.success(msg);
+    if (Toast && type === "err" && Toast.error)  return Toast.error(msg);
+    if (Toast && type === "info" && Toast.info)  return Toast.info(msg);
+    if (Toast && Toast.show) return Toast.show(type || "", msg);
+    var el = document.querySelector("#sysToast");
+    if (!el) return;
+    el.className = "toast-ns show " + (type || "");
+    el.textContent = msg;
+    setTimeout(function(){ el.classList.remove("show"); }, 3000);
+  }
+
+  function markup(){
+    return '' +
+      '<header class="navbar">' +
+        '<div class="navbar-title">Noosphere</div>' +
+        '<div class="navbar-actions">' +
+          '<button class="icon-btn" id="btnHelp" title="Как это работает" aria-label="Справка">' +
+            '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' +
+          '</button>' +
+          '<button class="icon-btn" id="btnOpenSettings" title="Настройки" aria-label="Настройки">' +
+            '<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9c.26.6.8 1 1.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>' +
+          '</button>' +
+        '</div>' +
+      '</header>' +
+
+      '<div class="status-bar">' +
+        '<div class="badge-status" id="stNetwork"><div class="dot"></div><span id="stNetworkText">Не в сети</span></div>' +
+        '<div class="badge-status" id="stAI"><div class="dot"></div><span id="stAIText">ИИ загружается…</span></div>' +
+      '</div>' +
+
+      '<div class="main-tabs">' +
+        '<button class="tab active" data-view="view-stream">Поток</button>' +
+        '<button class="tab" data-view="view-base">Моя база <span class="tab-count" id="baseTabCount">0</span></button>' +
+      '</div>' +
+
+      '<main class="workspace">' +
+        '<div id="view-stream" class="view-layer active">' +
+          '<div class="editor-card">' +
+            '<textarea id="ioInput" class="editor-textarea" placeholder="О чём думаешь? Мысль сама ищет резонанс…"></textarea>' +
+            '<div class="editor-meta">' +
+              '<span id="ioCount">0 символов</span>' +
+              '<div class="editor-meta-actions">' +
+                '<button class="link-btn" id="btnResonate" title="Найти резонанс и транслировать сейчас">↻ Резонанс</button>' +
+                '<button class="link-btn" id="btnClear">Очистить</button>' +
+              '</div>' +
+            '</div>' +
+            '<div class="editor-controls">' +
+              '<button class="btn btn-ghost" id="btnSavePrivate">Сохранить лично</button>' +
+              '<button class="btn btn-primary" id="btnSaveShared">Поделиться (P2P)</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="filter-tabs">' +
+            '<button class="f-tab active" data-filter="local">Локально <span class="counter" id="cntLocal">0</span></button>' +
+            '<button class="f-tab" data-filter="world">Мир <span class="counter" id="cntWorld">0</span></button>' +
+            '<button class="f-tab" data-filter="seren">Озарения <span class="counter" id="cntSeren">0</span></button>' +
+          '</div>' +
+          '<div id="list-local" class="node-list active"></div>' +
+          '<div id="list-world" class="node-list"></div>' +
+          '<div id="list-seren" class="node-list"></div>' +
+        '</div>' +
+
+        '<div id="view-base" class="view-layer">' +
+          '<div class="base-stats" id="baseStats"></div>' +
+          '<div class="base-controls">' +
+            '<input type="text" class="base-search" id="baseFilter" placeholder="Поиск по базе…" />' +
+            '<select class="base-sort" id="baseSort">' +
+              '<option value="new">Сначала новые</option>' +
+              '<option value="old">Сначала старые</option>' +
+              '<option value="az">По алфавиту</option>' +
+            '</select>' +
+          '</div>' +
+          '<div id="list-base" class="node-list active"></div>' +
+        '</div>' +
+      '</main>' +
+
+      '<div class="drawer-overlay" id="drawerOverlay"></div>' +
+      '<div class="drawer" id="drawer">' +
+        '<div class="drawer-header">Настройки <button class="drawer-close" id="btnCloseSettings" aria-label="Закрыть">&times;</button></div>' +
+        '<div class="form-group"><label class="form-label">Тема</label><select class="form-input" id="cfgTheme"><option value="dark">Тёмный космос</option><option value="light">Светлая бумага</option></select></div>' +
+        '<div class="form-group"><label class="form-label">Комната (топик Nostr)</label><input type="text" class="form-input" id="cfgRoom" placeholder="напр. noosphere-alpha" /><div class="form-hint">Узлы в одной комнате слышат ваши трансляции.</div></div>' +
+        '<div class="form-group"><label class="form-label">Порог точного совпадения <span class="val-display" id="valThresh">0.30</span></label><input type="range" class="form-range" id="cfgThresh" min="0.1" max="0.7" step="0.05" /></div>' +
+        '<div class="form-group"><label class="form-label">Дельта озарений <span class="val-display" id="valSeren">0.15</span></label><input type="range" class="form-range" id="cfgSeren" min="0.05" max="0.3" step="0.01" /></div>' +
+        '<div class="drawer-section">Данные</div>' +
+        '<div class="form-group">' +
+          '<div class="btn-row" style="margin-bottom:10px;">' +
+            '<button class="btn btn-ghost" id="btnExport">Экспорт .capsul</button>' +
+            '<button class="btn btn-ghost" id="btnImport">Импорт .capsul</button>' +
+          '</div>' +
+          '<button class="btn btn-ghost" id="btnSeed" style="width:100%;">Загрузить примеры мыслей</button>' +
+          '<input type="file" id="importFile" accept=".capsul,.json,application/json" style="display:none" />' +
+          '<div class="form-hint">Капсула — это снимок всей вашей базы. Примеры позволяют опробовать поиск и озарения без других узлов.</div>' +
+        '</div>' +
+        '<div class="drawer-section">Применение</div>' +
+        '<div class="form-group">' +
+          '<button class="btn btn-primary" id="btnSaveConfig" style="width:100%; margin-bottom:10px;">Применить и перезагрузить</button>' +
+          '<button class="btn btn-ghost" id="btnWipeDB" style="width:100%; color:var(--danger);">Стереть базу</button>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="drawer-overlay" id="helpDrawerOverlay"></div>' +
+      '<div class="drawer" id="helpDrawer">' +
+        '<div class="drawer-header">Как это работает <button class="drawer-close" id="btnCloseHelp" aria-label="Закрыть">&times;</button></div>' +
+        '<p>Noosphere превращает каждую мысль в смысловой вектор. Пока вы печатаете, она ищет совпадения в вашей базе и анонимно транслирует запрос узлам в вашей комнате. В ответ приходят созвучные <b>общие</b> мысли.</p>' +
+        '<div class="drawer-section">Дорожки</div>' +
+        '<p><b style="color:var(--brand)">Локально</b> — сильные совпадения в вашей базе.</p>' +
+        '<p><b style="color:var(--world)">Мир</b> — сильные совпадения, которыми прямо сейчас делятся узлы.</p>' +
+        '<p><b style="color:var(--seren)">Озарения</b> — близкие, но не точные мысли. Здесь живёт неожиданность.</p>' +
+        '<div class="drawer-section">Философия</div>' +
+        '<p>Чужие мысли нельзя сохранить себе. Их можно прочитать, понять — и написать своё. Так рождается синтез, а не склад чужого.</p>' +
+        '<div class="drawer-section">Офлайн</div>' +
+        '<p>Без сети Noosphere работает как личная база знаний: поиск по смыслу остаётся, просто дорожка «Мир» молчит.</p>' +
+        '<div class="drawer-section">Горячие клавиши</div>' +
+        '<p><kbd>Ctrl</kbd>+<kbd>Enter</kbd> — сохранить лично</p>' +
+        '<p><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> — поделиться (P2P)</p>' +
+        '<p><kbd>/</kbd> — перейти к редактору</p>' +
+        '<p><kbd>Esc</kbd> — закрыть панели</p>' +
+      '</div>' +
+
+      '<div class="toast-ns" id="sysToast">Система готова</div>';
+  }
+
+  function isBaseView(){
+    var el = document.querySelector("#view-base");
+    return !!(el && el.classList.contains("active"));
+  }
+
+  function switchToStream(root){
+    if (!root) return;
+    var tabs = root.querySelectorAll(".tab");
+    for (var i=0; i<tabs.length; i++) tabs[i].classList.remove("active");
+    var views = root.querySelectorAll(".view-layer");
+    for (var i=0; i<views.length; i++) views[i].classList.remove("active");
+    var streamTab = root.querySelector('.tab[data-view="view-stream"]');
+    var streamView = root.querySelector("#view-stream");
+    if (streamTab) streamTab.classList.add("active");
+    if (streamView) streamView.classList.add("active");
+  }
+
+  function executeSearch(root, force){
+    var input = root.querySelector("#ioInput");
+    var text = input ? input.value.trim() : "";
+    Renderer.clearRegistry();
+
+    if (!text || !AI.ready()){
+      ["local","world","seren"].forEach(function(k){
+        var el = root.querySelector("#list-" + k);
+        if (el) el.innerHTML = "";
+        var c = root.querySelector("#cnt" + k.charAt(0).toUpperCase() + k.slice(1));
+        if (c) c.textContent = "0";
+      });
+      var msg = AI.ready() ? "Начните печатать — поиск по смысловому пространству." : "ИИ ещё прогревается…";
+      Renderer.empty("list-local", msg, { loading: !AI.ready() });
+      return Promise.resolve();
+    }
+
+    return AI.embed(text).then(function(queryVector){
+      if (!queryVector) return;
+
+      if (!lastVector || AI.cosine(queryVector, lastVector) < 0.98 || force){
+        lastVector = queryVector;
+        lastQueryAt = Date.now();
+        Net.send(queryVector);
+      }
+
+      return DB.all().then(function(dbNotes){
+        var localScored = [];
+        for (var i=0; i<dbNotes.length; i++){
+          var n = dbNotes[i];
+          if (n && n.vector) localScored.push(Object.assign({}, n, { score: AI.cosine(queryVector, n.vector) }));
+        }
+        var worldAnswers = Net.activeAnswers();
+        var worldScored = [];
+        for (var i=0; i<worldAnswers.length; i++){
+          worldScored.push(Object.assign({}, worldAnswers[i], { score: AI.cosine(queryVector, worldAnswers[i].vector) }));
+        }
+
+        var TH = cfg.get("threshold", 0.30);
+        var SD = cfg.get("serendipity", 0.15);
+
+        var localExact = localScored.filter(function(n){ return n.score >= TH; }).sort(function(a,b){ return b.score - a.score; });
+        var worldExact = worldScored.filter(function(n){ return n.score >= TH; }).sort(function(a,b){ return b.score - a.score; });
+        var serenAll = localScored.concat(worldScored)
+          .filter(function(n){ return n.score >= (TH - SD) && n.score < TH; })
+          .sort(function(a,b){ return b.score - a.score; });
+
+        Renderer.clearRegistry();
+
+        if (localExact.length === 0) Renderer.empty("list-local", "В вашей базе нет точных совпадений.", {});
+        else Renderer.render("list-local", localExact, "t-local", text);
+
+        var waiting = (Date.now() - lastQueryAt < 6000) && worldExact.length === 0;
+        if (waiting) Renderer.empty("list-world", "Слушаю резонанс в комнате…", { loading: true });
+        else if (worldExact.length === 0) Renderer.empty("list-world", "Пока никто в комнате не думает так же.", {});
+        else Renderer.render("list-world", worldExact, "t-world", text);
+
+        if (serenAll.length === 0) Renderer.empty("list-seren", "Близких мыслей не найдено.", {});
+        else Renderer.render("list-seren", serenAll, "t-seren", text);
+
+        var setC = function(id, v){ var el = root.querySelector("#" + id); if (el) el.textContent = String(v); };
+        setC("cntLocal", localExact.length);
+        setC("cntWorld", worldExact.length);
+        setC("cntSeren", serenAll.length);
+      });
+    });
+  }
+
+  function renderMyBase(root){
+    return DB.all().then(function(all){
+      var btc = root.querySelector("#baseTabCount");
+      if (btc) btc.textContent = String(all.length);
+
+      var shared = 0;
+      for (var i=0; i<all.length; i++) if (all[i] && all[i].shared) shared++;
+
+      var stats = root.querySelector("#baseStats");
+      if (stats){
+        stats.innerHTML =
+          '<div class="stat"><div class="num">'+all.length+'</div><div class="lbl">Мыслей</div></div>' +
+          '<div class="stat"><div class="num">'+shared+'</div><div class="lbl">Общих</div></div>' +
+          '<div class="stat"><div class="num">'+(all.length - shared)+'</div><div class="lbl">Личных</div></div>';
+      }
+
+      if (all.length === 0){
+        Renderer.empty("list-base", "Ваша база знаний пуста.", { actionLabel: "Загрузить примеры", actionId: "seed" });
+        return;
+      }
+
+      var fEl = root.querySelector("#baseFilter");
+      var sEl = root.querySelector("#baseSort");
+      var q = fEl ? fEl.value.trim().toLowerCase() : "";
+      var sort = sEl ? sEl.value : "new";
+
+      var list = all.slice();
+      if (q) list = list.filter(function(n){ return n.text && n.text.toLowerCase().indexOf(q) >= 0; });
+
+      if (sort === "old") list.sort(function(a,b){ return (a.createdAt||0) - (b.createdAt||0); });
+      else if (sort === "az") list.sort(function(a,b){ return (a.text||"").localeCompare(b.text||"", "ru"); });
+      else list.sort(function(a,b){ return (b.createdAt||0) - (a.createdAt||0); });
+
+      Renderer.clearRegistry();
+      if (list.length === 0){
+        Renderer.empty("list-base", "Под фильтр ничего не подошло.", {});
+        return;
+      }
+      Renderer.render("list-base", list, "t-local", q || null);
+    });
+  }
+
+  function refreshCurrent(root){
+    if (isBaseView()) return renderMyBase(root);
+    return executeSearch(root);
+  }
+
+  function sanitizeNote(raw){
+    if (!raw || typeof raw !== "object") return null;
+    if (typeof raw.text !== "string" || raw.text.length === 0 || raw.text.length > 10000) return null;
+    return {
+      id: typeof raw.id === "string" && raw.id ? raw.id : ("i" + Math.random().toString(36).slice(2, 10)),
+      text: raw.text.trim(),
+      vector: Array.isArray(raw.vector) ? raw.vector : null,
+      shared: !!raw.shared,
+      createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now()
+    };
+  }
+
+  function seedSamples(root){
+    if (!AI.ready()){ toast("ИИ ещё не готов.", "err"); return Promise.resolve(); }
+    toast("Вкладываю смысл в примеры…", "info");
+    var notes = [];
+    function step(i){
+      if (i >= SAMPLES.length){
+        return DB.bulkPut(notes).then(function(){
+          toast("Загружено " + U.word("samples", notes.length) + ".", "ok");
+          return refreshCurrent(root);
+        });
+      }
+      return AI.embed(SAMPLES[i]).then(function(v){
+        notes.push({
+          id: "s" + Math.random().toString(36).slice(2, 10),
+          text: SAMPLES[i],
+          vector: v,
+          shared: true,
+          createdAt: Date.now() - Math.floor(Math.random() * 1e7)
+        });
+        return step(i + 1);
+      });
+    }
+    return step(0);
+  }
+
+  function exportData(){
+    DB.all().then(function(notes){
+      if (!notes || notes.length === 0){ toast("Базе нечего экспортировать.", "err"); return; }
+      var capsule = {
+        app: "noosphere", format: "capsul", version: 1,
+        model: cfg.get("model"), dim: cfg.get("dim"),
+        exportedAt: Date.now(), notes: notes
+      };
+      var blob = new Blob([JSON.stringify(capsule, null, 2)], { type: "application/json" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "noosphere-" + new Date().toISOString().slice(0,10) + "." + cfg.get("capsuleExt", "capsul");
+      document.body.appendChild(a); a.click();
+      URL.revokeObjectURL(url); a.remove();
+      toast("Экспортировано " + U.word("thoughts", notes.length) + " в капсулу.", "ok");
+    });
+  }
+
+  function importData(file){
+    var reader = new FileReader();
+    reader.onload = function(){
+      try {
+        var data = JSON.parse(String(reader.result || "{}"));
+        var notes = Array.isArray(data) ? data : (data.notes || []);
+        if (!Array.isArray(notes)) throw new Error("bad format");
+
+        var clean = [];
+        for (var i=0; i<notes.length; i++){
+          var s = sanitizeNote(notes[i]);
+          if (s) clean.push(s);
+        }
+
+        function embedStep(j){
+          if (j >= clean.length) return Promise.resolve();
+          if (AI.ready() && !clean[j].vector){
+            return AI.embed(clean[j].text).then(function(v){
+              clean[j].vector = v;
+              return embedStep(j + 1);
+            }).catch(function(){ return embedStep(j + 1); });
+          }
+          return embedStep(j + 1);
+        }
+        embedStep(0).then(function(){
+          return DB.bulkPut(clean);
+        }).then(function(){
+          toast("Импортировано " + U.word("thoughts", clean.length) + ".", "ok");
+          refreshCurrent(document.getElementById("app-root"));
+        });
+      } catch(e){
+        toast("Импорт не удался: " + (e && e.message || "неверный файл"), "err");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function handleCardAction(act, el, root){
+    if (act === "seed"){ seedSamples(root); return; }
+    var id = el.getAttribute("data-id");
+    var item = id ? Renderer.lookup(id) : null;
+    if (!item) return;
+
+    if (act === "find"){
+      var input = root.querySelector("#ioInput");
+      var count = root.querySelector("#ioCount");
+      if (input) input.value = item.text;
+      if (count) count.textContent = U.word("symbols", item.text.length);
+      switchToStream(root);
+      executeSearch(root, true);
+    } else if (act === "copy"){
+      try {
+        navigator.clipboard.writeText(item.text).then(
+          function(){ toast("Скопировано в буфер.", "ok"); },
+          function(){ toast("Не удалось скопировать.", "err"); }
+        );
+      } catch(e){ toast("Не удалось скопировать.", "err"); }
+    } else if (act === "del"){
+      if (!confirm("Удалить эту мысль навсегда?")) return;
+      DB.del(id).then(function(){
+        toast("Мысль удалена.", "info");
+        refreshCurrent(root);
+      });
+    } else if (act === "toggle"){
+      DB.get(id).then(function(rec){
+        if (!rec) return;
+        rec.shared = !rec.shared;
+        return DB.put(rec).then(function(){
+          toast(rec.shared ? "Теперь видно узлам." : "Теперь это личное.", "ok");
+          refreshCurrent(root);
+        });
+      });
+    }
+  }
+
+  function handleSave(root, isShared){
+    var input = root.querySelector("#ioInput");
+    var count = root.querySelector("#ioCount");
+    var text = input ? input.value.trim() : "";
+    if (!text){ toast("Нечего сохранять.", "err"); return; }
+    if (!AI.ready()){ toast("ИИ ещё не готов.", "err"); return; }
+    AI.embed(text).then(function(vector){
+      return DB.put({
+        id: Math.random().toString(36).slice(2, 10),
+        text: text,
+        vector: vector,
+        shared: !!isShared,
+        createdAt: Date.now()
+      });
+    }).then(function(){
+      if (input) input.value = "";
+      if (count) count.textContent = U.word("symbols", 0);
+      lastVector = null;
+      toast(isShared ? "Сохранено и видно узлам." : "Сохранено лично.", "ok");
+      executeSearch(root);
+      if (isBaseView()) renderMyBase(root);
+    }).catch(function(e){ toast("Ошибка: " + (e && e.message || e), "err"); });
+  }
+
+  function bind(root){
+    if (bound) return;
+    bound = true;
+
+    Status.mount(root);
+    Drawers.mount(root);
+    if (Theme && Theme.mount) Theme.mount();
+
+    Drawers.bindSettings(
+      function(){ location.reload(); },
+      function(){
+        if (!confirm("Внимание: это навсегда удалит все ваши мысли. Продолжить?")) return;
+        DB.reset().then(function(){
+          toast("База стёрта.", "info");
+          setTimeout(function(){ location.reload(); }, 500);
+        });
+      },
+      function(){ seedSamples(root); }
+    );
+
+    var tabs = root.querySelectorAll(".tab");
+    for (var i=0; i<tabs.length; i++){
+      tabs[i].onclick = function(e){
+        var t = e.currentTarget;
+        var ts = root.querySelectorAll(".tab");
+        for (var j=0; j<ts.length; j++) ts[j].classList.remove("active");
+        var vs = root.querySelectorAll(".view-layer");
+        for (var j=0; j<vs.length; j++) vs[j].classList.remove("active");
+        t.classList.add("active");
+        var v = root.querySelector("#" + t.getAttribute("data-view"));
+        if (v) v.classList.add("active");
+        if (t.getAttribute("data-view") === "view-base") renderMyBase(root);
+      };
+    }
+
+    var ftabs = root.querySelectorAll(".f-tab");
+    for (var i=0; i<ftabs.length; i++){
+      ftabs[i].onclick = function(e){
+        var t = e.currentTarget;
+        var ts = root.querySelectorAll(".f-tab");
+        for (var j=0; j<ts.length; j++) ts[j].classList.remove("active");
+        var ls = root.querySelectorAll("#view-stream .node-list");
+        for (var j=0; j<ls.length; j++) ls[j].classList.remove("active");
+        t.classList.add("active");
+        var l = root.querySelector("#list-" + t.getAttribute("data-filter"));
+        if (l) l.classList.add("active");
+      };
+    }
+
+    var input = root.querySelector("#ioInput");
+    if (input){
+      input.addEventListener("input", function(){
+        var count = root.querySelector("#ioCount");
+        if (count) count.textContent = U.word("symbols", input.value.length);
+        if (searchTimer) clearTimeout(searchTimer);
+        searchTimer = setTimeout(function(){ executeSearch(root); }, cfg.get("debounce", 800));
+      });
+    }
+
+    var btnRes = root.querySelector("#btnResonate");
+    if (btnRes) btnRes.onclick = function(){ executeSearch(root, true); };
+    var btnClr = root.querySelector("#btnClear");
+    if (btnClr) btnClr.onclick = function(){
+      if (input) input.value = "";
+      var count = root.querySelector("#ioCount");
+      if (count) count.textContent = U.word("symbols", 0);
+      executeSearch(root);
+    };
+
+    var bsp = root.querySelector("#btnSavePrivate"); if (bsp) bsp.onclick = function(){ handleSave(root, false); };
+    var bss = root.querySelector("#btnSaveShared"); if (bss) bss.onclick = function(){ handleSave(root, true); };
+
+    var bf = root.querySelector("#baseFilter");
+    if (bf) bf.addEventListener("input", function(){
+      if (baseTimer) clearTimeout(baseTimer);
+      baseTimer = setTimeout(function(){ renderMyBase(root); }, 200);
+    });
+    var bsrt = root.querySelector("#baseSort");
+    if (bsrt) bsrt.onchange = function(){ renderMyBase(root); };
+
+    var ws = root.querySelector(".workspace");
+    if (ws) ws.addEventListener("click", function(e){
+      var el = e.target.closest("[data-act]");
+      if (el) handleCardAction(el.getAttribute("data-act"), el, root);
+    });
+
+    var bos = root.querySelector("#btnOpenSettings"); if (bos) bos.onclick = function(){ Drawers.open("drawer"); };
+    var bcs = root.querySelector("#btnCloseSettings"); if (bcs) bcs.onclick = function(){ Drawers.close(); };
+    var dov = root.querySelector("#drawerOverlay");   if (dov) dov.onclick = function(){ Drawers.close(); };
+    var bh  = root.querySelector("#btnHelp");         if (bh)  bh.onclick  = function(){ Drawers.open("helpDrawer"); };
+    var bch = root.querySelector("#btnCloseHelp");    if (bch) bch.onclick = function(){ Drawers.close(); };
+    var hov = root.querySelector("#helpDrawerOverlay"); if (hov) hov.onclick = function(){ Drawers.close(); };
+
+    var be = root.querySelector("#btnExport"); if (be) be.onclick = exportData;
+    var bi = root.querySelector("#btnImport");
+    var fi = root.querySelector("#importFile");
+    if (bi) bi.onclick = function(){ if (fi) fi.click(); };
+    if (fi) fi.onchange = function(e){
+      if (e.target.files && e.target.files[0]) importData(e.target.files[0]);
+      e.target.value = "";
+    };
+
+    keyHandler = function(e){
+      if (e.key === "Escape") Drawers.close();
+      if (e.key === "/" && document.activeElement !== input &&
+          !/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement && document.activeElement.tagName) || "")){
+        e.preventDefault();
+        switchToStream(root);
+        if (input) input.focus();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter"){
+        e.preventDefault();
+        if (document.activeElement === input) handleSave(root, e.shiftKey);
+      }
+    };
+    document.addEventListener("keydown", keyHandler);
+
+    AI.onProgress(function(pct){
+      Status.renderAI("Загрузка модели " + Math.round(pct) + "%", "busy");
+    });
+
+    Net.onPeers(function(n){
+      Status.renderNetwork(n, true);
+      if (!isBaseView()) executeSearch(root);
+    });
+  }
+
+  function boot(root){
+    DB.all().then(function(all){
+      var btc = root.querySelector("#baseTabCount");
+      if (btc) btc.textContent = String(all.length);
+    }).catch(function(){});
+
+    Renderer.empty("list-local", "ИИ прогревается…", { loading: true });
+    Status.renderAI("ИИ загружается…", "busy");
+
+    AI.load().then(function(){
+      Status.renderAI(AI.getMode() === "model" ? "ИИ активен" : "ИИ: лексический режим",
+                      AI.getMode() === "model" ? "ready" : "warn");
+      Renderer.empty("list-local", "Начните печатать — поиск по смысловому пространству.", {});
+    }).catch(function(e){
+      if (log) log.error("AI", String(e && e.message || e));
+      Status.renderAI("ИИ: лексический режим", "warn");
+      toast("Модель недоступна — используется лексический поиск.", "info");
+    });
+
+    Net.init(function(){ executeSearch(root); }).then(function(){
+      Status.renderNetwork(Net.peerCount(), true);
+    }).catch(function(e){
+      if (log) log.error("Net", String(e && e.message || e));
+      Status.renderNetwork(0, false);
+    });
+  }
+
+  return {
+    mount: function(){
+      var root = document.getElementById("app-root");
+      if (!root) return;
+      root.innerHTML = markup();
+      bind(root);
+      boot(root);
+    },
+    unmount: function(){
+      if (keyHandler){ document.removeEventListener("keydown", keyHandler); keyHandler = null; }
+      if (searchTimer) clearTimeout(searchTimer);
+      if (baseTimer) clearTimeout(baseTimer);
+      if (Net && Net.stop) Net.stop();
+      var root = document.getElementById("app-root");
+      if (root) root.innerHTML = "";
+      bound = false;
+    }
+  };
+}
+</script>
+<!-- LOOM:END_MODULE -->
+
+<!-- LOOM:BEGIN_BOOTLOADER -->
+<script id="LOOM_BOOT" data-version="2.5.0">
+(function(){
+function parseJSONById(id, def){
+try { var el = document.getElementById(id); return el ? JSON.parse(el.textContent || "{}") : (def||{}); }
+catch(e){ console.error("JSON parse error", id, e); return def||{}; }
+}
+var meta = parseJSONById("LOOM_META", {});
+var guide = parseJSONById("LOOM_GUIDE", {});
+var order = (meta.conventions && meta.conventions.loadOrder) || ["core","build","ui","app"];
+var runProfile = (meta && meta.protected && meta.protected.runProfile) || "ide";
+var entryApp = (meta && meta.protected && meta.protected.entryApp) || "";
+var registry = new Map();
+var defs = [];
+var stubLog = {
+getHistory: function(){ return []; }, setLevel: function(){},
+log: function(_,m,d){ console.log("[Loom]", m, d||""); },
+info: function(m,d){ console.info("[Loom]", m, d||""); },
+warn: function(m,d){ console.warn("[Loom]", m, d||""); },
+error: function(m,d){ console.error("[Loom]", m, d||""); }
+};
+var busStub = { on:function(){}, off:function(){}, emit:function(){} };
+function findBeginComment(node){
+var p = node ? node.previousSibling : null;
+while(p){ if (p.nodeType===8 && (p.nodeValue||"").indexOf("LOOM:BEGIN_MODULE")>=0) return p; p = p.previousSibling; }
+return null;
+}
+function findEndComment(node){
+var n = node ? node.nextSibling : null;
+while(n){ if (n.nodeType===8 && (n.nodeValue||"").indexOf("LOOM:END_MODULE")>=0) return n; n = n.nextSibling; }
+return null;
+}
+var ctx = {
+meta: meta, guide: guide,
+log: stubLog, bus: busStub, store: null,
+health: { run: function(){ return []; }, preflight:function(){return [];} },
+require: function(n){ var e = registry.get(n); return e ? e.exports : null; },
+modules: {
+list: function(){ return defs.map(function(d){ return { name: d.manifest.name, type: d.manifest.type, version: d.manifest.version, manifest: d.manifest }; }); },
+exists: function(n){ return defs.some(function(x){ return x.manifest && x.manifest.name === n; }); },
+hasDef: function(n){ return defs.some(function(x){ return x.manifest && x.manifest.name === n; }); },
+existsCompiled: function(n){ return registry.has(n); },
+getDef: function(n){
+var d = defs.find(function(x){ return x.manifest.name === n; });
+return d ? { manifest: d.manifest, contract: d.contract, code: d.code } : null;
+},
+setDef: function(n, u){
+var d = defs.find(function(x){ return x.manifest.name === n; });
+if (!d) return false;
+if (u && u.manifest && u.manifest.name && u.manifest.name !== n){
+console.warn("setDef rename rejected; use add+remove for renaming"); return false;
+}
+d.manifest = u.manifest; d.contract = u.contract; d.code = u.code;
+d.tags.man.textContent = JSON.stringify(u.manifest);
+d.tags.con.textContent = JSON.stringify(u.contract);
+d.tags.code.textContent = u.code;
+compileOne(d);
+updateGlobals();
+try{ ctx.bus.emit("modules:setDef", { name: n, def: u }); }catch(_){}
+return true;
+},
+add: function(u){
+var name = u && u.manifest && u.manifest.name;
+if (!name){ console.warn("Add rejected: no manifest.name"); return false; }
+if (defs.some(function(x){ return x.manifest && x.manifest.name === name; })){
+console.warn("Add rejected: duplicate module", name); return false;
+}
+var before = document.getElementById("LOOM_BOOT");
+var frag = document.createDocumentFragment();
+var capStart = document.createComment(' LOOM:BEGIN_MODULE name="'+name+'" ');
+var man = document.createElement("script"); man.type="application/json"; man.setAttribute("data-role","manifest"); man.textContent = JSON.stringify(u.manifest);
+var con = document.createElement("script"); con.type="application/json"; con.setAttribute("data-role","contract"); con.textContent = JSON.stringify(u.contract);
+var code = document.createElement("script"); code.type="text/loom-module"; code.setAttribute("data-role","code"); code.textContent = u.code;
+var capEnd = document.createComment(" LOOM:END_MODULE ");
+frag.appendChild(capStart); frag.appendChild(man); frag.appendChild(con); frag.appendChild(code); frag.appendChild(capEnd);
+before.parentNode.insertBefore(frag, before);
+var d = { manifest: u.manifest, contract: u.contract, code: u.code, tags: { start: capStart, man: man, con: con, code: code, end: capEnd } };
+defs.push(d); compileOne(d); updateGlobals();
+try{ ctx.bus.emit("modules:add", { name: name, def: u }); }catch(_){}
+return true;
+},
+remove: function(n){
+var i = defs.findIndex(function(x){ return x.manifest.name === n; });
+if (i < 0) return false;
+var d = defs[i];
+try{
+if (d.tags.start) d.tags.start.remove();
+if (d.tags.man) d.tags.man.remove();
+if (d.tags.con) d.tags.con.remove();
+if (d.tags.code) d.tags.code.remove();
+if (d.tags.end) d.tags.end.remove();
+}catch(e){
+try{
+var startC = findBeginComment(d.tags.man||{});
+var endC = findEndComment(d.tags.code||{});
+if (startC) startC.remove();
+if (d.tags.man) d.tags.man.remove();
+if (d.tags.con) d.tags.con.remove();
+if (d.tags.code) d.tags.code.remove();
+if (endC) endC.remove();
+}catch(_){}
+}
+defs.splice(i,1); registry.delete(n); updateGlobals();
+try{ ctx.bus.emit("modules:remove", { name: n }); }catch(_){}
+return true;
+}
+}
+};
+function nextByRole(start, role){
+var el = start.nextElementSibling;
+while (el) {
+if (el.tagName === "SCRIPT" && el.getAttribute("data-role") === role) return el;
+el = el.nextElementSibling;
+}
+return null;
+}
+function collect(){
+defs.length = 0;
+var mans = Array.prototype.slice.call(document.querySelectorAll('script[type="application/json"][data-role="manifest"]'));
+for (var i=0; i<mans.length; i++){
+try {
+var man = mans[i];
+var manifest = JSON.parse(man.textContent || "{}");
+var con = nextByRole(man, "contract");
+var code = nextByRole(man, "code");
+var startC = findBeginComment(man);
+var endC = findEndComment(code);
+defs.push({
+manifest: manifest,
+contract: con ? JSON.parse(con.textContent || "{}") : {},
+code: code ? code.textContent : "function Module(ctx){ return {}; }",
+tags: { start: startC, man: man, con: con, code: code, end: endC }
+});
+} catch(e) { console.error("Bad capsule", e); }
+}
+}
+function compileOne(d){
+try {
+var factory = new Function("ctx", d.code + "\nreturn Module(ctx);");
+var exp = factory(ctx);
+registry.set(d.manifest.name, { def: d, exports: exp });
+try{
+if (d.manifest.name==="Core.Logger") ctx.log = exp || ctx.log;
+else if (d.manifest.name==="Core.Bus") ctx.bus = exp || ctx.bus;
+else if (d.manifest.name==="Core.Store") ctx.store = exp || ctx.store;
+else if (d.manifest.name==="Build.Health") ctx.health = exp || ctx.health;
+}catch(_){}
+return true;
+} catch(e) {
+console.error("Compile error", d.manifest && d.manifest.name, e);
+return false;
+}
+}
+function topoSort(items){
+var nameToItem = Object.create(null);
+var indeg = Object.create(null);
+var adj = Object.create(null);
+function typeIdx(it){
+var t = (it.manifest && it.manifest.type) || "";
+var idx = order.indexOf(t); return idx<0?99:idx;
+}
+items.forEach(function(it){
+var n = it.manifest.name;
+nameToItem[n] = it; indeg[n]=0; adj[n]=[];
+});
+items.forEach(function(it){
+var deps = (it.manifest && it.manifest.dependsOn) || [];
+var n = it.manifest.name;
+for (var i=0;i<deps.length;i++){
+var dep = deps[i];
+if (nameToItem[dep]){ indeg[n]++; adj[dep].push(n); }
+}
+});
+var queue = Object.keys(nameToItem).filter(function(n){ return indeg[n]===0; });
+queue.sort(function(a,b){
+var da = typeIdx(nameToItem[a]) - typeIdx(nameToItem[b]); if (da!==0) return da;
+return a.localeCompare(b);
+});
+var out=[];
+while(queue.length){
+var n = queue.shift();
+out.push(nameToItem[n]);
+var arr = adj[n]||{};
+for (var i=0;i<(arr.length||0);i++){
+var m = arr[i]; indeg[m]--;
+if (indeg[m]===0){ queue.push(m); }
+}
+queue.sort(function(a,b){
+var da = typeIdx(nameToItem[a]) - typeIdx(nameToItem[b]); if (da!==0) return da;
+return a.localeCompare(b);
+});
+}
+if (out.length < items.length){
+console.warn("Dependency cycle or unresolved deps, fallback ordering by type/name");
+var rest = items.filter(function(it){ return out.indexOf(it)<0; });
+rest.sort(function(a,b){
+var da = typeIdx(a) - typeIdx(b); if (da!==0) return da;
+return (a.manifest.name||"").localeCompare(b.manifest.name||"");
+});
+out = out.concat(rest);
+}
+return out;
+}
+function compileAll(){
+var items = topoSort(defs.slice());
+registry.clear();
+for (var i=0;i<items.length;i++){ compileOne(items[i]); }
+var logger = registry.has("Core.Logger") && registry.get("Core.Logger").exports; if (logger) ctx.log = logger;
+var bus = registry.has("Core.Bus") && registry.get("Core.Bus").exports; if (bus) ctx.bus = bus;
+var store = registry.has("Core.Store") && registry.get("Core.Store").exports; if (store) ctx.store = store;
+var health = registry.has("Build.Health") && registry.get("Build.Health").exports; if (health) ctx.health = health;
+updateGlobals();
+}
+function mountIDE(){
+var topbar = registry.has("UI.Topbar") && registry.get("UI.Topbar").exports;
+if (topbar && topbar.mount) topbar.mount();
+var shell = registry.has("UI.Shell") && registry.get("UI.Shell").exports;
+var actions = registry.has("UI.Actions") && registry.get("UI.Actions").exports;
+if (shell && actions){
+if (shell.mount) shell.mount();
+if (actions.wire) actions.wire();
+if (ctx.log && ctx.log.info) ctx.log.info("UI mounted");
+} else {
+if (actions && actions.wire) actions.wire();
+if (!shell) console.warn("UI.Shell missing");
+}
+}
+function mountApp(entry){
+try{
+var host = registry.has("App.Host") && registry.get("App.Host").exports;
+if (host && host.mount) host.mount();
+try{ document.body.classList.add("show-app"); }catch(_){}
+if (entry){
+var app = registry.has(entry) && registry.get(entry).exports;
+if (app && typeof app.mount==="function") app.mount();
+else if (app && typeof app.init==="function") app.init();
+else console.warn("Entry app has no mount/init:", entry);
+}
+}catch(e){ console.error("App mount error", e); }
+}
+function updateGlobals(){
+window.Loom = window.Loom || {};
+window.Loom.meta = ctx.meta;
+window.Loom.guide = ctx.guide;
+window.Loom.require = ctx.require;
+window.Loom.modules = ctx.modules;
+window.Loom.log = ctx.log;
+window.Loom.bus = ctx.bus;
+window.Loom.store = ctx.store;
+window.Loom.health = ctx.health;
+}
+document.addEventListener("DOMContentLoaded", function(){
+collect();
+compileAll();
+try {
+if (runProfile==="app"){ mountApp(entryApp); }
+else {
+var w = registry.has("App.Welcome") && registry.get("App.Welcome").exports;
+if (w && w.init) w.init();
+mountIDE();
+}
+} catch(e) {
+if (ctx.log && ctx.log.warn) ctx.log.warn("Boot init failed", String(e));
+}
+});
+})();
+</script>
+<!-- LOOM:END_BOOTLOADER -->
 </body>
 </html>
