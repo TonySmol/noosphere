@@ -1,1318 +1,1563 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0a0a0a">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://huggingface.co data: blob: wss:;">
 <title>NOOmium</title>
+<style id="LOOM_CSS">
+:root{
+  --bg:#0a0a0a;--fg:#ededed;--dim:#666;--line:#1f1f1f;
+  --accent:#7c5cff;--world:#0ea5e9;--seren:#4ade80;
+  --warn:#fbbf24;--err:#ef4444;
+  --mono:ui-monospace,'SF Mono',Monaco,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  --panel:#111827;--br:#1f2a44;--acc:#60a5fa;--ok:#22c55e;--muted:#99a7bf;
+  --btn-bg:#18233a;--btn-text:#f8fbff;--btn-br:#223156;
+  --btn-pr-bg:#60a5fa;--btn-pr-text:#0a0f1a;
+  --topH:52px;--left:320px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100dvh;overflow:hidden;background:var(--bg);color:var(--fg);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+body{display:flex;flex-direction:column}
+button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,textarea,select{font:inherit;color:inherit;background:none;border:none;outline:none}
 
-<!-- ============================================ -->
-<!-- LAYER 1: UI STYLES -->
-<!-- ============================================ -->
-<style>
-:root {
-  --bg: #0a0a0a; --fg: #ededed; --dim: #666; --line: #1f1f1f;
-  --accent: #7c5cff; --world: #0ea5e9; --seren: #4ade80;
-  --warn: #fbbf24; --err: #ef4444;
-  --mono: ui-monospace, 'SF Mono', Monaco, Consolas, monospace;
-  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body {
-  height: 100dvh; overflow: hidden;
-  background: var(--bg); color: var(--fg);
-  font: 14px/1.5 var(--sans);
-  -webkit-font-smoothing: antialiased;
-  -webkit-tap-highlight-color: transparent;
-}
-body { display: flex; flex-direction: column; }
-button { font: inherit; cursor: pointer; border: none; background: none; color: inherit; }
-input, textarea, select { font: inherit; color: inherit; background: none; border: none; outline: none; }
+.topbar{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line);flex-shrink:0}
+.brand{font:700 15px var(--mono);letter-spacing:.3px;background:linear-gradient(135deg,var(--accent),var(--world));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.spacer{flex:1}
+.icon-btn{padding:6px 10px;border:1px solid var(--line);border-radius:6px;color:var(--dim);transition:.15s;min-width:36px;min-height:36px;display:inline-flex;align-items:center;justify-content:center}
+.icon-btn:hover{color:var(--fg);border-color:var(--dim)}
 
-.topbar {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 14px; border-bottom: 1px solid var(--line);
-  flex-shrink: 0;
-}
-.brand {
-  font: 700 15px var(--mono); letter-spacing: .3px;
-  background: linear-gradient(135deg, var(--accent), var(--world));
-  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-.spacer { flex: 1; }
-.icon-btn {
-  padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
-  color: var(--dim); transition: .15s;
-  min-width: 36px; min-height: 36px;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.icon-btn:hover { color: var(--fg); border-color: var(--dim); }
+.status{display:flex;gap:10px;padding:6px 14px;border-bottom:1px solid var(--line);font:11px var(--mono);color:var(--dim);flex-shrink:0;flex-wrap:wrap}
+.s{display:inline-flex;align-items:center;gap:5px}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+.s.ok{color:var(--seren)}.s.warn{color:var(--warn)}.s.err{color:var(--err)}
+.s.busy .dot{animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.3}}
 
-.status {
-  display: flex; gap: 10px; padding: 6px 14px;
-  border-bottom: 1px solid var(--line);
-  font: 11px var(--mono); color: var(--dim);
-  flex-shrink: 0; flex-wrap: wrap;
-}
-.s { display: inline-flex; align-items: center; gap: 5px; }
-.dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.s.ok { color: var(--seren); }
-.s.warn { color: var(--warn); }
-.s.err { color: var(--err); }
-.s.busy .dot { animation: blink 1s infinite; }
-@keyframes blink { 50% { opacity: .3; } }
+.tabs{display:flex;border-bottom:1px solid var(--line);flex-shrink:0}
+.tab{flex:1;padding:11px;text-align:center;font:12px var(--mono);color:var(--dim);border-bottom:2px solid transparent;transition:.15s;text-transform:uppercase;letter-spacing:.5px;display:inline-flex;justify-content:center;align-items:center;gap:6px;cursor:pointer}
+.tab.active{color:var(--fg);border-color:var(--fg)}
+.tab .n{font-size:10px;padding:1px 5px;background:var(--line);border-radius:8px}
 
-.tabs { display: flex; border-bottom: 1px solid var(--line); flex-shrink: 0; }
-.tab {
-  flex: 1; padding: 11px; text-align: center;
-  font: 12px var(--mono); color: var(--dim);
-  border-bottom: 2px solid transparent; transition: .15s;
-  text-transform: uppercase; letter-spacing: .5px;
-  display: inline-flex; justify-content: center; align-items: center; gap: 6px;
-}
-.tab.active { color: var(--fg); border-color: var(--fg); }
-.tab .n {
-  font-size: 10px; padding: 1px 5px;
-  background: var(--line); border-radius: 8px;
-}
+.work{flex:1;overflow-y:auto;padding:14px;-webkit-overflow-scrolling:touch}
+.view{display:none}.view.active{display:block}
 
-.work {
-  flex: 1; overflow-y: auto; padding: 14px;
-  -webkit-overflow-scrolling: touch;
-}
-.view { display: none; }
-.view.active { display: block; }
+.editor{border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:14px;position:relative;overflow:hidden}
+.editor textarea{width:100%;min-height:72px;resize:vertical;font-size:15px;line-height:1.5;color:var(--fg)}
+.editor textarea::placeholder{color:var(--dim)}
+.editor-meta{display:flex;justify-content:space-between;align-items:center;margin-top:6px;font:11px var(--mono);color:var(--dim)}
+.editor-btns{display:flex;gap:8px;margin-top:12px}
+.btn{padding:10px 14px;border:1px solid var(--line);border-radius:6px;font:13px var(--sans);font-weight:500;transition:.15s;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;flex:1;cursor:pointer;color:var(--fg);background:none}
+.btn:hover:not(:disabled){border-color:var(--dim)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-primary{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.btn-primary:hover:not(:disabled){opacity:.9}
 
-.editor {
-  border: 1px solid var(--line); border-radius: 8px;
-  padding: 12px; margin-bottom: 14px;
-  position: relative; overflow: hidden;
-}
-.editor textarea {
-  width: 100%; min-height: 72px; resize: vertical;
-  font-size: 15px; line-height: 1.5;
-}
-.editor textarea::placeholder { color: var(--dim); }
-.editor-meta {
-  display: flex; justify-content: space-between; align-items: center;
-  margin-top: 6px; font: 11px var(--mono); color: var(--dim);
-}
-.editor-btns { display: flex; gap: 8px; margin-top: 12px; }
-.btn {
-  padding: 10px 14px; border: 1px solid var(--line); border-radius: 6px;
-  font: 13px var(--sans); font-weight: 500; transition: .15s;
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  min-height: 40px; flex: 1;
-}
-.btn:hover:not(:disabled) { border-color: var(--dim); }
-.btn:disabled { opacity: .4; cursor: not-allowed; }
-.btn-primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
-.btn-primary:hover:not(:disabled) { opacity: .9; }
+.progress-bar{position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--line);overflow:hidden;transition:opacity .5s}
+.progress-bar .fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--world));width:0;transition:width .3s}
 
-.progress-bar {
-  position: absolute; bottom: 0; left: 0; right: 0;
-  height: 2px; background: var(--line); overflow: hidden;
-  transition: opacity .5s;
-}
-.progress-bar .fill {
-  height: 100%; background: linear-gradient(90deg, var(--accent), var(--world));
-  width: 0; transition: width .3s;
-}
+.filters{display:flex;gap:2px;padding:3px;background:var(--line);border-radius:6px;margin-bottom:14px}
+.fbtn{flex:1;padding:7px 8px;font:11px var(--mono);color:var(--dim);border-radius:4px;transition:.15s;text-transform:uppercase;letter-spacing:.3px;display:inline-flex;align-items:center;justify-content:center;gap:5px;cursor:pointer;background:none;border:none}
+.fbtn.active{background:var(--bg);color:var(--fg)}
+.fbtn .n{font-size:10px;padding:1px 5px;background:var(--bg);border-radius:6px}
+.fbtn.active .n{background:var(--line)}
 
-.filters {
-  display: flex; gap: 2px; padding: 3px;
-  background: var(--line); border-radius: 6px;
-  margin-bottom: 14px;
-}
-.fbtn {
-  flex: 1; padding: 7px 8px;
-  font: 11px var(--mono); color: var(--dim);
-  border-radius: 4px; transition: .15s;
-  text-transform: uppercase; letter-spacing: .3px;
-  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-}
-.fbtn.active { background: var(--bg); color: var(--fg); }
-.fbtn .n {
-  font-size: 10px; padding: 1px 5px;
-  background: var(--bg); border-radius: 6px;
-}
-.fbtn.active .n { background: var(--line); }
+.carousel{display:none}.carousel.active{display:block}
+.track{display:flex;gap:10px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;padding:2px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.track::-webkit-scrollbar{display:none}
 
-.carousel { display: none; }
-.carousel.active { display: block; }
-.track {
-  display: flex; gap: 10px;
-  overflow-x: auto; overflow-y: hidden;
-  scroll-snap-type: x mandatory;
-  padding: 2px;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-.track::-webkit-scrollbar { display: none; }
+.card{flex:0 0 calc(100% - 4px);scroll-snap-align:start;scroll-snap-stop:always;border:1px solid var(--line);border-radius:8px;padding:12px 12px 12px 16px;position:relative;overflow:hidden;min-width:280px;display:flex;flex-direction:column;transition:border-color .15s,transform .15s}
+.card:hover{border-color:#2a2a2a}
+@media (min-width:768px){.card{flex:0 0 calc(50% - 8px)}}
+@media (min-width:1100px){.card{flex:0 0 calc(33.333% - 8px)}}
+.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.card.t-local::before{background:var(--accent)}
+.card.t-world::before{background:var(--world)}
+.card.t-seren::before{background:var(--seren)}
+.card.t-seren{background:rgba(74,222,128,.03)}
+.card.peer{opacity:.95}
 
-.card {
-  flex: 0 0 calc(100% - 4px);
-  scroll-snap-align: start; scroll-snap-stop: always;
-  border: 1px solid var(--line); border-radius: 8px;
-  padding: 12px 12px 12px 16px;
-  position: relative; overflow: hidden;
-  min-width: 280px;
-  display: flex; flex-direction: column;
-  transition: border-color .15s, transform .15s;
-}
-.card:hover { border-color: #2a2a2a; }
-@media (min-width: 768px) { .card { flex: 0 0 calc(50% - 8px); } }
-@media (min-width: 1100px) { .card { flex: 0 0 calc(33.333% - 8px); } }
-.card::before {
-  content: ''; position: absolute;
-  left: 0; top: 0; bottom: 0; width: 3px;
-}
-.card.t-local::before { background: var(--accent); }
-.card.t-world::before { background: var(--world); }
-.card.t-seren::before { background: var(--seren); }
-.card.t-seren { background: rgba(74, 222, 128, .03); }
-.card.peer { opacity: .95; }
+.card-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-shrink:0}
+.card-tag{font:10px var(--mono);font-weight:600;padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:.5px;background:var(--line);color:var(--dim)}
+.t-local .card-tag{color:var(--accent)}
+.t-world .card-tag{color:var(--world)}
+.t-seren .card-tag{color:var(--seren)}
+.card-score{font:11px var(--mono);color:var(--dim)}
+.card-body{font-size:14px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;max-height:160px;overflow-y:auto;flex:1}
+.card-body mark{background:transparent;color:var(--accent);font-weight:600}
+.card-foot{display:flex;gap:4px;flex-wrap:wrap;margin-top:10px;flex-shrink:0}
+.card-act{font:11px var(--mono);color:var(--dim);padding:5px 8px;border:1px solid var(--line);border-radius:4px;transition:.15s;min-height:28px;cursor:pointer;background:none}
+.card-act:hover{color:var(--fg);border-color:var(--dim)}
+.card-act.danger:hover{color:var(--err);border-color:var(--err)}
+.card-hint{font:11px var(--mono);color:var(--dim);font-style:italic}
 
-.card-head {
-  display: flex; justify-content: space-between;
-  align-items: center; gap: 8px;
-  margin-bottom: 8px; flex-shrink: 0;
-}
-.card-tag {
-  font: 10px var(--mono); font-weight: 600;
-  padding: 2px 6px; border-radius: 3px;
-  text-transform: uppercase; letter-spacing: .5px;
-  background: var(--line); color: var(--dim);
-}
-.t-local .card-tag { color: var(--accent); }
-.t-world .card-tag { color: var(--world); }
-.t-seren .card-tag { color: var(--seren); }
-.card-score { font: 11px var(--mono); color: var(--dim); }
-.card-body {
-  font-size: 14px; line-height: 1.5;
-  white-space: pre-wrap; word-wrap: break-word;
-  max-height: 160px; overflow-y: auto;
-  flex: 1;
-}
-.card-body mark {
-  background: transparent; color: var(--accent);
-  font-weight: 600;
-}
-.card-foot {
-  display: flex; gap: 4px; flex-wrap: wrap;
-  margin-top: 10px; flex-shrink: 0;
-}
-.card-act {
-  font: 11px var(--mono); color: var(--dim);
-  padding: 5px 8px; border: 1px solid var(--line);
-  border-radius: 4px; transition: .15s;
-  min-height: 28px;
-}
-.card-act:hover { color: var(--fg); border-color: var(--dim); }
-.card-act.danger:hover { color: var(--err); border-color: var(--err); }
-.card-hint {
-  font: 11px var(--mono); color: var(--dim);
-  font-style: italic;
-}
+.empty{text-align:center;color:var(--dim);padding:40px 20px;font:12px var(--mono);width:100%}
+.empty .hint{margin-top:8px;font-size:11px;opacity:.7}
 
-.empty {
-  text-align: center; color: var(--dim);
-  padding: 40px 20px; font: 12px var(--mono);
-  width: 100%;
-}
-.empty .hint {
-  margin-top: 8px; font-size: 11px; opacity: .7;
-}
+.hist-bar{display:flex;gap:8px;margin-bottom:14px}
+.hist-bar input{flex:1;padding:9px 12px;background:var(--line);border-radius:6px;min-height:40px;color:var(--fg)}
+.hist-bar select{padding:9px 10px;background:var(--line);border-radius:6px;min-height:40px;font:12px var(--mono);color:var(--fg)}
+.hist-bar select option{background:var(--bg)}
 
-.hist-bar { display: flex; gap: 8px; margin-bottom: 14px; }
-.hist-bar input {
-  flex: 1; padding: 9px 12px;
-  background: var(--line); border-radius: 6px;
-  min-height: 40px;
-}
-.hist-bar select {
-  padding: 9px 10px; background: var(--line);
-  border-radius: 6px; min-height: 40px;
-  font: 12px var(--mono);
-}
-.hist-bar select option { background: var(--bg); }
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;opacity:0;pointer-events:none;transition:.2s;backdrop-filter:blur(2px)}
+.overlay.open{opacity:1;pointer-events:auto}
+.drawer{position:fixed;top:0;right:-400px;width:360px;max-width:100%;height:100%;background:var(--bg);border-left:1px solid var(--line);z-index:101;transition:.25s;padding:20px;overflow-y:auto}
+.drawer.open{right:0}
+.drawer h3{font:600 16px var(--sans);margin-bottom:20px;display:flex;justify-content:space-between;align-items:center}
+.drawer .close{font-size:24px;color:var(--dim);min-width:36px;min-height:36px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;background:none;border:none}
+.drawer .close:hover{color:var(--err)}
 
-.overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,.6);
-  z-index: 100; opacity: 0; pointer-events: none; transition: .2s;
-  backdrop-filter: blur(2px);
-}
-.overlay.open { opacity: 1; pointer-events: auto; }
-.drawer {
-  position: fixed; top: 0; right: -400px;
-  width: 360px; max-width: 100%; height: 100%;
-  background: var(--bg); border-left: 1px solid var(--line);
-  z-index: 101; transition: .25s;
-  padding: 20px; overflow-y: auto;
-}
-.drawer.open { right: 0; }
-.drawer h3 {
-  font: 600 16px var(--sans); margin-bottom: 20px;
-  display: flex; justify-content: space-between; align-items: center;
-}
-.drawer .close {
-  font-size: 24px; color: var(--dim);
-  min-width: 36px; min-height: 36px;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.drawer .close:hover { color: var(--err); }
+.field{margin-bottom:18px}
+.field label{display:block;font:11px var(--mono);color:var(--dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+.field input[type="text"]{width:100%;padding:10px 12px;background:var(--line);border-radius:6px;min-height:40px;color:var(--fg)}
+.field input[type="range"]{width:100%;accent-color:var(--accent)}
+.field .row{display:flex;justify-content:space-between;align-items:center}
+.field .val{font:12px var(--mono);color:var(--accent);font-weight:600}
+.field .hint{font:11px var(--mono);color:var(--dim);margin-top:5px;line-height:1.4}
 
-.field { margin-bottom: 18px; }
-.field label {
-  display: block; font: 11px var(--mono); color: var(--dim);
-  margin-bottom: 6px; text-transform: uppercase; letter-spacing: .5px;
-}
-.field input[type="text"] {
-  width: 100%; padding: 10px 12px;
-  background: var(--line); border-radius: 6px;
-  min-height: 40px;
-}
-.field input[type="range"] { width: 100%; accent-color: var(--accent); }
-.field .row { display: flex; justify-content: space-between; align-items: center; }
-.field .val {
-  font: 12px var(--mono); color: var(--accent);
-  font-weight: 600;
-}
-.field .hint {
-  font: 11px var(--mono); color: var(--dim);
-  margin-top: 5px; line-height: 1.4;
-}
+.section{font:11px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin:22px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.btn-row{display:flex;gap:8px}
+.btn-row .btn{flex:1}
 
-.section {
-  font: 11px var(--mono); color: var(--dim);
-  text-transform: uppercase; letter-spacing: .5px;
-  margin: 22px 0 10px; padding-bottom: 6px;
-  border-bottom: 1px solid var(--line);
-}
-.btn-row { display: flex; gap: 8px; }
-.btn-row .btn { flex: 1; }
+.noo-toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(100px);background:var(--fg);color:var(--bg);padding:10px 20px;border-radius:4px;font:12px var(--mono);z-index:1000;transition:.25s;max-width:90vw;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,.5);opacity:0;pointer-events:none}
+.noo-toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.noo-toast.ok{background:var(--seren);color:#000}
+.noo-toast.err{background:var(--err);color:#fff}
+.noo-toast.info{background:var(--world);color:#000}
 
-.toast {
-  position: fixed; bottom: 20px; left: 50%;
-  transform: translateX(-50%) translateY(100px);
-  background: var(--fg); color: var(--bg);
-  padding: 10px 20px; border-radius: 4px;
-  font: 12px var(--mono); z-index: 1000;
-  transition: .25s; max-width: 90vw; text-align: center;
-  box-shadow: 0 4px 20px rgba(0,0,0,.5);
-}
-.toast.show { transform: translateX(-50%) translateY(0); }
-.toast.ok { background: var(--seren); color: #000; }
-.toast.err { background: var(--err); color: #fff; }
-.toast.info { background: var(--world); color: #000; }
+.copied-flash{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) scale(0);background:var(--fg);color:var(--bg);padding:20px 40px;border-radius:8px;font:16px var(--mono);font-weight:600;z-index:2000;opacity:0;transition:all .3s;box-shadow:0 8px 40px rgba(0,0,0,.6);pointer-events:none}
+.copied-flash.show{transform:translate(-50%,-50%) scale(1);opacity:1}
 
-.copied-flash {
-  position: fixed; top: 50%; left: 50%;
-  transform: translate(-50%, -50%) scale(0);
-  background: var(--fg); color: var(--bg);
-  padding: 20px 40px; border-radius: 8px;
-  font: 16px var(--mono); font-weight: 600;
-  z-index: 2000; opacity: 0;
-  transition: all .3s;
-  box-shadow: 0 8px 40px rgba(0,0,0,.6);
-}
-.copied-flash.show {
-  transform: translate(-50%, -50%) scale(1);
-  opacity: 1;
-}
+#loom-root{display:none}
+body.show-app #app-root{display:flex;flex-direction:column;flex:1;min-height:0}
+body.show-app #loom-root{display:none}
 
-@media (max-width: 600px) {
-  .topbar { padding: 8px 10px; }
-  .tabs .tab { padding: 9px 4px; font-size: 11px; }
-  .editor { padding: 10px; }
-  .drawer { width: 100%; }
+@media (max-width:600px){
+  .topbar{padding:8px 10px}
+  .tabs .tab{padding:9px 4px;font-size:11px}
+  .editor{padding:10px}
+  .drawer{width:100%}
 }
 </style>
 </head>
-<body>
+<body class="show-app">
+<div id="loom-root"></div>
+<div id="app-root"></div>
 
-<!-- ============================================ -->
-<!-- LAYER 2: UI MARKUP -->
-<!-- ============================================ -->
-<header class="topbar">
-  <div class="brand">NOOmium</div>
-  <div class="spacer"></div>
-  <button class="icon-btn" id="btnHelp" title="Как это работает">?</button>
-  <button class="icon-btn" id="btnSettings" title="Настройки">⚙</button>
-</header>
+<script type="application/json" id="LOOM_META">
+{"name":"NOOmium","version":"1.0.0","createdAt":"2026-05-29T00:00:00.000Z","updatedAt":"2026-05-29T00:00:00.000Z","description":"P2P thought resonator — turns a thought into a vector and finds resonance locally and across Nostr peers.","protected":{"bootloaderId":"LOOM_BOOT","bootloaderVersion":"2.5.0","runProfile":"app","entryApp":"App.NOOmium"},"conventions":{"moduleTypes":["core","ui","app"],"loadOrder":["core","ui","app"],"naming":"Namespace.Name"}}
+</script>
+<script type="application/json" id="LOOM_GUIDE">
+{"rules":["Правки — только в капсулах (manifest/contract/code).","Бутлоадер меняется только в релизах.","Сначала меняй manifest/contract, затем code.","Экспорты перечислены в manifest.exports.","Без сайд-эффектов в фабриках модулей.","Зависимости объявляются в manifest.dependsOn.","Весь UI рендерится в #app-root из App.NOOmium."],"flows":{"add":["создай капсулу","manifest","contract","code","Health","Rebuild"]}}
+</script>
 
-<div class="status">
-  <span class="s busy" id="stDB"><span class="dot"></span>DB</span>
-  <span class="s busy" id="stAI"><span class="dot"></span>AI</span>
-  <span class="s busy" id="stNet"><span class="dot"></span>NET</span>
-  <span class="s" id="stPeers"><span class="dot"></span>0 peers</span>
-</div>
+<!-- =================== MODULE CAPSULES =================== -->
 
-<nav class="tabs">
-  <button class="tab active" data-view="stream">Поток</button>
-  <button class="tab" data-view="history">База <span class="n" id="baseCount">0</span></button>
-</nav>
+<!-- LOOM:BEGIN_MODULE name="Core.NooConfig" -->
+<script type="application/json" data-role="manifest">
+{"name":"Core.NooConfig","type":"core","version":"1.0.0","dependsOn":["Core.Store","Core.Logger"],"exports":["get","set","getAll","save","reset"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"get":{"args":[{"type":"string"},{"type":"any","optional":true}],"returns":{"type":"any"}},"set":{"args":[{"type":"string"},{"type":"any"}],"returns":{"type":"void"}},"getAll":{"args":[],"returns":{"type":"object"}},"save":{"args":[],"returns":{"type":"void"}},"reset":{"args":[],"returns":{"type":"void"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var log = ctx.require("Core.Logger");
+  var store = ctx.require("Core.Store");
+  var KEY = "noomium:cfg";
 
-<main class="work">
-  <section class="view active" id="view-stream">
-    <div class="editor">
-      <textarea id="input" placeholder="О чём думаешь?" autocomplete="off" autocapitalize="sentences"></textarea>
-      <div class="editor-meta">
-        <span id="charCount">0</span>
-        <span id="debounce"></span>
-      </div>
-      <div class="editor-btns">
-        <button class="btn" id="btnSavePrivate">Сохранить лично</button>
-        <button class="btn btn-primary" id="btnSaveShared">Поделиться P2P</button>
-      </div>
-      <div class="progress-bar"><div class="fill" id="modelProgress"></div></div>
-    </div>
-
-    <div class="filters">
-      <button class="fbtn active" data-filter="local">Локально <span class="n" id="cntLocal">0</span></button>
-      <button class="fbtn" data-filter="world">Мир <span class="n" id="cntWorld">0</span></button>
-      <button class="fbtn" data-filter="seren">Озарения <span class="n" id="cntSeren">0</span></button>
-    </div>
-
-    <div class="carousel active" id="c-local"><div class="track"></div></div>
-    <div class="carousel" id="c-world"><div class="track"></div></div>
-    <div class="carousel" id="c-seren"><div class="track"></div></div>
-  </section>
-
-  <section class="view" id="view-history">
-    <div class="hist-bar">
-      <input type="text" id="histSearch" placeholder="Поиск по базе…">
-      <select id="histSort">
-        <option value="new">Новые</option>
-        <option value="old">Старые</option>
-        <option value="az">А→Я</option>
-      </select>
-    </div>
-    <div class="carousel active" id="c-history"><div class="track"></div></div>
-  </section>
-</main>
-
-<div class="overlay" id="overlay"></div>
-<aside class="drawer" id="drawer">
-  <h3>Настройки <button class="close" id="btnClose">×</button></h3>
-
-  <div class="field">
-    <label>Комната (Nostr topic)</label>
-    <input type="text" id="setRoom" placeholder="noomium-core">
-    <div class="hint">Узлы в одной комнате слышат вас.</div>
-  </div>
-
-  <div class="field">
-    <div class="row"><label>Порог совпадения</label><span class="val" id="valThresh">0.30</span></div>
-    <input type="range" id="setThresh" min="0.1" max="0.7" step="0.05">
-  </div>
-
-  <div class="field">
-    <div class="row"><label>Дельта озарений</label><span class="val" id="valSeren">0.15</span></div>
-    <input type="range" id="setSeren" min="0.05" max="0.3" step="0.01">
-  </div>
-
-  <div class="section">Капсулы .noo</div>
-  <div class="field">
-    <div class="btn-row">
-      <button class="btn" id="btnExport">Экспорт</button>
-      <button class="btn" id="btnImport">Импорт</button>
-    </div>
-    <input type="file" id="importFile" accept=".noo,.json" style="display:none">
-    <div class="hint">Дубли по хэшу текста пропускаются автоматически.</div>
-  </div>
-
-  <div class="section">Опасно</div>
-  <div class="field">
-    <button class="btn" id="btnApply" style="width:100%; margin-bottom:8px;">Применить и перезагрузить</button>
-    <button class="btn" id="btnWipe" style="width:100%; color:var(--err);">Стереть базу</button>
-  </div>
-</aside>
-
-<aside class="drawer" id="helpDrawer">
-  <h3>Как это работает <button class="close" id="btnCloseHelp">×</button></h3>
-  <p style="color:var(--dim); line-height:1.6; margin-bottom:14px;">
-    NOOmium превращает мысль в вектор и ищет резонанс в вашей базе и у других узлов в комнате.
-  </p>
-  <div class="section">Дорожки</div>
-  <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
-    <b style="color:var(--accent)">Локально</b> — точные совпадения в вашей базе.
-  </p>
-  <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
-    <b style="color:var(--world)">Мир</b> — совпадения от активных узлов (пока они в сети).
-  </p>
-  <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
-    <b style="color:var(--seren)">Озарения</b> — близкие, но не точные мысли.
-  </p>
-  <div class="section">Эфемерность</div>
-  <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
-    Запросы и ответы живут ~2 минуты. Заметки не хранятся на серверах — только у вас и у того, кто поделился.
-  </p>
-  <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
-    Выдача «Мира» живая: peer вышел — его карточки исчезают при следующем обновлении.
-  </p>
-  <div class="section">Горячие клавиши</div>
-  <p style="color:var(--dim); font:12px var(--mono); margin-bottom:4px;">Ctrl+Enter — сохранить</p>
-  <p style="color:var(--dim); font:12px var(--mono); margin-bottom:4px;">Ctrl+Shift+Enter — поделиться</p>
-  <p style="color:var(--dim); font:12px var(--mono); margin-bottom:4px;">/ — в редактор</p>
-  <p style="color:var(--dim); font:12px var(--mono);">Esc — закрыть панели</p>
-</aside>
-
-<div class="toast" id="toast"></div>
-<div class="copied-flash" id="copiedFlash">✓ скопировано</div>
-
-<!-- ============================================ -->
-<!-- SCRIPT -->
-<!-- ============================================ -->
-<script type="module">
-// ============================================
-// CONTRACT: NOO-framework v1.0
-// ============================================
-
-// === LAYER: BOOT | MODULE: GlobalHandlers ===
-// [MANIFEST] provides: глобальные обработчики ошибок
-// [RULE] подавляет шумные ошибки (relay disconnects), логирует критические
-window.addEventListener('error', (e) => {
-  console.error('[Global]', e.error || e.message);
-});
-
-window.addEventListener('unhandledrejection', (e) => {
-  const msg = e.reason?.message || String(e.reason);
-  if (msg.includes('relay connection closed') ||
-      msg.includes('WebSocket') ||
-      msg.includes('NetworkError')) {
-    e.preventDefault();
-    return;
-  }
-  console.error('[Rejection]', e.reason);
-});
-
-// === LAYER: CORE | MODULE: Config ===
-// [MANIFEST] provides: C, saveCfg
-// [RULE] единый источник правды, state хранится в C.state
-const C = {
-  DB: 'noomium_v8',
-  STORE: 'notes',
-  RELAYS: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.snort.social'],
-  K_QUERY: 21000,
-  K_ANSWER: 21001,
-  MODEL: 'Xenova/all-MiniLM-L6-v2',
-  DIM: 384,
-  DEBOUNCE: 800,
-  PEER_TTL: 60000,
-  HEARTBEAT: 30000,
-  SUB_WINDOW: 120,
-  QUERY_RATE_LIMIT: 2000,
-  state: {
-    room: 'noomium-core',
+  var defaults = {
+    room: "noomium-core",
     threshold: 0.30,
-    serendipity: 0.15
-  }
-};
-
-try {
-  const s = localStorage.getItem('noomium_cfg');
-  if (s) Object.assign(C.state, JSON.parse(s));
-} catch {}
-
-const saveCfg = () => {
-  try { localStorage.setItem('noomium_cfg', JSON.stringify(C.state)); } catch {}
-};
-
-// === LAYER: CORE | MODULE: Utils ===
-// [MANIFEST] provides: uuid, fnv1a, esc, escRe, toast, flashCopied, setStatus
-// [RULE] чистые функции без сайд-эффектов (кроме DOM в toast/setStatus)
-const uuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-  const r = Math.random() * 16 | 0;
-  return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-});
-
-const fnv1a = (s) => {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return 'h' + (h >>> 0).toString(16);
-};
-
-const esc = (s) => String(s).replace(/[&<>]/g, c =>
-  ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-
-const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-let toastTimer;
-const toast = (msg, type = '') => {
-  const el = document.getElementById('toast');
-  if (!el) return;
-  el.className = `toast show ${type}`;
-  el.textContent = msg;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.className = 'toast', 2500);
-};
-
-const flashCopied = () => {
-  const el = document.getElementById('copiedFlash');
-  if (!el) return;
-  el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 800);
-};
-
-const setStatus = (id, text, cls = '') => {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.className = `s ${cls}`;
-  el.innerHTML = `<span class="dot"></span>${esc(text)}`;
-};
-
-// === LAYER: CORE | MODULE: Storage ===
-// [MANIFEST] provides: DB { put, get, del, all, clear, reset }
-// [RULE] IndexedDB wrapper с retry и импотентным открытием
-const DB = (() => {
-  let db = null;
-
-  const open = () => new Promise((res, rej) => {
-    if (db) return res(db);
-    const req = indexedDB.open(C.DB, 1);
-    req.onupgradeneeded = e => {
-      const d = e.target.result;
-      if (!d.objectStoreNames.contains(C.STORE)) {
-        d.createObjectStore(C.STORE, { keyPath: 'id' });
-      }
-    };
-    req.onsuccess = e => { db = e.target.result; res(db); };
-    req.onerror = () => rej(req.error);
-    req.onblocked = () => rej(new Error('DB blocked'));
-  });
-
-  const tx = async (mode, fn, retries = 3) => {
-    const d = await open();
-    return new Promise((res, rej) => {
-      const attempt = (n) => {
-        try {
-          const t = d.transaction(C.STORE, mode);
-          const s = t.objectStore(C.STORE);
-          const r = fn(s);
-          r.onsuccess = () => res(r.result);
-          r.onerror = () => {
-            if (n > 0) setTimeout(() => attempt(n - 1), 100);
-            else rej(r.error);
-          };
-        } catch (err) {
-          if (n > 0) setTimeout(() => attempt(n - 1), 100);
-          else rej(err);
-        }
-      };
-      attempt(retries);
-    });
+    serendipity: 0.15,
+    relays: ["wss://relay.damus.io","wss://nos.lol","wss://relay.snort.social"],
+    kQuery: 21000,
+    kAnswer: 21001,
+    model: "Xenova/all-MiniLM-L6-v2",
+    dim: 384,
+    debounce: 800,
+    peerTTL: 60000,
+    heartbeat: 30000,
+    subWindow: 120,
+    queryRateLimit: 2000
   };
 
+  var state = Object.assign({}, defaults);
+  try {
+    var saved = store ? store.get(KEY, null) : null;
+    if (saved && typeof saved === "object") Object.assign(state, saved);
+  } catch(e){ if(log) log.warn("Config load failed", String(e)); }
+
   return {
-    put: (note) => tx('readwrite', s => s.put(note)),
-    get: (id) => tx('readonly', s => s.get(id)),
-    del: (id) => tx('readwrite', s => s.delete(id)),
-    all: () => tx('readonly', s => s.getAll()),
-    clear: () => tx('readwrite', s => s.clear()),
-    reset: async () => {
-      if (db) { try { db.close(); } catch {} db = null; }
-      await new Promise(r => {
-        const req = indexedDB.deleteDatabase(C.DB);
-        req.onsuccess = req.onerror = req.onblocked = () => r();
+    get: function(k, def){ return state.hasOwnProperty(k) ? state[k] : def; },
+    set: function(k, v){ state[k] = v; },
+    getAll: function(){ return Object.assign({}, state); },
+    save: function(){
+      try { if (store) store.set(KEY, state); }
+      catch(e){ if(log) log.warn("Config save failed", String(e)); }
+    },
+    reset: function(){
+      state = Object.assign({}, defaults);
+      try { if (store) store.remove(KEY); } catch(_){}
+    }
+  };
+}
+</script>
+<!-- LOOM:END_MODULE -->
+
+<!-- LOOM:BEGIN_MODULE name="Core.NooUtils" -->
+<script type="application/json" data-role="manifest">
+{"name":"Core.NooUtils","type":"core","version":"1.0.0","dependsOn":[],"exports":["uuid","fnv1a","esc","escRe"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"uuid":{"args":[],"returns":{"type":"string"}},"fnv1a":{"args":[{"type":"string"}],"returns":{"type":"string"}},"esc":{"args":[{"type":"any"}],"returns":{"type":"string"}},"escRe":{"args":[{"type":"string"}],"returns":{"type":"string"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  function uuid(){
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function(c){
+      var r = Math.random() * 16 | 0;
+      return (c === "x" ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+  }
+  function fnv1a(s){
+    var h = 2166136261;
+    for (var i=0; i<s.length; i++){
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return "h" + (h >>> 0).toString(16);
+  }
+  function esc(s){
+    return String(s==null ? "" : s).replace(/[&<>]/g, function(c){
+      return ({"&":"&amp;","<":"&lt;",">":"&gt;"})[c];
+    });
+  }
+  function escRe(s){ return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+  return { uuid:uuid, fnv1a:fnv1a, esc:esc, escRe:escRe };
+}
+</script>
+<!-- LOOM:END_MODULE -->
+
+<!-- LOOM:BEGIN_MODULE name="Core.NooDB" -->
+<script type="application/json" data-role="manifest">
+{"name":"Core.NooDB","type":"core","version":"1.0.0","dependsOn":["Core.NooConfig","Core.Logger"],"exports":["put","get","del","all","clear","reset"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"put":{"args":[{"type":"object"}],"returns":{"type":"promise"}},"get":{"args":[{"type":"string"}],"returns":{"type":"promise"}},"del":{"args":[{"type":"string"}],"returns":{"type":"promise"}},"all":{"args":[],"returns":{"type":"promise"}},"clear":{"args":[],"returns":{"type":"promise"}},"reset":{"args":[],"returns":{"type":"promise"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var cfg = ctx.require("Core.NooConfig");
+  var log = ctx.require("Core.Logger");
+  var DB_NAME = "noomium_v8";
+  var STORE = "notes";
+  var db = null;
+
+  function open(){
+    return new Promise(function(res, rej){
+      if (db) return res(db);
+      var req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = function(e){
+        var d = e.target.result;
+        if (!d.objectStoreNames.contains(STORE)){
+          d.createObjectStore(STORE, { keyPath: "id" });
+        }
+      };
+      req.onsuccess = function(e){ db = e.target.result; res(db); };
+      req.onerror = function(){ rej(req.error); };
+      req.onblocked = function(){ rej(new Error("DB blocked")); };
+    });
+  }
+
+  function tx(mode, fn, retries){
+    if (retries === undefined) retries = 3;
+    return open().then(function(d){
+      return new Promise(function(res, rej){
+        function attempt(n){
+          try {
+            var t = d.transaction(STORE, mode);
+            var s = t.objectStore(STORE);
+            var r = fn(s);
+            r.onsuccess = function(){ res(r.result); };
+            r.onerror = function(){
+              if (n > 0) setTimeout(function(){ attempt(n - 1); }, 100);
+              else rej(r.error);
+            };
+          } catch(err){
+            if (n > 0) setTimeout(function(){ attempt(n - 1); }, 100);
+            else rej(err);
+          }
+        }
+        attempt(retries);
+      });
+    });
+  }
+
+  return {
+    put: function(note){ return tx("readwrite", function(s){ return s.put(note); }); },
+    get: function(id){ return tx("readonly", function(s){ return s.get(id); }); },
+    del: function(id){ return tx("readwrite", function(s){ return s.delete(id); }); },
+    all: function(){ return tx("readonly", function(s){ return s.getAll(); }); },
+    clear: function(){ return tx("readwrite", function(s){ return s.clear(); }); },
+    reset: function(){
+      if (db){ try{ db.close(); }catch(_){} db = null; }
+      return new Promise(function(r){
+        var req = indexedDB.deleteDatabase(DB_NAME);
+        req.onsuccess = req.onerror = req.onblocked = function(){ r(); };
       });
     }
   };
-})();
+}
+</script>
+<!-- LOOM:END_MODULE -->
 
-// === LAYER: CORE | MODULE: AI ===
-// [MANIFEST] provides: AI { load, embed, cosine, ready, mode }
-// [RULE] hybrid embeddings: real model + lexical hash fallback
-const AI = (() => {
-  let ext = null;
-  const cache = new Map();
+<!-- LOOM:BEGIN_MODULE name="Core.NooAI" -->
+<script type="application/json" data-role="manifest">
+{"name":"Core.NooAI","type":"core","version":"1.0.0","dependsOn":["Core.NooConfig","Core.Logger","Core.Bus"],"exports":["load","embed","cosine","ready","getMode","onProgress"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"load":{"args":[{"type":"function","optional":true}],"returns":{"type":"promise"}},"embed":{"args":[{"type":"string"}],"returns":{"type":"promise"}},"cosine":{"args":[{"type":"array"},{"type":"array"}],"returns":{"type":"number"}},"ready":{"args":[],"returns":{"type":"boolean"}},"getMode":{"args":[],"returns":{"type":"string"}},"onProgress":{"args":[{"type":"function"}],"returns":{"type":"void"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var cfg = ctx.require("Core.NooConfig");
+  var log = ctx.require("Core.Logger");
+  var bus = ctx.require("Core.Bus");
+  var ext = null;
+  var mode = "loading";
+  var cache = Object.create(null);
+  var progressFns = [];
 
-  const hashEmbed = (text) => {
-    const v = new Float32Array(C.DIM);
-    const tokens = text.toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
-    for (const t of tokens) {
-      let h = 2166136261;
-      for (let i = 0; i < t.length; i++) {
-        h ^= t.charCodeAt(i);
+  function hashEmbed(text){
+    var DIM = cfg.get("dim", 384);
+    var v = new Float32Array(DIM);
+    var tokens = (text || "").toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
+    for (var t=0; t<tokens.length; t++){
+      var tok = tokens[t];
+      var h = 2166136261;
+      for (var i=0; i<tok.length; i++){
+        h ^= tok.charCodeAt(i);
         h = Math.imul(h, 16777619);
       }
-      v[Math.abs(h) % C.DIM] += 1;
-      const h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
-      v[Math.abs(h2) % C.DIM] += 0.5;
+      v[Math.abs(h) % DIM] += 1;
+      var h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
+      v[Math.abs(h2) % DIM] += 0.5;
     }
-    let n = 0;
-    for (let i = 0; i < C.DIM; i++) n += v[i] * v[i];
+    var n = 0;
+    for (var i=0; i<DIM; i++) n += v[i] * v[i];
     n = Math.sqrt(n) || 1;
-    for (let i = 0; i < C.DIM; i++) v[i] /= n;
+    for (var i=0; i<DIM; i++) v[i] /= n;
     return Array.from(v);
-  };
+  }
 
   return {
-    mode: 'loading',
+    ready: function(){ return ext !== null || mode === "demo"; },
+    getMode: function(){ return mode; },
+    onProgress: function(fn){ if (typeof fn === "function") progressFns.push(fn); },
 
-    ready: () => ext !== null || AI.mode === 'demo',
-
-    load: async (onProgress) => {
-      if (ext || AI.mode === 'demo') return;
-      try {
-        const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
-        if (mod.env) {
+    load: function(onProgress){
+      if (ext || mode === "demo") return Promise.resolve();
+      var MODEL = cfg.get("model", "Xenova/all-MiniLM-L6-v2");
+      return Promise.resolve().then(function(){
+        return import("https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2");
+      }).then(function(mod){
+        if (mod.env){
           mod.env.allowLocalModels = false;
           mod.env.useBrowserCache = true;
         }
-        ext = await mod.pipeline('feature-extraction', C.MODEL, {
+        return mod.pipeline("feature-extraction", MODEL, {
           quantized: true,
-          progress_callback: p => {
-            if (p.status === 'progress' && p.total > 0) {
-              onProgress?.(p.loaded / p.total * 100);
+          progress_callback: function(p){
+            if (p.status === "progress" && p.total > 0){
+              var pct = p.loaded / p.total * 100;
+              if (typeof onProgress === "function") onProgress(pct);
+              for (var i=0; i<progressFns.length; i++){
+                try { progressFns[i](pct); } catch(_){}
+              }
+              if (bus && bus.emit) bus.emit("noo:ai:progress", { pct: pct });
             }
           }
         });
-        AI.mode = 'model';
-      } catch (err) {
-        console.warn('[AI] model load failed, fallback to hash:', err);
-        AI.mode = 'demo';
-      }
+      }).then(function(pipe){
+        ext = pipe;
+        mode = "model";
+        if (log) log.info("AI model loaded: " + MODEL);
+      }).catch(function(err){
+        if (log) log.warn("AI model load failed, fallback to hash", String(err && err.message || err));
+        mode = "demo";
+      });
     },
 
-    embed: async (text) => {
-      const t = (text || '').trim();
-      if (!t) return null;
-      if (cache.has(t)) return cache.get(t);
-      let v;
-      if (ext) {
-        try {
-          const out = await ext(t, { pooling: 'mean', normalize: true });
-          v = Array.from(out.data);
-        } catch (err) {
-          console.warn('[AI] embed failed, fallback:', err);
-          v = hashEmbed(t);
-        }
+    embed: function(text){
+      var t = (text || "").trim();
+      if (!t) return Promise.resolve(null);
+      if (cache[t]) return Promise.resolve(cache[t]);
+      var p;
+      if (ext){
+        p = Promise.resolve().then(function(){
+          return ext(t, { pooling: "mean", normalize: true });
+        }).then(function(out){
+          return Array.from(out.data);
+        }).catch(function(err){
+          if (log) log.warn("embed failed, fallback to hash", String(err && err.message || err));
+          return hashEmbed(t);
+        });
       } else {
-        v = hashEmbed(t);
+        p = Promise.resolve(hashEmbed(t));
       }
-      cache.set(t, v);
-      return v;
+      return p.then(function(v){ cache[t] = v; return v; });
     },
 
-    cosine: (a, b) => {
+    cosine: function(a, b){
       if (!a || !b || a.length !== b.length) return 0;
-      let s = 0;
-      for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+      var s = 0;
+      for (var i=0; i<a.length; i++) s += a[i] * b[i];
       return s;
     }
   };
-})();
+}
+</script>
+<!-- LOOM:END_MODULE -->
 
-// === LAYER: CORE | MODULE: Network ===
-// [MANIFEST] provides: Net { init, send, activeAnswers, peerCount }
-// [RULE] Nostr P2P с rate limiting, валидацией событий и heartbeat
-const Net = (() => {
-  let pool = null, sk = null, pk = null;
-  let queryId = null;
-  const peers = new Map();
-  const answers = [];
-  let onUpdate = null;
-  let heartbeatTimer = null;
-  let lastQueryTime = 0;
-  let nostrMod = null;
+<!-- LOOM:BEGIN_MODULE name="Core.NooNet" -->
+<script type="application/json" data-role="manifest">
+{"name":"Core.NooNet","type":"core","version":"1.0.0","dependsOn":["Core.NooConfig","Core.NooDB","Core.NooAI","Core.Logger","Core.Bus"],"exports":["init","send","activeAnswers","peerCount","stop"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"init":{"args":[{"type":"function","optional":true}],"returns":{"type":"promise"}},"send":{"args":[{"type":"array"}],"returns":{"type":"void"}},"activeAnswers":{"args":[],"returns":{"type":"array"}},"peerCount":{"args":[],"returns":{"type":"number"}},"stop":{"args":[],"returns":{"type":"void"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var cfg = ctx.require("Core.NooConfig");
+  var DB  = ctx.require("Core.NooDB");
+  var AI  = ctx.require("Core.NooAI");
+  var log = ctx.require("Core.Logger");
+  var bus = ctx.require("Core.Bus");
 
-  const validateEvent = (ev) => {
-    if (!ev || typeof ev !== 'object') return false;
-    if (typeof ev.id !== 'string' || ev.id.length !== 64) return false;
-    if (typeof ev.pubkey !== 'string' || ev.pubkey.length !== 64) return false;
-    if (typeof ev.kind !== 'number') return false;
+  var pool = null, sk = null, pk = null;
+  var queryId = null;
+  var peers = new Map();
+  var answers = [];
+  var onUpdate = null;
+  var heartbeatTimer = null;
+  var lastQueryTime = 0;
+  var nostrMod = null;
+  var sub = null;
+
+  function validateEvent(ev){
+    if (!ev || typeof ev !== "object") return false;
+    if (typeof ev.id !== "string" || ev.id.length !== 64) return false;
+    if (typeof ev.pubkey !== "string" || ev.pubkey.length !== 64) return false;
+    if (typeof ev.kind !== "number") return false;
     if (!Array.isArray(ev.tags)) return false;
     return true;
-  };
+  }
 
-  const onEvent = async (ev) => {
+  function onEvent(ev){
     if (!validateEvent(ev)) return;
     if (ev.pubkey === pk) return;
-
     peers.set(ev.pubkey, Date.now());
 
-    if (ev.kind === C.K_QUERY) {
+    var K_QUERY = cfg.get("kQuery", 21000);
+    var K_ANSWER = cfg.get("kAnswer", 21001);
+    var room = cfg.get("room", "noomium-core");
+
+    if (ev.kind === K_QUERY){
       try {
-        const q = JSON.parse(ev.content);
+        var q = JSON.parse(ev.content);
         if (!q.vector || !Array.isArray(q.vector)) return;
-        const all = await DB.all();
-        const floor = C.state.threshold - C.state.serendipity;
-        for (const n of all) {
-          if (!n.shared || !n.vector) continue;
-          if (AI.cosine(q.vector, n.vector) >= floor) {
-            const ans = nostrMod.finalizeEvent({
-              kind: C.K_ANSWER,
-              created_at: Math.floor(Date.now() / 1000),
-              tags: [['t', C.state.room], ['e', ev.id]],
-              content: JSON.stringify({ text: n.text, vector: n.vector })
-            }, sk);
-            pool.publish(C.RELAYS, ans);
+        DB.all().then(function(all){
+          var floor = cfg.get("threshold", 0.30) - cfg.get("serendipity", 0.15);
+          var toSend = [];
+          for (var i=0; i<all.length; i++){
+            var n = all[i];
+            if (!n.shared || !n.vector) continue;
+            if (AI.cosine(q.vector, n.vector) >= floor) toSend.push(n);
           }
-        }
-      } catch {}
+          toSend.forEach(function(n){
+            try {
+              var ans = nostrMod.finalizeEvent({
+                kind: K_ANSWER,
+                created_at: Math.floor(Date.now() / 1000),
+                tags: [["t", room], ["e", ev.id]],
+                content: JSON.stringify({ text: n.text, vector: n.vector })
+              }, sk);
+              pool.publish(cfg.get("relays", []), ans);
+            } catch(e){ if(log) log.warn("answer publish failed", String(e)); }
+          });
+        });
+      } catch(_){}
     }
 
-    if (ev.kind === C.K_ANSWER) {
-      const eTag = ev.tags.find(t => t[0] === 'e');
-      if (eTag && eTag[1] === queryId) {
+    if (ev.kind === K_ANSWER){
+      var eTag = null;
+      for (var i=0; i<ev.tags.length; i++){
+        if (ev.tags[i][0] === "e"){ eTag = ev.tags[i][1]; break; }
+      }
+      if (eTag && eTag === queryId){
         try {
-          const d = JSON.parse(ev.content);
-          if (d.text && d.vector && !answers.some(a => a.id === ev.id)) {
-            answers.push({
-              id: ev.id,
-              text: d.text,
-              vector: d.vector,
-              peer: ev.pubkey.slice(0, 8),
-              fullPubkey: ev.pubkey,
-              createdAt: Date.now()
-            });
-            onUpdate?.();
+          var d = JSON.parse(ev.content);
+          if (d.text && d.vector){
+            var dup = false;
+            for (var j=0; j<answers.length; j++){ if (answers[j].id === ev.id){ dup = true; break; } }
+            if (!dup){
+              answers.push({
+                id: ev.id,
+                text: d.text,
+                vector: d.vector,
+                peer: ev.pubkey.slice(0, 8),
+                fullPubkey: ev.pubkey,
+                createdAt: Date.now()
+              });
+              if (typeof onUpdate === "function") onUpdate();
+            }
           }
-        } catch {}
+        } catch(_){}
       }
     }
-  };
+  }
 
-  const startHeartbeat = () => {
+  function startHeartbeat(){
     if (heartbeatTimer) clearInterval(heartbeatTimer);
-    heartbeatTimer = setInterval(() => {
-      const now = Date.now();
-      let removed = 0;
-      for (const [pubkey, lastSeen] of peers) {
-        if (now - lastSeen > C.PEER_TTL) {
-          peers.delete(pubkey);
-          removed++;
-        }
-      }
-      setStatus('stPeers',
-        `${peers.size} peer${peers.size !== 1 ? 's' : ''}`,
-        peers.size > 0 ? 'ok' : '');
-      if (removed > 0) onUpdate?.();
-    }, C.HEARTBEAT);
-  };
+    var hb = cfg.get("heartbeat", 30000);
+    var ttl = cfg.get("peerTTL", 60000);
+    heartbeatTimer = setInterval(function(){
+      var now = Date.now();
+      var removed = 0;
+      peers.forEach(function(ts, pubkey){
+        if (now - ts > ttl){ peers.delete(pubkey); removed++; }
+      });
+      if (bus && bus.emit) bus.emit("noo:net:peers", { count: peers.size });
+      if (removed > 0 && typeof onUpdate === "function") onUpdate();
+    }, hb);
+  }
 
   return {
-    init: async (cb) => {
+    init: function(cb){
       onUpdate = cb;
-      try {
-        nostrMod = await import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm');
-      } catch (err) {
-        console.error('[Net] nostr-tools load failed:', err);
+      return Promise.resolve().then(function(){
+        return import("https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm");
+      }).then(function(mod){
+        nostrMod = mod;
+        var KEY = "noomium:sk";
+        var keyHex = null;
+        try { keyHex = localStorage.getItem(KEY); } catch(_){}
+        if (!keyHex){
+          var raw = mod.generateSecretKey();
+          keyHex = Array.from(raw).map(function(b){ return b.toString(16).padStart(2,"0"); }).join("");
+          try { localStorage.setItem(KEY, keyHex); } catch(_){}
+        }
+        sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(function(b){ return parseInt(b, 16); }));
+        pk = mod.getPublicKey(sk);
+        pool = new mod.SimplePool();
+
+        var now = Math.floor(Date.now() / 1000);
+        var room = cfg.get("room", "noomium-core");
+        var K_QUERY = cfg.get("kQuery", 21000);
+        var K_ANSWER = cfg.get("kAnswer", 21001);
+        var subWindow = cfg.get("subWindow", 120);
+
+        try {
+          sub = pool.subscribeMany(cfg.get("relays", []), [{
+            kinds: [K_QUERY, K_ANSWER],
+            "#t": [room],
+            since: now - subWindow
+          }], { onevent: onEvent });
+        } catch(e){ if(log) log.warn("subscribe failed", String(e)); }
+
+        if (bus && bus.emit) bus.emit("noo:net:peers", { count: 0 });
+        startHeartbeat();
+        if (log) log.info("Nostr net started, room=" + room);
+      }).catch(function(err){
+        if (log) log.error("nostr-tools load failed", String(err && err.message || err));
         throw err;
-      }
-
-      let keyHex = localStorage.getItem('noomium_sk');
-      if (!keyHex) {
-        const raw = nostrMod.generateSecretKey();
-        keyHex = Array.from(raw).map(b => b.toString(16).padStart(2, '0')).join('');
-        localStorage.setItem('noomium_sk', keyHex);
-      }
-      sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
-      pk = nostrMod.getPublicKey(sk);
-      pool = new nostrMod.SimplePool();
-
-      const now = Math.floor(Date.now() / 1000);
-      pool.subscribeMany(C.RELAYS, [{
-        kinds: [C.K_QUERY, C.K_ANSWER],
-        '#t': [C.state.room],
-        since: now - C.SUB_WINDOW
-      }], { onevent: onEvent });
-
-      setStatus('stPeers', '0 peers', '');
-      startHeartbeat();
+      });
     },
 
-    send: (vector) => {
+    send: function(vector){
       if (!pool || !nostrMod) return;
-      const now = Date.now();
-      if (now - lastQueryTime < C.QUERY_RATE_LIMIT) return;
+      var now = Date.now();
+      var rate = cfg.get("queryRateLimit", 2000);
+      if (now - lastQueryTime < rate) return;
       lastQueryTime = now;
 
       answers.length = 0;
       try {
-        const ev = nostrMod.finalizeEvent({
-          kind: C.K_QUERY,
+        var ev = nostrMod.finalizeEvent({
+          kind: cfg.get("kQuery", 21000),
           created_at: Math.floor(Date.now() / 1000),
-          tags: [['t', C.state.room]],
-          content: JSON.stringify({ vector })
+          tags: [["t", cfg.get("room", "noomium-core")]],
+          content: JSON.stringify({ vector: vector })
         }, sk);
         queryId = ev.id;
-        pool.publish(C.RELAYS, ev);
-      } catch (err) {
-        console.warn('[Net] publish failed:', err);
-      }
+        pool.publish(cfg.get("relays", []), ev);
+      } catch(e){ if(log) log.warn("publish failed", String(e)); }
     },
 
-    activeAnswers: () => answers.filter(a => peers.has(a.fullPubkey)),
-    peerCount: () => peers.size
-  };
-})();
-
-// === LAYER: UI | MODULE: Renderer ===
-// [MANIFEST] provides: UI { card, render, empty }
-// [RULE] чистый рендер, без бизнес-логики, registry для lookup
-const UI = {
-  registry: new Map(),
-
-  card: (item, type, query) => {
-    UI.registry.set(item.id, item);
-    const isPeer = !!item.peer;
-    const label = isPeer ? `peer · ${item.peer}`
-      : (item.shared ? 'shared' : 'private');
-
-    const score = typeof item.score === 'number'
-      ? (item.score * 100).toFixed(0) + '%'
-      : item.createdAt ? new Date(item.createdAt).toLocaleDateString('ru-RU') : '';
-
-    let html = esc(item.text);
-    if (query) {
-      const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-      for (const w of words) {
-        html = html.replace(new RegExp(`(${escRe(w)})`, 'gi'), '<mark>$1</mark>');
+    activeAnswers: function(){
+      var out = [];
+      for (var i=0; i<answers.length; i++){
+        if (peers.has(answers[i].fullPubkey)) out.push(answers[i]);
       }
-    }
+      return out;
+    },
 
-    const foot = isPeer
-      ? `<div class="card-foot"><span class="card-hint">прочитать · понять · написать своё</span></div>`
-      : `<div class="card-foot">
-          <button class="card-act" data-act="toggle" data-id="${item.id}">${item.shared ? 'скрыть' : 'поделиться'}</button>
-          <button class="card-act" data-act="copy" data-id="${item.id}">копировать</button>
-          <button class="card-act danger" data-act="del" data-id="${item.id}">удалить</button>
-        </div>`;
+    peerCount: function(){ return peers.size; },
 
-    return `<div class="card t-${type}${isPeer ? ' peer' : ''}" data-id="${item.id}">
-      <div class="card-head">
-        <span class="card-tag">${label}</span>
-        <span class="card-score">${score}</span>
-      </div>
-      <div class="card-body">${html}</div>
-      ${foot}
-    </div>`;
-  },
-
-  render: (id, items, type, query) => {
-    const track = document.querySelector(`#${id} .track`);
-    if (!track) return;
-    if (!items.length) {
-      track.innerHTML = '<div class="empty">пусто</div>';
-      return;
-    }
-    track.innerHTML = items.map(i => UI.card(i, type, query)).join('');
-  },
-
-  empty: (id, msg, hint = '') => {
-    const track = document.querySelector(`#${id} .track`);
-    if (track) {
-      track.innerHTML = `<div class="empty">${esc(msg)}${hint ? `<div class="hint">${esc(hint)}</div>` : ''}</div>`;
-    }
-  }
-};
-
-// === LAYER: ENGINE | MODULE: Search ===
-// [MANIFEST] provides: search, renderHistory
-// [RULE] оркестрация поиска по всем дорожкам с вычислением scores
-let lastVec = null;
-let lastText = null;
-
-const search = async () => {
-  const input = document.getElementById('input');
-  const text = input ? input.value.trim() : '';
-
-  if (!text || !AI.ready()) {
-    ['local', 'world', 'seren'].forEach(k => {
-      UI.empty(`c-${k}`, k === 'local' ? 'начните печатать' : '—');
-      const counter = document.getElementById(`cnt${k.charAt(0).toUpperCase() + k.slice(1)}`);
-      if (counter) counter.textContent = '0';
-    });
-    return;
-  }
-
-  const qv = await AI.embed(text);
-  if (!qv) return;
-
-  if (!lastVec || AI.cosine(qv, lastVec) < 0.98) {
-    lastVec = qv;
-    Net.send(qv);
-  }
-
-  const all = await DB.all();
-  const scored = all.filter(n => n.vector).map(n => ({
-    ...n, score: AI.cosine(qv, n.vector)
-  }));
-  const worldScored = Net.activeAnswers().map(a => ({
-    ...a, score: AI.cosine(qv, a.vector)
-  }));
-
-  const TH = C.state.threshold;
-  const SD = C.state.serendipity;
-
-  const local = scored.filter(n => n.score >= TH).sort((a, b) => b.score - a.score);
-  const world = worldScored.filter(n => n.score >= TH).sort((a, b) => b.score - a.score);
-  const seren = [...scored, ...worldScored]
-    .filter(n => n.score >= (TH - SD) && n.score < TH)
-    .sort((a, b) => b.score - a.score);
-
-  UI.render('c-local', local, 'local', text);
-  UI.render('c-world', world, 'world', text);
-  UI.render('c-seren', seren, 'seren', text);
-
-  const setCount = (id, v) => {
-    const el = document.getElementById(id);
-    if (el) el.textContent = v;
-  };
-  setCount('cntLocal', local.length);
-  setCount('cntWorld', world.length);
-  setCount('cntSeren', seren.length);
-};
-
-const renderHistory = async () => {
-  const all = await DB.all();
-  const baseCount = document.getElementById('baseCount');
-  if (baseCount) baseCount.textContent = all.length;
-
-  const searchInput = document.getElementById('histSearch');
-  const sortSelect = document.getElementById('histSort');
-  const q = searchInput ? searchInput.value.trim().toLowerCase() : '';
-  const sort = sortSelect ? sortSelect.value : 'new';
-
-  let list = all.slice();
-  if (q) list = list.filter(n => n.text.toLowerCase().includes(q));
-  if (sort === 'old') list.sort((a, b) => a.createdAt - b.createdAt);
-  else if (sort === 'az') list.sort((a, b) => a.text.localeCompare(b.text, 'ru'));
-  else list.sort((a, b) => b.createdAt - a.createdAt);
-
-  UI.render('c-history', list, 'local', q || null);
-};
-
-// === LAYER: ENGINE | MODULE: Notes ===
-// [MANIFEST] provides: saveNote, onAction, exportData, importData, sanitizeNote
-// [RULE] CRUD для заметок, экспорт/импорт капсул с валидацией и дедупликацией
-const sanitizeNote = (raw) => {
-  if (!raw || typeof raw !== 'object') return null;
-  if (typeof raw.text !== 'string' || raw.text.length > 10000) return null;
-  return {
-    id: typeof raw.id === 'string' ? raw.id : uuid(),
-    text: raw.text.trim(),
-    vector: Array.isArray(raw.vector) ? raw.vector : null,
-    shared: !!raw.shared,
-    createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),
-    hash: typeof raw.hash === 'string' ? raw.hash : fnv1a(raw.text)
-  };
-};
-
-const saveNote = async (shared) => {
-  const input = document.getElementById('input');
-  const text = input ? input.value.trim() : '';
-  if (!text) { toast('пусто', 'err'); return; }
-  if (!AI.ready()) { toast('ИИ не готов', 'err'); return; }
-
-  const vector = await AI.embed(text);
-  await DB.put({
-    id: uuid(),
-    text,
-    vector,
-    shared,
-    createdAt: Date.now(),
-    hash: fnv1a(text)
-  });
-  if (input) input.value = '';
-  lastVec = null;
-  toast(shared ? 'видно узлам' : 'сохранено лично', 'ok');
-  search();
-  renderHistory();
-};
-
-const onAction = async (act, id) => {
-  if (act === 'copy') {
-    const n = await DB.get(id);
-    if (n) {
-      try {
-        await navigator.clipboard.writeText(n.text);
-        flashCopied();
-      } catch {
-        toast('не удалось скопировать', 'err');
-      }
-    }
-  } else if (act === 'del') {
-    if (confirm('удалить заметку?')) {
-      await DB.del(id);
-      toast('удалено', 'info');
-      search();
-      renderHistory();
-    }
-  } else if (act === 'toggle') {
-    const n = await DB.get(id);
-    if (n) {
-      n.shared = !n.shared;
-      await DB.put(n);
-      toast(n.shared ? 'видно миру' : 'скрыто', 'ok');
-      search();
-      renderHistory();
-    }
-  }
-};
-
-const exportData = async () => {
-  const notes = await DB.all();
-  if (!notes.length) { toast('нечего экспортировать', 'err'); return; }
-  const capsule = {
-    app: 'noomium',
-    format: 'noo',
-    version: 1,
-    exportedAt: Date.now(),
-    notes
-  };
-  const blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `noomium-${new Date().toISOString().slice(0, 10)}.noo`;
-  a.click();
-  URL.revokeObjectURL(url);
-  toast(`экспорт: ${notes.length}`, 'ok');
-};
-
-const importData = async (file) => {
-  try {
-    const data = JSON.parse(await file.text());
-    const notes = Array.isArray(data) ? data : data.notes;
-    if (!Array.isArray(notes)) throw new Error('неверный формат');
-
-    const existing = await DB.all();
-    const byHash = new Map(existing.filter(n => n.hash).map(n => [n.hash, n]));
-    const byId = new Map(existing.map(n => [n.id, n]));
-
-    let added = 0, skipped = 0;
-    for (const raw of notes) {
-      const note = sanitizeNote(raw);
-      if (!note) { skipped++; continue; }
-      if (byHash.has(note.hash)) { skipped++; continue; }
-      if (byId.has(note.id) && byId.get(note.id).text === note.text) { skipped++; continue; }
-
-      if (AI.ready() && !note.vector) {
-        try { note.vector = await AI.embed(note.text); } catch {}
-      }
-      await DB.put(note);
-      byHash.set(note.hash, note);
-      byId.set(note.id, note);
-      added++;
-    }
-    toast(`импорт: +${added} / ~${skipped}`, 'ok');
-    search();
-    renderHistory();
-  } catch (e) {
-    toast('импорт: ' + e.message, 'err');
-  }
-};
-
-// === LAYER: UI | MODULE: EventHandlers ===
-// [MANIFEST] provides: bind
-// [RULE] только навешивание DOM-событий, без бизнес-логики
-const bind = () => {
-  const openDrawer = (d) => {
-    const drawer = document.getElementById(d);
-    const overlay = document.getElementById('overlay');
-    if (drawer) drawer.classList.add('open');
-    if (overlay) overlay.classList.add('open');
-  };
-  const closeDrawers = () => {
-    document.querySelectorAll('.drawer').forEach(d => d.classList.remove('open'));
-    const overlay = document.getElementById('overlay');
-    if (overlay) overlay.classList.remove('open');
-  };
-
-  document.querySelectorAll('.tab').forEach(t => {
-    t.onclick = () => {
-      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-      t.classList.add('active');
-      const viewId = `view-${t.dataset.view}`;
-      const view = document.getElementById(viewId);
-      if (view) view.classList.add('active');
-      if (t.dataset.view === 'history') renderHistory();
-    };
-  });
-
-  document.querySelectorAll('.fbtn').forEach(f => {
-    f.onclick = () => {
-      document.querySelectorAll('.fbtn').forEach(x => x.classList.remove('active'));
-      document.querySelectorAll('.carousel').forEach(c => c.classList.remove('active'));
-      f.classList.add('active');
-      const carouselId = `c-${f.dataset.filter}`;
-      const carousel = document.getElementById(carouselId);
-      if (carousel) carousel.classList.add('active');
-    };
-  });
-
-  const input = document.getElementById('input');
-  let debounce = null;
-
-  if (input) {
-    input.addEventListener('input', () => {
-      const text = input.value;
-      const charCount = document.getElementById('charCount');
-      const debounceLabel = document.getElementById('debounce');
-      if (charCount) charCount.textContent = text.length;
-
-      if (text === lastText) return;
-      lastText = text;
-
-      clearTimeout(debounce);
-      if (debounceLabel) debounceLabel.textContent = '...';
-      debounce = setTimeout(() => {
-        if (debounceLabel) debounceLabel.textContent = '';
-        search();
-      }, C.DEBOUNCE);
-    });
-  }
-
-  document.getElementById('btnSavePrivate').onclick = () => saveNote(false);
-  document.getElementById('btnSaveShared').onclick = () => saveNote(true);
-
-  const histSearch = document.getElementById('histSearch');
-  if (histSearch) {
-    histSearch.addEventListener('input', () => {
-      clearTimeout(debounce);
-      debounce = setTimeout(renderHistory, 200);
-    });
-  }
-  const histSort = document.getElementById('histSort');
-  if (histSort) histSort.onchange = renderHistory;
-
-  document.querySelector('.work').addEventListener('click', e => {
-    const el = e.target.closest('[data-act]');
-    if (el) onAction(el.dataset.act, el.dataset.id);
-  });
-
-  document.getElementById('btnSettings').onclick = () => openDrawer('drawer');
-  document.getElementById('btnHelp').onclick = () => openDrawer('helpDrawer');
-  document.getElementById('btnClose').onclick = closeDrawers;
-  document.getElementById('btnCloseHelp').onclick = closeDrawers;
-  document.getElementById('overlay').onclick = closeDrawers;
-
-  const setRoom = document.getElementById('setRoom');
-  const setThresh = document.getElementById('setThresh');
-  const setSeren = document.getElementById('setSeren');
-  const valThresh = document.getElementById('valThresh');
-  const valSeren = document.getElementById('valSeren');
-
-  if (setRoom) setRoom.value = C.state.room;
-  if (setThresh) setThresh.value = C.state.threshold;
-  if (setSeren) setSeren.value = C.state.serendipity;
-  if (valThresh) valThresh.textContent = C.state.threshold.toFixed(2);
-  if (valSeren) valSeren.textContent = C.state.serendipity.toFixed(2);
-
-  if (setThresh) {
-    setThresh.oninput = e => {
-      C.state.threshold = parseFloat(e.target.value);
-      if (valThresh) valThresh.textContent = C.state.threshold.toFixed(2);
-    };
-  }
-  if (setSeren) {
-    setSeren.oninput = e => {
-      C.state.serendipity = parseFloat(e.target.value);
-      if (valSeren) valSeren.textContent = C.state.serendipity.toFixed(2);
-    };
-  }
-
-  document.getElementById('btnApply').onclick = () => {
-    const roomVal = setRoom ? setRoom.value.trim() : '';
-    C.state.room = roomVal || 'noomium-core';
-    saveCfg();
-    location.reload();
-  };
-
-  document.getElementById('btnWipe').onclick = async () => {
-    if (confirm('стереть всю базу? это необратимо.')) {
-      await DB.reset();
-      toast('база стёрта', 'info');
-      setTimeout(() => location.reload(), 500);
+    stop: function(){
+      if (heartbeatTimer){ clearInterval(heartbeatTimer); heartbeatTimer = null; }
+      if (sub && typeof sub.close === "function"){ try{ sub.close(); }catch(_){} }
+      if (pool && typeof pool.close === "function"){ try{ pool.close(); }catch(_){} }
     }
   };
-
-  document.getElementById('btnExport').onclick = exportData;
-  document.getElementById('btnImport').onclick = () => {
-    const f = document.getElementById('importFile');
-    if (f) f.click();
-  };
-  const importFile = document.getElementById('importFile');
-  if (importFile) {
-    importFile.onchange = e => {
-      if (e.target.files[0]) importData(e.target.files[0]);
-      e.target.value = '';
-    };
-  }
-
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeDrawers();
-    if (e.key === '/' && document.activeElement !== input &&
-        !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) {
-      e.preventDefault();
-      if (input) input.focus();
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault();
-      if (document.activeElement === input) saveNote(e.shiftKey);
-    }
-  });
-};
-
-// === LAYER: BOOT | MODULE: Bootstrap ===
-// [MANIFEST] provides: boot
-// [RULE] параллельный запуск всех модулей с изоляцией ошибок
-const boot = async () => {
-  try {
-    bind();
-
-    const progressBar = document.getElementById('modelProgress');
-
-    await Promise.allSettled([
-      DB.all()
-        .then(() => setStatus('stDB', 'DB', 'ok'))
-        .catch((e) => {
-          console.error('[DB]', e);
-          setStatus('stDB', 'DB', 'err');
-        }),
-      AI.load(pct => {
-        if (progressBar) progressBar.style.width = pct + '%';
-        setStatus('stAI', `AI ${Math.round(pct)}%`, 'busy');
-      }).then(() => {
-        if (progressBar) {
-          progressBar.style.width = '100%';
-          setTimeout(() => progressBar.style.opacity = '0', 500);
-        }
-        setStatus('stAI', AI.mode === 'model' ? 'AI' : 'AI·demo', 'ok');
-      }).catch((e) => {
-        console.error('[AI]', e);
-        setStatus('stAI', 'AI', 'err');
-      }),
-      Net.init(() => search())
-        .then(() => setStatus('stNet', 'NET', 'ok'))
-        .catch((e) => {
-          console.error('[Net]', e);
-          setStatus('stNet', 'NET', 'err');
-        })
-    ]);
-
-    UI.empty('c-local', 'начните печатать', 'первые результаты через ~1 сек');
-    UI.empty('c-world', '—');
-    UI.empty('c-seren', '—');
-
-    renderHistory();
-    console.log('[Boot] NOOmium ready');
-  } catch (err) {
-    console.error('[Bootstrap] fatal:', err);
-    toast('критическая ошибка: ' + err.message, 'err');
-  }
-};
-
-boot();
+}
 </script>
+<!-- LOOM:END_MODULE -->
+
+<!-- LOOM:BEGIN_MODULE name="UI.NooStatus" -->
+<script type="application/json" data-role="manifest">
+{"name":"UI.NooStatus","type":"ui","version":"1.0.0","dependsOn":["Core.NooUtils","Core.Bus"],"exports":["mount","set","renderPeers"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"mount":{"args":[{"type":"any"}],"returns":{"type":"void"}},"set":{"args":[{"type":"string"},{"type":"string"},{"type":"string","optional":true}],"returns":{"type":"void"}},"renderPeers":{"args":[{"type":"number"}],"returns":{"type":"void"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var U = ctx.require("Core.NooUtils");
+  var bus = ctx.require("Core.Bus");
+  var root = null;
+
+  return {
+    mount: function(host){
+      root = host;
+      if (!root || !bus) return;
+      bus.on("noo:net:peers", function(p){ renderPeers(p && p.count || 0); });
+    },
+    set: function(id, text, cls){
+      if (!root) return;
+      var el = root.querySelector("#" + id);
+      if (!el) return;
+      el.className = "s " + (cls || "");
+      el.innerHTML = '<span class="dot"></span>' + U.esc(text);
+    },
+    renderPeers: function(n){
+      set("stPeers", n + " peer" + (n !== 1 ? "s" : ""), n > 0 ? "ok" : "");
+    }
+  };
+  function set(id, text, cls){
+    if (!root) return;
+    var el = root.querySelector("#" + id);
+    if (!el) return;
+    el.className = "s " + (cls || "");
+    el.innerHTML = '<span class="dot"></span>' + U.esc(text);
+  }
+}
+</script>
+<!-- LOOM:END_MODULE -->
+
+<!-- LOOM:BEGIN_MODULE name="UI.NooRenderer" -->
+<script type="application/json" data-role="manifest">
+{"name":"UI.NooRenderer","type":"ui","version":"1.0.0","dependsOn":["Core.NooUtils"],"exports":["card","render","empty","lookup"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"card":{"args":[{"type":"object"},{"type":"string"},{"type":"string","optional":true}],"returns":{"type":"string"}},"render":{"args":[{"type":"any"},{"type":"array"},{"type":"string"},{"type":"string","optional":true}],"returns":{"type":"void"}},"empty":{"args":[{"type":"string"},{"type":"string"},{"type":"string","optional":true}],"returns":{"type":"void"}},"lookup":{"args":[{"type":"string"}],"returns":{"type":"object"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var U = ctx.require("Core.NooUtils");
+  var registry = Object.create(null);
+
+  function card(item, type, query){
+    registry[item.id] = item;
+    var isPeer = !!item.peer;
+    var label = isPeer ? ("peer · " + item.peer)
+      : (item.shared ? "shared" : "private");
+    var score = typeof item.score === "number"
+      ? (item.score * 100).toFixed(0) + "%"
+      : (item.createdAt ? new Date(item.createdAt).toLocaleDateString("ru-RU") : "");
+    var html = U.esc(item.text);
+    if (query){
+      var words = query.toLowerCase().split(/\s+/).filter(function(w){ return w.length > 2; });
+      for (var i=0; i<words.length; i++){
+        html = html.replace(new RegExp("(" + U.escRe(words[i]) + ")", "gi"), "<mark>$1</mark>");
+      }
+    }
+    var foot;
+    if (isPeer){
+      foot = '<div class="card-foot"><span class="card-hint">прочитать · понять · написать своё</span></div>';
+    } else {
+      foot = '<div class="card-foot">' +
+        '<button class="card-act" data-act="toggle" data-id="'+item.id+'">'+(item.shared ? "скрыть" : "поделиться")+'</button>' +
+        '<button class="card-act" data-act="copy" data-id="'+item.id+'">копировать</button>' +
+        '<button class="card-act danger" data-act="del" data-id="'+item.id+'">удалить</button>' +
+        '</div>';
+    }
+    return '<div class="card t-'+type+(isPeer?' peer':'')+'" data-id="'+item.id+'">' +
+      '<div class="card-head"><span class="card-tag">'+U.esc(label)+'</span><span class="card-score">'+U.esc(score)+'</span></div>' +
+      '<div class="card-body">'+html+'</div>' +
+      foot +
+      '</div>';
+  }
+
+  function render(id, items, type, query){
+    var track = document.querySelector("#" + id + " .track");
+    if (!track) return;
+    if (!items.length){ track.innerHTML = '<div class="empty">пусто</div>'; return; }
+    track.innerHTML = items.map(function(i){ return card(i, type, query); }).join("");
+  }
+
+  function empty(id, msg, hint){
+    var track = document.querySelector("#" + id + " .track");
+    if (!track) return;
+    track.innerHTML = '<div class="empty">' + U.esc(msg) +
+      (hint ? '<div class="hint">' + U.esc(hint) + '</div>' : '') +
+      '</div>';
+  }
+
+  return { card:card, render:render, empty:empty, lookup:function(id){ return registry[id] || null; } };
+}
+</script>
+<!-- LOOM:BEGIN_MODULE name="UI.NooDrawers" -->
+</script>
+<script type="application/json" data-role="manifest">
+{"name":"UI.NooDrawers","type":"ui","version":"1.0.0","dependsOn":["Core.NooConfig","Core.NooUtils","Core.Bus"],"exports":["mount","open","close","bindSettings"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"mount":{"args":[{"type":"any"}],"returns":{"type":"void"}},"open":{"args":[{"type":"string"}],"returns":{"type":"void"}},"close":{"args":[],"returns":{"type":"void"}},"bindSettings":{"args":[{"type":"function"},{"type":"function"},{"type":"function"}],"returns":{"type":"void"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var cfg = ctx.require("Core.NooConfig");
+  var U = ctx.require("Core.NooUtils");
+  var bus = ctx.require("Core.Bus");
+  var root = null;
+
+  function openDrawer(id){
+    if (!root) return;
+    var d = root.querySelector("#" + id);
+    var o = root.querySelector("#overlay");
+    if (d) d.classList.add("open");
+    if (o) o.classList.add("open");
+  }
+  function closeDrawers(){
+    if (!root) return;
+    var ds = root.querySelectorAll(".drawer");
+    for (var i=0; i<ds.length; i++) ds[i].classList.remove("open");
+    var o = root.querySelector("#overlay");
+    if (o) o.classList.remove("open");
+  }
+
+  return {
+    mount: function(host){ root = host; },
+    open: openDrawer,
+    close: closeDrawers,
+    bindSettings: function(onApply, onWipe, onToast){
+      if (!root) return;
+      var setRoom    = root.querySelector("#setRoom");
+      var setThresh  = root.querySelector("#setThresh");
+      var setSeren   = root.querySelector("#setSeren");
+      var valThresh  = root.querySelector("#valThresh");
+      var valSeren   = root.querySelector("#valSeren");
+
+      if (setRoom)   setRoom.value   = cfg.get("room", "noomium-core");
+      if (setThresh) setThresh.value = cfg.get("threshold", 0.30);
+      if (setSeren)  setSeren.value  = cfg.get("serendipity", 0.15);
+      if (valThresh) valThresh.textContent = Number(cfg.get("threshold", 0.30)).toFixed(2);
+      if (valSeren)  valSeren.textContent  = Number(cfg.get("serendipity", 0.15)).toFixed(2);
+
+      if (setThresh){
+        setThresh.oninput = function(e){
+          var v = parseFloat(e.target.value);
+          cfg.set("threshold", v);
+          if (valThresh) valThresh.textContent = v.toFixed(2);
+        };
+      }
+      if (setSeren){
+        setSeren.oninput = function(e){
+          var v = parseFloat(e.target.value);
+          cfg.set("serendipity", v);
+          if (valSeren) valSeren.textContent = v.toFixed(2);
+        };
+      }
+
+      var applyBtn = root.querySelector("#btnApply");
+      if (applyBtn) applyBtn.onclick = function(){
+        var roomVal = setRoom ? setRoom.value.trim() : "";
+        cfg.set("room", roomVal || "noomium-core");
+        cfg.save();
+        if (typeof onApply === "function") onApply();
+      };
+      var wipeBtn = root.querySelector("#btnWipe");
+      if (wipeBtn) wipeBtn.onclick = function(){
+        if (typeof onWipe === "function") onWipe();
+      };
+    }
+  };
+}
+</script>
+<!-- LOOM:END_MODULE -->
+
+<!-- LOOM:BEGIN_MODULE name="App.NOOmium" -->
+<script type="application/json" data-role="manifest">
+{"name":"App.NOOmium","type":"app","version":"1.0.0","dependsOn":["Core.Logger","Core.Bus","Core.Store","Core.NooConfig","Core.NooUtils","Core.NooDB","Core.NooAI","Core.NooNet","UI.NooStatus","UI.NooRenderer","UI.NooDrawers","UI.Toast"],"exports":["mount","unmount"]}
+</script>
+<script type="application/json" data-role="contract">
+{"$schema":"loom.contract/1","functions":{"mount":{"args":[],"returns":{"type":"void"}},"unmount":{"args":[],"returns":{"type":"void"}}}}
+</script>
+<script type="text/loom-module" data-role="code">
+function Module(ctx){
+  var log      = ctx.require("Core.Logger");
+  var bus      = ctx.require("Core.Bus");
+  var Toast    = ctx.require("UI.Toast");
+  var cfg      = ctx.require("Core.NooConfig");
+  var U        = ctx.require("Core.NooUtils");
+  var DB       = ctx.require("Core.NooDB");
+  var AI       = ctx.require("Core.NooAI");
+  var Net      = ctx.require("Core.NooNet");
+  var Status   = ctx.require("UI.NooStatus");
+  var Renderer = ctx.require("UI.NooRenderer");
+  var Drawers  = ctx.require("UI.NooDrawers");
+
+  var lastVec = null;
+  var lastText = null;
+  var searchTimer = null;
+  var histTimer = null;
+  var bound = false;
+  var keyHandler = null;
+
+  function flashCopied(){
+    var el = document.querySelector("#copiedFlash");
+    if (!el) return;
+    el.classList.add("show");
+    setTimeout(function(){ el.classList.remove("show"); }, 800);
+  }
+  function toast(msg, type){
+    if (Toast && type === "ok" && Toast.success)       return Toast.success(msg);
+    if (Toast && type === "err" && Toast.error)        return Toast.error(msg);
+    if (Toast && type === "info" && Toast.info)        return Toast.info(msg);
+    if (Toast && Toast.show) return Toast.show(type || "", msg);
+  }
+
+  function markup(){
+    return '' +
+      '<header class="topbar">' +
+        '<div class="brand">NOOmium</div>' +
+        '<div class="spacer"></div>' +
+        '<button class="icon-btn" id="btnHelp" title="Как это работает">?</button>' +
+        '<button class="icon-btn" id="btnSettings" title="Настройки">⚙</button>' +
+      '</header>' +
+
+      '<div class="status">' +
+        '<span class="s busy" id="stDB"><span class="dot"></span>DB</span>' +
+        '<span class="s busy" id="stAI"><span class="dot"></span>AI</span>' +
+        '<span class="s busy" id="stNet"><span class="dot"></span>NET</span>' +
+        '<span class="s" id="stPeers"><span class="dot"></span>0 peers</span>' +
+      '</div>' +
+
+      '<nav class="tabs">' +
+        '<button class="tab active" data-view="stream">Поток</button>' +
+        '<button class="tab" data-view="history">База <span class="n" id="baseCount">0</span></button>' +
+      '</nav>' +
+
+      '<main class="work">' +
+        '<section class="view active" id="view-stream">' +
+          '<div class="editor">' +
+            '<textarea id="input" placeholder="О чём думаешь?" autocomplete="off" autocapitalize="sentences"></textarea>' +
+            '<div class="editor-meta"><span id="charCount">0</span><span id="debounce"></span></div>' +
+            '<div class="editor-btns">' +
+              '<button class="btn" id="btnSavePrivate">Сохранить лично</button>' +
+              '<button class="btn btn-primary" id="btnSaveShared">Поделиться P2P</button>' +
+            '</div>' +
+            '<div class="progress-bar"><div class="fill" id="modelProgress"></div></div>' +
+          '</div>' +
+          '<div class="filters">' +
+            '<button class="fbtn active" data-filter="local">Локально <span class="n" id="cntLocal">0</span></button>' +
+            '<button class="fbtn" data-filter="world">Мир <span class="n" id="cntWorld">0</span></button>' +
+            '<button class="fbtn" data-filter="seren">Озарения <span class="n" id="cntSeren">0</span></button>' +
+          '</div>' +
+          '<div class="carousel active" id="c-local"><div class="track"></div></div>' +
+          '<div class="carousel" id="c-world"><div class="track"></div></div>' +
+          '<div class="carousel" id="c-seren"><div class="track"></div></div>' +
+        '</section>' +
+
+        '<section class="view" id="view-history">' +
+          '<div class="hist-bar">' +
+            '<input type="text" id="histSearch" placeholder="Поиск по базе…">' +
+            '<select id="histSort"><option value="new">Новые</option><option value="old">Старые</option><option value="az">А→Я</option></select>' +
+          '</div>' +
+          '<div class="carousel active" id="c-history"><div class="track"></div></div>' +
+        '</section>' +
+      '</main>' +
+
+      '<div class="overlay" id="overlay"></div>' +
+
+      '<aside class="drawer" id="drawer">' +
+        '<h3>Настройки <button class="close" id="btnClose">×</button></h3>' +
+        '<div class="field"><label>Комната (Nostr topic)</label><input type="text" id="setRoom" placeholder="noomium-core"><div class="hint">Узлы в одной комнате слышат вас.</div></div>' +
+        '<div class="field"><div class="row"><label>Порог совпадения</label><span class="val" id="valThresh">0.30</span></div><input type="range" id="setThresh" min="0.1" max="0.7" step="0.05"></div>' +
+        '<div class="field"><div class="row"><label>Дельта озарений</label><span class="val" id="valSeren">0.15</span></div><input type="range" id="setSeren" min="0.05" max="0.3" step="0.01"></div>' +
+        '<div class="section">Капсулы .noo</div>' +
+        '<div class="field"><div class="btn-row"><button class="btn" id="btnExport">Экспорт</button><button class="btn" id="btnImport">Импорт</button></div><input type="file" id="importFile" accept=".noo,.json" style="display:none"><div class="hint">Дубли по хэшу текста пропускаются автоматически.</div></div>' +
+        '<div class="section">Опасно</div>' +
+        '<div class="field"><button class="btn" id="btnApply" style="width:100%;margin-bottom:8px;">Применить и перезагрузить</button><button class="btn" id="btnWipe" style="width:100%;color:var(--err);">Стереть базу</button></div>' +
+      '</aside>' +
+
+      '<aside class="drawer" id="helpDrawer">' +
+        '<h3>Как это работает <button class="close" id="btnCloseHelp">×</button></h3>' +
+        '<p style="color:var(--dim);line-height:1.6;margin-bottom:14px;">NOOmium превращает мысль в вектор и ищет резонанс в вашей базе и у других узлов в комнате.</p>' +
+        '<div class="section">Дорожки</div>' +
+        '<p style="color:var(--dim);line-height:1.6;margin-bottom:8px;"><b style="color:var(--accent)">Локально</b> — точные совпадения в вашей базе.</p>' +
+        '<p style="color:var(--dim);line-height:1.6;margin-bottom:8px;"><b style="color:var(--world)">Мир</b> — совпадения от активных узлов (пока они в сети).</p>' +
+        '<p style="color:var(--dim);line-height:1.6;margin-bottom:8px;"><b style="color:var(--seren)">Озарения</b> — близкие, но не точные мысли.</p>' +
+        '<div class="section">Эфемерность</div>' +
+        '<p style="color:var(--dim);line-height:1.6;margin-bottom:8px;">Запросы и ответы живут ~2 минуты. Заметки не хранятся на серверах — только у вас и у того, кто поделился.</p>' +
+        '<p style="color:var(--dim);line-height:1.6;margin-bottom:8px;">Выдача «Мира» живая: peer вышел — его карточки исчезают при следующем обновлении.</p>' +
+        '<div class="section">Горячие клавиши</div>' +
+        '<p style="color:var(--dim);font:12px var(--mono);margin-bottom:4px;">Ctrl+Enter — сохранить</p>' +
+        '<p style="color:var(--dim);font:12px var(--mono);margin-bottom:4px;">Ctrl+Shift+Enter — поделиться</p>' +
+        '<p style="color:var(--dim);font:12px var(--mono);margin-bottom:4px;">/ — в редактор</p>' +
+        '<p style="color:var(--dim);font:12px var(--mono);">Esc — закрыть панели</p>' +
+      '</aside>' +
+
+      '<div class="copied-flash" id="copiedFlash">✓ скопировано</div>';
+  }
+
+  function search(){
+    var input = document.querySelector("#input");
+    var text = input ? input.value.trim() : "";
+    if (!text || !AI.ready()){
+      ["local","world","seren"].forEach(function(k){
+        Renderer.empty("c-" + k, k === "local" ? "начните печатать" : "—");
+        var c = document.querySelector("#cnt" + k.charAt(0).toUpperCase() + k.slice(1));
+        if (c) c.textContent = "0";
+      });
+      return Promise.resolve();
+    }
+    return AI.embed(text).then(function(qv){
+      if (!qv) return;
+      if (!lastVec || AI.cosine(qv, lastVec) < 0.98){
+        lastVec = qv;
+        Net.send(qv);
+      }
+      return DB.all().then(function(all){
+        var scored = [];
+        for (var i=0; i<all.length; i++){
+          var n = all[i];
+          if (n.vector) scored.push(Object.assign({}, n, { score: AI.cosine(qv, n.vector) }));
+        }
+        var worldScored = Net.activeAnswers().map(function(a){
+          return Object.assign({}, a, { score: AI.cosine(qv, a.vector) });
+        });
+        var TH = cfg.get("threshold", 0.30);
+        var SD = cfg.get("serendipity", 0.15);
+        var local = scored.filter(function(n){ return n.score >= TH; }).sort(function(a,b){ return b.score - a.score; });
+        var world = worldScored.filter(function(n){ return n.score >= TH; }).sort(function(a,b){ return b.score - a.score; });
+        var seren = scored.concat(worldScored)
+          .filter(function(n){ return n.score >= (TH - SD) && n.score < TH; })
+          .sort(function(a,b){ return b.score - a.score; });
+        Renderer.render("c-local", local, "local", text);
+        Renderer.render("c-world", world, "world", text);
+        Renderer.render("c-seren", seren, "seren", text);
+        function setC(id, v){ var el = document.querySelector("#" + id); if (el) el.textContent = String(v); }
+        setC("cntLocal", local.length);
+        setC("cntWorld", world.length);
+        setC("cntSeren", seren.length);
+      });
+    });
+  }
+
+  function renderHistory(){
+    return DB.all().then(function(all){
+      var bc = document.querySelector("#baseCount");
+      if (bc) bc.textContent = String(all.length);
+      var sI = document.querySelector("#histSearch");
+      var sS = document.querySelector("#histSort");
+      var q = sI ? sI.value.trim().toLowerCase() : "";
+      var sort = sS ? sS.value : "new";
+      var list = all.slice();
+      if (q) list = list.filter(function(n){ return n.text.toLowerCase().indexOf(q) >= 0; });
+      if (sort === "old") list.sort(function(a,b){ return a.createdAt - b.createdAt; });
+      else if (sort === "az") list.sort(function(a,b){ return a.text.localeCompare(b.text, "ru"); });
+      else list.sort(function(a,b){ return b.createdAt - a.createdAt; });
+      Renderer.render("c-history", list, "local", q || null);
+    });
+  }
+
+  function sanitizeNote(raw){
+    if (!raw || typeof raw !== "object") return null;
+    if (typeof raw.text !== "string" || raw.text.length > 10000) return null;
+    return {
+      id: typeof raw.id === "string" ? raw.id : U.uuid(),
+      text: raw.text.trim(),
+      vector: Array.isArray(raw.vector) ? raw.vector : null,
+      shared: !!raw.shared,
+      createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now(),
+      hash: typeof raw.hash === "string" ? raw.hash : U.fnv1a(raw.text)
+    };
+  }
+
+  function saveNote(shared){
+    var input = document.querySelector("#input");
+    var text = input ? input.value.trim() : "";
+    if (!text){ toast("пусто", "err"); return; }
+    if (!AI.ready()){ toast("ИИ не готов", "err"); return; }
+    AI.embed(text).then(function(vector){
+      return DB.put({
+        id: U.uuid(),
+        text: text,
+        vector: vector,
+        shared: !!shared,
+        createdAt: Date.now(),
+        hash: U.fnv1a(text)
+      });
+    }).then(function(){
+      if (input) input.value = "";
+      lastVec = null;
+      toast(shared ? "видно узлам" : "сохранено лично", "ok");
+      search();
+      renderHistory();
+    }).catch(function(e){ toast("ошибка: " + (e && e.message || e), "err"); });
+  }
+
+  function onAction(act, id){
+    if (act === "copy"){
+      DB.get(id).then(function(n){
+        if (!n) return;
+        try {
+          navigator.clipboard.writeText(n.text).then(flashCopied);
+        } catch(e){ toast("не удалось скопировать", "err"); }
+      });
+    } else if (act === "del"){
+      if (!confirm("удалить заметку?")) return;
+      DB.del(id).then(function(){
+        toast("удалено", "info");
+        search();
+        renderHistory();
+      });
+    } else if (act === "toggle"){
+      DB.get(id).then(function(n){
+        if (!n) return;
+        n.shared = !n.shared;
+        return DB.put(n).then(function(){
+          toast(n.shared ? "видно миру" : "скрыто", "ok");
+          search();
+          renderHistory();
+        });
+      });
+    }
+  }
+
+  function exportData(){
+    DB.all().then(function(notes){
+      if (!notes.length){ toast("нечего экспортировать", "err"); return; }
+      var capsule = {
+        app: "noomium", format: "noo", version: 1,
+        exportedAt: Date.now(), notes: notes
+      };
+      var blob = new Blob([JSON.stringify(capsule, null, 2)], { type: "application/json" });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement("a");
+      a.href = url;
+      a.download = "noomium-" + new Date().toISOString().slice(0,10) + ".noo";
+      document.body.appendChild(a); a.click();
+      URL.revokeObjectURL(url); a.remove();
+      toast("экспорт: " + notes.length, "ok");
+    });
+  }
+
+  function importData(file){
+    var reader = new FileReader();
+    reader.onload = function(){
+      try {
+        var data = JSON.parse(String(reader.result || "{}"));
+        var notes = Array.isArray(data) ? data : data.notes;
+        if (!Array.isArray(notes)) throw new Error("неверный формат");
+        DB.all().then(function(existing){
+          var byHash = Object.create(null);
+          var byId = Object.create(null);
+          existing.forEach(function(n){
+            if (n.hash) byHash[n.hash] = n;
+            byId[n.id] = n;
+          });
+          var added = 0, skipped = 0;
+          function step(i){
+            if (i >= notes.length){
+              toast("импорт: +" + added + " / ~" + skipped, "ok");
+              search(); renderHistory();
+              return;
+            }
+            var note = sanitizeNote(notes[i]);
+            if (!note){ skipped++; return step(i+1); }
+            if (byHash[note.hash]){ skipped++; return step(i+1); }
+            if (byId[note.id] && byId[note.id].text === note.text){ skipped++; return step(i+1); }
+            var p;
+            if (AI.ready() && !note.vector){
+              p = AI.embed(note.text).then(function(v){ note.vector = v; });
+            } else {
+              p = Promise.resolve();
+            }
+            p.then(function(){
+              return DB.put(note);
+            }).then(function(){
+              if (note.hash) byHash[note.hash] = note;
+              byId[note.id] = note;
+              added++;
+              step(i+1);
+            }).catch(function(){ skipped++; step(i+1); });
+          }
+          step(0);
+        });
+      } catch(e){
+        toast("импорт: " + e.message, "err");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function bind(root){
+    if (bound) return;
+    bound = true;
+
+    Status.mount(root);
+    Drawers.mount(root);
+
+    Drawers.bindSettings(
+      function(){ location.reload(); },
+      function(){
+        if (!confirm("стереть всю базу? это необратимо.")) return;
+        DB.reset().then(function(){
+          toast("база стёрта", "info");
+          setTimeout(function(){ location.reload(); }, 500);
+        });
+      },
+      toast
+    );
+
+    var tabs = root.querySelectorAll(".tab");
+    for (var i=0; i<tabs.length; i++){
+      tabs[i].onclick = function(e){
+        var t = e.currentTarget;
+        var ts = root.querySelectorAll(".tab");
+        for (var j=0; j<ts.length; j++) ts[j].classList.remove("active");
+        var vs = root.querySelectorAll(".view");
+        for (var j=0; j<vs.length; j++) vs[j].classList.remove("active");
+        t.classList.add("active");
+        var v = root.querySelector("#view-" + t.getAttribute("data-view"));
+        if (v) v.classList.add("active");
+        if (t.getAttribute("data-view") === "history") renderHistory();
+      };
+    }
+    var fbtns = root.querySelectorAll(".fbtn");
+    for (var i=0; i<fbtns.length; i++){
+      fbtns[i].onclick = function(e){
+        var f = e.currentTarget;
+        var fs = root.querySelectorAll(".fbtn");
+        for (var j=0; j<fs.length; j++) fs[j].classList.remove("active");
+        var cs = root.querySelectorAll(".carousel");
+        for (var j=0; j<cs.length; j++) cs[j].classList.remove("active");
+        f.classList.add("active");
+        var c = root.querySelector("#c-" + f.getAttribute("data-filter"));
+        if (c) c.classList.add("active");
+      };
+    }
+
+    var input = root.querySelector("#input");
+    if (input){
+      input.addEventListener("input", function(){
+        var text = input.value;
+        var charCount = root.querySelector("#charCount");
+        var debounce = root.querySelector("#debounce");
+        if (charCount) charCount.textContent = String(text.length);
+        if (text === lastText) return;
+        lastText = text;
+        if (searchTimer) clearTimeout(searchTimer);
+        if (debounce) debounce.textContent = "...";
+        searchTimer = setTimeout(function(){
+          if (debounce) debounce.textContent = "";
+          search();
+        }, cfg.get("debounce", 800));
+      });
+    }
+
+    var bsp = root.querySelector("#btnSavePrivate"); if (bsp) bsp.onclick = function(){ saveNote(false); };
+    var bss = root.querySelector("#btnSaveShared"); if (bss) bss.onclick = function(){ saveNote(true); };
+
+    var hs = root.querySelector("#histSearch");
+    if (hs) hs.addEventListener("input", function(){
+      if (histTimer) clearTimeout(histTimer);
+      histTimer = setTimeout(renderHistory, 200);
+    });
+    var hsort = root.querySelector("#histSort");
+    if (hsort) hsort.onchange = renderHistory;
+
+    root.querySelector(".work").addEventListener("click", function(e){
+      var el = e.target.closest("[data-act]");
+      if (el) onAction(el.getAttribute("data-act"), el.getAttribute("data-id"));
+    });
+
+    var bs = root.querySelector("#btnSettings"); if (bs) bs.onclick = function(){ Drawers.open("drawer"); };
+    var bh = root.querySelector("#btnHelp");     if (bh) bh.onclick = function(){ Drawers.open("helpDrawer"); };
+    var bc = root.querySelector("#btnClose");     if (bc) bc.onclick = function(){ Drawers.close(); };
+    var bch= root.querySelector("#btnCloseHelp"); if (bch)bch.onclick= function(){ Drawers.close(); };
+    var ov = root.querySelector("#overlay");      if (ov) ov.onclick = function(){ Drawers.close(); };
+
+    var be = root.querySelector("#btnExport"); if (be) be.onclick = exportData;
+    var bi = root.querySelector("#btnImport");
+    var fi = root.querySelector("#importFile");
+    if (bi) bi.onclick = function(){ if (fi) fi.click(); };
+    if (fi) fi.onchange = function(e){
+      if (e.target.files && e.target.files[0]) importData(e.target.files[0]);
+      e.target.value = "";
+    };
+
+    keyHandler = function(e){
+      if (e.key === "Escape") Drawers.close();
+      if (e.key === "/" && document.activeElement !== input &&
+          !/^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement && document.activeElement.tagName) || "")){
+        e.preventDefault();
+        if (input) input.focus();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter"){
+        e.preventDefault();
+        if (document.activeElement === input) saveNote(e.shiftKey);
+      }
+    };
+    document.addEventListener("keydown", keyHandler);
+
+    AI.onProgress(function(pct){
+      var bar = root.querySelector("#modelProgress");
+      if (bar) bar.style.width = pct + "%";
+      Status.set("stAI", "AI " + Math.round(pct) + "%", "busy");
+    });
+  }
+
+  function boot(root){
+    DB.all().then(function(){
+      Status.set("stDB", "DB", "ok");
+    }).catch(function(e){
+      if (log) log.error("DB", String(e && e.message || e));
+      Status.set("stDB", "DB", "err");
+    });
+
+    AI.load().then(function(){
+      var bar = root.querySelector("#modelProgress");
+      if (bar){
+        bar.style.width = "100%";
+        setTimeout(function(){ bar.style.opacity = "0"; }, 500);
+      }
+      Status.set("stAI", AI.getMode() === "model" ? "AI" : "AI·demo", "ok");
+    }).catch(function(e){
+      if (log) log.error("AI", String(e && e.message || e));
+      Status.set("stAI", "AI", "err");
+    });
+
+    Net.init(function(){ search(); }).then(function(){
+      Status.set("stNet", "NET", "ok");
+    }).catch(function(e){
+      if (log) log.error("Net", String(e && e.message || e));
+      Status.set("stNet", "NET", "err");
+    });
+
+    Renderer.empty("c-local", "начните печатать", "первые результаты через ~1 сек");
+    Renderer.empty("c-world", "—");
+    Renderer.empty("c-seren", "—");
+    renderHistory();
+    if (log) log.info("NOOmium ready");
+  }
+
+  return {
+    mount: function(){
+      var root = document.getElementById("app-root");
+      if (!root) return;
+      root.innerHTML = markup();
+      bind(root);
+      boot(root);
+    },
+    unmount: function(){
+      if (keyHandler){ document.removeEventListener("keydown", keyHandler); keyHandler = null; }
+      if (searchTimer) clearTimeout(searchTimer);
+      if (histTimer) clearTimeout(histTimer);
+      Net.stop();
+      var root = document.getElementById("app-root");
+      if (root) root.innerHTML = "";
+      bound = false;
+    }
+  };
+}
+</script>
+<!-- LOOM:END_MODULE -->
+
+<!-- LOOM:BEGIN_BOOTLOADER -->
+<script id="LOOM_BOOT" data-version="2.5.0">
+(function(){
+function parseJSONById(id, def){
+try { var el = document.getElementById(id); return el ? JSON.parse(el.textContent || "{}") : (def||{}); }
+catch(e){ console.error("JSON parse error", id, e); return def||{}; }
+}
+var meta = parseJSONById("LOOM_META", {});
+var guide = parseJSONById("LOOM_GUIDE", {});
+var order = (meta.conventions && meta.conventions.loadOrder) || ["core","build","ui","app"];
+var runProfile = (meta && meta.protected && meta.protected.runProfile) || "ide";
+var entryApp = (meta && meta.protected && meta.protected.entryApp) || "";
+var registry = new Map();
+var defs = [];
+var stubLog = {
+getHistory: function(){ return []; }, setLevel: function(){},
+log: function(_,m,d){ console.log("[Loom]", m, d||""); },
+info: function(m,d){ console.info("[Loom]", m, d||""); },
+warn: function(m,d){ console.warn("[Loom]", m, d||""); },
+error: function(m,d){ console.error("[Loom]", m, d||""); }
+};
+var busStub = { on:function(){}, off:function(){}, emit:function(){} };
+function findBeginComment(node){
+var p = node ? node.previousSibling : null;
+while(p){ if (p.nodeType===8 && (p.nodeValue||"").indexOf("LOOM:BEGIN_MODULE")>=0) return p; p = p.previousSibling; }
+return null;
+}
+function findEndComment(node){
+var n = node ? node.nextSibling : null;
+while(n){ if (n.nodeType===8 && (n.nodeValue||"").indexOf("LOOM:END_MODULE")>=0) return n; n = n.nextSibling; }
+return null;
+}
+var ctx = {
+meta: meta, guide: guide,
+log: stubLog, bus: busStub, store: null,
+health: { run: function(){ return []; }, preflight:function(){return [];} },
+require: function(n){ var e = registry.get(n); return e ? e.exports : null; },
+modules: {
+list: function(){ return defs.map(function(d){ return { name: d.manifest.name, type: d.manifest.type, version: d.manifest.version, manifest: d.manifest }; }); },
+exists: function(n){ return defs.some(function(x){ return x.manifest && x.manifest.name === n; }); },
+hasDef: function(n){ return defs.some(function(x){ return x.manifest && x.manifest.name === n; }); },
+existsCompiled: function(n){ return registry.has(n); },
+getDef: function(n){
+var d = defs.find(function(x){ return x.manifest.name === n; });
+return d ? { manifest: d.manifest, contract: d.contract, code: d.code } : null;
+},
+setDef: function(n, u){
+var d = defs.find(function(x){ return x.manifest.name === n; });
+if (!d) return false;
+if (u && u.manifest && u.manifest.name && u.manifest.name !== n){
+console.warn("setDef rename rejected; use add+remove for renaming"); return false;
+}
+d.manifest = u.manifest; d.contract = u.contract; d.code = u.code;
+d.tags.man.textContent = JSON.stringify(u.manifest);
+d.tags.con.textContent = JSON.stringify(u.contract);
+d.tags.code.textContent = u.code;
+compileOne(d);
+updateGlobals();
+try{ ctx.bus.emit("modules:setDef", { name: n, def: u }); }catch(_){}
+return true;
+},
+add: function(u){
+var name = u && u.manifest && u.manifest.name;
+if (!name){ console.warn("Add rejected: no manifest.name"); return false; }
+if (defs.some(function(x){ return x.manifest && x.manifest.name === name; })){
+console.warn("Add rejected: duplicate module", name); return false;
+}
+var before = document.getElementById("LOOM_BOOT");
+var frag = document.createDocumentFragment();
+var capStart = document.createComment(' LOOM:BEGIN_MODULE name="'+name+'" ');
+var man = document.createElement("script"); man.type="application/json"; man.setAttribute("data-role","manifest"); man.textContent = JSON.stringify(u.manifest);
+var con = document.createElement("script"); con.type="application/json"; con.setAttribute("data-role","contract"); con.textContent = JSON.stringify(u.contract);
+var code = document.createElement("script"); code.type="text/loom-module"; code.setAttribute("data-role","code"); code.textContent = u.code;
+var capEnd = document.createComment(" LOOM:END_MODULE ");
+frag.appendChild(capStart); frag.appendChild(man); frag.appendChild(con); frag.appendChild(code); frag.appendChild(capEnd);
+before.parentNode.insertBefore(frag, before);
+var d = { manifest: u.manifest, contract: u.contract, code: u.code, tags: { start: capStart, man: man, con: con, code: code, end: capEnd } };
+defs.push(d); compileOne(d); updateGlobals();
+try{ ctx.bus.emit("modules:add", { name: name, def: u }); }catch(_){}
+return true;
+},
+remove: function(n){
+var i = defs.findIndex(function(x){ return x.manifest.name === n; });
+if (i < 0) return false;
+var d = defs[i];
+try{
+if (d.tags.start) d.tags.start.remove();
+if (d.tags.man) d.tags.man.remove();
+if (d.tags.con) d.tags.con.remove();
+if (d.tags.code) d.tags.code.remove();
+if (d.tags.end) d.tags.end.remove();
+}catch(e){
+try{
+var startC = findBeginComment(d.tags.man||{});
+var endC = findEndComment(d.tags.code||{});
+if (startC) startC.remove();
+if (d.tags.man) d.tags.man.remove();
+if (d.tags.con) d.tags.con.remove();
+if (d.tags.code) d.tags.code.remove();
+if (endC) endC.remove();
+}catch(_){}
+}
+defs.splice(i,1); registry.delete(n); updateGlobals();
+try{ ctx.bus.emit("modules:remove", { name: n }); }catch(_){}
+return true;
+}
+}
+};
+function nextByRole(start, role){
+var el = start.nextElementSibling;
+while (el) {
+if (el.tagName === "SCRIPT" && el.getAttribute("data-role") === role) return el;
+el = el.nextElementSibling;
+}
+return null;
+}
+function collect(){
+defs.length = 0;
+var mans = Array.prototype.slice.call(document.querySelectorAll('script[type="application/json"][data-role="manifest"]'));
+for (var i=0; i<mans.length; i++){
+try {
+var man = mans[i];
+var manifest = JSON.parse(man.textContent || "{}");
+var con = nextByRole(man, "contract");
+var code = nextByRole(man, "code");
+var startC = findBeginComment(man);
+var endC = findEndComment(code);
+defs.push({
+manifest: manifest,
+contract: con ? JSON.parse(con.textContent || "{}") : {},
+code: code ? code.textContent : "function Module(ctx){ return {}; }",
+tags: { start: startC, man: man, con: con, code: code, end: endC }
+});
+} catch(e) { console.error("Bad capsule", e); }
+}
+}
+function compileOne(d){
+try {
+var factory = new Function("ctx", d.code + "\nreturn Module(ctx);");
+var exp = factory(ctx);
+registry.set(d.manifest.name, { def: d, exports: exp });
+try{
+if (d.manifest.name==="Core.Logger") ctx.log = exp || ctx.log;
+else if (d.manifest.name==="Core.Bus") ctx.bus = exp || ctx.bus;
+else if (d.manifest.name==="Core.Store") ctx.store = exp || ctx.store;
+else if (d.manifest.name==="Build.Health") ctx.health = exp || ctx.health;
+}catch(_){}
+return true;
+} catch(e) {
+console.error("Compile error", d.manifest && d.manifest.name, e);
+return false;
+}
+}
+function topoSort(items){
+var nameToItem = Object.create(null);
+var indeg = Object.create(null);
+var adj = Object.create(null);
+function typeIdx(it){
+var t = (it.manifest && it.manifest.type) || "";
+var idx = order.indexOf(t); return idx<0?99:idx;
+}
+items.forEach(function(it){
+var n = it.manifest.name;
+nameToItem[n] = it; indeg[n]=0; adj[n]=[];
+});
+items.forEach(function(it){
+var deps = (it.manifest && it.manifest.dependsOn) || [];
+var n = it.manifest.name;
+for (var i=0;i<deps.length;i++){
+var dep = deps[i];
+if (nameToItem[dep]){ indeg[n]++; adj[dep].push(n); }
+}
+});
+var queue = Object.keys(nameToItem).filter(function(n){ return indeg[n]===0; });
+queue.sort(function(a,b){
+var da = typeIdx(nameToItem[a]) - typeIdx(nameToItem[b]); if (da!==0) return da;
+return a.localeCompare(b);
+});
+var out=[];
+while(queue.length){
+var n = queue.shift();
+out.push(nameToItem[n]);
+var arr = adj[n]||{};
+for (var i=0;i<(arr.length||0);i++){
+var m = arr[i]; indeg[m]--;
+if (indeg[m]===0){ queue.push(m); }
+}
+queue.sort(function(a,b){
+var da = typeIdx(nameToItem[a]) - typeIdx(nameToItem[b]); if (da!==0) return da;
+return a.localeCompare(b);
+});
+}
+if (out.length < items.length){
+console.warn("Dependency cycle or unresolved deps, fallback ordering by type/name");
+var rest = items.filter(function(it){ return out.indexOf(it)<0; });
+rest.sort(function(a,b){
+var da = typeIdx(a) - typeIdx(b); if (da!==0) return da;
+return (a.manifest.name||"").localeCompare(b.manifest.name||"");
+});
+out = out.concat(rest);
+}
+return out;
+}
+function compileAll(){
+var items = topoSort(defs.slice());
+registry.clear();
+for (var i=0;i<items.length;i++){ compileOne(items[i]); }
+var logger = registry.has("Core.Logger") && registry.get("Core.Logger").exports; if (logger) ctx.log = logger;
+var bus = registry.has("Core.Bus") && registry.get("Core.Bus").exports; if (bus) ctx.bus = bus;
+var store = registry.has("Core.Store") && registry.get("Core.Store").exports; if (store) ctx.store = store;
+var health = registry.has("Build.Health") && registry.get("Build.Health").exports; if (health) ctx.health = health;
+updateGlobals();
+}
+function mountIDE(){
+var topbar = registry.has("UI.Topbar") && registry.get("UI.Topbar").exports;
+if (topbar && topbar.mount) topbar.mount();
+var shell = registry.has("UI.Shell") && registry.get("UI.Shell").exports;
+var actions = registry.has("UI.Actions") && registry.get("UI.Actions").exports;
+if (shell && actions){
+if (shell.mount) shell.mount();
+if (actions.wire) actions.wire();
+if (ctx.log && ctx.log.info) ctx.log.info("UI mounted");
+} else {
+if (actions && actions.wire) actions.wire();
+if (!shell) console.warn("UI.Shell missing");
+}
+}
+function mountApp(entry){
+try{
+var host = registry.has("App.Host") && registry.get("App.Host").exports;
+if (host && host.mount) host.mount();
+try{ document.body.classList.add("show-app"); }catch(_){}
+if (entry){
+var app = registry.has(entry) && registry.get(entry).exports;
+if (app && typeof app.mount==="function") app.mount();
+else if (app && typeof app.init==="function") app.init();
+else console.warn("Entry app has no mount/init:", entry);
+}
+}catch(e){ console.error("App mount error", e); }
+}
+function updateGlobals(){
+window.Loom = window.Loom || {};
+window.Loom.meta = ctx.meta;
+window.Loom.guide = ctx.guide;
+window.Loom.require = ctx.require;
+window.Loom.modules = ctx.modules;
+window.Loom.log = ctx.log;
+window.Loom.bus = ctx.bus;
+window.Loom.store = ctx.store;
+window.Loom.health = ctx.health;
+}
+document.addEventListener("DOMContentLoaded", function(){
+collect();
+compileAll();
+try {
+if (runProfile==="app"){ mountApp(entryApp); }
+else {
+var w = registry.has("App.Welcome") && registry.get("App.Welcome").exports;
+if (w && w.init) w.init();
+mountIDE();
+}
+} catch(e) {
+if (ctx.log && ctx.log.warn) ctx.log.warn("Boot init failed", String(e));
+}
+});
+})();
+</script>
+<!-- LOOM:END_BOOTLOADER -->
 </body>
 </html>
