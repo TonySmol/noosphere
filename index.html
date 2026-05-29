@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0a0a0a">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://huggingface.co data: blob: wss:;">
 <title>NOOmium</title>
 <style>
 :root {
@@ -84,6 +85,7 @@ input, textarea, select { font: inherit; color: inherit; background: none; borde
 .editor {
   border: 1px solid var(--line); border-radius: 8px;
   padding: 12px; margin-bottom: 14px;
+  position: relative;
 }
 .editor textarea {
   width: 100%; min-height: 72px; resize: vertical;
@@ -105,6 +107,15 @@ input, textarea, select { font: inherit; color: inherit; background: none; borde
 .btn:disabled { opacity: .4; cursor: not-allowed; }
 .btn-primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
 .btn-primary:hover:not(:disabled) { opacity: .9; }
+
+.progress-bar {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  height: 2px; background: var(--line); overflow: hidden;
+}
+.progress-bar .fill {
+  height: 100%; background: var(--accent);
+  width: 0; transition: width .3s;
+}
 
 .filters {
   display: flex; gap: 2px; padding: 3px;
@@ -204,6 +215,9 @@ input, textarea, select { font: inherit; color: inherit; background: none; borde
   padding: 40px 20px; font: 12px var(--mono);
   width: 100%;
 }
+.empty .hint {
+  margin-top: 8px; font-size: 11px; opacity: .7;
+}
 
 .hist-bar { display: flex; gap: 8px; margin-bottom: 14px; }
 .hist-bar input {
@@ -284,6 +298,20 @@ input, textarea, select { font: inherit; color: inherit; background: none; borde
 .toast.ok { background: var(--seren); color: #000; }
 .toast.err { background: var(--err); color: #fff; }
 .toast.info { background: var(--world); color: #000; }
+
+.copied-flash {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  background: var(--fg); color: var(--bg);
+  padding: 20px 40px; border-radius: 8px;
+  font: 16px var(--mono); font-weight: 600;
+  z-index: 2000; opacity: 0;
+  transition: all .3s;
+}
+.copied-flash.show {
+  transform: translate(-50%, -50%) scale(1);
+  opacity: 1;
+}
 </style>
 </head>
 <body>
@@ -310,7 +338,7 @@ input, textarea, select { font: inherit; color: inherit; background: none; borde
 <main class="work">
   <section class="view active" id="view-stream">
     <div class="editor">
-      <textarea id="input" placeholder="О чём думаешь?"></textarea>
+      <textarea id="input" placeholder="О чём думаешь?" autocomplete="off" autocapitalize="sentences"></textarea>
       <div class="editor-meta">
         <span id="charCount">0</span>
         <span id="debounce"></span>
@@ -319,6 +347,7 @@ input, textarea, select { font: inherit; color: inherit; background: none; borde
         <button class="btn" id="btnSavePrivate">Сохранить лично</button>
         <button class="btn btn-primary" id="btnSaveShared">Поделиться P2P</button>
       </div>
+      <div class="progress-bar"><div class="fill" id="modelProgress"></div></div>
     </div>
 
     <div class="filters">
@@ -412,16 +441,33 @@ input, textarea, select { font: inherit; color: inherit; background: none; borde
 </aside>
 
 <div class="toast" id="toast"></div>
+<div class="copied-flash" id="copiedFlash">✓ скопировано</div>
 
 <script type="module">
 import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 import * as nostrMod from 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
 
 /* =========================================================
+ * GLOBAL ERROR HANDLING
+ * ========================================================= */
+window.addEventListener('error', (e) => {
+  console.error('Global error:', e.error);
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+  // Suppress noisy nostr-tools relay connection errors
+  if (e.reason?.message?.includes('relay connection closed')) {
+    e.preventDefault();
+    return;
+  }
+  console.error('Unhandled rejection:', e.reason);
+});
+
+/* =========================================================
  * CONFIG
  * ========================================================= */
 const C = {
-  DB: 'noomium_v7',
+  DB: 'noomium_v8',
   STORE: 'notes',
   RELAYS: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.snort.social'],
   K_QUERY: 21000,
@@ -432,6 +478,7 @@ const C = {
   PEER_TTL: 60000,
   HEARTBEAT: 30000,
   SUB_WINDOW: 120,
+  QUERY_RATE_LIMIT: 2000, // min ms between queries
   state: {
     room: 'noomium-core',
     threshold: 0.30,
@@ -473,6 +520,12 @@ const toast = (msg, type = '') => {
   toastTimer = setTimeout(() => el.className = 'toast', 2500);
 };
 
+const flashCopied = () => {
+  const el = document.getElementById('copiedFlash');
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 800);
+};
+
 const setStatus = (id, text, cls = '') => {
   const el = document.getElementById(id);
   if (!el) return;
@@ -481,7 +534,7 @@ const setStatus = (id, text, cls = '') => {
 };
 
 /* =========================================================
- * DB — IndexedDB wrapper
+ * DB — IndexedDB wrapper with retry
  * ========================================================= */
 const DB = (() => {
   let db = null;
@@ -499,14 +552,25 @@ const DB = (() => {
     req.onerror = () => rej(req.error);
   });
 
-  const tx = async (mode, fn) => {
+  const tx = async (mode, fn, retries = 3) => {
     const d = await open();
     return new Promise((res, rej) => {
-      const t = d.transaction(C.STORE, mode);
-      const s = t.objectStore(C.STORE);
-      const r = fn(s);
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => rej(r.error);
+      const attempt = (n) => {
+        try {
+          const t = d.transaction(C.STORE, mode);
+          const s = t.objectStore(C.STORE);
+          const r = fn(s);
+          r.onsuccess = () => res(r.result);
+          r.onerror = () => {
+            if (n > 0) setTimeout(() => attempt(n - 1), 100);
+            else rej(r.error);
+          };
+        } catch (err) {
+          if (n > 0) setTimeout(() => attempt(n - 1), 100);
+          else rej(err);
+        }
+      };
+      attempt(retries);
     });
   };
 
@@ -527,7 +591,7 @@ const DB = (() => {
 })();
 
 /* =========================================================
- * AI — embeddings with lexical fallback
+ * AI — embeddings with lexical fallback + progress
  * ========================================================= */
 const AI = (() => {
   let ext = null;
@@ -561,11 +625,14 @@ const AI = (() => {
       try {
         ext = await pipeline('feature-extraction', C.MODEL, {
           progress_callback: p => {
-            if (p.status === 'progress' && p.total > 0) onProgress?.(p.loaded / p.total * 100);
+            if (p.status === 'progress' && p.total > 0) {
+              onProgress?.(p.loaded / p.total * 100);
+            }
           }
         });
         AI.mode = 'model';
-      } catch {
+      } catch (err) {
+        console.warn('Model load failed, using demo mode:', err);
         AI.mode = 'demo';
       }
     },
@@ -595,18 +662,29 @@ const AI = (() => {
 })();
 
 /* =========================================================
- * NET — Nostr P2P (ephemeral, alive answers)
+ * NET — Nostr P2P with rate limiting + validation
  * ========================================================= */
 const Net = (() => {
   const { SimplePool, generateSecretKey, getPublicKey, finalizeEvent } = nostrMod;
   let pool = null, sk = null, pk = null;
   let queryId = null;
-  const peers = new Map(); // pubkey -> lastSeen timestamp
-  const answers = [];      // { id, text, vector, peer, fullPubkey }
+  const peers = new Map();
+  const answers = [];
   let onUpdate = null;
   let heartbeatTimer = null;
+  let lastQueryTime = 0;
+
+  const validateEvent = (ev) => {
+    if (!ev || typeof ev !== 'object') return false;
+    if (typeof ev.id !== 'string' || ev.id.length !== 64) return false;
+    if (typeof ev.pubkey !== 'string' || ev.pubkey.length !== 64) return false;
+    if (typeof ev.kind !== 'number') return false;
+    if (!Array.isArray(ev.tags)) return false;
+    return true;
+  };
 
   const onEvent = async (ev) => {
+    if (!validateEvent(ev)) return;
     if (ev.pubkey === pk) return;
 
     peers.set(ev.pubkey, Date.now());
@@ -614,7 +692,7 @@ const Net = (() => {
     if (ev.kind === C.K_QUERY) {
       try {
         const q = JSON.parse(ev.content);
-        if (!q.vector) return;
+        if (!q.vector || !Array.isArray(q.vector)) return;
         const all = await DB.all();
         const floor = C.state.threshold - C.state.serendipity;
         for (const n of all) {
@@ -697,6 +775,12 @@ const Net = (() => {
 
     send: (vector) => {
       if (!pool) return;
+      
+      // Rate limiting
+      const now = Date.now();
+      if (now - lastQueryTime < C.QUERY_RATE_LIMIT) return;
+      lastQueryTime = now;
+      
       answers.length = 0;
       const ev = finalizeEvent({
         kind: C.K_QUERY,
@@ -765,9 +849,9 @@ const UI = {
     track.innerHTML = items.map(i => UI.card(i, type, query)).join('');
   },
 
-  empty: (id, msg) => {
+  empty: (id, msg, hint = '') => {
     const track = document.querySelector(`#${id} .track`);
-    if (track) track.innerHTML = `<div class="empty">${esc(msg)}</div>`;
+    if (track) track.innerHTML = `<div class="empty">${esc(msg)}${hint ? `<div class="hint">${esc(hint)}</div>` : ''}</div>`;
   }
 };
 
@@ -855,7 +939,7 @@ const onAction = async (act, id) => {
     if (n) {
       try {
         await navigator.clipboard.writeText(n.text);
-        toast('скопировано', 'ok');
+        flashCopied();
       } catch { toast('не удалось', 'err'); }
     }
   } else if (act === 'del') {
@@ -892,6 +976,19 @@ const exportData = async () => {
   toast(`экспорт ${notes.length}`, 'ok');
 };
 
+const sanitizeNote = (raw) => {
+  if (!raw || typeof raw !== 'object') return null;
+  if (typeof raw.text !== 'string' || raw.text.length > 10000) return null;
+  return {
+    id: typeof raw.id === 'string' ? raw.id : uuid(),
+    text: raw.text.trim(),
+    vector: Array.isArray(raw.vector) ? raw.vector : null,
+    shared: !!raw.shared,
+    createdAt: typeof raw.createdAt === 'number' ? raw.createdAt : Date.now(),
+    hash: typeof raw.hash === 'string' ? raw.hash : fnv1a(raw.text)
+  };
+};
+
 const importData = async (file) => {
   try {
     const data = JSON.parse(await file.text());
@@ -904,24 +1001,16 @@ const importData = async (file) => {
 
     let added = 0, skipped = 0;
     for (const raw of notes) {
-      if (!raw || typeof raw.text !== 'string') continue;
-      const hash = fnv1a(raw.text);
-      if (byHash.has(hash)) { skipped++; continue; }
-      if (byId.has(raw.id) && byId.get(raw.id).text === raw.text) { skipped++; continue; }
+      const note = sanitizeNote(raw);
+      if (!note) { skipped++; continue; }
+      if (byHash.has(note.hash)) { skipped++; continue; }
+      if (byId.has(note.id) && byId.get(note.id).text === note.text) { skipped++; continue; }
 
-      const note = {
-        id: raw.id || uuid(),
-        text: raw.text,
-        vector: Array.isArray(raw.vector) ? raw.vector : null,
-        shared: !!raw.shared,
-        createdAt: raw.createdAt || Date.now(),
-        hash
-      };
       if (AI.ready() && !note.vector) {
         try { note.vector = await AI.embed(note.text); } catch {}
       }
       await DB.put(note);
-      byHash.set(hash, note);
+      byHash.set(note.hash, note);
       byId.set(note.id, note);
       added++;
     }
@@ -1048,9 +1137,18 @@ const bind = () => {
 const boot = async () => {
   bind();
 
+  const progressBar = document.getElementById('modelProgress');
+
   await Promise.allSettled([
     DB.all().then(() => setStatus('stDB', 'DB', 'ok')).catch(() => setStatus('stDB', 'DB', 'err')),
-    AI.load().then(() => setStatus('stAI', AI.mode === 'model' ? 'AI' : 'AI·demo', 'ok')).catch(() => setStatus('stAI', 'AI', 'err')),
+    AI.load(pct => {
+      progressBar.style.width = pct + '%';
+      setStatus('stAI', `AI ${Math.round(pct)}%`, 'busy');
+    }).then(() => {
+      progressBar.style.width = '100%';
+      setTimeout(() => progressBar.style.opacity = '0', 500);
+      setStatus('stAI', AI.mode === 'model' ? 'AI' : 'AI·demo', 'ok');
+    }).catch(() => setStatus('stAI', 'AI', 'err')),
     new Promise((res) => {
       try {
         Net.init(() => search());
@@ -1062,7 +1160,7 @@ const boot = async () => {
     })
   ]);
 
-  UI.empty('c-local', 'начните печатать');
+  UI.empty('c-local', 'начните печатать', 'первые результаты через ~1 сек');
   UI.empty('c-world', '—');
   UI.empty('c-seren', '—');
 
