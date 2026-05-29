@@ -36,9 +36,7 @@ input, textarea, select { font: inherit; color: inherit; background: none; borde
   padding: 10px 14px; border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
-.brand {
-  font: 600 14px var(--mono); letter-spacing: .3px;
-}
+.brand { font: 600 14px var(--mono); letter-spacing: .3px; }
 .spacer { flex: 1; }
 .icon-btn {
   padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
@@ -55,19 +53,14 @@ input, textarea, select { font: inherit; color: inherit; background: none; borde
   flex-shrink: 0; flex-wrap: wrap;
 }
 .s { display: inline-flex; align-items: center; gap: 5px; }
-.dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: currentColor;
-}
+.dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .s.ok { color: var(--seren); }
 .s.warn { color: var(--warn); }
 .s.err { color: var(--err); }
 .s.busy .dot { animation: blink 1s infinite; }
 @keyframes blink { 50% { opacity: .3; } }
 
-.tabs {
-  display: flex; border-bottom: 1px solid var(--line); flex-shrink: 0;
-}
+.tabs { display: flex; border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .tab {
   flex: 1; padding: 11px; text-align: center;
   font: 12px var(--mono); color: var(--dim);
@@ -212,9 +205,7 @@ input, textarea, select { font: inherit; color: inherit; background: none; borde
   width: 100%;
 }
 
-.hist-bar {
-  display: flex; gap: 8px; margin-bottom: 14px;
-}
+.hist-bar { display: flex; gap: 8px; margin-bottom: 14px; }
 .hist-bar input {
   flex: 1; padding: 9px 12px;
   background: var(--line); border-radius: 6px;
@@ -381,7 +372,7 @@ input, textarea, select { font: inherit; color: inherit; background: none; borde
       <button class="btn" id="btnImport">Импорт</button>
     </div>
     <input type="file" id="importFile" accept=".noo,.json" style="display:none">
-    <div class="hint">Дубли по хэшу текста пропускаются.</div>
+    <div class="hint">Дубли по хэшу текста пропускаются автоматически.</div>
   </div>
 
   <div class="section">Опасно</div>
@@ -401,14 +392,17 @@ input, textarea, select { font: inherit; color: inherit; background: none; borde
     <b style="color:var(--accent)">Локально</b> — точные совпадения в вашей базе.
   </p>
   <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
-    <b style="color:var(--world)">Мир</b> — совпадения от других узлов.
+    <b style="color:var(--world)">Мир</b> — совпадения от активных узлов (пока они в сети).
   </p>
   <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
     <b style="color:var(--seren)">Озарения</b> — близкие, но не точные мысли.
   </p>
   <div class="section">Эфемерность</div>
   <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
-    Запросы и ответы живут ~2 минуты. Заметки не хранятся на серверах.
+    Запросы и ответы живут ~2 минуты. Заметки не хранятся на серверах — только у вас и у того, кто поделился.
+  </p>
+  <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
+    Выдача «Мира» живая: peer вышел — его карточки исчезают при следующем обновлении.
   </p>
   <div class="section">Горячие клавиши</div>
   <p style="color:var(--dim); font:12px var(--mono); margin-bottom:4px;">Ctrl+Enter — сохранить</p>
@@ -424,10 +418,10 @@ import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2
 import * as nostrMod from 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
 
 /* =========================================================
- * CONFIG — единственный источник правды
+ * CONFIG
  * ========================================================= */
 const C = {
-  DB: 'noomium_v6',
+  DB: 'noomium_v7',
   STORE: 'notes',
   RELAYS: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.snort.social'],
   K_QUERY: 21000,
@@ -435,6 +429,9 @@ const C = {
   MODEL: 'Xenova/all-MiniLM-L6-v2',
   DIM: 384,
   DEBOUNCE: 800,
+  PEER_TTL: 60000,
+  HEARTBEAT: 30000,
+  SUB_WINDOW: 120,
   state: {
     room: 'noomium-core',
     threshold: 0.30,
@@ -480,11 +477,11 @@ const setStatus = (id, text, cls = '') => {
   const el = document.getElementById(id);
   if (!el) return;
   el.className = `s ${cls}`;
-  el.innerHTML = `<span class="dot"></span>${text}`;
+  el.innerHTML = `<span class="dot"></span>${esc(text)}`;
 };
 
 /* =========================================================
- * DB — тонкий wrapper над IndexedDB
+ * DB — IndexedDB wrapper
  * ========================================================= */
 const DB = (() => {
   let db = null;
@@ -530,7 +527,7 @@ const DB = (() => {
 })();
 
 /* =========================================================
- * AI — embeddings с lexical fallback
+ * AI — embeddings with lexical fallback
  * ========================================================= */
 const AI = (() => {
   let ext = null;
@@ -598,21 +595,20 @@ const AI = (() => {
 })();
 
 /* =========================================================
- * NET — Nostr P2P (proper implementation)
+ * NET — Nostr P2P (ephemeral, alive answers)
  * ========================================================= */
 const Net = (() => {
   const { SimplePool, generateSecretKey, getPublicKey, finalizeEvent } = nostrMod;
-  let pool = null, sk = null, pk = null, sub = null;
+  let pool = null, sk = null, pk = null;
   let queryId = null;
   const peers = new Map(); // pubkey -> lastSeen timestamp
-  const answers = [];
+  const answers = [];      // { id, text, vector, peer, fullPubkey }
   let onUpdate = null;
   let heartbeatTimer = null;
 
   const onEvent = async (ev) => {
     if (ev.pubkey === pk) return;
 
-    // Update peer liveness
     peers.set(ev.pubkey, Date.now());
 
     if (ev.kind === C.K_QUERY) {
@@ -620,9 +616,10 @@ const Net = (() => {
         const q = JSON.parse(ev.content);
         if (!q.vector) return;
         const all = await DB.all();
+        const floor = C.state.threshold - C.state.serendipity;
         for (const n of all) {
           if (!n.shared || !n.vector) continue;
-          if (AI.cosine(q.vector, n.vector) >= (C.state.threshold - C.state.serendipity)) {
+          if (AI.cosine(q.vector, n.vector) >= floor) {
             const ans = finalizeEvent({
               kind: C.K_ANSWER,
               created_at: Math.floor(Date.now() / 1000),
@@ -642,8 +639,11 @@ const Net = (() => {
           const d = JSON.parse(ev.content);
           if (d.text && d.vector && !answers.some(a => a.id === ev.id)) {
             answers.push({
-              id: ev.id, text: d.text, vector: d.vector,
-              peer: ev.pubkey.slice(0, 8)
+              id: ev.id,
+              text: d.text,
+              vector: d.vector,
+              peer: ev.pubkey.slice(0, 8),
+              fullPubkey: ev.pubkey
             });
             onUpdate?.();
           }
@@ -658,15 +658,16 @@ const Net = (() => {
       const now = Date.now();
       let removed = 0;
       for (const [pubkey, lastSeen] of peers) {
-        if (now - lastSeen > 60000) {
+        if (now - lastSeen > C.PEER_TTL) {
           peers.delete(pubkey);
           removed++;
         }
       }
-      if (removed > 0 || peers.size > 0) {
-        setStatus('stPeers', `${peers.size} peer${peers.size !== 1 ? 's' : ''}`, peers.size > 0 ? 'ok' : '');
-      }
-    }, 30000);
+      setStatus('stPeers',
+        `${peers.size} peer${peers.size !== 1 ? 's' : ''}`,
+        peers.size > 0 ? 'ok' : '');
+      if (removed > 0) onUpdate?.();
+    }, C.HEARTBEAT);
   };
 
   return {
@@ -682,15 +683,15 @@ const Net = (() => {
       pk = getPublicKey(sk);
       pool = new SimplePool();
 
-      // KEY FIX: subscribe to last 2 minutes, not just future
       const now = Math.floor(Date.now() / 1000);
-      sub = pool.subscribeMany(C.RELAYS, [{
+      pool.subscribeMany(C.RELAYS, [{
         kinds: [C.K_QUERY, C.K_ANSWER],
         '#t': [C.state.room],
-        since: now - 120
+        since: now - C.SUB_WINDOW
       }], { onevent: onEvent });
 
       setStatus('stNet', 'NET', 'ok');
+      setStatus('stPeers', '0 peers', '');
       startHeartbeat();
     },
 
@@ -707,13 +708,13 @@ const Net = (() => {
       pool.publish(C.RELAYS, ev);
     },
 
-    answers: () => answers,
+    activeAnswers: () => answers.filter(a => peers.has(a.fullPubkey)),
     peerCount: () => peers.size
   };
 })();
 
 /* =========================================================
- * UI — только рендер
+ * UI — render only
  * ========================================================= */
 const UI = {
   registry: new Map(),
@@ -721,9 +722,8 @@ const UI = {
   card: (item, type, query) => {
     UI.registry.set(item.id, item);
     const isPeer = !!item.peer;
-    let label;
-    if (isPeer) label = `peer · ${item.peer}`;
-    else label = item.shared ? 'shared' : 'private';
+    const label = isPeer ? `peer · ${item.peer}`
+      : (item.shared ? 'shared' : 'private');
 
     const score = typeof item.score === 'number'
       ? (item.score * 100).toFixed(0) + '%'
@@ -776,6 +776,7 @@ const UI = {
  * ========================================================= */
 let debounce = null;
 let lastVec = null;
+let lastText = null;
 
 const search = async () => {
   const text = document.getElementById('input').value.trim();
@@ -797,7 +798,7 @@ const search = async () => {
 
   const all = await DB.all();
   const scored = all.filter(n => n.vector).map(n => ({ ...n, score: AI.cosine(qv, n.vector) }));
-  const worldScored = Net.answers().map(a => ({ ...a, score: AI.cosine(qv, a.vector) }));
+  const worldScored = Net.activeAnswers().map(a => ({ ...a, score: AI.cosine(qv, a.vector) }));
 
   const TH = C.state.threshold;
   const SD = C.state.serendipity;
@@ -954,9 +955,14 @@ const bind = () => {
 
   const input = document.getElementById('input');
   input.addEventListener('input', () => {
-    document.getElementById('charCount').textContent = input.value.length;
-    clearTimeout(debounce);
+    const text = input.value;
+    document.getElementById('charCount').textContent = text.length;
     const label = document.getElementById('debounce');
+
+    if (text === lastText) return;
+    lastText = text;
+
+    clearTimeout(debounce);
     label.textContent = '...';
     debounce = setTimeout(() => { label.textContent = ''; search(); }, C.DEBOUNCE);
   });
@@ -1042,8 +1048,7 @@ const bind = () => {
 const boot = async () => {
   bind();
 
-  // Parallel bootstrap — UI не умирает если что-то упало
-  const results = await Promise.allSettled([
+  await Promise.allSettled([
     DB.all().then(() => setStatus('stDB', 'DB', 'ok')).catch(() => setStatus('stDB', 'DB', 'err')),
     AI.load().then(() => setStatus('stAI', AI.mode === 'model' ? 'AI' : 'AI·demo', 'ok')).catch(() => setStatus('stAI', 'AI', 'err')),
     new Promise((res) => {
