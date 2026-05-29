@@ -42,19 +42,138 @@ input, textarea { font: inherit; color: inherit; background: none; border: none;
 <!-- ============================================ -->
 <header class="topbar">
   <div class="brand">NOOmium</div>
+  <div class="peers" id="peers"><span class="dot"></span><span id="peers-count">0 peers</span></div>
+  <div class="spacer"></div>
+  <button class="icon-btn" id="btn-how" title="Как работает">?</button>
+  <button class="icon-btn" id="btn-capsules" title="Капсулы">⎗</button>
+  <button class="icon-btn" id="btn-settings" title="Настройки">⚙</button>
 </header>
 
-<div class="status">
-  <span id="stDB">DB</span>
-  <span id="stAI">AI</span>
-  <span id="stNet">P2P</span>
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-tab="stream">Поток<span class="count" id="c-stream">0</span></button>
+  <button class="tab" data-tab="local">База<span class="count" id="c-local">0</span></button>
+  <button class="tab" data-tab="world">Мир<span class="count" id="c-world">0</span></button>
+  <button class="tab" data-tab="insight">Озарения<span class="count" id="c-insight">0</span></button>
+</nav>
+
+<section class="editor">
+  <textarea id="note-input" placeholder="О чём думаешь? (/ — фокус, Ctrl+Enter — сохранить)"></textarea>
+  <div class="editor-actions">
+    <span class="hint" id="editor-hint"></span>
+    <button class="btn" id="btn-share">Поделиться P2P</button>
+    <button class="btn btn-primary" id="btn-save">Сохранить лично</button>
+  </div>
+</section>
+
+<main class="work" id="work">
+  <div class="track" id="track"></div>
+</main>
+
+<div class="status-bar">
+  <span class="st-loading" id="st-db"><span class="st-dot"></span>DB</span>
+  <span class="st-loading" id="st-ai"><span class="st-dot"></span>AI</span>
+  <span class="st-loading" id="st-net"><span class="st-dot"></span>P2P</span>
 </div>
 
-<main class="work">
-  <textarea id="input" placeholder="Ввод..."></textarea>
-  <button class="btn btn-primary" id="btnSave">Сохранить</button>
-  <div id="list"></div>
-</main>
+<div class="drawer" id="drawer-settings">
+  <div class="drawer-backdrop"></div>
+  <div class="drawer-panel">
+    <div class="drawer-head">
+      <div class="drawer-title">Настройки</div>
+      <button class="icon-btn" data-close>×</button>
+    </div>
+    <div class="drawer-body">
+      <div class="section">
+        <div class="section-title">Комната (Nostr topic)</div>
+        <div class="info" style="margin-bottom:8px;">Узлы в одной комнате слышат друг друга.</div>
+        <input class="field-input" id="cfg-room" placeholder="noomium-public">
+      </div>
+      <div class="section">
+        <div class="section-title">Порог совпадения</div>
+        <div class="field-range">
+          <input type="range" id="cfg-threshold" min="0" max="1" step="0.01">
+          <span class="val" id="cfg-threshold-v">0.30</span>
+        </div>
+        <div class="info">Минимальное косинусное сходство для выдачи «Мира».</div>
+      </div>
+      <div class="section">
+        <div class="section-title">Дельта озарений</div>
+        <div class="field-range">
+          <input type="range" id="cfg-insight" min="0" max="0.5" step="0.01">
+          <span class="val" id="cfg-insight-v">0.15</span>
+        </div>
+        <div class="info">Разница между локальным и «Миром», чтобы попасть в «Озарения».</div>
+      </div>
+      <div class="section">
+        <div class="section-title">Опасно</div>
+        <div class="btn-row">
+          <button class="btn" id="btn-apply">Применить и перезагрузить</button>
+          <button class="btn" id="btn-reset" style="color:var(--err);border-color:var(--err);">Стереть базу</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="drawer" id="drawer-capsules">
+  <div class="drawer-backdrop"></div>
+  <div class="drawer-panel">
+    <div class="drawer-head">
+      <div class="drawer-title">Капсулы .noo</div>
+      <button class="icon-btn" data-close>×</button>
+    </div>
+    <div class="drawer-body">
+      <div class="info" style="margin-bottom:12px;">
+        Капсулы — это выгрузка твоей базы в JSON-файл. Дубли по хэшу текста пропускаются автоматически.
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btn-export">Экспорт</button>
+        <button class="btn" id="btn-import">Импорт</button>
+        <input type="file" id="file-import" accept=".noo,.json" hidden>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="drawer" id="drawer-how">
+  <div class="drawer-backdrop"></div>
+  <div class="drawer-panel">
+    <div class="drawer-head">
+      <div class="drawer-title">Как это работает</div>
+      <button class="icon-btn" data-close>×</button>
+    </div>
+    <div class="drawer-body">
+      <div class="section">
+        <div class="section-title">Суть</div>
+        <div class="info">NOOmium превращает мысль в вектор и ищет резонанс в твоей базе и у других узлов в комнате.</div>
+      </div>
+      <div class="section">
+        <div class="section-title">Дорожки</div>
+        <div class="info">
+          <strong>Локально</strong> — точные совпадения в твоей базе.<br>
+          <strong>Мир</strong> — совпадения от активных узлов (пока они в сети).<br>
+          <strong>Озарения</strong> — близкие, но не точные мысли.
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">Эфемерность</div>
+        <div class="info">
+          Запросы и ответы живут ~2 минуты. Заметки не хранятся на серверах — только у тебя и у того, кто поделился.<br>
+          Выдача «Мира» живая: peer вышел — его карточки исчезают при следующем обновлении.
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">Горячие клавиши</div>
+        <div class="info">
+          <code>Ctrl+Enter</code> — сохранить<br>
+          <code>Ctrl+Shift+Enter</code> — поделиться<br>
+          <code>/</code> — в редактор<br>
+          <code>Esc</code> — закрыть панели
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="toast" id="toast"></div>
 
