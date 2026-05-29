@@ -281,9 +281,10 @@ window.addEventListener('unhandledrejection', (e) => {
 
 // === LAYER: CORE | MODULE: Config ===
 // [MANIFEST] provides: C, saveCfg
-// [RULE] единый источник правды
+// [RULE] единый источник правды, DB_VERSION=3 для миграции схемы
 const C = {
-  DB: 'noomium_v2',
+  DB: 'noomium_prod',
+  DB_VERSION: 3,
   STORE_NOTES: 'notes',
   STORE_META: 'meta',
   DEBOUNCE: 400,
@@ -355,18 +356,26 @@ const fmtTime = (ts) => {
 
 // === LAYER: CORE | MODULE: Storage ===
 // [MANIFEST] provides: put, get, del, all, getByHash, putMeta, getMeta, reset
-// [RULE] IndexedDB wrapper с импотентным открытием
+// [RULE] IndexedDB с миграцией схемы (version bump создаёт индексы)
 const Storage = (() => {
   let db = null;
+  
   const open = () => new Promise((res, rej) => {
     if (db) return res(db);
-    const req = indexedDB.open(C.DB, 1);
+    const req = indexedDB.open(C.DB, C.DB_VERSION);
     req.onupgradeneeded = e => {
       const d = e.target.result;
+      let notesStore;
       if (!d.objectStoreNames.contains(C.STORE_NOTES)) {
-        const s = d.createObjectStore(C.STORE_NOTES, { keyPath: 'id' });
-        s.createIndex('createdAt', 'createdAt');
-        s.createIndex('hash', 'hash');
+        notesStore = d.createObjectStore(C.STORE_NOTES, { keyPath: 'id' });
+      } else {
+        notesStore = e.target.transaction.objectStore(C.STORE_NOTES);
+      }
+      if (!notesStore.indexNames.contains('createdAt')) {
+        try { notesStore.createIndex('createdAt', 'createdAt'); } catch {}
+      }
+      if (!notesStore.indexNames.contains('hash')) {
+        try { notesStore.createIndex('hash', 'hash'); } catch {}
       }
       if (!d.objectStoreNames.contains(C.STORE_META)) {
         d.createObjectStore(C.STORE_META, { keyPath: 'k' });
@@ -374,6 +383,7 @@ const Storage = (() => {
     };
     req.onsuccess = e => { db = e.target.result; res(db); };
     req.onerror = () => rej(req.error);
+    req.onblocked = () => rej(new Error('DB blocked'));
   });
 
   const tx = async (store, mode, fn) => {
@@ -392,11 +402,18 @@ const Storage = (() => {
     get: (id) => tx(C.STORE_NOTES, 'readonly', s => s.get(id)),
     del: (id) => tx(C.STORE_NOTES, 'readwrite', s => s.delete(id)),
     all: () => tx(C.STORE_NOTES, 'readonly', s => s.getAll()),
-    getByHash: (hash) => tx(C.STORE_NOTES, 'readonly', s => s.index('hash').get(hash)),
+    getByHash: async (hash) => {
+      try {
+        return await tx(C.STORE_NOTES, 'readonly', s => s.index('hash').get(hash));
+      } catch (err) {
+        const all = await Storage.all();
+        return all.find(n => n.hash === hash) || null;
+      }
+    },
     putMeta: (k, v) => tx(C.STORE_META, 'readwrite', s => s.put({ k, v })),
     getMeta: (k) => tx(C.STORE_META, 'readonly', s => s.get(k)).then(r => r?.v),
     reset: async () => {
-      if (db) { db.close(); db = null; }
+      if (db) { try { db.close(); } catch {} db = null; }
       await new Promise(r => {
         const req = indexedDB.deleteDatabase(C.DB);
         req.onsuccess = req.onerror = req.onblocked = () => r();
@@ -407,8 +424,7 @@ const Storage = (() => {
 
 // === LAYER: CORE | MODULE: AI ===
 // [MANIFEST] provides: embed, aiReady
-// [RULE] Transformers.js, ленивая загрузка
-let pipeline = null;
+// [RULE] Transformers.js, ленивая загрузка с гарантированным статусом
 let embedder = null;
 let aiReadyPromise = null;
 
@@ -418,11 +434,10 @@ const aiReady = () => {
     try {
       setStatus('st-ai', ' AI: loading', 'loading');
       const mod = await import('https://esm.sh/@xenova/transformers@2.17.1');
-      pipeline = mod.pipeline;
-      embedder = await pipeline('feature-extraction', C.EMBED_MODEL, {
+      embedder = await mod.pipeline('feature-extraction', C.EMBED_MODEL, {
         quantized: true,
         progress_callback: (p) => {
-          if (p.status === 'progress' && p.progress) {
+          if (p.status === 'progress' && typeof p.progress === 'number') {
             setStatus('st-ai', ` AI: ${Math.floor(p.progress)}%`, 'loading');
           }
         }
@@ -430,7 +445,7 @@ const aiReady = () => {
       setStatus('st-ai', ' AI: ready', 'ok');
       return embedder;
     } catch (err) {
-      console.error('AI init failed:', err);
+      console.error('[AI] init failed:', err);
       setStatus('st-ai', ' AI: off', 'err');
       return null;
     }
@@ -439,20 +454,20 @@ const aiReady = () => {
 };
 
 const embed = async (text) => {
-  const model = await aiReady();
-  if (!model || !text?.trim()) return null;
   try {
+    const model = await aiReady();
+    if (!model || !text?.trim()) return null;
     const out = await model(text, { pooling: 'mean', normalize: true });
     return Array.from(out.data);
   } catch (err) {
-    console.warn('embed failed:', err);
+    console.warn('[AI] embed failed:', err);
     return null;
   }
 };
 
 // === LAYER: CORE | MODULE: Network ===
 // [MANIFEST] provides: publish, subscribe, getPeersCount
-// [RULE] Nostr ephemeral P2P
+// [RULE] Nostr ephemeral P2P с авто-реконнектом
 const RELAYS = ['wss://relay.damus.io', 'wss://relay.nostr.band', 'wss://nos.lol'];
 const KIND = 30078;
 
@@ -465,10 +480,13 @@ let _sk = null;
 
 const getPubkey = () => {
   if (_pk) return _pk;
-  _sk = JSON.parse(localStorage.getItem('noomium_sk') || 'null');
+  try {
+    const stored = localStorage.getItem('noomium_sk');
+    _sk = stored ? JSON.parse(stored) : null;
+  } catch { _sk = null; }
   if (!_sk) {
     _sk = Array.from(crypto.getRandomValues(new Uint8Array(32)));
-    localStorage.setItem('noomium_sk', JSON.stringify(_sk));
+    try { localStorage.setItem('noomium_sk', JSON.stringify(_sk)); } catch {}
   }
   let h = 0x811c9dc5;
   for (let i = 0; i < _sk.length; i++) { h ^= _sk[i]; h = Math.imul(h, 0x01000193); }
@@ -487,11 +505,16 @@ const connect = () => new Promise((res) => {
   if (ws && ws.readyState === 1) return res(true);
   setStatus('st-net', ' P2P: connect', 'loading');
   const url = RELAYS[Math.floor(Math.random() * RELAYS.length)];
+  let resolved = false;
   try {
     ws = new WebSocket(url);
+    const timeout = setTimeout(() => {
+      if (!resolved) { resolved = true; try { ws.close(); } catch {} res(false); }
+    }, 8000);
     ws.onopen = () => {
+      clearTimeout(timeout);
       setStatus('st-net', ' P2P: online', 'ok');
-      res(true);
+      if (!resolved) { resolved = true; res(true); }
     };
     ws.onmessage = (e) => {
       try { handleMessage(JSON.parse(e.data)); } catch {}
@@ -501,15 +524,18 @@ const connect = () => new Promise((res) => {
       ws = null;
       setTimeout(connect, 5000);
     };
-    ws.onerror = () => ws.close();
-    setTimeout(() => res(false), 5000);
-  } catch { res(false); }
+    ws.onerror = () => { try { ws.close(); } catch {} };
+  } catch {
+    setStatus('st-net', ' P2P: off', 'err');
+    if (!resolved) { resolved = true; res(false); }
+  }
 });
 
 const handleMessage = (msg) => {
   if (msg[0] === 'EVENT' && msg[1] === subId) {
     const ev = msg[2];
-    const content = ev.content?.[0] === '{' ? JSON.parse(ev.content) : null;
+    let content = null;
+    try { content = ev.content?.[0] === '{' ? JSON.parse(ev.content) : null; } catch {}
     if (!content || content.room !== C.state.room) return;
     const pk = ev.pubkey.slice(0, 8);
     peers.set(pk, { ts: Date.now(), pubkey: ev.pubkey });
@@ -532,16 +558,19 @@ setInterval(updatePeersUI, 5000);
 
 const publish = async (payload) => {
   if (!ws || ws.readyState !== 1) return false;
-  const ev = {
-    kind: KIND,
-    created_at: Math.floor(Date.now() / 1000),
-    tags: [['d', C.state.room]],
-    content: JSON.stringify({ ...payload, room: C.state.room, ts: Date.now() })
-  };
-  ev.id = await hashEvent(ev);
-  ev.pubkey = getPubkey();
-  ev.sig = 'sim_' + Math.random().toString(36).slice(2);
-  try { ws.send(JSON.stringify(['EVENT', ev])); return true; } catch { return false; }
+  try {
+    const ev = {
+      kind: KIND,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [['d', C.state.room]],
+      content: JSON.stringify({ ...payload, room: C.state.room, ts: Date.now() })
+    };
+    ev.id = await hashEvent(ev);
+    ev.pubkey = getPubkey();
+    ev.sig = 'sim_' + Math.random().toString(36).slice(2);
+    ws.send(JSON.stringify(['EVENT', ev]));
+    return true;
+  } catch { return false; }
 };
 
 const subscribe = (fn) => {
@@ -549,11 +578,13 @@ const subscribe = (fn) => {
   if (!ws || ws.readyState !== 1) return;
   if (subId) try { ws.send(JSON.stringify(['CLOSE', subId])); } catch {}
   subId = uuid().slice(0, 16);
-  ws.send(JSON.stringify(['REQ', subId, {
-    kinds: [KIND],
-    '#d': [C.state.room],
-    since: Math.floor(Date.now() / 1000) - 120
-  }]));
+  try {
+    ws.send(JSON.stringify(['REQ', subId, {
+      kinds: [KIND],
+      '#d': [C.state.room],
+      since: Math.floor(Date.now() / 1000) - 120
+    }]));
+  } catch {}
 };
 
 const getPeersCount = () => peers.size;
@@ -638,7 +669,7 @@ const topK = (items, qVec, k, minScore) => {
 
 // === LAYER: ENGINE | MODULE: Notes ===
 // [MANIFEST] provides: saveNote, delNote, getLocalAll, searchLocal
-// [RULE] CRUD для локальных заметок
+// [RULE] CRUD для локальных заметок с гарантированным статусом AI
 const saveNote = async (text, publishFn = null) => {
   const t = text.trim();
   if (!t) { toast('пусто', 'err'); return null; }
@@ -648,7 +679,8 @@ const saveNote = async (text, publishFn = null) => {
 
   setStatus('st-ai', ' AI: thinking', 'loading');
   const vec = await embed(t);
-  setStatus('st-ai', ' AI: ready', 'ok');
+  if (vec) setStatus('st-ai', ' AI: ready', 'ok');
+  else setStatus('st-ai', ' AI: no vec', 'warn');
 
   const note = {
     id: uuid(),
@@ -690,7 +722,7 @@ const searchLocal = async (query, k = 50) => {
 
 // === LAYER: ENGINE | MODULE: Capsules ===
 // [MANIFEST] provides: exportCapsule, importCapsule
-// [RULE] экспорт/импорт .noo файлов
+// [RULE] экспорт/импорт .noo файлов с дедупликацией
 const exportCapsule = async () => {
   const all = await Storage.all();
   const data = {
@@ -964,7 +996,7 @@ const bindKeyboard = (input) => {
 
 // === LAYER: BOOT | MODULE: Bootstrap ===
 // [MANIFEST] provides: boot
-// [RULE] параллельный запуск, изоляция ошибок
+// [RULE] параллельный запуск, изоляция ошибок каждого модуля
 const boot = async () => {
   try {
     bind();
@@ -976,11 +1008,9 @@ const boot = async () => {
     await Promise.allSettled([
       Storage.all()
         .then(() => setStatus('st-db', ' DB', 'ok'))
-        .catch(() => setStatus('st-db', ' DB', 'err')),
-      aiReady(),
-      connect().then(() => {
-        subscribe(onNetMessage);
-      })
+        .catch((e) => { console.error('[DB]', e); setStatus('st-db', ' DB', 'err'); }),
+      aiReady().catch(() => setStatus('st-ai', ' AI: off', 'err')),
+      connect().then(() => subscribe(onNetMessage)).catch(() => setStatus('st-net', ' P2P: off', 'err'))
     ]);
 
     await refresh('');
