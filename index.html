@@ -1,402 +1,347 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#0a0a0f">
-  <title>NOOmium</title>
-  <style>
-    :root {
-      --bg: #0a0a0f;
-      --surface: #13131a;
-      --surface-hover: #1a1a24;
-      --border: #24242e;
-      --text: #e8e8f0;
-      --text-muted: #8888a0;
-      --brand: #7c5cff;
-      --brand-glow: rgba(124, 92, 255, 0.2);
-      --world: #0ea5e9;
-      --world-glow: rgba(14, 165, 233, 0.2);
-      --seren: #4ade80;
-      --seren-glow: rgba(74, 222, 128, 0.2);
-      --warn: #fbbf24;
-      --danger: #f87171;
-      --radius: 12px;
-      --font: 14px/1.6 ui-sans-serif, system-ui, -apple-system, sans-serif;
-      --safe-b: env(safe-area-inset-bottom, 0);
-    }
-    [data-theme="light"] {
-      --bg: #f3f4f6; --surface: #fff; --surface-hover: #f9fafb;
-      --border: #e5e7eb; --text: #111827; --text-muted: #6b7280;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; overflow: hidden; }
-    body {
-      display: flex; flex-direction: column;
-      background: var(--bg); color: var(--text); font: var(--font);
-      -webkit-font-smoothing: antialiased;
-    }
-    button { font: inherit; cursor: pointer; border: none; background: none; color: inherit; }
-    input, textarea, select { font: inherit; color: inherit; }
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0f">
+<title>NOOmium</title>
+<style>
+:root {
+  --bg:#0a0a0f; --surface:#13131a; --surface-hover:#1a1a24;
+  --border:#24242e; --text:#e8e8f0; --text-muted:#8888a0;
+  --brand:#7c5cff; --brand-glow:rgba(124,92,255,.2);
+  --world:#0ea5e9; --world-glow:rgba(14,165,233,.2);
+  --seren:#4ade80; --seren-glow:rgba(74,222,128,.2);
+  --warn:#fbbf24; --danger:#f87171;
+  --radius:12px;
+  --font:14px/1.6 ui-sans-serif,system-ui,-apple-system,sans-serif;
+  --safe-b:env(safe-area-inset-bottom,0);
+}
+[data-theme="light"] {
+  --bg:#f3f4f6; --surface:#fff; --surface-hover:#f9fafb;
+  --border:#e5e7eb; --text:#111827; --text-muted:#6b7280;
+}
+* { box-sizing:border-box; margin:0; padding:0; }
+html, body { height:100%; overflow:hidden; }
+body {
+  display:flex; flex-direction:column;
+  background:var(--bg); color:var(--text); font:var(--font);
+  -webkit-font-smoothing:antialiased;
+}
+button { font:inherit; cursor:pointer; border:none; background:none; color:inherit; }
+input, textarea, select { font:inherit; color:inherit; }
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:6px; }
 
-    .navbar {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 12px 16px; background: var(--surface);
-      border-bottom: 1px solid var(--border); z-index: 10;
-    }
-    .navbar-title {
-      font-weight: 700; font-size: 16px; letter-spacing: 0.3px;
-      background: linear-gradient(135deg, var(--brand), var(--world));
-      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-    }
-    .navbar-actions { display: flex; gap: 6px; }
-    .icon-btn {
-      padding: 8px; border: 1px solid var(--border); border-radius: 8px;
-      color: var(--text); transition: 0.2s;
-      display: inline-flex; align-items: center; justify-content: center;
-      min-width: 36px; min-height: 36px;
-    }
-    .icon-btn:hover { background: var(--surface-hover); border-color: var(--brand); }
+/* ===== SKELETON (рисуется до JS) ===== */
+.skel {
+  background:linear-gradient(90deg,var(--surface) 0%,var(--surface-hover) 50%,var(--surface) 100%);
+  background-size:200% 100%;
+  animation:shimmer 1.4s infinite;
+  border-radius:var(--radius);
+}
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+.skel-card { height:120px; margin-bottom:12px; }
 
-    .status-bar {
-      display: flex; gap: 8px; padding: 8px 16px;
-      background: var(--surface); border-bottom: 1px solid var(--border);
-      font-size: 11px; flex-wrap: wrap;
-    }
-    .badge-status {
-      padding: 4px 10px; border-radius: 20px;
-      background: var(--surface-hover); border: 1px solid var(--border);
-      display: flex; align-items: center; gap: 6px;
-      color: var(--text-muted); font-weight: 500; transition: 0.3s;
-    }
-    .badge-status .dot {
-      width: 6px; height: 6px; border-radius: 50%; background: currentColor;
-    }
-    .badge-status.active { color: var(--world); border-color: var(--world-glow); background: var(--world-glow); }
-    .badge-status.ready { color: var(--seren); border-color: var(--seren-glow); }
-    .badge-status.warn { color: var(--warn); border-color: rgba(251, 191, 36, 0.18); background: rgba(251, 191, 36, 0.18); }
-    .badge-status.busy .dot { animation: pulse 1s infinite; }
-    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+.navbar {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:12px 16px; background:var(--surface);
+  border-bottom:1px solid var(--border); z-index:10;
+}
+.navbar-title {
+  font-weight:700; font-size:16px; letter-spacing:.3px;
+  background:linear-gradient(135deg,var(--brand),var(--world));
+  -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+}
+.navbar-actions { display:flex; gap:6px; }
+.icon-btn {
+  padding:8px; border:1px solid var(--border); border-radius:8px;
+  color:var(--text); transition:.2s;
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:36px; min-height:36px;
+}
+.icon-btn:hover { background:var(--surface-hover); border-color:var(--brand); }
 
-    .main-tabs {
-      display: flex; background: var(--surface);
-      border-bottom: 1px solid var(--border);
-    }
-    .tab {
-      flex: 1; text-align: center; padding: 12px;
-      color: var(--text-muted); font-weight: 500;
-      border-bottom: 2px solid transparent; transition: 0.2s;
-      display: flex; justify-content: center; align-items: center; gap: 6px;
-    }
-    .tab.active { color: var(--text); border-color: var(--brand); }
-    .tab .tab-count {
-      font-size: 10px; font-family: monospace;
-      background: var(--surface-hover); border: 1px solid var(--border);
-      padding: 1px 6px; border-radius: 10px;
-    }
+.status-bar {
+  display:flex; gap:8px; padding:8px 16px;
+  background:var(--surface); border-bottom:1px solid var(--border);
+  font-size:11px; flex-wrap:wrap;
+}
+.badge-status {
+  padding:4px 10px; border-radius:20px;
+  background:var(--surface-hover); border:1px solid var(--border);
+  display:flex; align-items:center; gap:6px;
+  color:var(--text-muted); font-weight:500; transition:.3s;
+}
+.badge-status .dot { width:6px; height:6px; border-radius:50%; background:currentColor; }
+.badge-status.active { color:var(--world); border-color:var(--world-glow); background:var(--world-glow); }
+.badge-status.ready { color:var(--seren); border-color:var(--seren-glow); }
+.badge-status.warn { color:var(--warn); border-color:rgba(251,191,36,.18); background:rgba(251,191,36,.18); }
+.badge-status.err { color:var(--danger); border-color:rgba(248,113,113,.2); background:rgba(248,113,113,.1); }
+.badge-status.busy .dot { animation:pulse 1s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
 
-    .workspace {
-      flex: 1; overflow-y: auto; overflow-x: hidden;
-      padding: 16px; position: relative; scroll-behavior: smooth;
-    }
-    .view-layer { display: none; animation: fade 0.2s ease-out; }
-    .view-layer.active { display: block; }
-    @keyframes fade { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+.main-tabs {
+  display:flex; background:var(--surface);
+  border-bottom:1px solid var(--border);
+}
+.tab {
+  flex:1; text-align:center; padding:12px;
+  color:var(--text-muted); font-weight:500;
+  border-bottom:2px solid transparent; transition:.2s;
+  display:flex; justify-content:center; align-items:center; gap:6px;
+}
+.tab.active { color:var(--text); border-color:var(--brand); }
+.tab .tab-count {
+  font-size:10px; font-family:monospace;
+  background:var(--surface-hover); border:1px solid var(--border);
+  padding:1px 6px; border-radius:10px;
+}
 
-    .editor-card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 16px; margin-bottom: 20px;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    }
-    .editor-textarea {
-      width: 100%; min-height: 84px; background: transparent;
-      border: none; resize: vertical; outline: none;
-      font-size: 15px; line-height: 1.55; color: inherit;
-    }
-    .editor-textarea::placeholder { color: var(--text-muted); }
-    .editor-meta {
-      display: flex; justify-content: space-between; align-items: center;
-      margin-top: 6px; font-size: 11px; color: var(--text-muted);
-    }
-    .editor-meta-actions { display: flex; gap: 14px; }
-    .link-btn {
-      color: var(--text-muted); font-size: 11px; font-weight: 600;
-      transition: 0.2s; padding: 2px 0;
-    }
-    .link-btn:hover { color: var(--brand); }
-    .editor-controls { display: flex; gap: 8px; margin-top: 14px; }
+.workspace {
+  flex:1; overflow-y:auto; overflow-x:hidden;
+  padding:16px; position:relative; scroll-behavior:smooth;
+}
+.view-layer { display:none; animation:fade .2s ease-out; }
+.view-layer.active { display:block; }
+@keyframes fade { from{opacity:0; transform:translateY(5px)} to{opacity:1; transform:translateY(0)} }
 
-    .btn {
-      padding: 10px 16px; border-radius: 8px;
-      font-weight: 600; font-size: 13px; transition: 0.2s;
-      border: 1px solid transparent; flex: 1;
-      display: flex; justify-content: center; align-items: center; gap: 6px;
-      min-height: 40px;
-    }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-ghost { background: var(--surface-hover); color: var(--text); border-color: var(--border); }
-    .btn-ghost:hover:not(:disabled) { border-color: var(--brand); }
-    .btn-primary { background: var(--brand); color: #fff; }
-    .btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
-    kbd {
-      font-family: monospace; font-size: 10px;
-      background: rgba(127, 127, 127, 0.14); border: 1px solid var(--border);
-      border-radius: 4px; padding: 1px 5px;
-    }
+.editor-card {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius); padding:16px; margin-bottom:20px;
+  box-shadow:0 4px 6px -1px rgba(0,0,0,.1);
+}
+.editor-textarea {
+  width:100%; min-height:84px; background:transparent;
+  border:none; resize:vertical; outline:none;
+  font-size:15px; line-height:1.55; color:inherit;
+}
+.editor-textarea::placeholder { color:var(--text-muted); }
+.editor-meta {
+  display:flex; justify-content:space-between; align-items:center;
+  margin-top:6px; font-size:11px; color:var(--text-muted);
+}
+.editor-meta-actions { display:flex; gap:14px; }
+.link-btn {
+  color:var(--text-muted); font-size:11px; font-weight:600;
+  transition:.2s; padding:2px 0;
+}
+.link-btn:hover { color:var(--brand); }
+.editor-controls { display:flex; gap:8px; margin-top:14px; }
 
-    .filter-tabs {
-      display: flex; gap: 4px; background: var(--surface);
-      padding: 4px; border-radius: 10px; border: 1px solid var(--border);
-      margin-bottom: 16px;
-    }
-    .f-tab {
-      flex: 1; padding: 8px 6px; text-align: center;
-      border-radius: 6px; font-size: 12px; font-weight: 600;
-      color: var(--text-muted); transition: 0.2s;
-      display: flex; align-items: center; justify-content: center; gap: 6px;
-    }
-    .f-tab.active {
-      background: var(--surface-hover); color: var(--text);
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    }
-    .f-tab .counter {
-      background: var(--border); padding: 2px 6px;
-      border-radius: 12px; font-size: 10px; font-family: monospace;
-    }
-    .f-tab.active[data-filter="local"] .counter { background: var(--brand-glow); color: var(--brand); }
-    .f-tab.active[data-filter="world"] .counter { background: var(--world-glow); color: var(--world); }
-    .f-tab.active[data-filter="seren"] .counter { background: var(--seren-glow); color: var(--seren); }
+.btn {
+  padding:10px 16px; border-radius:8px;
+  font-weight:600; font-size:13px; transition:.2s;
+  border:1px solid transparent; flex:1;
+  display:flex; justify-content:center; align-items:center; gap:6px;
+  min-height:40px;
+}
+.btn:disabled { opacity:.5; cursor:not-allowed; }
+.btn-ghost { background:var(--surface-hover); color:var(--text); border-color:var(--border); }
+.btn-ghost:hover:not(:disabled) { border-color:var(--brand); }
+.btn-primary { background:var(--brand); color:#fff; }
+.btn-primary:hover:not(:disabled) { filter:brightness(1.1); }
+kbd {
+  font-family:monospace; font-size:10px;
+  background:rgba(127,127,127,.14); border:1px solid var(--border);
+  border-radius:4px; padding:1px 5px;
+}
 
-    .carousel-container { display: none; position: relative; margin-bottom: 8px; }
-    .carousel-container.active { display: block; }
-    .carousel-wrapper {
-      display: flex; overflow-x: auto; overflow-y: hidden;
-      scroll-snap-type: x mandatory; gap: 12px; padding: 4px 2px;
-      -webkit-overflow-scrolling: touch;
-      scrollbar-width: thin;
-    }
-    .carousel-wrapper::-webkit-scrollbar { height: 4px; }
+.filter-tabs {
+  display:flex; gap:4px; background:var(--surface);
+  padding:4px; border-radius:10px; border:1px solid var(--border);
+  margin-bottom:16px;
+}
+.f-tab {
+  flex:1; padding:8px 6px; text-align:center;
+  border-radius:6px; font-size:12px; font-weight:600;
+  color:var(--text-muted); transition:.2s;
+  display:flex; align-items:center; justify-content:center; gap:6px;
+}
+.f-tab.active {
+  background:var(--surface-hover); color:var(--text);
+  box-shadow:0 1px 3px rgba(0,0,0,.1);
+}
+.f-tab .counter {
+  background:var(--border); padding:2px 6px;
+  border-radius:12px; font-size:10px; font-family:monospace;
+}
+.f-tab.active[data-filter="local"] .counter { background:var(--brand-glow); color:var(--brand); }
+.f-tab.active[data-filter="world"] .counter { background:var(--world-glow); color:var(--world); }
+.f-tab.active[data-filter="seren"] .counter { background:var(--seren-glow); color:var(--seren); }
 
-    .note-card {
-      flex: 0 0 calc(100% - 4px);
-      scroll-snap-align: start; scroll-snap-stop: always;
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 14px 14px 14px 18px;
-      position: relative; overflow: hidden;
-      animation: slideUp 0.3s ease-out backwards;
-      min-width: 260px; max-width: 600px;
-      display: flex; flex-direction: column;
-    }
-    @media (min-width: 768px) {
-      .note-card { flex: 0 0 calc(50% - 8px); }
-    }
-    @media (min-width: 1100px) {
-      .note-card { flex: 0 0 calc(33.333% - 8px); }
-    }
-    @keyframes slideUp {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
+.carousel-container { display:none; position:relative; margin-bottom:8px; }
+.carousel-container.active { display:block; }
+.carousel-wrapper {
+  display:flex; overflow-x:auto; overflow-y:hidden;
+  scroll-snap-type:x mandatory; gap:12px; padding:4px 2px;
+  -webkit-overflow-scrolling:touch; scrollbar-width:thin;
+}
+.carousel-wrapper::-webkit-scrollbar { height:4px; }
 
-    .note-card::before {
-      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
-    }
-    .note-card.t-local::before { background: var(--brand); }
-    .note-card.t-world::before { background: var(--world); }
-    .note-card.t-seren::before { background: var(--seren); }
-    .note-card.peer { background: linear-gradient(180deg, var(--surface), var(--surface)); }
+.note-card {
+  flex:0 0 calc(100% - 4px);
+  scroll-snap-align:start; scroll-snap-stop:always;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius); padding:14px 14px 14px 18px;
+  position:relative; overflow:hidden;
+  animation:slideUp .3s ease-out backwards;
+  min-width:260px; max-width:600px;
+  display:flex; flex-direction:column;
+}
+@media (min-width:768px) { .note-card { flex:0 0 calc(50% - 8px); } }
+@media (min-width:1100px) { .note-card { flex:0 0 calc(33.333% - 8px); } }
+@keyframes slideUp { from{opacity:0; transform:translateY(10px)} to{opacity:1; transform:translateY(0)} }
+.note-card::before { content:''; position:absolute; left:0; top:0; bottom:0; width:4px; }
+.note-card.t-local::before { background:var(--brand); }
+.note-card.t-world::before { background:var(--world); }
+.note-card.t-seren::before { background:var(--seren); }
+.note-card.peer { background:linear-gradient(180deg,var(--surface),var(--surface)); }
+.note-header {
+  display:flex; justify-content:space-between;
+  margin-bottom:8px; align-items:center; gap:8px; flex-shrink:0;
+}
+.note-type {
+  font-size:10px; font-weight:700; padding:2px 6px;
+  border-radius:4px; letter-spacing:.5px; white-space:nowrap;
+}
+.t-local .note-type { background:var(--brand-glow); color:var(--brand); }
+.t-world .note-type { background:var(--world-glow); color:var(--world); }
+.t-seren .note-type { background:var(--seren-glow); color:var(--seren); }
+.note-score { font-family:monospace; font-size:11px; color:var(--text-muted); white-space:nowrap; }
+.note-content {
+  font-size:14px; white-space:pre-wrap;
+  word-wrap:break-word; overflow-wrap:anywhere;
+  max-height:160px; overflow-y:auto; line-height:1.5;
+  flex:1; padding-right:4px;
+}
+.note-content mark {
+  background:var(--brand-glow); color:var(--brand);
+  padding:0 2px; border-radius:3px; font-weight:600;
+}
+.note-foot {
+  display:flex; align-items:center; justify-content:space-between;
+  margin-top:12px; gap:8px; flex-shrink:0;
+}
+.note-hint { font-size:11px; color:var(--text-muted); font-style:italic; opacity:.8; }
+.note-actions {
+  display:flex; gap:4px; flex-wrap:wrap;
+  opacity:1; transition:.2s; margin-left:auto;
+}
+@media (hover:hover) {
+  .note-actions { opacity:.55; }
+  .note-card:hover .note-actions { opacity:1; }
+}
+.note-act {
+  font-size:11px; font-weight:600; color:var(--text-muted);
+  padding:6px 10px; border-radius:6px;
+  border:1px solid var(--border); transition:.15s;
+  display:inline-flex; align-items:center; gap:5px;
+  white-space:nowrap; min-height:28px;
+}
+.note-act:hover { color:var(--text); border-color:var(--brand); background:var(--surface-hover); }
+.note-act.danger:hover { color:var(--danger); border-color:var(--danger); }
 
-    .note-header {
-      display: flex; justify-content: space-between;
-      margin-bottom: 8px; align-items: center; gap: 8px; flex-shrink: 0;
-    }
-    .note-type {
-      font-size: 10px; font-weight: 700; padding: 2px 6px;
-      border-radius: 4px; letter-spacing: 0.5px; white-space: nowrap;
-    }
-    .t-local .note-type { background: var(--brand-glow); color: var(--brand); }
-    .t-world .note-type { background: var(--world-glow); color: var(--world); }
-    .t-seren .note-type { background: var(--seren-glow); color: var(--seren); }
-    .note-score {
-      font-family: monospace; font-size: 11px;
-      color: var(--text-muted); white-space: nowrap;
-    }
-    .note-content {
-      font-size: 14px; white-space: pre-wrap;
-      word-wrap: break-word; overflow-wrap: anywhere;
-      max-height: 160px; overflow-y: auto; line-height: 1.5;
-      flex: 1; padding-right: 4px;
-    }
-    .note-content mark {
-      background: var(--brand-glow); color: var(--brand);
-      padding: 0 2px; border-radius: 3px; font-weight: 600;
-    }
-    .note-foot {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-top: 12px; gap: 8px; flex-shrink: 0;
-    }
-    .note-hint {
-      font-size: 11px; color: var(--text-muted);
-      font-style: italic; opacity: 0.8;
-    }
-    .note-actions {
-      display: flex; gap: 4px; flex-wrap: wrap;
-      opacity: 1; transition: 0.2s; margin-left: auto;
-    }
-    @media (hover: hover) {
-      .note-actions { opacity: 0.55; }
-      .note-card:hover .note-actions { opacity: 1; }
-    }
-    .note-act {
-      font-size: 11px; font-weight: 600; color: var(--text-muted);
-      padding: 6px 10px; border-radius: 6px;
-      border: 1px solid var(--border); transition: 0.15s;
-      display: inline-flex; align-items: center; gap: 5px;
-      white-space: nowrap; min-height: 28px;
-    }
-    .note-act:hover {
-      color: var(--text); border-color: var(--brand); background: var(--surface-hover);
-    }
-    .note-act.danger:hover { color: var(--danger); border-color: var(--danger); }
+.empty-state {
+  padding:40px 20px; text-align:center;
+  color:var(--text-muted); display:flex;
+  flex-direction:column; align-items:center; gap:12px; width:100%;
+}
+.empty-state svg { width:48px; height:48px; opacity:.2; }
+.spinner {
+  width:28px; height:28px;
+  border:3px solid var(--border); border-top-color:var(--world);
+  border-radius:50%; animation:spin .8s linear infinite;
+}
+@keyframes spin { to { transform:rotate(360deg); } }
 
-    .empty-state {
-      padding: 40px 20px; text-align: center;
-      color: var(--text-muted); display: flex;
-      flex-direction: column; align-items: center; gap: 12px;
-      width: 100%;
-    }
-    .empty-state svg { width: 48px; height: 48px; opacity: 0.2; }
-    .spinner {
-      width: 28px; height: 28px;
-      border: 3px solid var(--border); border-top-color: var(--world);
-      border-radius: 50%; animation: spin 0.8s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
+.base-stats { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+.stat {
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:10px; padding:8px 12px; flex:1; min-width:80px;
+}
+.stat .num { font-size:18px; font-weight:700; }
+.stat .lbl {
+  font-size:10px; text-transform:uppercase;
+  letter-spacing:.5px; color:var(--text-muted);
+}
+.base-controls { display:flex; gap:8px; align-items:center; margin-bottom:14px; }
+.base-search {
+  flex:1; background:var(--surface);
+  border:1px solid var(--border); padding:9px 12px;
+  border-radius:8px; transition:.2s; min-height:40px;
+}
+.base-search:focus { border-color:var(--brand); outline:none; }
+.base-sort {
+  background:var(--surface); border:1px solid var(--border);
+  padding:9px 10px; border-radius:8px; font-size:12px; min-height:40px;
+}
 
-    .carousel-indicator {
-      display: flex; justify-content: center; gap: 6px;
-      padding: 8px 0; margin-bottom: 16px;
-    }
-    .carousel-dot {
-      width: 6px; height: 6px; border-radius: 50%;
-      background: var(--border); transition: 0.2s;
-    }
-    .carousel-dot.active {
-      background: var(--brand); width: 18px; border-radius: 3px;
-    }
+.toast {
+  position:fixed; bottom:calc(24px + var(--safe-b));
+  left:50%; transform:translateX(-50%) translateY(120px);
+  background:var(--text); color:var(--bg);
+  padding:10px 20px; border-radius:30px;
+  font-weight:600; font-size:13px;
+  transition:.3s cubic-bezier(.175,.885,.32,1.275);
+  z-index:1000; box-shadow:0 10px 25px rgba(0,0,0,.2);
+  max-width:90vw; text-align:center;
+}
+.toast.show { transform:translateX(-50%) translateY(0); }
+.toast.ok { background:var(--seren); color:#04130a; }
+.toast.err { background:var(--danger); color:#160404; }
+.toast.info { background:var(--world); color:#021019; }
 
-    .base-stats {
-      display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px;
-    }
-    .stat {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 10px; padding: 8px 12px; flex: 1; min-width: 80px;
-    }
-    .stat .num { font-size: 18px; font-weight: 700; }
-    .stat .lbl {
-      font-size: 10px; text-transform: uppercase;
-      letter-spacing: 0.5px; color: var(--text-muted);
-    }
-    .base-controls {
-      display: flex; gap: 8px; align-items: center; margin-bottom: 14px;
-    }
-    .base-search {
-      flex: 1; background: var(--surface);
-      border: 1px solid var(--border); padding: 9px 12px;
-      border-radius: 8px; transition: 0.2s; min-height: 40px;
-    }
-    .base-search:focus { border-color: var(--brand); outline: none; }
-    .base-sort {
-      background: var(--surface); border: 1px solid var(--border);
-      padding: 9px 10px; border-radius: 8px; font-size: 12px; min-height: 40px;
-    }
-
-    .toast {
-      position: fixed; bottom: calc(24px + var(--safe-b));
-      left: 50%; transform: translateX(-50%) translateY(120px);
-      background: var(--text); color: var(--bg);
-      padding: 10px 20px; border-radius: 30px;
-      font-weight: 600; font-size: 13px;
-      transition: 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-      z-index: 1000; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
-      max-width: 90vw; text-align: center;
-    }
-    .toast.show { transform: translateX(-50%) translateY(0); }
-    .toast.ok { background: var(--seren); color: #04130a; }
-    .toast.err { background: var(--danger); color: #160404; }
-    .toast.info { background: var(--world); color: #021019; }
-
-    .drawer-overlay {
-      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6);
-      backdrop-filter: blur(3px); z-index: 100;
-      opacity: 0; pointer-events: none; transition: 0.2s;
-    }
-    .drawer-overlay.open { opacity: 1; pointer-events: auto; }
-    .drawer {
-      position: fixed; top: 0; right: -400px; width: 360px;
-      max-width: 100%; height: 100%; background: var(--surface);
-      border-left: 1px solid var(--border); z-index: 101;
-      transition: 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-      padding: 20px; overflow-y: auto;
-      padding-bottom: calc(20px + var(--safe-b));
-    }
-    .drawer.open { right: 0; }
-    .drawer-header {
-      display: flex; justify-content: space-between;
-      margin-bottom: 24px; font-size: 18px;
-      font-weight: 700; align-items: center;
-    }
-    .drawer-close {
-      font-size: 28px; color: var(--text-muted);
-      transition: 0.2s; line-height: 1; min-width: 36px; min-height: 36px;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .drawer-close:hover { color: var(--danger); }
-    .drawer-section {
-      font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
-      color: var(--text-muted); font-weight: 700;
-      margin: 24px 0 12px; padding-bottom: 6px;
-      border-bottom: 1px solid var(--border);
-    }
-    .drawer p { color: var(--text-muted); margin-bottom: 10px; line-height: 1.5; }
-    .form-group { margin-bottom: 20px; }
-    .form-label {
-      display: block; font-size: 11px; text-transform: uppercase;
-      font-weight: 700; color: var(--text-muted);
-      margin-bottom: 8px; letter-spacing: 0.5px;
-    }
-    .form-hint {
-      font-size: 11px; color: var(--text-muted);
-      margin-top: 6px; line-height: 1.4;
-    }
-    .form-input {
-      width: 100%; background: var(--bg);
-      border: 1px solid var(--border); padding: 10px 12px;
-      border-radius: 8px; transition: 0.2s; min-height: 40px;
-    }
-    .form-input:focus { border-color: var(--brand); outline: none; }
-    .form-range { width: 100%; accent-color: var(--brand); }
-    .val-display {
-      float: right; font-family: monospace;
-      color: var(--brand); font-weight: bold;
-    }
-    .btn-row { display: flex; gap: 8px; }
-
-    .critical-error {
-      position: fixed; inset: 0; background: var(--bg);
-      display: flex; align-items: center; justify-content: center;
-      padding: 20px; z-index: 9999; flex-direction: column; gap: 16px;
-      text-align: center;
-    }
-    .critical-error h2 { color: var(--danger); }
-    .critical-error pre {
-      background: var(--surface); padding: 16px; border-radius: 8px;
-      border: 1px solid var(--border); max-width: 100%; overflow: auto;
-      font-size: 12px; color: var(--text-muted);
-    }
-  </style>
+.drawer-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,.6);
+  backdrop-filter:blur(3px); z-index:100;
+  opacity:0; pointer-events:none; transition:.2s;
+}
+.drawer-overlay.open { opacity:1; pointer-events:auto; }
+.drawer {
+  position:fixed; top:0; right:-400px; width:360px;
+  max-width:100%; height:100%; background:var(--surface);
+  border-left:1px solid var(--border); z-index:101;
+  transition:.3s cubic-bezier(.16,1,.3,1);
+  padding:20px; overflow-y:auto;
+  padding-bottom:calc(20px + var(--safe-b));
+}
+.drawer.open { right:0; }
+.drawer-header {
+  display:flex; justify-content:space-between;
+  margin-bottom:24px; font-size:18px;
+  font-weight:700; align-items:center;
+}
+.drawer-close {
+  font-size:28px; color:var(--text-muted);
+  transition:.2s; line-height:1; min-width:36px; min-height:36px;
+  display:flex; align-items:center; justify-content:center;
+}
+.drawer-close:hover { color:var(--danger); }
+.drawer-section {
+  font-size:11px; text-transform:uppercase; letter-spacing:1px;
+  color:var(--text-muted); font-weight:700;
+  margin:24px 0 12px; padding-bottom:6px;
+  border-bottom:1px solid var(--border);
+}
+.drawer p { color:var(--text-muted); margin-bottom:10px; line-height:1.5; }
+.form-group { margin-bottom:20px; }
+.form-label {
+  display:block; font-size:11px; text-transform:uppercase;
+  font-weight:700; color:var(--text-muted);
+  margin-bottom:8px; letter-spacing:.5px;
+}
+.form-hint { font-size:11px; color:var(--text-muted); margin-top:6px; line-height:1.4; }
+.form-input {
+  width:100%; background:var(--bg);
+  border:1px solid var(--border); padding:10px 12px;
+  border-radius:8px; transition:.2s; min-height:40px;
+}
+.form-input:focus { border-color:var(--brand); outline:none; }
+.form-range { width:100%; accent-color:var(--brand); }
+.val-display { float:right; font-family:monospace; color:var(--brand); font-weight:bold; }
+.btn-row { display:flex; gap:8px; }
+</style>
 </head>
 <body>
 
@@ -420,11 +365,14 @@
 </header>
 
 <div class="status-bar">
-  <div class="badge-status" id="stNetwork">
-    <div class="dot"></div><span id="stNetworkText">Инициализация…</span>
+  <div class="badge-status" id="stNet">
+    <div class="dot"></div><span id="stNetText">Инициализация…</span>
   </div>
   <div class="badge-status" id="stAI">
-    <div class="dot"></div><span id="stAIText">ИИ загружается…</span>
+    <div class="dot"></div><span id="stAIText">ИИ грузится…</span>
+  </div>
+  <div class="badge-status" id="stDB">
+    <div class="dot"></div><span id="stDBText">База…</span>
   </div>
 </div>
 
@@ -438,7 +386,7 @@
 <main class="workspace">
   <div id="view-stream" class="view-layer active">
     <div class="editor-card">
-      <textarea id="ioInput" class="editor-textarea" placeholder="О чём думаешь? Мысль ищет резонанс…"></textarea>
+      <textarea id="ioInput" class="editor-textarea" placeholder="О чём думаешь?"></textarea>
       <div class="editor-meta">
         <span id="ioCount">0 символов</span>
         <div class="editor-meta-actions">
@@ -465,7 +413,10 @@
     </div>
 
     <div id="carousel-local" class="carousel-container active">
-      <div class="carousel-wrapper"></div>
+      <div class="carousel-wrapper">
+        <div class="skel skel-card"></div>
+        <div class="skel skel-card" style="animation-delay:.2s"></div>
+      </div>
     </div>
     <div id="carousel-world" class="carousel-container">
       <div class="carousel-wrapper"></div>
@@ -536,8 +487,7 @@
     </div>
     <input type="file" id="importFile" accept=".noo,.json,application/json" style="display:none">
     <div class="form-hint">
-      .noo — переносимый формат капсулы. Дубликаты по ID и хэшу текста автоматически пропускаются,
-      так что при передаче капсулы другому клиенту заметки не удвоятся.
+      .noo — переносимый формат капсулы. Дубликаты по ID и хэшу текста автоматически пропускаются.
     </div>
   </div>
 
@@ -561,7 +511,6 @@
   <p>
     NOOmium превращает каждую мысль в смысловой вектор. Пока вы печатаете,
     система ищет совпадения в вашей базе и анонимно транслирует запрос узлам в вашей комнате.
-    В ответ приходят созвучные общие мысли.
   </p>
   <div class="drawer-section">Дорожки</div>
   <p><b style="color:var(--brand)">Локально</b> — сильные совпадения в вашей базе.</p>
@@ -569,23 +518,17 @@
   <p><b style="color:var(--seren)">Озарения</b> — близкие, но не точные мысли.</p>
   <div class="drawer-section">Философия</div>
   <p>
-    Чужие мысли нельзя сохранить себе. Их можно прочитать, понять — и написать своё.
+    Чужие мысли нельзя сохранить себе. Прочитать, понять — и написать своё.
     Так рождается синтез, а не склад чужого.
-  </p>
-  <div class="drawer-section">Офлайн</div>
-  <p>
-    Без сети NOOmium работает как личная база знаний: поиск по смыслу остаётся,
-    просто дорожка «Мир» молчит.
   </p>
   <div class="drawer-section">Капсулы .noo</div>
   <p>
-    Капсула — это переносимый снимок базы. У каждой заметки есть UUID и хэш текста,
-    поэтому при импорте на другом устройстве дубли не появляются.
+    У каждой заметки есть UUID и хэш текста, поэтому при импорте на другом устройстве дубли не появляются.
   </p>
   <div class="drawer-section">Горячие клавиши</div>
   <p><kbd>Ctrl</kbd>+<kbd>Enter</kbd> — сохранить лично</p>
-  <p><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> — поделиться (P2P)</p>
-  <p><kbd>/</kbd> — перейти к редактору</p>
+  <p><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> — поделиться</p>
+  <p><kbd>/</kbd> — редактор</p>
   <p><kbd>Esc</kbd> — закрыть панели</p>
 </div>
 
@@ -595,17 +538,25 @@
 import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 import * as nostrMod from 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
 
+/* ===== CONFIG ===== */
 const Config = {
-  DB_NAME: 'noomium_v2',
+  DB_NAME: 'noomium_v3',
   DB_VERSION: 1,
   STORE: 'notes',
-  RELAYS: ['wss://relay.damus.io', 'wss://nos.lol'],
+  RELAYS: [
+    'wss://nos.lol',
+    'wss://relay.nostr.band',
+    'wss://relay.damus.io',
+    'wss://relay.snort.social',
+    'wss://nostr.mutinywallet.com',
+  ],
   K_QUERY: 21000,
   K_ANSWER: 21001,
   MODEL: 'Xenova/all-MiniLM-L6-v2',
   DIM: 384,
   BACKUP_EXT: 'noo',
   DEBOUNCE: 800,
+  RELAY_CONNECT_TIMEOUT: 6000,
   state: {
     room: 'noomium-core',
     theme: 'dark',
@@ -617,46 +568,65 @@ const Config = {
 try {
   const saved = localStorage.getItem('noomium_config');
   if (saved) Object.assign(Config.state, JSON.parse(saved));
-} catch (e) { console.warn('Config load failed:', e); }
+} catch {}
 
-function uuid() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+/* ===== UTILS ===== */
+const uuid = () =>
+  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = Math.random() * 16 | 0;
     return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
   });
-}
 
-function textHash(text) {
+const textHash = (text) => {
   let h = 2166136261;
   for (let i = 0; i < text.length; i++) {
     h ^= text.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
   return 'h' + (h >>> 0).toString(16);
-}
+};
 
-function plural(n, one, few, many) {
+const plural = (n, one, few, many) => {
   const m10 = n % 10, m100 = n % 100;
   if (m10 === 1 && m100 !== 11) return one;
   if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
   return many;
-}
+};
 
 const word = {
   symbols: n => `${n} ${plural(n, 'символ', 'символа', 'символов')}`,
   peers: n => `${n} ${plural(n, 'узел', 'узла', 'узлов')}`,
-  thoughts: n => `${n} ${plural(n, 'мысль', 'мысли', 'мыслей')}`
+  thoughts: n => `${n} ${plural(n, 'мысль', 'мысли', 'мыслей')}`,
+  relays: n => `${n} ${plural(n, 'relay', 'relay', 'relay')}`
 };
 
-class Storage {
-  constructor() {
-    this.db = null;
-    this.ready = false;
+/* ===== EVENT BUS ===== */
+class EventBus {
+  constructor() { this.listeners = new Map(); }
+  on(evt, fn) {
+    if (!this.listeners.has(evt)) this.listeners.set(evt, new Set());
+    this.listeners.get(evt).add(fn);
+    return () => this.off(evt, fn);
   }
+  off(evt, fn) { this.listeners.get(evt)?.delete(fn); }
+  emit(evt, data) { this.listeners.get(evt)?.forEach(fn => {
+    try { fn(data); } catch (e) { console.error(`EventBus ${evt}:`, e); }
+  }); }
+}
+const bus = new EventBus();
+
+/* ===== STORAGE ===== */
+class Storage {
+  constructor() { this.db = null; this.ready = false; }
 
   async open() {
     if (this.db && this.ready) return this.db;
-    return this._openWithVersion(Config.DB_VERSION);
+    try {
+      return await this._openWithVersion(Config.DB_VERSION);
+    } catch (e1) {
+      console.warn('DB open v1 failed, trying recovery:', e1);
+      return await this._recover(Config.DB_VERSION + 1);
+    }
   }
 
   _openWithVersion(version) {
@@ -668,15 +638,11 @@ class Storage {
           db.createObjectStore(Config.STORE, { keyPath: 'id' });
         }
       };
-      req.onsuccess = async e => {
+      req.onsuccess = e => {
         const db = e.target.result;
         if (!db.objectStoreNames.contains(Config.STORE)) {
           db.close();
-          try {
-            const recovered = await this._recover(db.version + 1);
-            resolve(recovered);
-          } catch (err) { reject(err); }
-          return;
+          return reject(new Error('Store missing'));
         }
         this.db = db;
         this.ready = true;
@@ -725,26 +691,8 @@ class Storage {
   getAll() { return this.tx('readonly', s => s.getAll()); }
   clear() { return this.tx('readwrite', s => s.clear()); }
 
-  async bulkPut(notes) {
-    const db = await this.open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(Config.STORE, 'readwrite');
-      const store = tx.objectStore(Config.STORE);
-      for (const n of notes) store.put(n);
-      tx.oncomplete = () => resolve(notes.length);
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-
-  async exists(id) {
-    const note = await this.get(id);
-    return !!note;
-  }
-
   async reset() {
-    try {
-      if (this.db) { this.db.close(); this.db = null; }
-    } catch {}
+    try { if (this.db) { this.db.close(); this.db = null; } } catch {}
     this.ready = false;
     await new Promise((resolve, reject) => {
       const req = indexedDB.deleteDatabase(Config.DB_NAME);
@@ -754,9 +702,9 @@ class Storage {
     });
   }
 }
-
 const DB = new Storage();
 
+/* ===== AI ===== */
 class AI {
   constructor() {
     this.extractor = null;
@@ -765,7 +713,6 @@ class AI {
     const { env } = tfMod;
     if (env) { env.allowLocalModels = false; env.useBrowserCache = true; }
   }
-
   get ready() { return this.mode === 'model' || this.mode === 'demo'; }
 
   async init(onProgress) {
@@ -774,7 +721,7 @@ class AI {
     this.extractor = await pipeline('feature-extraction', Config.MODEL, {
       progress_callback: p => {
         if (p.status === 'progress' && p.total > 0) {
-          onProgress(`Модель ${Math.round((p.loaded / p.total) * 100)}%`);
+          onProgress?.(`Модель ${Math.round((p.loaded / p.total) * 100)}%`);
         }
       }
     });
@@ -824,106 +771,228 @@ class AI {
     return sum;
   }
 }
-
 const ai = new AI();
+
+/* ===== RELAY MANAGER (по науке) ===== */
+class RelayManager {
+  constructor(urls) {
+    this.urls = urls;
+    this.health = new Map();
+    urls.forEach(u => this.health.set(u, { ok: true, fails: 0, lastCheck: 0 }));
+  }
+
+  getHealthyUrls() {
+    return this.urls.filter(u => this.health.get(u).ok);
+  }
+
+  markOk(url) {
+    const h = this.health.get(url);
+    if (h) { h.ok = true; h.fails = 0; h.lastCheck = Date.now(); }
+  }
+
+  markFailed(url) {
+    const h = this.health.get(url);
+    if (!h) return;
+    h.fails++;
+    h.lastCheck = Date.now();
+    if (h.fails >= 2) h.ok = false;
+  }
+
+  resetAll() {
+    this.urls.forEach(u => {
+      const h = this.health.get(u);
+      if (h) { h.ok = true; h.fails = 0; }
+    });
+  }
+}
+const relays = new RelayManager(Config.RELAYS);
+
+/* ===== NETWORK (state machine) ===== */
+const NetState = Object.freeze({
+  IDLE: 'idle',
+  CONNECTING: 'connecting',
+  CONNECTED: 'connected',
+  DEGRADED: 'degraded',
+  FAILED: 'failed'
+});
 
 class Network {
   constructor() {
-    this.pool = null; this.sk = null; this.pk = null; this.sub = null;
-    this.currentQueryId = null; this.lastQueryAt = 0;
-    this.worldAnswers = []; this.peers = new Set(); this.ready = false;
+    this.pool = null;
+    this.sk = null;
+    this.pk = null;
+    this.sub = null;
+    this.state = NetState.IDLE;
+    this.currentQueryId = null;
+    this.lastQueryAt = 0;
+    this.worldAnswers = [];
+    this.peers = new Set();
+    this.connectedCount = 0;
+    this.reconnectTimer = null;
   }
 
-  init(onActivity, onAnswersUpdated) {
-    const { SimplePool, generateSecretKey, getPublicKey } = nostrMod;
-    let keyHex = localStorage.getItem('noomium_key');
-    if (!keyHex) {
-      const raw = generateSecretKey();
-      keyHex = Array.from(raw).map(b => b.toString(16).padStart(2, '0')).join('');
-      localStorage.setItem('noomium_key', keyHex);
+  get ready() { return this.state === NetState.CONNECTED || this.state === NetState.DEGRADED; }
+
+  _setState(state, details = {}) {
+    if (this.state === state) return;
+    this.state = state;
+    bus.emit('net:state', { state, ...details });
+  }
+
+  async init() {
+    this._setState(NetState.CONNECTING);
+    try {
+      const { SimplePool, generateSecretKey, getPublicKey } = nostrMod;
+
+      let keyHex = localStorage.getItem('noomium_key');
+      if (!keyHex) {
+        const raw = generateSecretKey();
+        keyHex = Array.from(raw).map(b => b.toString(16).padStart(2, '0')).join('');
+        localStorage.setItem('noomium_key', keyHex);
+      }
+
+      this.sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+      this.pk = getPublicKey(this.sk);
+      this.pool = new SimplePool();
+
+      await this._subscribe();
+
+      this._scheduleReconnect();
+    } catch (err) {
+      console.error('Network init:', err);
+      this._setState(NetState.FAILED, { error: err.message });
+      this._scheduleReconnect();
     }
-    this.sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
-    this.pk = getPublicKey(this.sk);
-    this.pool = new SimplePool();
-    this.ready = true;
+  }
 
-    this.sub = this.pool.subscribeMany(Config.RELAYS, [{
-      kinds: [Config.K_QUERY, Config.K_ANSWER],
-      '#t': [Config.state.room],
-      since: Math.floor(Date.now() / 1000)
-    }], {
-      onevent: async ev => {
-        if (ev.pubkey === this.pk) return;
-        this.peers.add(ev.pubkey);
-        onActivity(this.peers.size);
+  async _subscribe() {
+    if (!this.pool) return;
+    if (this.sub) {
+      try { this.sub.close(); } catch {}
+      this.sub = null;
+    }
 
-        if (ev.kind === Config.K_QUERY) {
-          try {
-            const data = JSON.parse(ev.content);
-            if (!data.vector) return;
-            const localNotes = await DB.getAll();
-            const { threshold, serendipity } = Config.state;
-            for (const note of localNotes) {
-              if (!note.shared || !note.vector) continue;
-              const score = ai.cosine(data.vector, note.vector);
-              if (score >= (threshold - serendipity)) {
-                this.sendAnswer(ev.id, note.text, note.vector);
-              }
-            }
-          } catch (e) { console.error('Query parse:', e); }
+    const healthyUrls = relays.getHealthyUrls();
+    if (healthyUrls.length === 0) {
+      relays.resetAll();
+      this._setState(NetState.FAILED, { error: 'No healthy relays' });
+      return;
+    }
+
+    try {
+      this.sub = this.pool.subscribeMany(healthyUrls, [{
+        kinds: [Config.K_QUERY, Config.K_ANSWER],
+        '#t': [Config.state.room],
+        since: Math.floor(Date.now() / 1000)
+      }], {
+        onevent: async ev => {
+          if (ev.pubkey === this.pk) return;
+          this.peers.add(ev.pubkey);
+          bus.emit('net:peer', { count: this.peers.size });
+          await this._handleEvent(ev);
         }
+      });
 
-        if (ev.kind === Config.K_ANSWER) {
-          const eTag = ev.tags.find(t => t[0] === 'e');
-          if (eTag && eTag[1] === this.currentQueryId) {
-            try {
-              const data = JSON.parse(ev.content);
-              if (data.text && data.vector) {
-                if (!this.worldAnswers.some(a => a.id === ev.id)) {
-                  this.worldAnswers.push({
-                    id: ev.id, text: data.text, vector: data.vector,
-                    peer: ev.pubkey.slice(0, 6)
-                  });
-                  onAnswersUpdated();
-                }
-              }
-            } catch (e) { console.error('Answer parse:', e); }
+      setTimeout(() => this._checkConnectivity(), 2000);
+    } catch (err) {
+      healthyUrls.forEach(u => relays.markFailed(u));
+      throw err;
+    }
+  }
+
+  async _checkConnectivity() {
+    if (!this.pool) return;
+    const healthy = relays.getHealthyUrls();
+    if (healthy.length === 0) {
+      this._setState(NetState.FAILED);
+    } else if (healthy.length < Config.RELAYS.length / 2) {
+      this._setState(NetState.DEGRADED, { relays: healthy.length });
+    } else {
+      this._setState(NetState.CONNECTED, { relays: healthy.length });
+    }
+  }
+
+  _scheduleReconnect() {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => {
+      if (this.state !== NetState.CONNECTED) {
+        this._subscribe().catch(() => {});
+      }
+    }, 10000);
+  }
+
+  async _handleEvent(ev) {
+    if (ev.kind === Config.K_QUERY) {
+      try {
+        const data = JSON.parse(ev.content);
+        if (!data.vector) return;
+        const localNotes = await DB.getAll();
+        const { threshold, serendipity } = Config.state;
+        for (const note of localNotes) {
+          if (!note.shared || !note.vector) continue;
+          const score = ai.cosine(data.vector, note.vector);
+          if (score >= (threshold - serendipity)) {
+            this.sendAnswer(ev.id, note.text, note.vector);
           }
         }
+      } catch (e) { console.warn('Query parse:', e); }
+    }
+
+    if (ev.kind === Config.K_ANSWER) {
+      const eTag = ev.tags.find(t => t[0] === 'e');
+      if (eTag && eTag[1] === this.currentQueryId) {
+        try {
+          const data = JSON.parse(ev.content);
+          if (data.text && data.vector) {
+            if (!this.worldAnswers.some(a => a.id === ev.id)) {
+              this.worldAnswers.push({
+                id: ev.id, text: data.text, vector: data.vector,
+                peer: ev.pubkey.slice(0, 6)
+              });
+              bus.emit('net:answers');
+            }
+          }
+        } catch (e) { console.warn('Answer parse:', e); }
       }
-    });
+    }
   }
 
   broadcastQuery(vector) {
-    if (!this.pool) return;
+    if (!this.pool || !this.ready) return;
     this.worldAnswers = [];
     this.lastQueryAt = Date.now();
-    const { finalizeEvent } = nostrMod;
-    const ev = finalizeEvent({
-      kind: Config.K_QUERY,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [['t', Config.state.room]],
-      content: JSON.stringify({ vector })
-    }, this.sk);
-    this.currentQueryId = ev.id;
-    this.pool.publish(Config.RELAYS, ev);
+    try {
+      const { finalizeEvent } = nostrMod;
+      const ev = finalizeEvent({
+        kind: Config.K_QUERY,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [['t', Config.state.room]],
+        content: JSON.stringify({ vector })
+      }, this.sk);
+      this.currentQueryId = ev.id;
+      this.pool.publish(relays.getHealthyUrls(), ev);
+    } catch (err) {
+      console.warn('Broadcast failed:', err);
+    }
   }
 
   sendAnswer(targetId, text, vector) {
-    if (!this.pool) return;
-    const { finalizeEvent } = nostrMod;
-    const ev = finalizeEvent({
-      kind: Config.K_ANSWER,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [['t', Config.state.room], ['e', targetId]],
-      content: JSON.stringify({ text, vector })
-    }, this.sk);
-    this.pool.publish(Config.RELAYS, ev);
+    if (!this.pool || !this.ready) return;
+    try {
+      const { finalizeEvent } = nostrMod;
+      const ev = finalizeEvent({
+        kind: Config.K_ANSWER,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [['t', Config.state.room], ['e', targetId]],
+        content: JSON.stringify({ text, vector })
+      }, this.sk);
+      this.pool.publish(relays.getHealthyUrls(), ev);
+    } catch (err) { console.warn('Answer failed:', err); }
   }
 }
-
 const net = new Network();
 
+/* ===== UI ===== */
 const UI = {
   get: id => document.getElementById(id),
   toastTimer: null,
@@ -999,11 +1068,13 @@ const UI = {
   renderEmpty(containerId, message, opts = {}) {
     const c = this.get(containerId);
     if (!c) return;
+    const wrapper = c.querySelector('.carousel-wrapper');
+    if (!wrapper) return;
     if (opts.loading) {
-      c.innerHTML = `<div class="empty-state"><div class="spinner"></div><div>${this.escapeHtml(message)}</div></div>`;
+      wrapper.innerHTML = `<div class="empty-state"><div class="spinner"></div><div>${this.escapeHtml(message)}</div></div>`;
       return;
     }
-    c.innerHTML = `<div class="empty-state">
+    wrapper.innerHTML = `<div class="empty-state">
       <svg fill="currentColor" viewBox="0 0 24 24">
         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/>
       </svg>
@@ -1029,9 +1100,9 @@ async function executeSearch(force = false) {
       if (c) c.textContent = '0';
     });
     UI.renderEmpty('carousel-local',
-      ai.ready ? 'Начните печатать — поиск по смысловому пространству.' : 'ИИ прогревается…',
+      ai.ready ? 'Начните печатать.' : 'ИИ прогревается…',
       { loading: !ai.ready });
-    UI.renderEmpty('carousel-world', 'Сеть тиха.');
+    UI.renderEmpty('carousel-world', net.ready ? 'Сеть тиха.' : 'Оффлайн.');
     UI.renderEmpty('carousel-seren', 'Близких мыслей нет.');
     return;
   }
@@ -1072,9 +1143,9 @@ async function executeSearch(force = false) {
   renderCarousel('carousel-local', localExact, 't-local', 'В базе нет точных совпадений.');
 
   const waiting = net.ready && net.lastQueryAt && (Date.now() - net.lastQueryAt < 6000) && worldExact.length === 0;
-  if (waiting) UI.renderEmpty('carousel-world', 'Слушаю резонанс в комнате…', { loading: true });
+  if (waiting) UI.renderEmpty('carousel-world', 'Слушаю резонанс…', { loading: true });
   else renderCarousel('carousel-world', worldExact, 't-world',
-    net.ready ? 'Пока никто в комнате не думает так же.' : 'Сеть недоступна.');
+    net.ready ? 'Пока никто не думает так же.' : 'Оффлайн — только локальный поиск.');
 
   renderCarousel('carousel-seren', serenAll, 't-seren', 'Близких мыслей не найдено.');
 
@@ -1094,7 +1165,7 @@ async function renderMyBase() {
     <div class="stat"><div class="num">${all.length - shared}</div><div class="lbl">Личных</div></div>`;
 
   if (all.length === 0) {
-    UI.renderEmpty('carousel-base', 'Ваша база знаний пуста.');
+    UI.renderEmpty('carousel-base', 'База пуста.');
     return;
   }
 
@@ -1110,15 +1181,15 @@ async function renderMyBase() {
   UI.registry.clear();
   const wrap = UI.get('carousel-base')?.querySelector('.carousel-wrapper');
   if (!wrap) return;
-  if (list.length === 0) { UI.renderEmpty('carousel-base', 'Под фильтр ничего не подошло.'); return; }
+  if (list.length === 0) { UI.renderEmpty('carousel-base', 'Ничего не найдено.'); return; }
   wrap.innerHTML = list.map(note => UI.createCard(note, 't-local', q || null)).join('');
 }
 
-function isBaseView() { return UI.get('view-base').classList.contains('active'); }
-async function refreshCurrent() {
+const isBaseView = () => UI.get('view-base').classList.contains('active');
+const refreshCurrent = async () => {
   if (isBaseView()) await renderMyBase();
   else await executeSearch();
-}
+};
 
 async function handleCardAction(act, el) {
   const id = el.dataset.id;
@@ -1133,12 +1204,12 @@ async function handleCardAction(act, el) {
   } else if (act === 'copy') {
     try {
       await navigator.clipboard.writeText(item.text);
-      UI.toast('Скопировано в буфер.', 'ok');
+      UI.toast('Скопировано.', 'ok');
     } catch { UI.toast('Не удалось скопировать.', 'err'); }
   } else if (act === 'del') {
-    if (confirm('Удалить эту мысль навсегда?')) {
+    if (confirm('Удалить мысль?')) {
       await DB.delete(id);
-      UI.toast('Мысль удалена.', 'info');
+      UI.toast('Удалено.', 'info');
       refreshCurrent();
     }
   } else if (act === 'toggle') {
@@ -1146,7 +1217,7 @@ async function handleCardAction(act, el) {
     if (rec) {
       rec.shared = !rec.shared;
       await DB.save(rec);
-      UI.toast(rec.shared ? 'Теперь видно узлам.' : 'Теперь личное.', 'ok');
+      UI.toast(rec.shared ? 'Видно узлам.' : 'Личное.', 'ok');
       refreshCurrent();
     }
   }
@@ -1155,15 +1226,11 @@ async function handleCardAction(act, el) {
 async function exportData() {
   try {
     const notes = await DB.getAll();
-    if (notes.length === 0) { UI.toast('Базе нечего экспортировать.', 'err'); return; }
+    if (notes.length === 0) { UI.toast('Нечего экспортировать.', 'err'); return; }
     const capsule = {
-      app: 'noomium',
-      format: 'noo',
-      version: 1,
-      model: Config.MODEL,
-      dim: Config.DIM,
-      exportedAt: Date.now(),
-      notes
+      app: 'noomium', format: 'noo', version: 1,
+      model: Config.MODEL, dim: Config.DIM,
+      exportedAt: Date.now(), notes
     };
     const blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1172,10 +1239,8 @@ async function exportData() {
     a.download = `noomium-${new Date().toISOString().slice(0, 10)}.${Config.BACKUP_EXT}`;
     a.click();
     URL.revokeObjectURL(url);
-    UI.toast(`Экспортировано ${word.thoughts(notes.length)} в .noo`, 'ok');
-  } catch (e) {
-    UI.toast('Экспорт не удался: ' + e.message, 'err');
-  }
+    UI.toast(`Экспорт ${word.thoughts(notes.length)}`, 'ok');
+  } catch (e) { UI.toast('Экспорт не удался: ' + e.message, 'err'); }
 }
 
 async function importData(file) {
@@ -1197,15 +1262,13 @@ async function importData(file) {
       if (existingByHash.has(hash)) { skipped++; continue; }
 
       const candidateId = raw.id && typeof raw.id === 'string' ? raw.id : uuid();
-      if (existingById.has(candidateId)) {
-        const existingNote = existingById.get(candidateId);
-        if (existingNote.text === raw.text) { skipped++; continue; }
+      if (existingById.has(candidateId) && existingById.get(candidateId).text === raw.text) {
+        skipped++; continue;
       }
 
       const finalId = existingById.has(candidateId) ? uuid() : candidateId;
       const note = {
-        id: finalId,
-        text: raw.text,
+        id: finalId, text: raw.text,
         vector: Array.isArray(raw.vector) ? raw.vector : null,
         shared: !!raw.shared,
         createdAt: raw.createdAt || Date.now(),
@@ -1221,26 +1284,24 @@ async function importData(file) {
       imported++;
     }
 
-    UI.toast(`Импорт: ${imported} добавлено, ${skipped} дублей пропущено.`, 'ok');
+    UI.toast(`Импорт: ${imported} добавлено, ${skipped} пропущено.`, 'ok');
     refreshCurrent();
-  } catch (e) {
-    UI.toast('Импорт не удался: ' + e.message, 'err');
-  }
+  } catch (e) { UI.toast('Импорт не удался: ' + e.message, 'err'); }
 }
 
-function switchToStream() {
+const switchToStream = () => {
   document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.view-layer').forEach(el => el.classList.remove('active'));
   document.querySelector('.tab[data-view="view-stream"]')?.classList.add('active');
   UI.get('view-stream')?.classList.add('active');
-}
+};
 
-function openDrawer(d, o) { UI.get(d)?.classList.add('open'); UI.get(o)?.classList.add('open'); }
-function closeAllDrawers() {
+const openDrawer = (d, o) => { UI.get(d)?.classList.add('open'); UI.get(o)?.classList.add('open'); };
+const closeAllDrawers = () => {
   ['drawer', 'drawerOverlay', 'helpDrawer', 'helpOverlay'].forEach(id => {
     UI.get(id)?.classList.remove('open');
   });
-}
+};
 
 function bindEvents() {
   document.querySelectorAll('.tab').forEach(t => {
@@ -1279,21 +1340,17 @@ function bindEvents() {
   const handleSave = async isShared => {
     const text = input.value.trim();
     if (!text) { UI.toast('Нечего сохранять.', 'err'); return; }
-    if (!ai.ready) { UI.toast('ИИ ещё не готов.', 'err'); return; }
+    if (!ai.ready) { UI.toast('ИИ не готов.', 'err'); return; }
     const vector = await ai.embed(text);
     const note = {
-      id: uuid(),
-      text,
-      vector,
-      shared: isShared,
-      createdAt: Date.now(),
-      hash: textHash(text)
+      id: uuid(), text, vector, shared: isShared,
+      createdAt: Date.now(), hash: textHash(text)
     };
     await DB.save(note);
     input.value = '';
     UI.get('ioCount').textContent = word.symbols(0);
     lastVectorHash = null;
-    UI.toast(isShared ? 'Сохранено и видно узлам.' : 'Сохранено лично.', 'ok');
+    UI.toast(isShared ? 'Видно узлам.' : 'Личное.', 'ok');
     executeSearch();
     if (isBaseView()) renderMyBase();
   };
@@ -1339,14 +1396,12 @@ function bindEvents() {
   };
 
   UI.get('btnWipeDB').onclick = async () => {
-    if (confirm('Удалить все мысли безвозвратно?')) {
+    if (confirm('Удалить все мысли?')) {
       try {
         await DB.reset();
         UI.toast('База стёрта.', 'info');
         setTimeout(() => window.location.reload(), 500);
-      } catch (e) {
-        UI.toast('Ошибка очистки: ' + e.message, 'err');
-      }
+      } catch (e) { UI.toast('Ошибка: ' + e.message, 'err'); }
     }
   };
 
@@ -1370,75 +1425,82 @@ function bindEvents() {
   });
 }
 
-function showCriticalError(err) {
-  const div = document.createElement('div');
-  div.className = 'critical-error';
-  div.innerHTML = `
-    <h2>NOOmium: критическая ошибка</h2>
-    <div>${UI.escapeHtml(err.message || String(err))}</div>
-    <pre>${UI.escapeHtml(err.stack || '')}</pre>
-    <button class="btn btn-ghost" onclick="localStorage.removeItem('noomium_config');location.reload()">
-      Сбросить настройки и перезагрузить
-    </button>
-    <button class="btn btn-ghost" onclick="indexedDB.deleteDatabase('${Config.DB_NAME}').onsuccess=()=>location.reload()">
-      Сбросить базу и перезагрузить
-    </button>
-  `;
-  document.body.appendChild(div);
-}
+/* ===== NET STATE UI ===== */
+bus.on('net:state', ({ state, relays, error }) => {
+  const map = {
+    [NetState.IDLE]:       { text: 'Инициализация…', cls: 'busy' },
+    [NetState.CONNECTING]: { text: 'Подключение…',    cls: 'busy' },
+    [NetState.CONNECTED]:  { text: `В сети · ${relays || ''} relay`, cls: 'active' },
+    [NetState.DEGRADED]:   { text: `Частично · ${relays || ''} relay`, cls: 'warn' },
+    [NetState.FAILED]:     { text: 'Оффлайн',         cls: 'err' }
+  };
+  const cfg = map[state] || map[NetState.FAILED];
+  UI.setStatus('stNet', cfg.text, cfg.cls);
+});
 
+bus.on('net:peer', ({ count }) => {
+  if (count > 0) {
+    UI.setStatus('stNet', `Узлов: ${count}`, 'active');
+  }
+});
+
+bus.on('net:answers', () => {
+  if (!isBaseView()) executeSearch();
+});
+
+/* ===== PARALLEL BOOTSTRAP (по науке) ===== */
 async function bootstrap() {
   UI.setTheme(Config.state.theme);
   bindEvents();
-  UI.renderEmpty('carousel-local', 'Инициализация базы…', { loading: true });
-  UI.renderEmpty('carousel-world', 'Ожидание сети…');
-  UI.renderEmpty('carousel-seren', 'Ожидание…');
-  UI.setStatus('stAI', 'ИИ загружается…', 'busy');
 
-  try {
-    await DB.open();
-    UI.get('baseTabCount').textContent = (await DB.getAll()).length;
-  } catch (err) {
-    console.error('DB init failed:', err);
-    UI.setStatus('stAI', 'База повреждена', 'warn');
-    UI.toast('Проблема с базой. Попробуйте сбросить в настройках.', 'err');
-  }
+  UI.setStatus('stDB', 'Открытие…', 'busy');
+  UI.setStatus('stAI', 'ИИ грузится…', 'busy');
+  UI.setStatus('stNet', 'Подключение…', 'busy');
 
-  UI.renderEmpty('carousel-local', 'Начните печатать — поиск по смысловому пространству.');
+  const tasks = [
+    DB.open()
+      .then(async () => {
+        const all = await DB.getAll();
+        UI.get('baseTabCount').textContent = all.length;
+        UI.setStatus('stDB', `База · ${all.length}`, 'ready');
+      })
+      .catch(err => {
+        console.error('DB:', err);
+        UI.setStatus('stDB', 'База повреждена', 'err');
+        UI.toast('Проблема с базой', 'err');
+      }),
 
-  try {
-    await ai.init(msg => UI.setStatus('stAI', msg, 'busy'));
-    UI.setStatus('stAI', 'ИИ активен', 'ready');
-  } catch (err) {
-    console.warn('Model load failed:', err);
-    ai.mode = 'demo';
-    UI.setStatus('stAI', 'Лексический режим', 'warn');
-    UI.toast('Модель недоступна — лексический поиск.', 'info');
-  }
+    ai.init(msg => UI.setStatus('stAI', msg, 'busy'))
+      .then(() => UI.setStatus('stAI', 'ИИ активен', 'ready'))
+      .catch(err => {
+        console.warn('AI:', err);
+        ai.mode = 'demo';
+        UI.setStatus('stAI', 'Лексический режим', 'warn');
+      }),
 
-  try {
-    net.init(
-      peerCount => UI.setStatus('stNetwork', `В сети · ${word.peers(peerCount)}`, 'active'),
-      () => { if (!isBaseView()) executeSearch(); }
-    );
-    UI.setStatus('stNetwork', `В сети · ${word.peers(0)}`, 'active');
-  } catch (err) {
-    console.warn('Network init failed:', err);
-    UI.setStatus('stNetwork', 'Сеть недоступна', 'warn');
-  }
+    net.init().catch(err => {
+      console.warn('Net:', err);
+      UI.setStatus('stNet', 'Оффлайн', 'err');
+    })
+  ];
+
+  await Promise.allSettled(tasks);
+
+  UI.renderEmpty('carousel-local', ai.ready ? 'Начните печатать.' : 'ИИ прогревается…', { loading: !ai.ready });
+  UI.renderEmpty('carousel-world', net.ready ? 'Сеть тиха.' : 'Оффлайн.');
+  UI.renderEmpty('carousel-seren', 'Близких мыслей нет.');
 }
 
 window.addEventListener('unhandledrejection', e => {
-  console.error('Unhandled rejection:', e.reason);
-  UI.toast('Ошибка: ' + (e.reason?.message || 'неизвестно'), 'err');
+  console.error('Unhandled:', e.reason);
 });
 window.addEventListener('error', e => {
-  console.error('Global error:', e.error);
+  console.error('Error:', e.error);
 });
 
 bootstrap().catch(err => {
   console.error('Bootstrap failed:', err);
-  showCriticalError(err);
+  UI.toast('Критическая ошибка: ' + err.message, 'err');
 });
 </script>
 </body>
