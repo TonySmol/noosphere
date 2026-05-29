@@ -113,6 +113,8 @@ input, textarea, select { font: inherit; color: inherit; background: none; borde
   .card-actions { opacity: 1; }
 }
 </style>
+</head>
+<body>
 
 <!-- ============================================ -->
 <!-- LAYER 2: UI MARKUP -->
@@ -254,6 +256,9 @@ input, textarea, select { font: inherit; color: inherit; background: none; borde
 
 <div class="toast" id="toast"></div>
 
+<!-- ============================================ -->
+<!-- SCRIPT -->
+<!-- ============================================ -->
 <script type="module">
 // ============================================
 // CONTRACT: NOO-framework v1.0
@@ -261,100 +266,24 @@ input, textarea, select { font: inherit; color: inherit; background: none; borde
 
 // === LAYER: BOOT | MODULE: GlobalHandlers ===
 // [MANIFEST] provides: глобальные обработчики
-// [RULE] подавляет шумные ошибки
-window.addEventListener('error', e => console.error('Error:', e.error));
-window.addEventListener('unhandledrejection', e => {
-  if (e.reason?.message?.includes('connection')) {
+// [RULE] подавляет шум, ловит критические ошибки
+window.addEventListener('error', (e) => {
+  console.error('[Global]', e.error || e.message);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const msg = e.reason?.message || String(e.reason);
+  if (msg.includes('connection') || msg.includes('WebSocket') || msg.includes('NetworkError')) {
     e.preventDefault();
     return;
   }
-  console.error('Rejection:', e.reason);
+  console.error('[Rejection]', e.reason);
 });
 
 // === LAYER: CORE | MODULE: Config ===
-// [MANIFEST] provides: C
+// [MANIFEST] provides: C, saveCfg
 // [RULE] единый источник правды
 const C = {
-  DB: 'noomium_v1',
-  STORE: 'notes',
-  DEBOUNCE: 800,
-  state: {}
-};
-
-// === LAYER: CORE | MODULE: Utils ===
-// [MANIFEST] provides: uuid, esc, toast, setStatus
-// [RULE] чистые функции
-const uuid = () => crypto.randomUUID();
-const esc = (s) => String(s).replace(/[&<>]/g, c =>
-  ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-
-let toastTimer;
-const toast = (msg, type = '') => {
-  const el = document.getElementById('toast');
-  if (!el) return;
-  el.className = `toast show ${type}`;
-  el.textContent = msg;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.className = 'toast', 2500);
-};
-
-const setStatus = (id, text, cls = '') => {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.className = `status ${cls}`;
-  el.textContent = text;
-};
-
-// === LAYER: CORE | MODULE: Storage ===
-// [MANIFEST] provides: put, get, del, all, reset
-// [RULE] IndexedDB wrapper
-const Storage = (() => {
-  let db = null;
-
-  const open = () => new Promise((res, rej) => {
-    if (db) return res(db);
-    const req = indexedDB.open(C.DB, 1);
-    req.onupgradeneeded = e => {
-      const d = e.target.result;
-      if (!d.objectStoreNames.contains(C.STORE)) {
-        d.createObjectStore(C.STORE, { keyPath: 'id' });
-      }
-    };
-    req.onsuccess = e => { db = e.target.result; res(db); };
-    req.onerror = () => rej(req.error);
-  });
-
-  const tx = async (mode, fn) => {
-    const d = await open();
-    return new Promise((res, rej) => {
-      const t = d.transaction(C.STORE, mode);
-      const s = t.objectStore(C.STORE);
-      const r = fn(s);
-      r.onsuccess = () => res(r.result);
-      r.onerror = () => rej(r.error);
-    });
-  };
-
-  return {
-    put: (item) => tx('readwrite', s => s.put(item)),
-    get: (id) => tx('readonly', s => s.get(id)),
-    del: (id) => tx('readwrite', s => s.delete(id)),
-    all: () => tx('readonly', s => s.getAll()),
-    reset: async () => {
-      if (db) { db.close(); db = null; }
-      await new Promise(r => {
-        const req = indexedDB.deleteDatabase(C.DB);
-        req.onsuccess = req.onerror = req.onblocked = () => r();
-      });
-    }
-  };
-})();
-
-// === LAYER: CORE | MODULE: Config ===
-// [MANIFEST] provides: C, saveCfg
-// [RULE] единый источник правды с настройками NOOmium (заменяет старый Config)
-const C = {
-  DB: 'noomium_v1',
+  DB: 'noomium_v2',
   STORE_NOTES: 'notes',
   STORE_META: 'meta',
   DEBOUNCE: 400,
@@ -376,49 +305,691 @@ try {
 const saveCfg = () => {
   try { localStorage.setItem('noomium_cfg', JSON.stringify(C.state)); } catch {}
 };
-// === LAYER: ENGINE | MODULE: BusinessLogic ===
-// [MANIFEST] provides: save, search
-// [RULE] оркестрация слоёв ниже
-const save = async () => {
-  const text = document.getElementById('input').value.trim();
-  if (!text) { toast('пусто', 'err'); return; }
-  await Storage.put({
-    id: uuid(),
-    text,
-    createdAt: Date.now()
-  });
-  document.getElementById('input').value = '';
-  toast('сохранено', 'ok');
-  await search();
+
+// === LAYER: CORE | MODULE: Utils ===
+// [MANIFEST] provides: uuid, fnv1a, esc, toast, setStatus, fmtTime
+// [RULE] чистые функции без сайд-эффектов
+const uuid = () => crypto.randomUUID();
+
+const fnv1a = (s) => {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return 'h' + (h >>> 0).toString(16);
 };
 
-const search = async () => {
+const esc = (s) => String(s).replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+let toastTimer;
+const toast = (msg, type = '') => {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.className = `toast show ${type}`;
+  el.textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = 'toast', 2500);
+};
+
+const setStatus = (id, text, cls = '') => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = `st-${cls}`;
+  let textNode = null;
+  for (const node of el.childNodes) {
+    if (node.nodeType === 3) { textNode = node; break; }
+  }
+  if (textNode) textNode.textContent = text;
+  else el.append(document.createTextNode(text));
+};
+
+const fmtTime = (ts) => {
+  const d = new Date(ts);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const time = d.toTimeString().slice(0, 5);
+  return isToday ? time : `${d.getDate().toString().padStart(2,'0')}.${(d.getMonth()+1).toString().padStart(2,'0')} ${time}`;
+};
+
+// === LAYER: CORE | MODULE: Storage ===
+// [MANIFEST] provides: put, get, del, all, getByHash, putMeta, getMeta, reset
+// [RULE] IndexedDB wrapper с импотентным открытием
+const Storage = (() => {
+  let db = null;
+  const open = () => new Promise((res, rej) => {
+    if (db) return res(db);
+    const req = indexedDB.open(C.DB, 1);
+    req.onupgradeneeded = e => {
+      const d = e.target.result;
+      if (!d.objectStoreNames.contains(C.STORE_NOTES)) {
+        const s = d.createObjectStore(C.STORE_NOTES, { keyPath: 'id' });
+        s.createIndex('createdAt', 'createdAt');
+        s.createIndex('hash', 'hash');
+      }
+      if (!d.objectStoreNames.contains(C.STORE_META)) {
+        d.createObjectStore(C.STORE_META, { keyPath: 'k' });
+      }
+    };
+    req.onsuccess = e => { db = e.target.result; res(db); };
+    req.onerror = () => rej(req.error);
+  });
+
+  const tx = async (store, mode, fn) => {
+    const d = await open();
+    return new Promise((res, rej) => {
+      const t = d.transaction(store, mode);
+      const s = t.objectStore(store);
+      const r = fn(s);
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  };
+
+  return {
+    put: (item) => tx(C.STORE_NOTES, 'readwrite', s => s.put(item)),
+    get: (id) => tx(C.STORE_NOTES, 'readonly', s => s.get(id)),
+    del: (id) => tx(C.STORE_NOTES, 'readwrite', s => s.delete(id)),
+    all: () => tx(C.STORE_NOTES, 'readonly', s => s.getAll()),
+    getByHash: (hash) => tx(C.STORE_NOTES, 'readonly', s => s.index('hash').get(hash)),
+    putMeta: (k, v) => tx(C.STORE_META, 'readwrite', s => s.put({ k, v })),
+    getMeta: (k) => tx(C.STORE_META, 'readonly', s => s.get(k)).then(r => r?.v),
+    reset: async () => {
+      if (db) { db.close(); db = null; }
+      await new Promise(r => {
+        const req = indexedDB.deleteDatabase(C.DB);
+        req.onsuccess = req.onerror = req.onblocked = () => r();
+      });
+    }
+  };
+})();
+
+// === LAYER: CORE | MODULE: AI ===
+// [MANIFEST] provides: embed, aiReady
+// [RULE] Transformers.js, ленивая загрузка
+let pipeline = null;
+let embedder = null;
+let aiReadyPromise = null;
+
+const aiReady = () => {
+  if (aiReadyPromise) return aiReadyPromise;
+  aiReadyPromise = (async () => {
+    try {
+      setStatus('st-ai', ' AI: loading', 'loading');
+      const mod = await import('https://esm.sh/@xenova/transformers@2.17.1');
+      pipeline = mod.pipeline;
+      embedder = await pipeline('feature-extraction', C.EMBED_MODEL, {
+        quantized: true,
+        progress_callback: (p) => {
+          if (p.status === 'progress' && p.progress) {
+            setStatus('st-ai', ` AI: ${Math.floor(p.progress)}%`, 'loading');
+          }
+        }
+      });
+      setStatus('st-ai', ' AI: ready', 'ok');
+      return embedder;
+    } catch (err) {
+      console.error('AI init failed:', err);
+      setStatus('st-ai', ' AI: off', 'err');
+      return null;
+    }
+  })();
+  return aiReadyPromise;
+};
+
+const embed = async (text) => {
+  const model = await aiReady();
+  if (!model || !text?.trim()) return null;
+  try {
+    const out = await model(text, { pooling: 'mean', normalize: true });
+    return Array.from(out.data);
+  } catch (err) {
+    console.warn('embed failed:', err);
+    return null;
+  }
+};
+
+// === LAYER: CORE | MODULE: Network ===
+// [MANIFEST] provides: publish, subscribe, getPeersCount
+// [RULE] Nostr ephemeral P2P
+const RELAYS = ['wss://relay.damus.io', 'wss://relay.nostr.band', 'wss://nos.lol'];
+const KIND = 30078;
+
+let ws = null;
+let subId = null;
+const peers = new Map();
+const listeners = new Set();
+let _pk = null;
+let _sk = null;
+
+const getPubkey = () => {
+  if (_pk) return _pk;
+  _sk = JSON.parse(localStorage.getItem('noomium_sk') || 'null');
+  if (!_sk) {
+    _sk = Array.from(crypto.getRandomValues(new Uint8Array(32)));
+    localStorage.setItem('noomium_sk', JSON.stringify(_sk));
+  }
+  let h = 0x811c9dc5;
+  for (let i = 0; i < _sk.length; i++) { h ^= _sk[i]; h = Math.imul(h, 0x01000193); }
+  _pk = (h >>> 0).toString(16).padStart(8, '0') + '0'.repeat(56);
+  return _pk;
+};
+
+const hashEvent = async (ev) => {
+  const data = JSON.stringify([0, ev.pubkey, ev.created_at, ev.kind, ev.tags, ev.content]);
+  const buf = new TextEncoder().encode(data);
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
+};
+
+const connect = () => new Promise((res) => {
+  if (ws && ws.readyState === 1) return res(true);
+  setStatus('st-net', ' P2P: connect', 'loading');
+  const url = RELAYS[Math.floor(Math.random() * RELAYS.length)];
+  try {
+    ws = new WebSocket(url);
+    ws.onopen = () => {
+      setStatus('st-net', ' P2P: online', 'ok');
+      res(true);
+    };
+    ws.onmessage = (e) => {
+      try { handleMessage(JSON.parse(e.data)); } catch {}
+    };
+    ws.onclose = () => {
+      setStatus('st-net', ' P2P: off', 'err');
+      ws = null;
+      setTimeout(connect, 5000);
+    };
+    ws.onerror = () => ws.close();
+    setTimeout(() => res(false), 5000);
+  } catch { res(false); }
+});
+
+const handleMessage = (msg) => {
+  if (msg[0] === 'EVENT' && msg[1] === subId) {
+    const ev = msg[2];
+    const content = ev.content?.[0] === '{' ? JSON.parse(ev.content) : null;
+    if (!content || content.room !== C.state.room) return;
+    const pk = ev.pubkey.slice(0, 8);
+    peers.set(pk, { ts: Date.now(), pubkey: ev.pubkey });
+    updatePeersUI();
+    listeners.forEach(fn => { try { fn(content, pk); } catch {} });
+  }
+};
+
+const updatePeersUI = () => {
+  const now = Date.now();
+  for (const [k, v] of peers) if (now - v.ts > C.TTL) peers.delete(k);
+  const n = peers.size;
+  const el = document.getElementById('peers');
+  const count = document.getElementById('peers-count');
+  if (el) el.className = n > 0 ? 'peers on' : 'peers';
+  if (count) count.textContent = `${n} peer${n === 1 ? '' : 's'}`;
+};
+
+setInterval(updatePeersUI, 5000);
+
+const publish = async (payload) => {
+  if (!ws || ws.readyState !== 1) return false;
+  const ev = {
+    kind: KIND,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [['d', C.state.room]],
+    content: JSON.stringify({ ...payload, room: C.state.room, ts: Date.now() })
+  };
+  ev.id = await hashEvent(ev);
+  ev.pubkey = getPubkey();
+  ev.sig = 'sim_' + Math.random().toString(36).slice(2);
+  try { ws.send(JSON.stringify(['EVENT', ev])); return true; } catch { return false; }
+};
+
+const subscribe = (fn) => {
+  listeners.add(fn);
+  if (!ws || ws.readyState !== 1) return;
+  if (subId) try { ws.send(JSON.stringify(['CLOSE', subId])); } catch {}
+  subId = uuid().slice(0, 16);
+  ws.send(JSON.stringify(['REQ', subId, {
+    kinds: [KIND],
+    '#d': [C.state.room],
+    since: Math.floor(Date.now() / 1000) - 120
+  }]));
+};
+
+const getPeersCount = () => peers.size;
+
+// === LAYER: UI | MODULE: Renderer ===
+// [MANIFEST] provides: render, counts, clear
+// [RULE] чистый рендер, без бизнес-логики
+const UI = {
+  msgs: {
+    stream: 'Поток пуст. Напиши первую мысль.',
+    local: 'В базе пока ничего нет.',
+    world: 'Пока никто не делится в этой комнате.',
+    insight: 'Озарений нет — попробуй другой запрос.'
+  },
+
+  render: (items, tab) => {
+    const track = document.getElementById('track');
+    if (!track) return;
+    if (!items.length) {
+      track.innerHTML = `<div class="empty">${esc(UI.msgs[tab] || '')}</div>`;
+      return;
+    }
+    track.innerHTML = items.map(i => UI.card(i)).join('');
+  },
+
+  card: (item) => {
+    const src = item.src || 'local';
+    const srcLabel = { local: 'Л', world: 'М', insight: 'О' }[src] || 'Л';
+    const score = item.score != null ? ` · ${item.score.toFixed(2)}` : '';
+    const actions = src === 'local'
+      ? `<button class="card-action" data-act="copy" data-id="${item.id}">копировать</button>
+         <button class="card-action del" data-act="del" data-id="${item.id}">удалить</button>`
+      : `<button class="card-action" data-act="adopt" data-id="${item.id}">забрать</button>`;
+    return `<div class="card ${src}" data-id="${item.id}">
+      <div class="card-meta">
+        <span class="src ${src}">${srcLabel}</span>
+        <span>${fmtTime(item.createdAt)}</span>
+        ${score ? `<span class="score">${score}</span>` : ''}
+        ${item.peer ? `<span>от ${esc(item.peer)}</span>` : ''}
+      </div>
+      <div class="card-body">${esc(item.text)}</div>
+      <div class="card-actions">${actions}</div>
+    </div>`;
+  },
+
+  counts: (c) => {
+    for (const k of ['stream', 'local', 'world', 'insight']) {
+      const el = document.getElementById(`c-${k}`);
+      if (el) el.textContent = c[k] || 0;
+    }
+  },
+
+  clear: () => {
+    const track = document.getElementById('track');
+    if (track) track.innerHTML = '';
+  }
+};
+
+// === LAYER: ENGINE | MODULE: Vector ===
+// [MANIFEST] provides: cosine, topK
+// [RULE] чистая математика без сайд-эффектов
+const dot = (a, b) => {
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+  return s;
+};
+
+const cosine = (a, b) => {
+  if (!a || !b || a.length !== b.length) return 0;
+  return dot(a, b);
+};
+
+const topK = (items, qVec, k, minScore) => {
+  if (!qVec) return [];
+  const scored = items
+    .filter(i => i.vec && i.vec.length === qVec.length)
+    .map(i => ({ ...i, score: cosine(i.vec, qVec) }))
+    .filter(i => i.score >= minScore)
+    .sort((a, b) => b.score - a.score);
+  return scored.slice(0, k);
+};
+
+// === LAYER: ENGINE | MODULE: Notes ===
+// [MANIFEST] provides: saveNote, delNote, getLocalAll, searchLocal
+// [RULE] CRUD для локальных заметок
+const saveNote = async (text, publishFn = null) => {
+  const t = text.trim();
+  if (!t) { toast('пусто', 'err'); return null; }
+  const hash = fnv1a(t);
+  const existing = await Storage.getByHash(hash);
+  if (existing) { toast('уже есть в базе', 'warn'); return existing; }
+
+  setStatus('st-ai', ' AI: thinking', 'loading');
+  const vec = await embed(t);
+  setStatus('st-ai', ' AI: ready', 'ok');
+
+  const note = {
+    id: uuid(),
+    hash,
+    text: t,
+    vec,
+    createdAt: Date.now()
+  };
+  await Storage.put(note);
+  toast('сохранено', 'ok');
+
+  if (publishFn && vec) {
+    const ok = await publishFn({
+      type: 'note',
+      note: { id: note.id, text: t, vec, createdAt: note.createdAt }
+    });
+    toast(ok ? 'отправлено в мир' : 'ошибка отправки', ok ? 'ok' : 'err');
+  }
+  return note;
+};
+
+const delNote = async (id) => {
+  await Storage.del(id);
+  toast('удалено', 'ok');
+};
+
+const getLocalAll = async () => {
   const all = await Storage.all();
-  all.sort((a, b) => b.createdAt - a.createdAt);
-  UI.render('list', all);
+  return all.sort((a, b) => b.createdAt - a.createdAt);
+};
+
+const searchLocal = async (query, k = 50) => {
+  const all = await getLocalAll();
+  if (!query.trim()) return all.map(n => ({ ...n, src: 'local' }));
+  const qVec = await embed(query);
+  if (!qVec) return all.map(n => ({ ...n, src: 'local' }));
+  return topK(all, qVec, k, C.state.threshold).map(n => ({ ...n, src: 'local' }));
+};
+
+// === LAYER: ENGINE | MODULE: Capsules ===
+// [MANIFEST] provides: exportCapsule, importCapsule
+// [RULE] экспорт/импорт .noo файлов
+const exportCapsule = async () => {
+  const all = await Storage.all();
+  const data = {
+    v: 1,
+    app: 'NOOmium',
+    exported: Date.now(),
+    notes: all.map(n => ({
+      id: n.id, text: n.text, vec: n.vec,
+      createdAt: n.createdAt, hash: n.hash
+    }))
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `noomium-${new Date().toISOString().slice(0,10)}.noo`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast(`экспортировано: ${all.length}`, 'ok');
+};
+
+const importCapsule = async (file) => {
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+    const notes = Array.isArray(data) ? data : (data.notes || []);
+    let added = 0, skipped = 0;
+    for (const n of notes) {
+      if (!n.text) { skipped++; continue; }
+      const hash = n.hash || fnv1a(n.text);
+      const exists = await Storage.getByHash(hash);
+      if (exists) { skipped++; continue; }
+      const vec = n.vec || await embed(n.text);
+      await Storage.put({
+        id: n.id || uuid(),
+        hash, text: n.text, vec,
+        createdAt: n.createdAt || Date.now()
+      });
+      added++;
+    }
+    toast(`+${added}, пропущено ${skipped}`, 'ok');
+    return added;
+  } catch (err) {
+    toast('ошибка импорта', 'err');
+    console.error(err);
+    return 0;
+  }
+};
+
+// === LAYER: ENGINE | MODULE: Search ===
+// [MANIFEST] provides: refresh, refreshCounts, onNetMessage, worldCache
+// [RULE] оркестрация поиска по всем дорожкам
+const worldCache = new Map();
+let currentQuery = '';
+
+const onNetMessage = (content, peer) => {
+  if (content.type === 'note' && content.note?.vec) {
+    const key = content.note.id || fnv1a(content.note.text);
+    worldCache.set(key, {
+      id: key,
+      text: content.note.text,
+      vec: content.note.vec,
+      createdAt: content.note.createdAt || Date.now(),
+      src: 'world',
+      peer
+    });
+    if (currentQuery.trim()) refresh(currentQuery);
+    else refreshCounts();
+  }
+};
+
+const computeInsights = async (query) => {
+  const local = await searchLocal(query, 20);
+  if (!local.length) return [];
+  const qVec = await embed(query);
+  if (!qVec) return [];
+  const worldMatches = topK([...worldCache.values()], qVec, 30, C.state.threshold);
+  const localIds = new Set(local.map(l => fnv1a(l.text)));
+  const localScores = new Map(local.map(l => [fnv1a(l.text), l.score || 1]));
+  const bestLocal = Math.max(...[...localScores.values()]);
+  return worldMatches.filter(w => {
+    const h = fnv1a(w.text);
+    if (localIds.has(h)) return false;
+    return bestLocal - w.score <= C.state.insightDelta && w.score >= C.state.threshold;
+  }).map(w => ({ ...w, src: 'insight' }));
+};
+
+const refresh = async (query) => {
+  currentQuery = query || '';
+  const tab = C.state.activeTab;
+  let items = [];
+
+  if (tab === 'stream') {
+    const local = await searchLocal('', 20);
+    items = local;
+  } else if (tab === 'local') {
+    items = await searchLocal(query, 50);
+  } else if (tab === 'world') {
+    if (query.trim()) {
+      const qVec = await embed(query);
+      items = topK([...worldCache.values()], qVec, 50, C.state.threshold);
+    } else {
+      items = [...worldCache.values()].sort((a, b) => b.createdAt - a.createdAt);
+    }
+  } else if (tab === 'insight' && query.trim()) {
+    items = await computeInsights(query);
+  }
+
+  UI.render(items, tab);
+  refreshCounts();
+};
+
+const refreshCounts = async () => {
+  const allLocal = await Storage.all();
+  UI.counts({
+    stream: Math.min(allLocal.length, 20),
+    local: allLocal.length,
+    world: worldCache.size,
+    insight: 0
+  });
+};
+
+// === LAYER: UI | MODULE: Drawers ===
+// [MANIFEST] provides: openDrawer, closeDrawers, bindDrawers
+// [RULE] управление боковыми панелями
+const openDrawer = (id) => {
+  closeDrawers();
+  document.getElementById(id)?.classList.add('open');
+};
+
+const closeDrawers = () => {
+  document.querySelectorAll('.drawer').forEach(d => d.classList.remove('open'));
+};
+
+const bindDrawers = () => {
+  document.querySelectorAll('[data-close]').forEach(btn => {
+    btn.addEventListener('click', closeDrawers);
+  });
+  document.querySelectorAll('.drawer-backdrop').forEach(b => {
+    b.addEventListener('click', closeDrawers);
+  });
+  document.getElementById('btn-settings')?.addEventListener('click', () => openDrawer('drawer-settings'));
+  document.getElementById('btn-capsules')?.addEventListener('click', () => openDrawer('drawer-capsules'));
+  document.getElementById('btn-how')?.addEventListener('click', () => openDrawer('drawer-how'));
 };
 
 // === LAYER: UI | MODULE: EventHandlers ===
 // [MANIFEST] provides: bind
-// [RULE] только навешивание обработчиков
+// [RULE] только DOM-события, без бизнес-логики
 const bind = () => {
-  document.getElementById('btnSave').onclick = save;
+  const input = document.getElementById('note-input');
+  let debounce = null;
+
+  input?.addEventListener('input', () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => refresh(input.value), C.DEBOUNCE);
+  });
+
+  document.getElementById('btn-save')?.addEventListener('click', async () => {
+    const v = input.value;
+    await saveNote(v, null);
+    input.value = '';
+    await refresh(input.value);
+  });
+
+  document.getElementById('btn-share')?.addEventListener('click', async () => {
+    const v = input.value;
+    await saveNote(v, publish);
+    input.value = '';
+    await refresh(input.value);
+  });
+
+  document.getElementById('tabs')?.addEventListener('click', (e) => {
+    const tab = e.target.closest('.tab');
+    if (!tab) return;
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    C.state.activeTab = tab.dataset.tab;
+    saveCfg();
+    refresh(input.value);
+  });
+
+  document.getElementById('work')?.addEventListener('click', async (e) => {
+    const el = e.target.closest('[data-act]');
+    if (!el) return;
+    const { act, id } = el.dataset;
+    if (act === 'del') { await delNote(id); await refresh(input.value); }
+    else if (act === 'copy') {
+      const all = await Storage.all();
+      const n = all.find(x => x.id === id);
+      if (n) { try { await navigator.clipboard.writeText(n.text); toast('скопировано', 'ok'); } catch {} }
+    } else if (act === 'adopt') {
+      const w = [...worldCache.values()].find(x => x.id === id);
+      if (w) { await saveNote(w.text, null); await refresh(input.value); }
+    }
+  });
+
+  document.getElementById('btn-export')?.addEventListener('click', exportCapsule);
+  document.getElementById('btn-import')?.addEventListener('click', () => {
+    document.getElementById('file-import').click();
+  });
+  document.getElementById('file-import')?.addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const added = await importCapsule(f);
+    if (added > 0) await refresh(input.value);
+    e.target.value = '';
+  });
+
+  document.getElementById('btn-apply')?.addEventListener('click', () => {
+    saveCfg();
+    toast('перезагрузка...', 'ok');
+    setTimeout(() => location.reload(), 500);
+  });
+
+  document.getElementById('btn-reset')?.addEventListener('click', async () => {
+    if (!confirm('Стереть всю базу? Это необратимо.')) return;
+    await Storage.reset();
+    toast('база стёрта', 'ok');
+    setTimeout(() => location.reload(), 500);
+  });
+
+  bindDrawers();
+  bindSettings();
+  bindKeyboard(input);
+};
+
+const bindSettings = () => {
+  const threshold = document.getElementById('cfg-threshold');
+  const thresholdV = document.getElementById('cfg-threshold-v');
+  if (threshold) {
+    threshold.value = C.state.threshold;
+    thresholdV.textContent = C.state.threshold.toFixed(2);
+    threshold.addEventListener('input', () => {
+      C.state.threshold = parseFloat(threshold.value);
+      thresholdV.textContent = C.state.threshold.toFixed(2);
+    });
+  }
+
+  const insight = document.getElementById('cfg-insight');
+  const insightV = document.getElementById('cfg-insight-v');
+  if (insight) {
+    insight.value = C.state.insightDelta;
+    insightV.textContent = C.state.insightDelta.toFixed(2);
+    insight.addEventListener('input', () => {
+      C.state.insightDelta = parseFloat(insight.value);
+      insightV.textContent = C.state.insightDelta.toFixed(2);
+    });
+  }
+
+  const room = document.getElementById('cfg-room');
+  if (room) {
+    room.value = C.state.room;
+    room.addEventListener('input', () => { C.state.room = room.value.trim() || 'noomium-public'; });
+  }
+};
+
+const bindKeyboard = (input) => {
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeDrawers();
+    if (e.key === '/' && document.activeElement !== input && document.activeElement?.tagName !== 'INPUT') {
+      e.preventDefault();
+      input.focus();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && document.activeElement === input) {
+      e.preventDefault();
+      document.getElementById(e.shiftKey ? 'btn-share' : 'btn-save').click();
+    }
+  });
 };
 
 // === LAYER: BOOT | MODULE: Bootstrap ===
-// [MANIFEST] инициализация всех модулей
+// [MANIFEST] provides: boot
 // [RULE] параллельный запуск, изоляция ошибок
 const boot = async () => {
-  bind();
+  try {
+    bind();
 
-  await Promise.allSettled([
-    Storage.all()
-      .then(() => setStatus('stDB', 'DB', 'ok'))
-      .catch(() => setStatus('stDB', 'DB', 'err'))
-  ]);
+    document.querySelectorAll('.tab').forEach(t => {
+      t.classList.toggle('active', t.dataset.tab === C.state.activeTab);
+    });
 
-  await search();
-  console.log('App ready');
+    await Promise.allSettled([
+      Storage.all()
+        .then(() => setStatus('st-db', ' DB', 'ok'))
+        .catch(() => setStatus('st-db', ' DB', 'err')),
+      aiReady(),
+      connect().then(() => {
+        subscribe(onNetMessage);
+      })
+    ]);
+
+    await refresh('');
+    setInterval(() => { if (!currentQuery.trim()) refresh(''); }, 30000);
+    console.log('NOOmium ready');
+  } catch (err) {
+    console.error('[Bootstrap] fatal:', err);
+    toast('критическая ошибка', 'err');
+  }
 };
 
 boot();
