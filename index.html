@@ -1,1507 +1,484 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#0a0a0f">
-<title>NOOmium</title>
-<style>
-:root {
-  --bg:#0a0a0f; --surface:#13131a; --surface-hover:#1a1a24;
-  --border:#24242e; --text:#e8e8f0; --text-muted:#8888a0;
-  --brand:#7c5cff; --brand-glow:rgba(124,92,255,.2);
-  --world:#0ea5e9; --world-glow:rgba(14,165,233,.2);
-  --seren:#4ade80; --seren-glow:rgba(74,222,128,.2);
-  --warn:#fbbf24; --danger:#f87171;
-  --radius:12px;
-  --font:14px/1.6 ui-sans-serif,system-ui,-apple-system,sans-serif;
-  --safe-b:env(safe-area-inset-bottom,0);
-}
-[data-theme="light"] {
-  --bg:#f3f4f6; --surface:#fff; --surface-hover:#f9fafb;
-  --border:#e5e7eb; --text:#111827; --text-muted:#6b7280;
-}
-* { box-sizing:border-box; margin:0; padding:0; }
-html, body { height:100%; overflow:hidden; }
-body {
-  display:flex; flex-direction:column;
-  background:var(--bg); color:var(--text); font:var(--font);
-  -webkit-font-smoothing:antialiased;
-}
-button { font:inherit; cursor:pointer; border:none; background:none; color:inherit; }
-input, textarea, select { font:inherit; color:inherit; }
-::-webkit-scrollbar { width:6px; height:6px; }
-::-webkit-scrollbar-thumb { background:var(--border); border-radius:6px; }
-
-/* ===== SKELETON (рисуется до JS) ===== */
-.skel {
-  background:linear-gradient(90deg,var(--surface) 0%,var(--surface-hover) 50%,var(--surface) 100%);
-  background-size:200% 100%;
-  animation:shimmer 1.4s infinite;
-  border-radius:var(--radius);
-}
-@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
-.skel-card { height:120px; margin-bottom:12px; }
-
-.navbar {
-  display:flex; align-items:center; justify-content:space-between;
-  padding:12px 16px; background:var(--surface);
-  border-bottom:1px solid var(--border); z-index:10;
-}
-.navbar-title {
-  font-weight:700; font-size:16px; letter-spacing:.3px;
-  background:linear-gradient(135deg,var(--brand),var(--world));
-  -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
-}
-.navbar-actions { display:flex; gap:6px; }
-.icon-btn {
-  padding:8px; border:1px solid var(--border); border-radius:8px;
-  color:var(--text); transition:.2s;
-  display:inline-flex; align-items:center; justify-content:center;
-  min-width:36px; min-height:36px;
-}
-.icon-btn:hover { background:var(--surface-hover); border-color:var(--brand); }
-
-.status-bar {
-  display:flex; gap:8px; padding:8px 16px;
-  background:var(--surface); border-bottom:1px solid var(--border);
-  font-size:11px; flex-wrap:wrap;
-}
-.badge-status {
-  padding:4px 10px; border-radius:20px;
-  background:var(--surface-hover); border:1px solid var(--border);
-  display:flex; align-items:center; gap:6px;
-  color:var(--text-muted); font-weight:500; transition:.3s;
-}
-.badge-status .dot { width:6px; height:6px; border-radius:50%; background:currentColor; }
-.badge-status.active { color:var(--world); border-color:var(--world-glow); background:var(--world-glow); }
-.badge-status.ready { color:var(--seren); border-color:var(--seren-glow); }
-.badge-status.warn { color:var(--warn); border-color:rgba(251,191,36,.18); background:rgba(251,191,36,.18); }
-.badge-status.err { color:var(--danger); border-color:rgba(248,113,113,.2); background:rgba(248,113,113,.1); }
-.badge-status.busy .dot { animation:pulse 1s infinite; }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
-
-.main-tabs {
-  display:flex; background:var(--surface);
-  border-bottom:1px solid var(--border);
-}
-.tab {
-  flex:1; text-align:center; padding:12px;
-  color:var(--text-muted); font-weight:500;
-  border-bottom:2px solid transparent; transition:.2s;
-  display:flex; justify-content:center; align-items:center; gap:6px;
-}
-.tab.active { color:var(--text); border-color:var(--brand); }
-.tab .tab-count {
-  font-size:10px; font-family:monospace;
-  background:var(--surface-hover); border:1px solid var(--border);
-  padding:1px 6px; border-radius:10px;
-}
-
-.workspace {
-  flex:1; overflow-y:auto; overflow-x:hidden;
-  padding:16px; position:relative; scroll-behavior:smooth;
-}
-.view-layer { display:none; animation:fade .2s ease-out; }
-.view-layer.active { display:block; }
-@keyframes fade { from{opacity:0; transform:translateY(5px)} to{opacity:1; transform:translateY(0)} }
-
-.editor-card {
-  background:var(--surface); border:1px solid var(--border);
-  border-radius:var(--radius); padding:16px; margin-bottom:20px;
-  box-shadow:0 4px 6px -1px rgba(0,0,0,.1);
-}
-.editor-textarea {
-  width:100%; min-height:84px; background:transparent;
-  border:none; resize:vertical; outline:none;
-  font-size:15px; line-height:1.55; color:inherit;
-}
-.editor-textarea::placeholder { color:var(--text-muted); }
-.editor-meta {
-  display:flex; justify-content:space-between; align-items:center;
-  margin-top:6px; font-size:11px; color:var(--text-muted);
-}
-.editor-meta-actions { display:flex; gap:14px; }
-.link-btn {
-  color:var(--text-muted); font-size:11px; font-weight:600;
-  transition:.2s; padding:2px 0;
-}
-.link-btn:hover { color:var(--brand); }
-.editor-controls { display:flex; gap:8px; margin-top:14px; }
-
-.btn {
-  padding:10px 16px; border-radius:8px;
-  font-weight:600; font-size:13px; transition:.2s;
-  border:1px solid transparent; flex:1;
-  display:flex; justify-content:center; align-items:center; gap:6px;
-  min-height:40px;
-}
-.btn:disabled { opacity:.5; cursor:not-allowed; }
-.btn-ghost { background:var(--surface-hover); color:var(--text); border-color:var(--border); }
-.btn-ghost:hover:not(:disabled) { border-color:var(--brand); }
-.btn-primary { background:var(--brand); color:#fff; }
-.btn-primary:hover:not(:disabled) { filter:brightness(1.1); }
-kbd {
-  font-family:monospace; font-size:10px;
-  background:rgba(127,127,127,.14); border:1px solid var(--border);
-  border-radius:4px; padding:1px 5px;
-}
-
-.filter-tabs {
-  display:flex; gap:4px; background:var(--surface);
-  padding:4px; border-radius:10px; border:1px solid var(--border);
-  margin-bottom:16px;
-}
-.f-tab {
-  flex:1; padding:8px 6px; text-align:center;
-  border-radius:6px; font-size:12px; font-weight:600;
-  color:var(--text-muted); transition:.2s;
-  display:flex; align-items:center; justify-content:center; gap:6px;
-}
-.f-tab.active {
-  background:var(--surface-hover); color:var(--text);
-  box-shadow:0 1px 3px rgba(0,0,0,.1);
-}
-.f-tab .counter {
-  background:var(--border); padding:2px 6px;
-  border-radius:12px; font-size:10px; font-family:monospace;
-}
-.f-tab.active[data-filter="local"] .counter { background:var(--brand-glow); color:var(--brand); }
-.f-tab.active[data-filter="world"] .counter { background:var(--world-glow); color:var(--world); }
-.f-tab.active[data-filter="seren"] .counter { background:var(--seren-glow); color:var(--seren); }
-
-.carousel-container { display:none; position:relative; margin-bottom:8px; }
-.carousel-container.active { display:block; }
-.carousel-wrapper {
-  display:flex; overflow-x:auto; overflow-y:hidden;
-  scroll-snap-type:x mandatory; gap:12px; padding:4px 2px;
-  -webkit-overflow-scrolling:touch; scrollbar-width:thin;
-}
-.carousel-wrapper::-webkit-scrollbar { height:4px; }
-
-.note-card {
-  flex:0 0 calc(100% - 4px);
-  scroll-snap-align:start; scroll-snap-stop:always;
-  background:var(--surface); border:1px solid var(--border);
-  border-radius:var(--radius); padding:14px 14px 14px 18px;
-  position:relative; overflow:hidden;
-  animation:slideUp .3s ease-out backwards;
-  min-width:260px; max-width:600px;
-  display:flex; flex-direction:column;
-}
-@media (min-width:768px) { .note-card { flex:0 0 calc(50% - 8px); } }
-@media (min-width:1100px) { .note-card { flex:0 0 calc(33.333% - 8px); } }
-@keyframes slideUp { from{opacity:0; transform:translateY(10px)} to{opacity:1; transform:translateY(0)} }
-.note-card::before { content:''; position:absolute; left:0; top:0; bottom:0; width:4px; }
-.note-card.t-local::before { background:var(--brand); }
-.note-card.t-world::before { background:var(--world); }
-.note-card.t-seren::before { background:var(--seren); }
-.note-card.peer { background:linear-gradient(180deg,var(--surface),var(--surface)); }
-.note-header {
-  display:flex; justify-content:space-between;
-  margin-bottom:8px; align-items:center; gap:8px; flex-shrink:0;
-}
-.note-type {
-  font-size:10px; font-weight:700; padding:2px 6px;
-  border-radius:4px; letter-spacing:.5px; white-space:nowrap;
-}
-.t-local .note-type { background:var(--brand-glow); color:var(--brand); }
-.t-world .note-type { background:var(--world-glow); color:var(--world); }
-.t-seren .note-type { background:var(--seren-glow); color:var(--seren); }
-.note-score { font-family:monospace; font-size:11px; color:var(--text-muted); white-space:nowrap; }
-.note-content {
-  font-size:14px; white-space:pre-wrap;
-  word-wrap:break-word; overflow-wrap:anywhere;
-  max-height:160px; overflow-y:auto; line-height:1.5;
-  flex:1; padding-right:4px;
-}
-.note-content mark {
-  background:var(--brand-glow); color:var(--brand);
-  padding:0 2px; border-radius:3px; font-weight:600;
-}
-.note-foot {
-  display:flex; align-items:center; justify-content:space-between;
-  margin-top:12px; gap:8px; flex-shrink:0;
-}
-.note-hint { font-size:11px; color:var(--text-muted); font-style:italic; opacity:.8; }
-.note-actions {
-  display:flex; gap:4px; flex-wrap:wrap;
-  opacity:1; transition:.2s; margin-left:auto;
-}
-@media (hover:hover) {
-  .note-actions { opacity:.55; }
-  .note-card:hover .note-actions { opacity:1; }
-}
-.note-act {
-  font-size:11px; font-weight:600; color:var(--text-muted);
-  padding:6px 10px; border-radius:6px;
-  border:1px solid var(--border); transition:.15s;
-  display:inline-flex; align-items:center; gap:5px;
-  white-space:nowrap; min-height:28px;
-}
-.note-act:hover { color:var(--text); border-color:var(--brand); background:var(--surface-hover); }
-.note-act.danger:hover { color:var(--danger); border-color:var(--danger); }
-
-.empty-state {
-  padding:40px 20px; text-align:center;
-  color:var(--text-muted); display:flex;
-  flex-direction:column; align-items:center; gap:12px; width:100%;
-}
-.empty-state svg { width:48px; height:48px; opacity:.2; }
-.spinner {
-  width:28px; height:28px;
-  border:3px solid var(--border); border-top-color:var(--world);
-  border-radius:50%; animation:spin .8s linear infinite;
-}
-@keyframes spin { to { transform:rotate(360deg); } }
-
-.base-stats { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
-.stat {
-  background:var(--surface); border:1px solid var(--border);
-  border-radius:10px; padding:8px 12px; flex:1; min-width:80px;
-}
-.stat .num { font-size:18px; font-weight:700; }
-.stat .lbl {
-  font-size:10px; text-transform:uppercase;
-  letter-spacing:.5px; color:var(--text-muted);
-}
-.base-controls { display:flex; gap:8px; align-items:center; margin-bottom:14px; }
-.base-search {
-  flex:1; background:var(--surface);
-  border:1px solid var(--border); padding:9px 12px;
-  border-radius:8px; transition:.2s; min-height:40px;
-}
-.base-search:focus { border-color:var(--brand); outline:none; }
-.base-sort {
-  background:var(--surface); border:1px solid var(--border);
-  padding:9px 10px; border-radius:8px; font-size:12px; min-height:40px;
-}
-
-.toast {
-  position:fixed; bottom:calc(24px + var(--safe-b));
-  left:50%; transform:translateX(-50%) translateY(120px);
-  background:var(--text); color:var(--bg);
-  padding:10px 20px; border-radius:30px;
-  font-weight:600; font-size:13px;
-  transition:.3s cubic-bezier(.175,.885,.32,1.275);
-  z-index:1000; box-shadow:0 10px 25px rgba(0,0,0,.2);
-  max-width:90vw; text-align:center;
-}
-.toast.show { transform:translateX(-50%) translateY(0); }
-.toast.ok { background:var(--seren); color:#04130a; }
-.toast.err { background:var(--danger); color:#160404; }
-.toast.info { background:var(--world); color:#021019; }
-
-.drawer-overlay {
-  position:fixed; inset:0; background:rgba(0,0,0,.6);
-  backdrop-filter:blur(3px); z-index:100;
-  opacity:0; pointer-events:none; transition:.2s;
-}
-.drawer-overlay.open { opacity:1; pointer-events:auto; }
-.drawer {
-  position:fixed; top:0; right:-400px; width:360px;
-  max-width:100%; height:100%; background:var(--surface);
-  border-left:1px solid var(--border); z-index:101;
-  transition:.3s cubic-bezier(.16,1,.3,1);
-  padding:20px; overflow-y:auto;
-  padding-bottom:calc(20px + var(--safe-b));
-}
-.drawer.open { right:0; }
-.drawer-header {
-  display:flex; justify-content:space-between;
-  margin-bottom:24px; font-size:18px;
-  font-weight:700; align-items:center;
-}
-.drawer-close {
-  font-size:28px; color:var(--text-muted);
-  transition:.2s; line-height:1; min-width:36px; min-height:36px;
-  display:flex; align-items:center; justify-content:center;
-}
-.drawer-close:hover { color:var(--danger); }
-.drawer-section {
-  font-size:11px; text-transform:uppercase; letter-spacing:1px;
-  color:var(--text-muted); font-weight:700;
-  margin:24px 0 12px; padding-bottom:6px;
-  border-bottom:1px solid var(--border);
-}
-.drawer p { color:var(--text-muted); margin-bottom:10px; line-height:1.5; }
-.form-group { margin-bottom:20px; }
-.form-label {
-  display:block; font-size:11px; text-transform:uppercase;
-  font-weight:700; color:var(--text-muted);
-  margin-bottom:8px; letter-spacing:.5px;
-}
-.form-hint { font-size:11px; color:var(--text-muted); margin-top:6px; line-height:1.4; }
-.form-input {
-  width:100%; background:var(--bg);
-  border:1px solid var(--border); padding:10px 12px;
-  border-radius:8px; transition:.2s; min-height:40px;
-}
-.form-input:focus { border-color:var(--brand); outline:none; }
-.form-range { width:100%; accent-color:var(--brand); }
-.val-display { float:right; font-family:monospace; color:var(--brand); font-weight:bold; }
-.btn-row { display:flex; gap:8px; }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Noosphere v11 (P2P Vector)</title>
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --panel: #13131a;
+      --panel-2: #1a1a24;
+      --border: #24242e;
+      --text: #e8e8f0;
+      --muted: #8888a0;
+      --accent: #7c5cff;
+      --accent-2: #5c8cff;
+      --ok: #4ade80;
+      --warn: #fbbf24;
+      --err: #f87171;
+      --card: #16161f;
+    }
+    html[data-theme="light"] {
+      --bg: #f6f6fa;
+      --panel: #ffffff;
+      --panel-2: #f0f0f6;
+      --border: #e0e0ea;
+      --text: #1a1a24;
+      --muted: #666680;
+      --card: #ffffff;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100vh; overflow: hidden; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
+    body { display: flex; flex-direction: column; }
+    .header { background: var(--panel); border-bottom: 1px solid var(--border); padding: 10px 14px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+    .header .title { font-weight: 600; font-size: 16px; letter-spacing: .5px; }
+    .header .spacer { flex: 1; }
+    .header button { background: transparent; border: 1px solid var(--border); color: var(--text); padding: 4px 10px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+    .header button:hover { background: var(--panel-2); }
+    .main-tabs { display: flex; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .main-tab { flex: 1; padding: 10px; text-align: center; cursor: pointer; font-size: 13px; color: var(--muted); border-bottom: 2px solid transparent; transition: all .15s; }
+    .main-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+    .net-activity { height: 2px; background: var(--panel-2); position: relative; overflow: hidden; flex-shrink: 0; }
+    .net-activity .bar { position: absolute; top: 0; left: -40%; width: 40%; height: 100%; background: linear-gradient(90deg, transparent, var(--accent), transparent); opacity: 0; transition: opacity .3s; }
+    .net-activity.active .bar { opacity: 1; animation: slide 1.2s linear infinite; }
+    @keyframes slide { 0% { left: -40%; } 100% { left: 100%; } }
+    .status-bar { background: var(--panel); border-bottom: 1px solid var(--border); padding: 5px 14px; display: flex; gap: 6px; flex-wrap: wrap; font-size: 10px; flex-shrink: 0; align-items: center; }
+    .chip { padding: 2px 7px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); display: inline-flex; align-items: center; gap: 4px; transition: all .2s; }
+    .chip .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--muted); transition: all .2s; }
+    .chip.ok { color: var(--ok); border-color: rgba(74,222,128,.3); }
+    .chip.ok .dot { background: var(--ok); box-shadow: 0 0 5px var(--ok); }
+    .chip.warn { color: var(--warn); border-color: rgba(251,191,36,.3); }
+    .chip.warn .dot { background: var(--warn); }
+    .chip.err { color: var(--err); border-color: rgba(248,113,113,.3); }
+    .chip.err .dot { background: var(--err); }
+    .chip.publishing { color: var(--accent); border-color: rgba(124,92,255,.4); background: rgba(124,92,255,.1); }
+    .chip.publishing .dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 1s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(1.3); } }
+    .content { flex: 1; overflow-y: auto; padding: 12px; padding-bottom: 20px; }
+    .view { display: none; }
+    .view.active { display: block; }
+    .composer { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; position: relative; }
+    .composer textarea { width: 100%; background: transparent; border: none; color: var(--text); font: inherit; resize: none; min-height: 60px; outline: none; }
+    .composer textarea::placeholder { color: var(--muted); }
+    .composer .actions { display: flex; gap: 6px; margin-top: 8px; }
+    .btn { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 7px 14px; border-radius: 6px; font-size: 13px; cursor: pointer; font-weight: 500; transition: all .15s; }
+    .btn:hover:not(:disabled) { background: #222230; border-color: var(--accent); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn.primary { background: var(--accent); border-color: var(--accent); color: white; flex: 1; }
+    .btn.primary:hover:not(:disabled) { background: #6a4aee; }
+    .sub-tabs { display: flex; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 3px; margin-bottom: 12px; gap: 2px; }
+    .sub-tab { flex: 1; padding: 7px 10px; text-align: center; cursor: pointer; font-size: 12px; color: var(--muted); border-radius: 5px; transition: all .15s; display: flex; align-items: center; justify-content: center; gap: 4px; }
+    .sub-tab.active { background: var(--panel-2); color: var(--text); }
+    .sub-tab .badge { background: var(--border); color: var(--muted); padding: 0 5px; border-radius: 8px; font-size: 10px; min-width: 16px; }
+    .sub-tab.active .badge { background: rgba(124,92,255,.25); color: var(--accent); }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; animation: fadeIn .25s; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    .card.mine { border-left: 3px solid var(--muted); }
+    .card.world { border-left: 3px solid var(--accent); }
+    .card .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+    .card .tag { font-size: 9px; padding: 2px 6px; border-radius: 3px; background: var(--panel-2); color: var(--muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+    .card.world .tag { background: rgba(124,92,255,.15); color: var(--accent); }
+    .card .score { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
+    .card .text { font-size: 13px; line-height: 1.5; word-wrap: break-word; }
+    .card .text mark { background: transparent; color: var(--accent); font-weight: 600; }
+    .card .meta { margin-top: 6px; font-size: 10px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .pub-status { padding: 1px 6px; border-radius: 3px; font-size: 9px; font-weight: 600; display: inline-flex; align-items: center; gap: 3px; }
+    .pub-ok { background: rgba(124,92,255,.15); color: var(--accent); }
+    .empty { text-align: center; color: var(--muted); padding: 32px 16px; font-size: 12px; }
+    .drawer { position: fixed; top: 0; right: -100%; width: 320px; max-width: 92vw; height: 100%; background: var(--panel); border-left: 1px solid var(--border); z-index: 100; transition: right .25s; overflow-y: auto; padding: 16px; }
+    .drawer.open { right: 0; }
+    .drawer h3 { margin: 0 0 16px 0; font-size: 15px; display: flex; justify-content: space-between; align-items: center; }
+    .drawer .close { background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: 22px; padding: 0; }
+    .setting { margin-bottom: 16px; }
+    .setting label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .4px; }
+    .setting input[type="text"] { width: 100%; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 6px; font: inherit; font-size: 13px; }
+    .setting input[type="range"] { width: 100%; accent-color: var(--accent); }
+    .setting .row { display: flex; align-items: center; justify-content: space-between; }
+    .setting .val { font-size: 12px; color: var(--accent); font-weight: 600; font-family: ui-monospace, monospace; }
+    .setting .seg { display: flex; gap: 4px; }
+    .setting .seg button { flex: 1; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); padding: 6px 10px; border-radius: 5px; font-size: 12px; cursor: pointer; }
+    .setting .seg button.active { background: var(--accent); color: white; border-color: var(--accent); }
+    .setting .btn { width: 100%; margin-bottom: 6px; }
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 99; opacity: 0; pointer-events: none; transition: opacity .25s; }
+    .overlay.show { opacity: 1; pointer-events: auto; }
+    .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 10px 18px; border-radius: 8px; font-size: 12px; z-index: 200; transition: transform .25s; box-shadow: 0 4px 20px rgba(0,0,0,.4); display: flex; align-items: center; gap: 8px; }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+    .progress { height: 2px; background: var(--border); overflow: hidden; border-radius: 2px; margin-top: 6px; }
+    .progress > div { height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+  </style>
 </head>
 <body>
 
-<header class="navbar">
-  <div class="navbar-title">NOOmium</div>
-  <div class="navbar-actions">
-    <button class="icon-btn" id="btnHelp" title="Как это работает" aria-label="Справка">
-      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <circle cx="12" cy="12" r="10"/>
-        <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/>
-        <line x1="12" y1="17" x2="12.01" y2="17"/>
-      </svg>
-    </button>
-    <button class="icon-btn" id="btnOpenSettings" title="Настройки" aria-label="Настройки">
-      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-        <path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/>
-        <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9c.26.6.8 1 1.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
-      </svg>
-    </button>
-  </div>
-</header>
-
-<div class="status-bar">
-  <div class="badge-status" id="stNet">
-    <div class="dot"></div><span id="stNetText">Инициализация…</span>
-  </div>
-  <div class="badge-status" id="stAI">
-    <div class="dot"></div><span id="stAIText">ИИ грузится…</span>
-  </div>
-  <div class="badge-status" id="stDB">
-    <div class="dot"></div><span id="stDBText">База…</span>
-  </div>
+<div class="header">
+  <div class="title">Noosphere</div>
+  <div class="spacer"></div>
+  <button id="btnSettings">☰</button>
 </div>
 
 <div class="main-tabs">
-  <button class="tab active" data-view="view-stream">Поток</button>
-  <button class="tab" data-view="view-base">
-    Моя база <span class="tab-count" id="baseTabCount">0</span>
-  </button>
+  <div class="main-tab active" data-main="stream">Поток</div>
+  <div class="main-tab" data-main="history">Моя база</div>
 </div>
 
-<main class="workspace">
-  <div id="view-stream" class="view-layer active">
-    <div class="editor-card">
-      <textarea id="ioInput" class="editor-textarea" placeholder="О чём думаешь?"></textarea>
-      <div class="editor-meta">
-        <span id="ioCount">0 символов</span>
-        <div class="editor-meta-actions">
-          <button class="link-btn" id="btnResonate">↻ Резонанс</button>
-          <button class="link-btn" id="btnClear">Очистить</button>
-        </div>
+<div class="net-activity" id="netActivity"><div class="bar"></div></div>
+
+<div class="status-bar">
+  <span class="chip" id="chipNet"><span class="dot"></span>offline</span>
+  <span class="chip" id="chipModel"><span class="dot"></span>model</span>
+  <span class="chip" id="chipPeers"><span class="dot"></span>0 peers</span>
+  <span class="chip" id="chipActivity" style="display:none"><span class="dot"></span>rx/tx</span>
+</div>
+
+<div class="content">
+  <div class="view active" id="view-stream">
+    <div class="composer" id="composer">
+      <textarea id="input" placeholder="О чём думаешь? Ввод текста рассылает вектор-запрос пирам..."></textarea>
+      <div class="actions">
+        <button class="btn ghost" id="btnSaveLocal">Сохранить приватно</button>
+        <button class="btn primary" id="btnPublish">Отдать в сеть (Shared)</button>
       </div>
-      <div class="editor-controls">
-        <button class="btn btn-ghost" id="btnSavePrivate">Сохранить лично</button>
-        <button class="btn btn-primary" id="btnSaveShared">Поделиться (P2P)</button>
-      </div>
+      <div class="progress"><div id="modelProgress"></div></div>
     </div>
 
-    <div class="filter-tabs">
-      <button class="f-tab active" data-filter="local">
-        Локально <span class="counter" id="cntLocal">0</span>
-      </button>
-      <button class="f-tab" data-filter="world">
-        Мир <span class="counter" id="cntWorld">0</span>
-      </button>
-      <button class="f-tab" data-filter="seren">
-        Озарения <span class="counter" id="cntSeren">0</span>
-      </button>
+    <div class="sub-tabs">
+      <div class="sub-tab active" data-sub="mine">Локально<span class="badge" id="badgeMine">0</span></div>
+      <div class="sub-tab" data-sub="world">Из сети<span class="badge" id="badgeWorld">0</span></div>
     </div>
 
-    <div id="carousel-local" class="carousel-container active">
-      <div class="carousel-wrapper">
-        <div class="skel skel-card"></div>
-        <div class="skel skel-card" style="animation-delay:.2s"></div>
-      </div>
-    </div>
-    <div id="carousel-world" class="carousel-container">
-      <div class="carousel-wrapper"></div>
-    </div>
-    <div id="carousel-seren" class="carousel-container">
-      <div class="carousel-wrapper"></div>
-    </div>
+    <div id="sub-mine"><div id="listMine"></div></div>
+    <div id="sub-world" style="display:none"><div id="listWorld"></div></div>
   </div>
 
-  <div id="view-base" class="view-layer">
-    <div class="base-stats" id="baseStats"></div>
-    <div class="base-controls">
-      <input type="text" class="base-search" id="baseFilter" placeholder="Поиск по базе…">
-      <select class="base-sort" id="baseSort">
-        <option value="new">Сначала новые</option>
-        <option value="old">Сначала старые</option>
-        <option value="az">По алфавиту</option>
-      </select>
-    </div>
-    <div id="carousel-base" class="carousel-container active">
-      <div class="carousel-wrapper"></div>
-    </div>
+  <div class="view" id="view-history">
+    <div id="listHistory"></div>
   </div>
-</main>
+</div>
 
-<div class="drawer-overlay" id="drawerOverlay"></div>
+<div class="overlay" id="overlay"></div>
 <div class="drawer" id="drawer">
-  <div class="drawer-header">
-    Настройки
-    <button class="drawer-close" id="btnCloseSettings" aria-label="Закрыть">&times;</button>
-  </div>
-
-  <div class="form-group">
-    <label class="form-label">Тема</label>
-    <select class="form-input" id="cfgTheme">
-      <option value="dark">Тёмный космос</option>
-      <option value="light">Светлая бумага</option>
-    </select>
-  </div>
-
-  <div class="form-group">
-    <label class="form-label">Комната (топик Nostr)</label>
-    <input type="text" class="form-input" id="cfgRoom" placeholder="noomium-alpha">
-    <div class="form-hint">Узлы в одной комнате слышат ваши трансляции.</div>
-  </div>
-
-  <div class="form-group">
-    <label class="form-label">
-      Порог точного совпадения
-      <span class="val-display" id="valThresh">0.30</span>
-    </label>
-    <input type="range" class="form-range" id="cfgThresh" min="0.1" max="0.7" step="0.05">
-  </div>
-
-  <div class="form-group">
-    <label class="form-label">
-      Дельта озарений
-      <span class="val-display" id="valSeren">0.15</span>
-    </label>
-    <input type="range" class="form-range" id="cfgSeren" min="0.05" max="0.3" step="0.01">
-  </div>
-
-  <div class="drawer-section">Данные</div>
-  <div class="form-group">
-    <div class="btn-row" style="margin-bottom:10px;">
-      <button class="btn btn-ghost" id="btnExport">Экспорт .noo</button>
-      <button class="btn btn-ghost" id="btnImport">Импорт .noo</button>
-    </div>
-    <input type="file" id="importFile" accept=".noo,.json,application/json" style="display:none">
-    <div class="form-hint">
-      .noo — переносимый формат капсулы. Дубликаты по ID и хэшу текста автоматически пропускаются.
+  <h3>Настройки<button class="close" id="btnClose">×</button></h3>
+  <div class="setting">
+    <label>Тема</label>
+    <div class="seg" data-opt="theme">
+      <button data-val="auto" class="active">Авто</button>
+      <button data-val="light">День</button>
+      <button data-val="dark">Ночь</button>
     </div>
   </div>
-
-  <div class="drawer-section">Применение</div>
-  <div class="form-group">
-    <button class="btn btn-primary" id="btnSaveConfig" style="width:100%; margin-bottom:10px;">
-      Применить и перезагрузить
-    </button>
-    <button class="btn btn-ghost" id="btnWipeDB" style="width:100%; color:var(--danger);">
-      Стереть базу
-    </button>
+  <div class="setting">
+    <label>Комната (Room)</label>
+    <input type="text" id="setRoom" />
+  </div>
+  <div class="setting">
+    <div class="row"><label>Порог релевантности</label><span class="val" id="valThreshold">0.30</span></div>
+    <input type="range" id="setThreshold" min="0.1" max="0.7" step="0.05" value="0.30" />
+  </div>
+  <div class="setting" style="margin-top:20px;">
+    <button class="btn" id="btnReset" style="color:var(--err)">🗑 Сбросить БД</button>
+    <button class="btn primary" id="btnApply">Применить и Перезайти</button>
   </div>
 </div>
 
-<div class="drawer-overlay" id="helpOverlay"></div>
-<div class="drawer" id="helpDrawer">
-  <div class="drawer-header">
-    Как это работает
-    <button class="drawer-close" id="btnCloseHelp" aria-label="Закрыть">&times;</button>
-  </div>
-  <p>
-    NOOmium превращает каждую мысль в смысловой вектор. Пока вы печатаете,
-    система ищет совпадения в вашей базе и анонимно транслирует запрос узлам в вашей комнате.
-  </p>
-  <div class="drawer-section">Дорожки</div>
-  <p><b style="color:var(--brand)">Локально</b> — сильные совпадения в вашей базе.</p>
-  <p><b style="color:var(--world)">Мир</b> — совпадения, которыми делятся узлы сейчас.</p>
-  <p><b style="color:var(--seren)">Озарения</b> — близкие, но не точные мысли.</p>
-  <div class="drawer-section">Философия</div>
-  <p>
-    Чужие мысли нельзя сохранить себе. Прочитать, понять — и написать своё.
-    Так рождается синтез, а не склад чужого.
-  </p>
-  <div class="drawer-section">Капсулы .noo</div>
-  <p>
-    У каждой заметки есть UUID и хэш текста, поэтому при импорте на другом устройстве дубли не появляются.
-  </p>
-  <div class="drawer-section">Горячие клавиши</div>
-  <p><kbd>Ctrl</kbd>+<kbd>Enter</kbd> — сохранить лично</p>
-  <p><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> — поделиться</p>
-  <p><kbd>/</kbd> — редактор</p>
-  <p><kbd>Esc</kbd> — закрыть панели</p>
-</div>
-
-<div class="toast" id="sysToast"></div>
+<div class="toast" id="toast"></div>
 
 <script type="module">
-import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.1';
 import * as nostrMod from 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
 
-/* ===== CONFIG ===== */
-const Config = {
-  DB_NAME: 'noomium_v3',
+const pipeline = tfMod.pipeline || tfMod.default.pipeline;
+const tfEnv = tfMod.env || tfMod.default.env;
+const { SimplePool, finalizeEvent, generateSecretKey, getPublicKey } = nostrMod;
+
+if (tfEnv) {
+  tfEnv.allowLocalModels = false;
+  tfEnv.useBrowserCache = true;
+}
+
+/* ================= CONFIG ================= */
+const CFG = {
+  DB_NAME: 'noosphere_p2p',
   DB_VERSION: 1,
-  STORE: 'notes',
-  RELAYS: [
-    'wss://nos.lol',
-    'wss://relay.nostr.band',
-    'wss://relay.damus.io',
-    'wss://relay.snort.social',
-    'wss://nostr.mutinywallet.com',
-  ],
-  K_QUERY: 21000,
-  K_ANSWER: 21001,
-  MODEL: 'Xenova/all-MiniLM-L6-v2',
-  DIM: 384,
-  BACKUP_EXT: 'noo',
-  DEBOUNCE: 800,
-  RELAY_CONNECT_TIMEOUT: 6000,
-  state: {
-    room: 'noomium-core',
-    theme: 'dark',
-    threshold: 0.30,
-    serendipity: 0.15
-  }
+  STORE_THOUGHTS: 'thoughts',
+  RELAYS: ['wss://relay.damus.io', 'wss://nos.lol'],
+  KIND_QUERY: 21000, // Эфемерный запрос
+  KIND_ANSWER: 21001, // Эфемерный ответ
+  MODEL_ID: 'Xenova/all-MiniLM-L6-v2',
+  settings: { room: 'noosphere-p2p', theme: 'auto', threshold: 0.30 }
 };
 
-try {
-  const saved = localStorage.getItem('noomium_config');
-  if (saved) Object.assign(Config.state, JSON.parse(saved));
-} catch {}
+try { const s = localStorage.getItem('ns_settings'); if (s) Object.assign(CFG.settings, JSON.parse(s)); } catch {}
+const saveSettings = () => localStorage.setItem('ns_settings', JSON.stringify(CFG.settings));
+const Util = { newId: () => Math.random().toString(36).slice(2, 15), now: () => Date.now(), esc: (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') };
 
-/* ===== UTILS ===== */
-const uuid = () =>
-  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = Math.random() * 16 | 0;
-    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+/* ================= TOAST / UI ================= */
+const Toast = (() => {
+  let timer;
+  return {
+    show: (msg, duration=2500) => {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.className = 'toast show';
+      clearTimeout(timer); timer = setTimeout(() => t.className = 'toast', duration);
+    }
+  };
+})();
+const $ = (id) => document.getElementById(id);
+const setChip = (id, txt, cls) => { const el=$(id); if(el) el.className='chip '+cls, el.innerHTML=`<span class="dot"></span>${txt}`; };
+
+/* ================= STORAGE ================= */
+const Storage = (() => {
+  let db = null;
+  const open = () => new Promise((res, rej) => {
+    if (db) return res(db);
+    const req = indexedDB.open(CFG.DB_NAME, CFG.DB_VERSION);
+    req.onupgradeneeded = (ev) => { if (!ev.target.result.objectStoreNames.contains(CFG.STORE_THOUGHTS)) ev.target.result.createObjectStore(CFG.STORE_THOUGHTS, { keyPath: 'id' }); };
+    req.onsuccess = (ev) => { db = ev.target.result; res(db); };
+    req.onerror = () => rej(req.error);
   });
+  const tx = (store, mode='readonly') => db.transaction(store, mode).objectStore(store);
+  const prom = (req) => new Promise((r, j) => { req.onsuccess = () => r(req.result); req.onerror = () => j(req.error); });
+  return {
+    put: async (t) => { await open(); return prom(tx(CFG.STORE_THOUGHTS, 'readwrite').put(t)); },
+    all: async () => { await open(); return prom(tx(CFG.STORE_THOUGHTS).getAll()); },
+    clear: async () => { await open(); return prom(tx(CFG.STORE_THOUGHTS, 'readwrite').clear()); }
+  };
+})();
 
-const textHash = (text) => {
-  let h = 2166136261;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return 'h' + (h >>> 0).toString(16);
-};
+/* ================= VECTOR ================= */
+const Vector = (() => {
+  let extractor = null;
+  return {
+    load: async (onProgress) => {
+      if (!extractor) extractor = await pipeline('feature-extraction', CFG.MODEL_ID, { progress_callback: p => { if (p.status==='progress') onProgress(p.loaded/p.total*100); }});
+      return extractor;
+    },
+    embed: async (txt) => {
+      if (!extractor || !txt) return null;
+      const out = await extractor(txt, { pooling: 'mean', normalize: true });
+      return Array.from(out.data);
+    },
+    cosine: (a, b) => { let s=0; for(let i=0; i<a.length; i++) s+=a[i]*b[i]; return s; },
+    isLoaded: () => extractor !== null
+  };
+})();
 
-const plural = (n, one, few, many) => {
-  const m10 = n % 10, m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
-  return many;
-};
+/* ================= P2P NETWORK (NOSTR) ================= */
+const Network = (() => {
+  let pool = null, sk = null, pk = null, sub = null;
+  let activePeers = new Set();
+  let currentQueryId = null; 
+  let worldResults = []; // Временные результаты из сети
 
-const word = {
-  symbols: n => `${n} ${plural(n, 'символ', 'символа', 'символов')}`,
-  peers: n => `${n} ${plural(n, 'узел', 'узла', 'узлов')}`,
-  thoughts: n => `${n} ${plural(n, 'мысль', 'мысли', 'мыслей')}`,
-  relays: n => `${n} ${plural(n, 'relay', 'relay', 'relay')}`
-};
+  const flashActivity = () => {
+    const el = $('netActivity'); el.classList.add('active');
+    setTimeout(() => el.classList.remove('active'), 1000);
+  };
 
-/* ===== EVENT BUS ===== */
-class EventBus {
-  constructor() { this.listeners = new Map(); }
-  on(evt, fn) {
-    if (!this.listeners.has(evt)) this.listeners.set(evt, new Set());
-    this.listeners.get(evt).add(fn);
-    return () => this.off(evt, fn);
-  }
-  off(evt, fn) { this.listeners.get(evt)?.delete(fn); }
-  emit(evt, data) { this.listeners.get(evt)?.forEach(fn => {
-    try { fn(data); } catch (e) { console.error(`EventBus ${evt}:`, e); }
-  }); }
-}
-const bus = new EventBus();
-
-/* ===== STORAGE ===== */
-class Storage {
-  constructor() { this.db = null; this.ready = false; }
-
-  async open() {
-    if (this.db && this.ready) return this.db;
-    try {
-      return await this._openWithVersion(Config.DB_VERSION);
-    } catch (e1) {
-      console.warn('DB open v1 failed, trying recovery:', e1);
-      return await this._recover(Config.DB_VERSION + 1);
-    }
-  }
-
-  _openWithVersion(version) {
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(Config.DB_NAME, version);
-      req.onupgradeneeded = e => {
-        const db = e.target.result;
-        if (!db.objectStoreNames.contains(Config.STORE)) {
-          db.createObjectStore(Config.STORE, { keyPath: 'id' });
-        }
-      };
-      req.onsuccess = e => {
-        const db = e.target.result;
-        if (!db.objectStoreNames.contains(Config.STORE)) {
-          db.close();
-          return reject(new Error('Store missing'));
-        }
-        this.db = db;
-        this.ready = true;
-        resolve(db);
-      };
-      req.onerror = () => reject(req.error);
-      req.onblocked = () => reject(new Error('DB blocked'));
-    });
-  }
-
-  _recover(newVersion) {
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(Config.DB_NAME, newVersion);
-      req.onupgradeneeded = e => {
-        const db = e.target.result;
-        if (!db.objectStoreNames.contains(Config.STORE)) {
-          db.createObjectStore(Config.STORE, { keyPath: 'id' });
-        }
-      };
-      req.onsuccess = e => {
-        this.db = e.target.result;
-        this.ready = true;
-        resolve(this.db);
-      };
-      req.onerror = () => reject(req.error);
-    });
-  }
-
-  async tx(mode, action) {
-    const db = await this.open();
-    return new Promise((resolve, reject) => {
+  const processIncomingEvent = async (event) => {
+    if (event.pubkey === pk) return;
+    activePeers.add(event.pubkey);
+    setChip('chipPeers', `${activePeers.size} peers`, 'ok');
+    
+    // Кто-то ищет. Если у нас есть подходящие (shared) заметки - отвечаем.
+    if (event.kind === CFG.KIND_QUERY) {
       try {
-        const tx = db.transaction(Config.STORE, mode);
-        const store = tx.objectStore(Config.STORE);
-        const req = action(store);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-        tx.onerror = () => reject(tx.error);
-      } catch (err) { reject(err); }
-    });
-  }
-
-  save(note) { return this.tx('readwrite', s => s.put(note)); }
-  get(id) { return this.tx('readonly', s => s.get(id)); }
-  delete(id) { return this.tx('readwrite', s => s.delete(id)); }
-  getAll() { return this.tx('readonly', s => s.getAll()); }
-  clear() { return this.tx('readwrite', s => s.clear()); }
-
-  async reset() {
-    try { if (this.db) { this.db.close(); this.db = null; } } catch {}
-    this.ready = false;
-    await new Promise((resolve, reject) => {
-      const req = indexedDB.deleteDatabase(Config.DB_NAME);
-      req.onsuccess = resolve;
-      req.onerror = () => reject(req.error);
-      req.onblocked = resolve;
-    });
-  }
-}
-const DB = new Storage();
-
-/* ===== AI ===== */
-class AI {
-  constructor() {
-    this.extractor = null;
-    this.mode = 'loading';
-    this.cache = new Map();
-    const { env } = tfMod;
-    if (env) { env.allowLocalModels = false; env.useBrowserCache = true; }
-  }
-  get ready() { return this.mode === 'model' || this.mode === 'demo'; }
-
-  async init(onProgress) {
-    if (this.extractor) { this.mode = 'model'; return; }
-    const { pipeline } = tfMod;
-    this.extractor = await pipeline('feature-extraction', Config.MODEL, {
-      progress_callback: p => {
-        if (p.status === 'progress' && p.total > 0) {
-          onProgress?.(`Модель ${Math.round((p.loaded / p.total) * 100)}%`);
-        }
-      }
-    });
-    this.mode = 'model';
-  }
-
-  hashEmbed(text) {
-    const dim = Config.DIM;
-    const v = new Float32Array(dim);
-    const tokens = (text.toLowerCase().match(/[a-zа-яё0-9]+/gi) || []);
-    for (const tok of tokens) {
-      let h = 2166136261;
-      for (let i = 0; i < tok.length; i++) {
-        h ^= tok.charCodeAt(i);
-        h = Math.imul(h, 16777619);
-      }
-      v[Math.abs(h) % dim] += 1;
-      let h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
-      v[Math.abs(h2) % dim] += 0.5;
-    }
-    let norm = 0;
-    for (let i = 0; i < dim; i++) norm += v[i] * v[i];
-    norm = Math.sqrt(norm) || 1;
-    for (let i = 0; i < dim; i++) v[i] /= norm;
-    return Array.from(v);
-  }
-
-  async embed(text) {
-    const t = (text || '').trim();
-    if (!t) return null;
-    if (this.cache.has(t)) return this.cache.get(t);
-    let vec;
-    if (this.mode === 'model' && this.extractor) {
-      const out = await this.extractor(t, { pooling: 'mean', normalize: true });
-      vec = Array.from(out.data);
-    } else {
-      vec = this.hashEmbed(t);
-    }
-    this.cache.set(t, vec);
-    return vec;
-  }
-
-  cosine(a, b) {
-    if (!a || !b || a.length !== b.length) return 0;
-    let sum = 0;
-    for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
-    return sum;
-  }
-}
-const ai = new AI();
-
-/* ===== RELAY MANAGER (по науке) ===== */
-class RelayManager {
-  constructor(urls) {
-    this.urls = urls;
-    this.health = new Map();
-    urls.forEach(u => this.health.set(u, { ok: true, fails: 0, lastCheck: 0 }));
-  }
-
-  getHealthyUrls() {
-    return this.urls.filter(u => this.health.get(u).ok);
-  }
-
-  markOk(url) {
-    const h = this.health.get(url);
-    if (h) { h.ok = true; h.fails = 0; h.lastCheck = Date.now(); }
-  }
-
-  markFailed(url) {
-    const h = this.health.get(url);
-    if (!h) return;
-    h.fails++;
-    h.lastCheck = Date.now();
-    if (h.fails >= 2) h.ok = false;
-  }
-
-  resetAll() {
-    this.urls.forEach(u => {
-      const h = this.health.get(u);
-      if (h) { h.ok = true; h.fails = 0; }
-    });
-  }
-}
-const relays = new RelayManager(Config.RELAYS);
-
-/* ===== NETWORK (state machine) ===== */
-const NetState = Object.freeze({
-  IDLE: 'idle',
-  CONNECTING: 'connecting',
-  CONNECTED: 'connected',
-  DEGRADED: 'degraded',
-  FAILED: 'failed'
-});
-
-class Network {
-  constructor() {
-    this.pool = null;
-    this.sk = null;
-    this.pk = null;
-    this.sub = null;
-    this.state = NetState.IDLE;
-    this.currentQueryId = null;
-    this.lastQueryAt = 0;
-    this.worldAnswers = [];
-    this.peers = new Set();
-    this.connectedCount = 0;
-    this.reconnectTimer = null;
-  }
-
-  get ready() { return this.state === NetState.CONNECTED || this.state === NetState.DEGRADED; }
-
-  _setState(state, details = {}) {
-    if (this.state === state) return;
-    this.state = state;
-    bus.emit('net:state', { state, ...details });
-  }
-
-  async init() {
-    this._setState(NetState.CONNECTING);
-    try {
-      const { SimplePool, generateSecretKey, getPublicKey } = nostrMod;
-
-      let keyHex = localStorage.getItem('noomium_key');
-      if (!keyHex) {
-        const raw = generateSecretKey();
-        keyHex = Array.from(raw).map(b => b.toString(16).padStart(2, '0')).join('');
-        localStorage.setItem('noomium_key', keyHex);
-      }
-
-      this.sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
-      this.pk = getPublicKey(this.sk);
-      this.pool = new SimplePool();
-
-      await this._subscribe();
-
-      this._scheduleReconnect();
-    } catch (err) {
-      console.error('Network init:', err);
-      this._setState(NetState.FAILED, { error: err.message });
-      this._scheduleReconnect();
-    }
-  }
-
-  async _subscribe() {
-    if (!this.pool) return;
-    if (this.sub) {
-      try { this.sub.close(); } catch {}
-      this.sub = null;
-    }
-
-    const healthyUrls = relays.getHealthyUrls();
-    if (healthyUrls.length === 0) {
-      relays.resetAll();
-      this._setState(NetState.FAILED, { error: 'No healthy relays' });
-      return;
-    }
-
-    try {
-      this.sub = this.pool.subscribeMany(healthyUrls, [{
-        kinds: [Config.K_QUERY, Config.K_ANSWER],
-        '#t': [Config.state.room],
-        since: Math.floor(Date.now() / 1000)
-      }], {
-        onevent: async ev => {
-          if (ev.pubkey === this.pk) return;
-          this.peers.add(ev.pubkey);
-          bus.emit('net:peer', { count: this.peers.size });
-          await this._handleEvent(ev);
-        }
-      });
-
-      setTimeout(() => this._checkConnectivity(), 2000);
-    } catch (err) {
-      healthyUrls.forEach(u => relays.markFailed(u));
-      throw err;
-    }
-  }
-
-  async _checkConnectivity() {
-    if (!this.pool) return;
-    const healthy = relays.getHealthyUrls();
-    if (healthy.length === 0) {
-      this._setState(NetState.FAILED);
-    } else if (healthy.length < Config.RELAYS.length / 2) {
-      this._setState(NetState.DEGRADED, { relays: healthy.length });
-    } else {
-      this._setState(NetState.CONNECTED, { relays: healthy.length });
-    }
-  }
-
-  _scheduleReconnect() {
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = setTimeout(() => {
-      if (this.state !== NetState.CONNECTED) {
-        this._subscribe().catch(() => {});
-      }
-    }, 10000);
-  }
-
-  async _handleEvent(ev) {
-    if (ev.kind === Config.K_QUERY) {
-      try {
-        const data = JSON.parse(ev.content);
-        if (!data.vector) return;
-        const localNotes = await DB.getAll();
-        const { threshold, serendipity } = Config.state;
-        for (const note of localNotes) {
-          if (!note.shared || !note.vector) continue;
-          const score = ai.cosine(data.vector, note.vector);
-          if (score >= (threshold - serendipity)) {
-            this.sendAnswer(ev.id, note.text, note.vector);
+        const query = JSON.parse(event.content);
+        if (!query.vector) return;
+        const allNotes = await Storage.all();
+        const sharedNotes = allNotes.filter(n => n.shared && n.vector);
+        
+        for (const note of sharedNotes) {
+          const score = Vector.cosine(query.vector, note.vector);
+          if (score >= CFG.settings.threshold) {
+            flashActivity();
+            // Отправляем ответ, привязывая его к ID запроса (NIP-10 'e' tag)
+            const ansEv = finalizeEvent({
+              kind: CFG.KIND_ANSWER, created_at: Math.floor(Date.now()/1000),
+              tags: [['t', CFG.settings.room], ['e', event.id]],
+              content: JSON.stringify({ text: note.text, vector: note.vector })
+            }, sk);
+            pool.publish(CFG.RELAYS, ansEv);
           }
         }
-      } catch (e) { console.warn('Query parse:', e); }
-    }
-
-    if (ev.kind === Config.K_ANSWER) {
-      const eTag = ev.tags.find(t => t[0] === 'e');
-      if (eTag && eTag[1] === this.currentQueryId) {
+      } catch (e) {}
+    } 
+    
+    // Кто-то ответил на НАШ запрос
+    else if (event.kind === CFG.KIND_ANSWER) {
+      const targetTag = event.tags.find(t => t[0] === 'e');
+      if (targetTag && targetTag[1] === currentQueryId) {
         try {
-          const data = JSON.parse(ev.content);
+          const data = JSON.parse(event.content);
           if (data.text && data.vector) {
-            if (!this.worldAnswers.some(a => a.id === ev.id)) {
-              this.worldAnswers.push({
-                id: ev.id, text: data.text, vector: data.vector,
-                peer: ev.pubkey.slice(0, 6)
-              });
-              bus.emit('net:answers');
-            }
+            worldResults.push({ source: { text: data.text, peer: event.pubkey }, vector: data.vector });
+            document.dispatchEvent(new Event('ns:update-ui'));
+            flashActivity();
           }
-        } catch (e) { console.warn('Answer parse:', e); }
+        } catch (e) {}
       }
     }
-  }
+  };
 
-  broadcastQuery(vector) {
-    if (!this.pool || !this.ready) return;
-    this.worldAnswers = [];
-    this.lastQueryAt = Date.now();
-    try {
-      const { finalizeEvent } = nostrMod;
-      const ev = finalizeEvent({
-        kind: Config.K_QUERY,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [['t', Config.state.room]],
-        content: JSON.stringify({ vector })
-      }, this.sk);
-      this.currentQueryId = ev.id;
-      this.pool.publish(relays.getHealthyUrls(), ev);
-    } catch (err) {
-      console.warn('Broadcast failed:', err);
-    }
-  }
-
-  sendAnswer(targetId, text, vector) {
-    if (!this.pool || !this.ready) return;
-    try {
-      const { finalizeEvent } = nostrMod;
-      const ev = finalizeEvent({
-        kind: Config.K_ANSWER,
-        created_at: Math.floor(Date.now() / 1000),
-        tags: [['t', Config.state.room], ['e', targetId]],
-        content: JSON.stringify({ text, vector })
-      }, this.sk);
-      this.pool.publish(relays.getHealthyUrls(), ev);
-    } catch (err) { console.warn('Answer failed:', err); }
-  }
-}
-const net = new Network();
-
-/* ===== UI ===== */
-const UI = {
-  get: id => document.getElementById(id),
-  toastTimer: null,
-  registry: new Map(),
-
-  toast(msg, kind = '') {
-    const el = this.get('sysToast');
-    if (!el) return;
-    el.className = `toast ${kind}`;
-    el.textContent = msg;
-    requestAnimationFrame(() => el.classList.add('show'));
-    clearTimeout(this.toastTimer);
-    this.toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
-  },
-
-  setStatus(id, text, type = '') {
-    const el = this.get(id);
-    const txtEl = this.get(id + 'Text');
-    if (!el || !txtEl) return;
-    el.className = `badge-status ${type}`;
-    txtEl.textContent = text;
-  },
-
-  setTheme(theme) { document.documentElement.setAttribute('data-theme', theme); },
-
-  escapeHtml(str) {
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  },
-  escapeReg(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); },
-
-  createCard(item, type, qText) {
-    this.registry.set(item.id, item);
-    const isPeer = !!item.peer;
-
-    let textHTML = this.escapeHtml(item.text);
-    if (qText) {
-      const words = qText.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-      for (const w of words) {
-        textHTML = textHTML.replace(
-          new RegExp(`(${this.escapeReg(w)})`, 'gi'),
-          '<mark>$1</mark>'
-        );
+  return {
+    init: () => {
+      let savedSk = localStorage.getItem('ns_sk');
+      if (!savedSk) {
+        const s = generateSecretKey();
+        savedSk = Array.from(s).map(b=>b.toString(16).padStart(2,'0')).join('');
+        localStorage.setItem('ns_sk', savedSk);
       }
-    }
+      sk = new Uint8Array(savedSk.match(/.{1,2}/g).map(b=>parseInt(b,16)));
+      pk = getPublicKey(sk);
+      
+      pool = new SimplePool();
+      sub = pool.subscribeMany(CFG.RELAYS, [{
+        kinds: [CFG.KIND_QUERY, CFG.KIND_ANSWER],
+        '#t': [CFG.settings.room],
+        since: Math.floor(Date.now()/1000)
+      }], { onevent: processIncomingEvent });
+      setChip('chipNet', 'online', 'ok');
+    },
+    
+    // Броадкаст запроса (вызывается при вводе текста)
+    sendQuery: (vector) => {
+      if (!pool) return;
+      worldResults = []; // сброс старых результатов
+      const ev = finalizeEvent({
+        kind: CFG.KIND_QUERY, created_at: Math.floor(Date.now()/1000),
+        tags: [['t', CFG.settings.room]], content: JSON.stringify({ vector })
+      }, sk);
+      currentQueryId = ev.id;
+      pool.publish(CFG.RELAYS, ev);
+      flashActivity();
+    },
 
-    const typeLabel = isPeer
-      ? `УЗЕЛ · ${item.peer}`
-      : item.shared ? 'МОЁ · ОБЩЕЕ' : 'МОЁ · ЛИЧНОЕ';
+    getWorldResults: () => worldResults,
+    
+    leave: () => { if(sub) sub.close(); if(pool) pool.close(CFG.RELAYS); pool=null; activePeers.clear(); setChip('chipNet', 'offline', 'warn'); }
+  };
+})();
 
-    const scoreRender = typeof item.score === 'number'
-      ? `${(item.score * 100).toFixed(1)}%`
-      : item.createdAt ? new Date(item.createdAt).toLocaleDateString('ru-RU') : '';
+/* ================= UI / APP LOGIC ================= */
+const App = (() => {
+  let debounceTimer = null;
+  let lastVector = null;
 
-    const foot = isPeer
-      ? `<div class="note-foot"><span class="note-hint">прочитать · понять · написать своё</span></div>`
-      : `<div class="note-foot"><div class="note-actions">
-          <button class="note-act" data-act="find" data-id="${item.id}">⌖ Резонанс</button>
-          <button class="note-act" data-act="toggle" data-id="${item.id}">${item.shared ? '🔒 Скрыть' : '📡 Поделиться'}</button>
-          <button class="note-act" data-act="copy" data-id="${item.id}">⧉ Копировать</button>
-          <button class="note-act danger" data-act="del" data-id="${item.id}">🗑 Удалить</button>
-        </div></div>`;
+  const hl = (qt, mt) => {
+    if (!qt) return Util.esc(mt);
+    const words = qt.toLowerCase().split(/\s+/).filter(w=>w.length>2);
+    let out = Util.esc(mt);
+    words.forEach(w => {
+      const re = new RegExp(`(${w})`, 'gi');
+      out = out.replace(re, '<mark>$1</mark>');
+    });
+    return out;
+  };
 
-    return `<div class="note-card ${type}${isPeer ? ' peer' : ''}" data-card="${item.id}">
-      <div class="note-header">
-        <span class="note-type">${typeLabel}</span>
-        <span class="note-score">${scoreRender}</span>
-      </div>
-      <div class="note-content">${textHTML}</div>
-      ${foot}
-    </div>`;
-  },
+  const renderCards = (containerId, items, qText, isWorld) => {
+    const c = $(containerId); c.innerHTML = '';
+    if (!items.length) { c.innerHTML = `<div class="empty">Ничего не найдено</div>`; return; }
+    items.forEach(item => {
+      const score = item.score ? item.score.toFixed(3) : '';
+      const pubTag = isWorld ? '<span class="tag">ПИР</span>' : (item.source.shared ? '<span class="pub-status pub-ok">SHARED</span>' : '<span class="pub-status">PRIVATE</span>');
+      c.innerHTML += `
+        <div class="card ${isWorld ? 'world' : 'mine'}">
+          <div class="head">${pubTag}<span class="score">${score}</span></div>
+          <div class="text">${hl(qText, item.source.text)}</div>
+        </div>`;
+    });
+  };
 
-  renderEmpty(containerId, message, opts = {}) {
-    const c = this.get(containerId);
-    if (!c) return;
-    const wrapper = c.querySelector('.carousel-wrapper');
-    if (!wrapper) return;
-    if (opts.loading) {
-      wrapper.innerHTML = `<div class="empty-state"><div class="spinner"></div><div>${this.escapeHtml(message)}</div></div>`;
+  const updateUI = async () => {
+    const text = $('input').value.trim();
+    if (!text || !Vector.isLoaded()) {
+      renderCards('listMine', [], text, false);
+      renderCards('listWorld', [], text, true);
+      $('badgeMine').textContent = '0'; $('badgeWorld').textContent = '0';
       return;
     }
-    wrapper.innerHTML = `<div class="empty-state">
-      <svg fill="currentColor" viewBox="0 0 24 24">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/>
-      </svg>
-      <div>${this.escapeHtml(message)}</div>
-    </div>`;
-  }
-};
 
-let debounceInput = null;
-let lastVectorHash = null;
+    const qv = await Vector.embed(text);
+    if (!lastVector || Vector.cosine(qv, lastVector) < 0.99) {
+      lastVector = qv;
+      Network.sendQuery(qv); // Ищем в сети
+    }
 
-async function executeSearch(force = false) {
-  const input = UI.get('ioInput');
-  if (!input) return;
-  const text = input.value.trim();
+    const allLocal = await Storage.all();
+    const mine = allLocal.filter(n=>n.vector).map(n=>({ source:n, score:Vector.cosine(qv, n.vector) }))
+                 .filter(r=>r.score >= CFG.settings.threshold).sort((a,b)=>b.score-a.score);
+    
+    const world = Network.getWorldResults().map(r=>({ source:r.source, score:Vector.cosine(qv, r.vector) }))
+                 .filter(r=>r.score >= CFG.settings.threshold).sort((a,b)=>b.score-a.score);
 
-  if (!text || !ai.ready) {
-    UI.registry.clear();
-    ['local', 'world', 'seren'].forEach(k => {
-      const w = UI.get(`carousel-${k}`)?.querySelector('.carousel-wrapper');
-      if (w) w.innerHTML = '';
-      const c = UI.get(`cnt${k.charAt(0).toUpperCase() + k.slice(1)}`);
-      if (c) c.textContent = '0';
+    renderCards('listMine', mine, text, false);
+    renderCards('listWorld', world, text, true);
+    $('badgeMine').textContent = mine.length;
+    $('badgeWorld').textContent = world.length;
+  };
+
+  const renderHistory = async () => {
+    const all = await Storage.all();
+    const c = $('listHistory'); c.innerHTML = '';
+    if (!all.length) { c.innerHTML = '<div class="empty">База пуста</div>'; return; }
+    all.sort((a,b)=>b.createdAt - a.createdAt).forEach(n => {
+      c.innerHTML += `
+        <div class="card mine">
+          <div class="head">${n.shared ? '<span class="pub-status pub-ok">SHARED (Доступно сети)</span>' : '<span class="pub-status">PRIVATE</span>'} 
+          <span class="score">${new Date(n.createdAt).toLocaleString()}</span></div>
+          <div class="text">${Util.esc(n.text)}</div>
+        </div>`;
     });
-    UI.renderEmpty('carousel-local',
-      ai.ready ? 'Начните печатать.' : 'ИИ прогревается…',
-      { loading: !ai.ready });
-    UI.renderEmpty('carousel-world', net.ready ? 'Сеть тиха.' : 'Оффлайн.');
-    UI.renderEmpty('carousel-seren', 'Близких мыслей нет.');
-    return;
-  }
-
-  const queryVector = await ai.embed(text);
-  if (!queryVector) return;
-
-  if (net.ready && (force || !lastVectorHash || ai.cosine(queryVector, lastVectorHash) < 0.98)) {
-    lastVectorHash = queryVector;
-    net.broadcastQuery(queryVector);
-  }
-
-  const dbNotes = await DB.getAll();
-  const localScored = dbNotes
-    .filter(n => n.vector)
-    .map(n => ({ ...n, score: ai.cosine(queryVector, n.vector) }));
-  const worldScored = net.worldAnswers
-    .map(ans => ({ ...ans, score: ai.cosine(queryVector, ans.vector) }));
-
-  const TH = Config.state.threshold;
-  const SD = Config.state.serendipity;
-
-  const localExact = localScored.filter(n => n.score >= TH).sort((a, b) => b.score - a.score);
-  const worldExact = worldScored.filter(n => n.score >= TH).sort((a, b) => b.score - a.score);
-  const serenAll = [...localScored, ...worldScored]
-    .filter(n => n.score >= (TH - SD) && n.score < TH)
-    .sort((a, b) => b.score - a.score);
-
-  UI.registry.clear();
-
-  const renderCarousel = (id, arr, typeClass, emptyMsg, emptyOpts) => {
-    const wrap = UI.get(id)?.querySelector('.carousel-wrapper');
-    if (!wrap) return;
-    if (arr.length === 0) UI.renderEmpty(id, emptyMsg, emptyOpts);
-    else wrap.innerHTML = arr.map(item => UI.createCard(item, typeClass, text)).join('');
   };
 
-  renderCarousel('carousel-local', localExact, 't-local', 'В базе нет точных совпадений.');
-
-  const waiting = net.ready && net.lastQueryAt && (Date.now() - net.lastQueryAt < 6000) && worldExact.length === 0;
-  if (waiting) UI.renderEmpty('carousel-world', 'Слушаю резонанс…', { loading: true });
-  else renderCarousel('carousel-world', worldExact, 't-world',
-    net.ready ? 'Пока никто не думает так же.' : 'Оффлайн — только локальный поиск.');
-
-  renderCarousel('carousel-seren', serenAll, 't-seren', 'Близких мыслей не найдено.');
-
-  UI.get('cntLocal').textContent = localExact.length;
-  UI.get('cntWorld').textContent = worldExact.length;
-  UI.get('cntSeren').textContent = serenAll.length;
-}
-
-async function renderMyBase() {
-  const all = await DB.getAll();
-  UI.get('baseTabCount').textContent = all.length;
-
-  const shared = all.filter(n => n.shared).length;
-  UI.get('baseStats').innerHTML = `
-    <div class="stat"><div class="num">${all.length}</div><div class="lbl">Мыслей</div></div>
-    <div class="stat"><div class="num">${shared}</div><div class="lbl">Общих</div></div>
-    <div class="stat"><div class="num">${all.length - shared}</div><div class="lbl">Личных</div></div>`;
-
-  if (all.length === 0) {
-    UI.renderEmpty('carousel-base', 'База пуста.');
-    return;
-  }
-
-  const q = UI.get('baseFilter').value.trim().toLowerCase();
-  const sort = UI.get('baseSort').value;
-  let list = all.slice();
-  if (q) list = list.filter(n => n.text.toLowerCase().includes(q));
-
-  if (sort === 'old') list.sort((a, b) => a.createdAt - b.createdAt);
-  else if (sort === 'az') list.sort((a, b) => a.text.localeCompare(b.text, 'ru'));
-  else list.sort((a, b) => b.createdAt - a.createdAt);
-
-  UI.registry.clear();
-  const wrap = UI.get('carousel-base')?.querySelector('.carousel-wrapper');
-  if (!wrap) return;
-  if (list.length === 0) { UI.renderEmpty('carousel-base', 'Ничего не найдено.'); return; }
-  wrap.innerHTML = list.map(note => UI.createCard(note, 't-local', q || null)).join('');
-}
-
-const isBaseView = () => UI.get('view-base').classList.contains('active');
-const refreshCurrent = async () => {
-  if (isBaseView()) await renderMyBase();
-  else await executeSearch();
-};
-
-async function handleCardAction(act, el) {
-  const id = el.dataset.id;
-  const item = id ? UI.registry.get(id) : null;
-  if (!item) return;
-
-  if (act === 'find') {
-    UI.get('ioInput').value = item.text;
-    UI.get('ioCount').textContent = word.symbols(item.text.length);
-    switchToStream();
-    executeSearch(true);
-  } else if (act === 'copy') {
-    try {
-      await navigator.clipboard.writeText(item.text);
-      UI.toast('Скопировано.', 'ok');
-    } catch { UI.toast('Не удалось скопировать.', 'err'); }
-  } else if (act === 'del') {
-    if (confirm('Удалить мысль?')) {
-      await DB.delete(id);
-      UI.toast('Удалено.', 'info');
-      refreshCurrent();
-    }
-  } else if (act === 'toggle') {
-    const rec = await DB.get(id);
-    if (rec) {
-      rec.shared = !rec.shared;
-      await DB.save(rec);
-      UI.toast(rec.shared ? 'Видно узлам.' : 'Личное.', 'ok');
-      refreshCurrent();
-    }
-  }
-}
-
-async function exportData() {
-  try {
-    const notes = await DB.getAll();
-    if (notes.length === 0) { UI.toast('Нечего экспортировать.', 'err'); return; }
-    const capsule = {
-      app: 'noomium', format: 'noo', version: 1,
-      model: Config.MODEL, dim: Config.DIM,
-      exportedAt: Date.now(), notes
-    };
-    const blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `noomium-${new Date().toISOString().slice(0, 10)}.${Config.BACKUP_EXT}`;
-    a.click();
-    URL.revokeObjectURL(url);
-    UI.toast(`Экспорт ${word.thoughts(notes.length)}`, 'ok');
-  } catch (e) { UI.toast('Экспорт не удался: ' + e.message, 'err'); }
-}
-
-async function importData(file) {
-  try {
-    const data = JSON.parse(await file.text());
-    const notes = Array.isArray(data) ? data : data.notes;
-    if (!Array.isArray(notes)) throw new Error('bad format');
-
-    const existing = await DB.getAll();
-    const existingById = new Map(existing.map(n => [n.id, n]));
-    const existingByHash = new Map(existing.filter(n => n.hash).map(n => [n.hash, n]));
-
-    let imported = 0, skipped = 0;
-
-    for (const raw of notes) {
-      if (!raw || typeof raw.text !== 'string') continue;
-      const hash = textHash(raw.text);
-
-      if (existingByHash.has(hash)) { skipped++; continue; }
-
-      const candidateId = raw.id && typeof raw.id === 'string' ? raw.id : uuid();
-      if (existingById.has(candidateId) && existingById.get(candidateId).text === raw.text) {
-        skipped++; continue;
-      }
-
-      const finalId = existingById.has(candidateId) ? uuid() : candidateId;
-      const note = {
-        id: finalId, text: raw.text,
-        vector: Array.isArray(raw.vector) ? raw.vector : null,
-        shared: !!raw.shared,
-        createdAt: raw.createdAt || Date.now(),
-        hash
-      };
-
-      if (ai.ready && !note.vector) {
-        try { note.vector = await ai.embed(note.text); } catch {}
-      }
-      await DB.save(note);
-      existingById.set(finalId, note);
-      existingByHash.set(hash, note);
-      imported++;
-    }
-
-    UI.toast(`Импорт: ${imported} добавлено, ${skipped} пропущено.`, 'ok');
-    refreshCurrent();
-  } catch (e) { UI.toast('Импорт не удался: ' + e.message, 'err'); }
-}
-
-const switchToStream = () => {
-  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
-  document.querySelectorAll('.view-layer').forEach(el => el.classList.remove('active'));
-  document.querySelector('.tab[data-view="view-stream"]')?.classList.add('active');
-  UI.get('view-stream')?.classList.add('active');
-};
-
-const openDrawer = (d, o) => { UI.get(d)?.classList.add('open'); UI.get(o)?.classList.add('open'); };
-const closeAllDrawers = () => {
-  ['drawer', 'drawerOverlay', 'helpDrawer', 'helpOverlay'].forEach(id => {
-    UI.get(id)?.classList.remove('open');
-  });
-};
-
-function bindEvents() {
-  document.querySelectorAll('.tab').forEach(t => {
-    t.onclick = () => {
-      document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('.view-layer').forEach(el => el.classList.remove('active'));
-      t.classList.add('active');
-      UI.get(t.dataset.view)?.classList.add('active');
-      if (t.dataset.view === 'view-base') renderMyBase();
-    };
-  });
-
-  document.querySelectorAll('.f-tab').forEach(t => {
-    t.onclick = () => {
-      document.querySelectorAll('.f-tab').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('.carousel-container').forEach(el => el.classList.remove('active'));
-      t.classList.add('active');
-      UI.get(`carousel-${t.dataset.filter}`)?.classList.add('active');
-    };
-  });
-
-  const input = UI.get('ioInput');
-  input.addEventListener('input', () => {
-    UI.get('ioCount').textContent = word.symbols(input.value.length);
-    clearTimeout(debounceInput);
-    debounceInput = setTimeout(() => executeSearch(), Config.DEBOUNCE);
-  });
-
-  UI.get('btnResonate').onclick = () => executeSearch(true);
-  UI.get('btnClear').onclick = () => {
-    input.value = '';
-    UI.get('ioCount').textContent = word.symbols(0);
-    executeSearch();
+  const saveNote = async (isShared) => {
+    const txt = $('input').value.trim();
+    if (!txt) return;
+    const v = await Vector.embed(txt);
+    await Storage.put({ id: Util.newId(), text: txt, vector: v, shared: isShared, createdAt: Date.now() });
+    $('input').value = '';
+    Toast.show(isShared ? 'Сохранено и открыто для сети' : 'Сохранено приватно');
+    updateUI(); renderHistory();
   };
 
-  const handleSave = async isShared => {
-    const text = input.value.trim();
-    if (!text) { UI.toast('Нечего сохранять.', 'err'); return; }
-    if (!ai.ready) { UI.toast('ИИ не готов.', 'err'); return; }
-    const vector = await ai.embed(text);
-    const note = {
-      id: uuid(), text, vector, shared: isShared,
-      createdAt: Date.now(), hash: textHash(text)
-    };
-    await DB.save(note);
-    input.value = '';
-    UI.get('ioCount').textContent = word.symbols(0);
-    lastVectorHash = null;
-    UI.toast(isShared ? 'Видно узлам.' : 'Личное.', 'ok');
-    executeSearch();
-    if (isBaseView()) renderMyBase();
-  };
-  UI.get('btnSavePrivate').onclick = () => handleSave(false);
-  UI.get('btnSaveShared').onclick = () => handleSave(true);
+  return {
+    init: async () => {
+      // Темы и вкладки
+      document.documentElement.setAttribute('data-theme', CFG.settings.theme === 'auto' ? (window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light') : CFG.settings.theme);
+      document.querySelectorAll('.main-tab').forEach(t => t.onclick = () => { document.querySelectorAll('.main-tab').forEach(x=>x.classList.remove('active')); t.classList.add('active'); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active', v.id==='view-'+t.dataset.main)); if(t.dataset.main==='history') renderHistory(); });
+      document.querySelectorAll('.sub-tab').forEach(t => t.onclick = () => { document.querySelectorAll('.sub-tab').forEach(x=>x.classList.remove('active')); t.classList.add('active'); $('sub-mine').style.display=t.dataset.sub==='mine'?'':'none'; $('sub-world').style.display=t.dataset.sub==='world'?'':'none'; });
+      
+      // Инпуты и события
+      $('input').addEventListener('input', () => { clearTimeout(debounceTimer); debounceTimer = setTimeout(updateUI, 1500); });
+      $('btnSaveLocal').onclick = () => saveNote(false);
+      $('btnPublish').onclick = () => saveNote(true);
+      document.addEventListener('ns:update-ui', updateUI);
 
-  UI.get('baseFilter').addEventListener('input', () => {
-    clearTimeout(debounceInput);
-    debounceInput = setTimeout(renderMyBase, 200);
-  });
-  UI.get('baseSort').onchange = renderMyBase;
+      // Настройки
+      $('setRoom').value = CFG.settings.room; $('setThreshold').value = CFG.settings.threshold; $('valThreshold').textContent = CFG.settings.threshold;
+      document.querySelectorAll('.seg button').forEach(b => {
+        if(b.dataset.val == CFG.settings.theme) { b.parentNode.querySelectorAll('button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); }
+        b.onclick = () => { b.parentNode.querySelectorAll('button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); CFG.settings[b.parentNode.dataset.opt] = b.dataset.val; };
+      });
+      $('setThreshold').oninput = e => { CFG.settings.threshold = parseFloat(e.target.value); $('valThreshold').textContent = CFG.settings.threshold; };
+      
+      $('btnSettings').onclick = () => { $('drawer').classList.add('open'); $('overlay').classList.add('show'); };
+      $('btnClose').onclick = $('overlay').onclick = () => { $('drawer').classList.remove('open'); $('overlay').classList.remove('show'); };
+      
+      $('btnReset').onclick = async () => { if(confirm('Стереть все локальные заметки?')) { await Storage.clear(); renderHistory(); updateUI(); Toast.show('Очищено'); } };
+      $('btnApply').onclick = () => { CFG.settings.room = $('setRoom').value.trim(); saveSettings(); location.reload(); };
 
-  document.querySelector('.workspace').addEventListener('click', e => {
-    const el = e.target.closest('[data-act]');
-    if (el) handleCardAction(el.dataset.act, el);
-  });
-
-  UI.get('btnOpenSettings').onclick = () => openDrawer('drawer', 'drawerOverlay');
-  UI.get('btnCloseSettings').onclick = closeAllDrawers;
-  UI.get('drawerOverlay').onclick = closeAllDrawers;
-  UI.get('btnHelp').onclick = () => openDrawer('helpDrawer', 'helpOverlay');
-  UI.get('btnCloseHelp').onclick = closeAllDrawers;
-  UI.get('helpOverlay').onclick = closeAllDrawers;
-
-  UI.get('cfgTheme').value = Config.state.theme;
-  UI.get('cfgRoom').value = Config.state.room;
-  UI.get('cfgThresh').value = Config.state.threshold;
-  UI.get('cfgSeren').value = Config.state.serendipity;
-  UI.get('valThresh').textContent = Number(Config.state.threshold).toFixed(2);
-  UI.get('valSeren').textContent = Number(Config.state.serendipity).toFixed(2);
-
-  UI.get('cfgThresh').oninput = e => UI.get('valThresh').textContent = e.target.value;
-  UI.get('cfgSeren').oninput = e => UI.get('valSeren').textContent = e.target.value;
-  UI.get('cfgTheme').onchange = e => UI.setTheme(e.target.value);
-
-  UI.get('btnSaveConfig').onclick = () => {
-    Config.state.theme = UI.get('cfgTheme').value;
-    Config.state.room = UI.get('cfgRoom').value.trim() || 'noomium-core';
-    Config.state.threshold = parseFloat(UI.get('cfgThresh').value);
-    Config.state.serendipity = parseFloat(UI.get('cfgSeren').value);
-    localStorage.setItem('noomium_config', JSON.stringify(Config.state));
-    window.location.reload();
-  };
-
-  UI.get('btnWipeDB').onclick = async () => {
-    if (confirm('Удалить все мысли?')) {
-      try {
-        await DB.reset();
-        UI.toast('База стёрта.', 'info');
-        setTimeout(() => window.location.reload(), 500);
-      } catch (e) { UI.toast('Ошибка: ' + e.message, 'err'); }
+      // Загрузка
+      setChip('chipModel', 'loading...', 'warn');
+      await Vector.load((pct) => { $('modelProgress').style.width = pct + '%'; });
+      setChip('chipModel', 'model ready', 'ok'); $('modelProgress').style.width = '100%'; setTimeout(()=>$('modelProgress').style.opacity='0', 500);
+      
+      renderHistory();
+      Network.init();
     }
   };
+})();
 
-  UI.get('btnExport').onclick = exportData;
-  UI.get('btnImport').onclick = () => UI.get('importFile').click();
-  UI.get('importFile').onchange = e => {
-    if (e.target.files[0]) importData(e.target.files[0]);
-    e.target.value = '';
-  };
-
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeAllDrawers();
-    if (e.key === '/' && document.activeElement !== input
-      && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) {
-      e.preventDefault(); switchToStream(); input.focus();
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault();
-      if (document.activeElement === input) handleSave(e.shiftKey);
-    }
-  });
-}
-
-/* ===== NET STATE UI ===== */
-bus.on('net:state', ({ state, relays, error }) => {
-  const map = {
-    [NetState.IDLE]:       { text: 'Инициализация…', cls: 'busy' },
-    [NetState.CONNECTING]: { text: 'Подключение…',    cls: 'busy' },
-    [NetState.CONNECTED]:  { text: `В сети · ${relays || ''} relay`, cls: 'active' },
-    [NetState.DEGRADED]:   { text: `Частично · ${relays || ''} relay`, cls: 'warn' },
-    [NetState.FAILED]:     { text: 'Оффлайн',         cls: 'err' }
-  };
-  const cfg = map[state] || map[NetState.FAILED];
-  UI.setStatus('stNet', cfg.text, cfg.cls);
-});
-
-bus.on('net:peer', ({ count }) => {
-  if (count > 0) {
-    UI.setStatus('stNet', `Узлов: ${count}`, 'active');
-  }
-});
-
-bus.on('net:answers', () => {
-  if (!isBaseView()) executeSearch();
-});
-
-/* ===== PARALLEL BOOTSTRAP (по науке) ===== */
-async function bootstrap() {
-  UI.setTheme(Config.state.theme);
-  bindEvents();
-
-  UI.setStatus('stDB', 'Открытие…', 'busy');
-  UI.setStatus('stAI', 'ИИ грузится…', 'busy');
-  UI.setStatus('stNet', 'Подключение…', 'busy');
-
-  const tasks = [
-    DB.open()
-      .then(async () => {
-        const all = await DB.getAll();
-        UI.get('baseTabCount').textContent = all.length;
-        UI.setStatus('stDB', `База · ${all.length}`, 'ready');
-      })
-      .catch(err => {
-        console.error('DB:', err);
-        UI.setStatus('stDB', 'База повреждена', 'err');
-        UI.toast('Проблема с базой', 'err');
-      }),
-
-    ai.init(msg => UI.setStatus('stAI', msg, 'busy'))
-      .then(() => UI.setStatus('stAI', 'ИИ активен', 'ready'))
-      .catch(err => {
-        console.warn('AI:', err);
-        ai.mode = 'demo';
-        UI.setStatus('stAI', 'Лексический режим', 'warn');
-      }),
-
-    net.init().catch(err => {
-      console.warn('Net:', err);
-      UI.setStatus('stNet', 'Оффлайн', 'err');
-    })
-  ];
-
-  await Promise.allSettled(tasks);
-
-  UI.renderEmpty('carousel-local', ai.ready ? 'Начните печатать.' : 'ИИ прогревается…', { loading: !ai.ready });
-  UI.renderEmpty('carousel-world', net.ready ? 'Сеть тиха.' : 'Оффлайн.');
-  UI.renderEmpty('carousel-seren', 'Близких мыслей нет.');
-}
-
-window.addEventListener('unhandledrejection', e => {
-  console.error('Unhandled:', e.reason);
-});
-window.addEventListener('error', e => {
-  console.error('Error:', e.error);
-});
-
-bootstrap().catch(err => {
-  console.error('Bootstrap failed:', err);
-  UI.toast('Критическая ошибка: ' + err.message, 'err');
-});
+App.init();
 </script>
 </body>
 </html>
