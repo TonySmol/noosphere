@@ -1,1003 +1,1070 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Noosphere Core</title>
-  <style>
-    /* ================= 1. DESIGN SYSTEM & VARIABLES ================= */
-    :root {
-      --bg: #0a0a0f; --surface: #13131a; --surface-hover: #1a1a24;
-      --border: #24242e; --text-main: #e8e8f0; --text-muted: #8888a0;
-      --brand: #7c5cff; --brand-glow: rgba(124, 92, 255, 0.2);
-      --world: #0ea5e9; --world-glow: rgba(14, 165, 233, 0.2);
-      --seren: #4ade80; --seren-glow: rgba(74, 222, 128, 0.2);
-      --warn: #fbbf24; --warn-glow: rgba(251, 191, 36, 0.18);
-      --danger: #f87171; --radius: 12px;
-      --font: 14px/1.6 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a">
+<title>NOOmium</title>
+<style>
+:root {
+  --bg: #0a0a0a;
+  --fg: #ededed;
+  --dim: #666;
+  --line: #1f1f1f;
+  --accent: #7c5cff;
+  --world: #0ea5e9;
+  --seren: #4ade80;
+  --warn: #fbbf24;
+  --err: #ef4444;
+  --mono: ui-monospace, 'SF Mono', Monaco, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  height: 100dvh; overflow: hidden;
+  background: var(--bg); color: var(--fg);
+  font: 14px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+body { display: flex; flex-direction: column; }
+button { font: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+input, textarea, select { font: inherit; color: inherit; background: none; border: none; outline: none; }
 
-    html[data-theme="light"] {
-      --bg: #f3f4f6; --surface: #ffffff; --surface-hover: #f9fafb;
-      --border: #e5e7eb; --text-main: #111827; --text-muted: #6b7280;
-    }
+.topbar {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.brand {
+  font: 600 14px var(--mono); letter-spacing: .3px;
+}
+.spacer { flex: 1; }
+.icon-btn {
+  padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
+  color: var(--dim); transition: .15s;
+  min-width: 36px; min-height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.icon-btn:hover { color: var(--fg); border-color: var(--dim); }
 
-    /* ================= 2. BASE RESET ================= */
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text-main); font: var(--font); }
-    body { display: flex; flex-direction: column; }
-    button { font: inherit; cursor: pointer; border: none; background: none; }
-    input, textarea, select { font: inherit; color: inherit; }
-    ::-webkit-scrollbar { width: 8px; height: 8px; }
-    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
-    ::-webkit-scrollbar-thumb:hover { background: var(--surface-hover); }
+.status {
+  display: flex; gap: 10px; padding: 6px 14px;
+  border-bottom: 1px solid var(--line);
+  font: 11px var(--mono); color: var(--dim);
+  flex-shrink: 0; flex-wrap: wrap;
+}
+.s { display: inline-flex; align-items: center; gap: 5px; }
+.dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor;
+}
+.s.ok { color: var(--seren); }
+.s.warn { color: var(--warn); }
+.s.err { color: var(--err); }
+.s.busy .dot { animation: blink 1s infinite; }
+@keyframes blink { 50% { opacity: .3; } }
 
-    /* ================= 3. LAYOUT & NAVBAR ================= */
-    .navbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); z-index: 10; }
-    .navbar-title { font-weight: 700; font-size: 16px; letter-spacing: 0.2px; background: linear-gradient(to right, var(--brand), var(--world)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-    .navbar-actions { display: flex; gap: 6px; }
-    .icon-btn { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-main); transition: 0.2s; display: inline-flex; align-items: center; gap: 6px; }
-    .icon-btn:hover { background: var(--surface-hover); border-color: var(--brand); }
+.tabs {
+  display: flex; border-bottom: 1px solid var(--line); flex-shrink: 0;
+}
+.tab {
+  flex: 1; padding: 11px; text-align: center;
+  font: 12px var(--mono); color: var(--dim);
+  border-bottom: 2px solid transparent; transition: .15s;
+  text-transform: uppercase; letter-spacing: .5px;
+  display: inline-flex; justify-content: center; align-items: center; gap: 6px;
+}
+.tab.active { color: var(--fg); border-color: var(--fg); }
+.tab .n {
+  font-size: 10px; padding: 1px 5px;
+  background: var(--line); border-radius: 8px;
+}
 
-    .status-bar { display: flex; gap: 8px; padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--border); font-size: 11px; flex-wrap: wrap; }
-    .badge-status { padding: 4px 10px; border-radius: 20px; background: var(--surface-hover); border: 1px solid var(--border); display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-weight: 500; transition: 0.3s; }
-    .badge-status .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-    .badge-status.active { color: var(--world); border-color: var(--world-glow); background: var(--world-glow); }
-    .badge-status.ready { color: var(--seren); border-color: var(--seren-glow); }
-    .badge-status.warn  { color: var(--warn);  border-color: var(--warn-glow);  background: var(--warn-glow); }
-    .badge-status.busy .dot { animation: pulse 1s infinite; }
-    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+.work {
+  flex: 1; overflow-y: auto; padding: 14px;
+  -webkit-overflow-scrolling: touch;
+}
+.view { display: none; }
+.view.active { display: block; }
 
-    .main-tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); }
-    .tab { flex: 1; text-align: center; padding: 12px; color: var(--text-muted); font-weight: 500; border-bottom: 2px solid transparent; transition: 0.2s; display: flex; justify-content: center; align-items: center; gap: 6px; }
-    .tab.active { color: var(--text-main); border-color: var(--brand); }
-    .tab .tab-count { font-size: 10px; font-family: monospace; background: var(--surface-hover); border: 1px solid var(--border); padding: 1px 6px; border-radius: 10px; }
+.editor {
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px; margin-bottom: 14px;
+}
+.editor textarea {
+  width: 100%; min-height: 72px; resize: vertical;
+  font-size: 15px; line-height: 1.5;
+}
+.editor textarea::placeholder { color: var(--dim); }
+.editor-meta {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-top: 6px; font: 11px var(--mono); color: var(--dim);
+}
+.editor-btns { display: flex; gap: 8px; margin-top: 12px; }
+.btn {
+  padding: 10px 14px; border: 1px solid var(--line); border-radius: 6px;
+  font: 13px var(--sans); font-weight: 500; transition: .15s;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 40px; flex: 1;
+}
+.btn:hover:not(:disabled) { border-color: var(--dim); }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn-primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.btn-primary:hover:not(:disabled) { opacity: .9; }
 
-    .workspace { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 16px; position: relative; scroll-behavior: smooth; }
-    .view-layer { display: none; animation: fade 0.2s ease-out; }
-    .view-layer.active { display: block; }
-    @keyframes fade { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+.filters {
+  display: flex; gap: 2px; padding: 3px;
+  background: var(--line); border-radius: 6px;
+  margin-bottom: 14px;
+}
+.fbtn {
+  flex: 1; padding: 7px 8px;
+  font: 11px var(--mono); color: var(--dim);
+  border-radius: 4px; transition: .15s;
+  text-transform: uppercase; letter-spacing: .3px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+}
+.fbtn.active { background: var(--bg); color: var(--fg); }
+.fbtn .n {
+  font-size: 10px; padding: 1px 5px;
+  background: var(--bg); border-radius: 6px;
+}
+.fbtn.active .n { background: var(--line); }
 
-    /* ================= 4. EDITOR COMPONENT ================= */
-    .editor-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-    .editor-textarea { width: 100%; min-height: 84px; background: transparent; border: none; resize: vertical; outline: none; font-size: 15px; line-height: 1.55; color: inherit; }
-    .editor-textarea::placeholder { color: var(--text-muted); }
-    .editor-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 11px; color: var(--text-muted); }
-    .editor-meta-actions { display: flex; gap: 14px; }
-    .link-btn { color: var(--text-muted); font-size: 11px; font-weight: 600; transition: 0.2s; padding: 2px 0; }
-    .link-btn:hover { color: var(--brand); }
-    .editor-controls { display: flex; gap: 8px; margin-top: 14px; }
+.carousel { display: none; }
+.carousel.active { display: block; }
+.track {
+  display: flex; gap: 10px;
+  overflow-x: auto; overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  padding: 2px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.track::-webkit-scrollbar { display: none; }
 
-    .btn { padding: 8px 16px; border-radius: 8px; font-weight: 600; font-size: 13px; transition: 0.2s; border: 1px solid transparent; flex: 1; display: flex; justify-content: center; align-items: center; gap: 6px; }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-    .btn-ghost { background: var(--surface-hover); color: var(--text-main); border-color: var(--border); }
-    .btn-ghost:hover:not(:disabled) { border-color: var(--brand); }
-    .btn-primary { background: var(--brand); color: #fff; }
-    .btn-primary:hover:not(:disabled) { filter: brightness(1.1); }
-    kbd { font-family: monospace; font-size: 10px; background: rgba(127,127,127,0.14); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
+.card {
+  flex: 0 0 calc(100% - 4px);
+  scroll-snap-align: start; scroll-snap-stop: always;
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px 12px 12px 16px;
+  position: relative; overflow: hidden;
+  min-width: 280px;
+  display: flex; flex-direction: column;
+}
+@media (min-width: 768px) { .card { flex: 0 0 calc(50% - 8px); } }
+@media (min-width: 1100px) { .card { flex: 0 0 calc(33.333% - 8px); } }
+.card::before {
+  content: ''; position: absolute;
+  left: 0; top: 0; bottom: 0; width: 3px;
+}
+.card.t-local::before { background: var(--accent); }
+.card.t-world::before { background: var(--world); }
+.card.t-seren::before { background: var(--seren); }
+.card.peer { opacity: .95; }
 
-    /* ================= 5. DATA RENDERER (CARDS & TABS) ================= */
-    .filter-tabs { display: flex; gap: 4px; background: var(--surface); padding: 4px; border-radius: 10px; border: 1px solid var(--border); margin-bottom: 16px; }
-    .f-tab { flex: 1; padding: 6px; text-align: center; border-radius: 6px; font-size: 12px; font-weight: 600; color: var(--text-muted); transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
-    .f-tab.active { background: var(--surface-hover); color: var(--text-main); box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .f-tab .counter { background: var(--border); padding: 2px 6px; border-radius: 12px; font-size: 10px; font-family: monospace; }
+.card-head {
+  display: flex; justify-content: space-between;
+  align-items: center; gap: 8px;
+  margin-bottom: 8px; flex-shrink: 0;
+}
+.card-tag {
+  font: 10px var(--mono); font-weight: 600;
+  padding: 2px 6px; border-radius: 3px;
+  text-transform: uppercase; letter-spacing: .5px;
+  background: var(--line); color: var(--dim);
+}
+.t-local .card-tag { color: var(--accent); }
+.t-world .card-tag { color: var(--world); }
+.t-seren .card-tag { color: var(--seren); }
+.card-score { font: 11px var(--mono); color: var(--dim); }
+.card-body {
+  font-size: 14px; line-height: 1.5;
+  white-space: pre-wrap; word-wrap: break-word;
+  max-height: 160px; overflow-y: auto;
+  flex: 1;
+}
+.card-body mark {
+  background: transparent; color: var(--accent);
+  font-weight: 600;
+}
+.card-foot {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  margin-top: 10px; flex-shrink: 0;
+}
+.card-act {
+  font: 11px var(--mono); color: var(--dim);
+  padding: 5px 8px; border: 1px solid var(--line);
+  border-radius: 4px; transition: .15s;
+  min-height: 28px;
+}
+.card-act:hover { color: var(--fg); border-color: var(--dim); }
+.card-act.danger:hover { color: var(--err); border-color: var(--err); }
+.card-hint {
+  font: 11px var(--mono); color: var(--dim);
+  font-style: italic;
+}
 
-    .f-tab.active[data-filter="local"] .counter { background: var(--brand-glow); color: var(--brand); }
-    .f-tab.active[data-filter="world"] .counter { background: var(--world-glow); color: var(--world); }
-    .f-tab.active[data-filter="seren"] .counter { background: var(--seren-glow); color: var(--seren); }
+.empty {
+  text-align: center; color: var(--dim);
+  padding: 40px 20px; font: 12px var(--mono);
+  width: 100%;
+}
 
-    .node-list { display: none; flex-direction: column; gap: 12px; }
-    .node-list.active { display: flex; }
+.hist-bar {
+  display: flex; gap: 8px; margin-bottom: 14px;
+}
+.hist-bar input {
+  flex: 1; padding: 9px 12px;
+  background: var(--line); border-radius: 6px;
+  min-height: 40px;
+}
+.hist-bar select {
+  padding: 9px 10px; background: var(--line);
+  border-radius: 6px; min-height: 40px;
+  font: 12px var(--mono);
+}
+.hist-bar select option { background: var(--bg); }
 
-    .note-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 14px 14px 18px; position: relative; overflow: hidden; animation: slideUp 0.3s ease-out backwards; }
-    @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.6);
+  z-index: 100; opacity: 0; pointer-events: none; transition: .2s;
+}
+.overlay.open { opacity: 1; pointer-events: auto; }
+.drawer {
+  position: fixed; top: 0; right: -400px;
+  width: 360px; max-width: 100%; height: 100%;
+  background: var(--bg); border-left: 1px solid var(--line);
+  z-index: 101; transition: .25s;
+  padding: 20px; overflow-y: auto;
+}
+.drawer.open { right: 0; }
+.drawer h3 {
+  font: 600 16px var(--sans); margin-bottom: 20px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.drawer .close {
+  font-size: 24px; color: var(--dim);
+  min-width: 36px; min-height: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.drawer .close:hover { color: var(--err); }
 
-    .note-card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; }
-    .note-card.t-local::before { background: var(--brand); }
-    .note-card.t-world::before { background: var(--world); }
-    .note-card.t-seren::before { background: var(--seren); }
-    .note-card.peer { background: linear-gradient(180deg, var(--surface), var(--surface)); }
+.field { margin-bottom: 18px; }
+.field label {
+  display: block; font: 11px var(--mono); color: var(--dim);
+  margin-bottom: 6px; text-transform: uppercase; letter-spacing: .5px;
+}
+.field input[type="text"] {
+  width: 100%; padding: 10px 12px;
+  background: var(--line); border-radius: 6px;
+  min-height: 40px;
+}
+.field input[type="range"] { width: 100%; accent-color: var(--accent); }
+.field .row { display: flex; justify-content: space-between; align-items: center; }
+.field .val {
+  font: 12px var(--mono); color: var(--accent);
+  font-weight: 600;
+}
+.field .hint {
+  font: 11px var(--mono); color: var(--dim);
+  margin-top: 5px; line-height: 1.4;
+}
 
-    .note-header { display: flex; justify-content: space-between; margin-bottom: 8px; align-items: center; gap: 8px; }
-    .note-type { font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.5px; white-space: nowrap; }
-    .t-local .note-type { background: var(--brand-glow); color: var(--brand); }
-    .t-world .note-type { background: var(--world-glow); color: var(--world); }
-    .t-seren .note-type { background: var(--seren-glow); color: var(--seren); }
+.section {
+  font: 11px var(--mono); color: var(--dim);
+  text-transform: uppercase; letter-spacing: .5px;
+  margin: 22px 0 10px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.btn-row { display: flex; gap: 8px; }
+.btn-row .btn { flex: 1; }
 
-    .note-score { font-family: monospace; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
-    .note-content { font-size: 14px; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; }
-    .note-content mark { background: var(--brand-glow); color: var(--brand); padding: 0 2px; border-radius: 3px; font-weight: 600; }
-
-    .note-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; gap: 8px; }
-    .note-hint { font-size: 11px; color: var(--text-muted); font-style: italic; opacity: 0.8; }
-    .note-actions { display: flex; gap: 4px; flex-wrap: wrap; opacity: 0.55; transition: 0.2s; margin-left: auto; }
-    .note-card:hover .note-actions { opacity: 1; }
-    .note-act { font-size: 11px; font-weight: 600; color: var(--text-muted); padding: 4px 9px; border-radius: 6px; border: 1px solid var(--border); transition: 0.15s; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
-    .note-act:hover { color: var(--text-main); border-color: var(--brand); background: var(--surface-hover); }
-    .note-act.danger:hover { color: var(--danger); border-color: var(--danger); }
-
-    .empty-state { padding: 40px 20px; text-align: center; color: var(--text-muted); display: flex; flex-direction: column; align-items: center; gap: 12px; }
-    .empty-state svg { width: 48px; height: 48px; opacity: 0.2; }
-    .empty-state .btn { flex: 0; }
-    .spinner { width: 28px; height: 28px; border: 3px solid var(--border); border-top-color: var(--world); border-radius: 50%; animation: spin 0.8s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* ===== My Base toolbar ===== */
-    .base-stats { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-    .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; flex: 1; min-width: 80px; }
-    .stat .num { font-size: 18px; font-weight: 700; }
-    .stat .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); }
-    .base-controls { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
-    .base-search { flex: 1; background: var(--surface); border: 1px solid var(--border); padding: 9px 12px; border-radius: 8px; transition: 0.2s; }
-    .base-search:focus { border-color: var(--brand); outline: none; }
-    .base-sort { background: var(--surface); border: 1px solid var(--border); padding: 9px 10px; border-radius: 8px; font-size: 12px; }
-
-    /* ================= 6. MODALS & TOASTS ================= */
-    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(120px); background: var(--text-main); color: var(--bg); padding: 10px 20px; border-radius: 30px; font-weight: 600; font-size: 13px; transition: 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); z-index: 1000; box-shadow: 0 10px 25px rgba(0,0,0,0.2); max-width: 90vw; text-align: center; }
-    .toast.show { transform: translateX(-50%) translateY(0); }
-    .toast.ok  { background: var(--seren); color: #04130a; }
-    .toast.err { background: var(--danger); color: #160404; }
-    .toast.info{ background: var(--world); color: #021019; }
-
-    .drawer-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(3px); z-index: 100; opacity: 0; pointer-events: none; transition: 0.2s; }
-    .drawer-overlay.open { opacity: 1; pointer-events: auto; }
-    .drawer { position: fixed; top: 0; right: -400px; width: 360px; max-width: 100%; height: 100%; background: var(--surface); border-left: 1px solid var(--border); z-index: 101; transition: 0.3s cubic-bezier(0.16, 1, 0.3, 1); padding: 20px; overflow-y: auto; }
-    .drawer.open { right: 0; }
-
-    .drawer-header { display: flex; justify-content: space-between; margin-bottom: 24px; font-size: 18px; font-weight: 700; align-items: center; }
-    .drawer-close { font-size: 24px; color: var(--text-muted); transition: 0.2s; line-height: 1; }
-    .drawer-close:hover { color: var(--danger); }
-    .drawer-section { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); font-weight: 700; margin: 24px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
-    .drawer p { color: var(--text-muted); margin-bottom: 10px; }
-
-    .form-group { margin-bottom: 20px; }
-    .form-label { display: block; font-size: 11px; text-transform: uppercase; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; letter-spacing: 0.5px; }
-    .form-hint { font-size: 11px; color: var(--text-muted); margin-top: 6px; line-height: 1.4; }
-    .form-input { width: 100%; background: var(--bg); border: 1px solid var(--border); padding: 10px 12px; border-radius: 8px; transition: 0.2s; }
-    .form-input:focus { border-color: var(--brand); outline: none; }
-    .form-range { width: 100%; accent-color: var(--brand); }
-    .val-display { float: right; font-family: monospace; color: var(--brand); font-weight: bold; }
-    .btn-row { display: flex; gap: 8px; }
-  </style>
+.toast {
+  position: fixed; bottom: 20px; left: 50%;
+  transform: translateX(-50%) translateY(100px);
+  background: var(--fg); color: var(--bg);
+  padding: 10px 20px; border-radius: 4px;
+  font: 12px var(--mono); z-index: 1000;
+  transition: .25s; max-width: 90vw; text-align: center;
+}
+.toast.show { transform: translateX(-50%) translateY(0); }
+.toast.ok { background: var(--seren); color: #000; }
+.toast.err { background: var(--err); color: #fff; }
+.toast.info { background: var(--world); color: #000; }
+</style>
 </head>
 <body>
 
-<!-- NAVBAR -->
-<header class="navbar">
-  <div class="navbar-title">Noosphere</div>
-  <div class="navbar-actions">
-    <button class="icon-btn" id="btnHelp" title="Как это работает" aria-label="Справка">
-      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-    </button>
-    <button class="icon-btn" id="btnOpenSettings" title="Настройки" aria-label="Настройки">
-      <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9c.26.6.8 1 1.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-    </button>
-  </div>
+<header class="topbar">
+  <div class="brand">NOOmium</div>
+  <div class="spacer"></div>
+  <button class="icon-btn" id="btnHelp" title="Как это работает">?</button>
+  <button class="icon-btn" id="btnSettings" title="Настройки">⚙</button>
 </header>
 
-<!-- STATUS BAR -->
-<div class="status-bar">
-  <div class="badge-status" id="stNetwork"><div class="dot"></div><span id="stNetworkText">Не в сети</span></div>
-  <div class="badge-status" id="stAI"><div class="dot"></div><span id="stAIText">ИИ загружается…</span></div>
+<div class="status">
+  <span class="s busy" id="stDB"><span class="dot"></span>DB</span>
+  <span class="s busy" id="stAI"><span class="dot"></span>AI</span>
+  <span class="s busy" id="stNet"><span class="dot"></span>NET</span>
+  <span class="s" id="stPeers"><span class="dot"></span>0 peers</span>
 </div>
 
-<!-- MAIN TABS -->
-<div class="main-tabs">
-  <button class="tab active" data-view="view-stream">Поток</button>
-  <button class="tab" data-view="view-base">Моя база <span class="tab-count" id="baseTabCount">0</span></button>
-</div>
+<nav class="tabs">
+  <button class="tab active" data-view="stream">Поток</button>
+  <button class="tab" data-view="history">База <span class="n" id="baseCount">0</span></button>
+</nav>
 
-<!-- WORKSPACE -->
-<main class="workspace">
-
-  <!-- VIEW: STREAM (Editor & Results) -->
-  <div id="view-stream" class="view-layer active">
-
-    <div class="editor-card">
-      <textarea id="ioInput" class="editor-textarea" placeholder="О чём думаешь? Мысль сама ищет резонанс…"></textarea>
+<main class="work">
+  <section class="view active" id="view-stream">
+    <div class="editor">
+      <textarea id="input" placeholder="О чём думаешь?"></textarea>
       <div class="editor-meta">
-        <span id="ioCount">0 символов</span>
-        <div class="editor-meta-actions">
-          <button class="link-btn" id="btnResonate" title="Найти резонанс и транслировать сейчас">↻ Резонанс</button>
-          <button class="link-btn" id="btnClear">Очистить</button>
-        </div>
+        <span id="charCount">0</span>
+        <span id="debounce"></span>
       </div>
-      <div class="editor-controls">
-        <button class="btn btn-ghost" id="btnSavePrivate">Сохранить лично</button>
-        <button class="btn btn-primary" id="btnSaveShared">Поделиться (P2P)</button>
+      <div class="editor-btns">
+        <button class="btn" id="btnSavePrivate">Сохранить лично</button>
+        <button class="btn btn-primary" id="btnSaveShared">Поделиться P2P</button>
       </div>
     </div>
 
-    <div class="filter-tabs">
-      <button class="f-tab active" data-filter="local">Локально <span class="counter" id="cntLocal">0</span></button>
-      <button class="f-tab" data-filter="world">Мир <span class="counter" id="cntWorld">0</span></button>
-      <button class="f-tab" data-filter="seren">Озарения <span class="counter" id="cntSeren">0</span></button>
+    <div class="filters">
+      <button class="fbtn active" data-filter="local">Локально <span class="n" id="cntLocal">0</span></button>
+      <button class="fbtn" data-filter="world">Мир <span class="n" id="cntWorld">0</span></button>
+      <button class="fbtn" data-filter="seren">Озарения <span class="n" id="cntSeren">0</span></button>
     </div>
 
-    <div id="list-local" class="node-list active"></div>
-    <div id="list-world" class="node-list"></div>
-    <div id="list-seren" class="node-list"></div>
+    <div class="carousel active" id="c-local"><div class="track"></div></div>
+    <div class="carousel" id="c-world"><div class="track"></div></div>
+    <div class="carousel" id="c-seren"><div class="track"></div></div>
+  </section>
 
-  </div>
-
-  <!-- VIEW: BASE (All saved notes) -->
-  <div id="view-base" class="view-layer">
-    <div class="base-stats" id="baseStats"></div>
-    <div class="base-controls">
-      <input type="text" class="base-search" id="baseFilter" placeholder="Поиск по базе…" />
-      <select class="base-sort" id="baseSort">
-        <option value="new">Сначала новые</option>
-        <option value="old">Сначала старые</option>
-        <option value="az">По алфавиту</option>
+  <section class="view" id="view-history">
+    <div class="hist-bar">
+      <input type="text" id="histSearch" placeholder="Поиск по базе…">
+      <select id="histSort">
+        <option value="new">Новые</option>
+        <option value="old">Старые</option>
+        <option value="az">А→Я</option>
       </select>
     </div>
-    <div id="list-base" class="node-list active"></div>
-  </div>
-
+    <div class="carousel active" id="c-history"><div class="track"></div></div>
+  </section>
 </main>
 
-<!-- SETTINGS DRAWER -->
-<div class="drawer-overlay" id="drawerOverlay"></div>
-<div class="drawer" id="drawer">
-  <div class="drawer-header">
-    Настройки <button class="drawer-close" id="btnCloseSettings" aria-label="Закрыть">&times;</button>
+<div class="overlay" id="overlay"></div>
+<aside class="drawer" id="drawer">
+  <h3>Настройки <button class="close" id="btnClose">×</button></h3>
+
+  <div class="field">
+    <label>Комната (Nostr topic)</label>
+    <input type="text" id="setRoom" placeholder="noomium-core">
+    <div class="hint">Узлы в одной комнате слышат вас.</div>
   </div>
 
-  <div class="form-group">
-    <label class="form-label">Тема</label>
-    <select class="form-input" id="cfgTheme">
-      <option value="dark">Тёмный космос</option>
-      <option value="light">Светлая бумага</option>
-    </select>
+  <div class="field">
+    <div class="row"><label>Порог совпадения</label><span class="val" id="valThresh">0.30</span></div>
+    <input type="range" id="setThresh" min="0.1" max="0.7" step="0.05">
   </div>
 
-  <div class="form-group">
-    <label class="form-label">Комната (топик Nostr)</label>
-    <input type="text" class="form-input" id="cfgRoom" placeholder="напр. noosphere-alpha" />
-    <div class="form-hint">Узлы в одной комнате слышат ваши трансляции.</div>
+  <div class="field">
+    <div class="row"><label>Дельта озарений</label><span class="val" id="valSeren">0.15</span></div>
+    <input type="range" id="setSeren" min="0.05" max="0.3" step="0.01">
   </div>
 
-  <div class="form-group">
-    <label class="form-label">Порог точного совпадения <span class="val-display" id="valThresh">0.30</span></label>
-    <input type="range" class="form-range" id="cfgThresh" min="0.1" max="0.7" step="0.05" />
-  </div>
-
-  <div class="form-group">
-    <label class="form-label">Дельта озарений <span class="val-display" id="valSeren">0.15</span></label>
-    <input type="range" class="form-range" id="cfgSeren" min="0.05" max="0.3" step="0.01" />
-  </div>
-
-  <div class="drawer-section">Данные</div>
-  <div class="form-group">
-    <div class="btn-row" style="margin-bottom:10px;">
-      <button class="btn btn-ghost" id="btnExport">Экспорт .capsul</button>
-      <button class="btn btn-ghost" id="btnImport">Импорт .capsul</button>
+  <div class="section">Капсулы .noo</div>
+  <div class="field">
+    <div class="btn-row">
+      <button class="btn" id="btnExport">Экспорт</button>
+      <button class="btn" id="btnImport">Импорт</button>
     </div>
-    <button class="btn btn-ghost" id="btnSeed" style="width:100%;">Загрузить примеры мыслей</button>
-    <input type="file" id="importFile" accept=".capsul,.json,application/json" style="display:none" />
-    <div class="form-hint">Капсула — это снимок всей вашей базы. Примеры позволяют опробовать поиск и озарения без других узлов.</div>
+    <input type="file" id="importFile" accept=".noo,.json" style="display:none">
+    <div class="hint">Дубли по хэшу текста пропускаются.</div>
   </div>
 
-  <div class="drawer-section">Применение</div>
-  <div class="form-group">
-    <button class="btn btn-primary" id="btnSaveConfig" style="width:100%; margin-bottom:10px;">Применить и перезагрузить</button>
-    <button class="btn btn-ghost" id="btnWipeDB" style="width:100%; color:var(--danger);">Стереть базу</button>
+  <div class="section">Опасно</div>
+  <div class="field">
+    <button class="btn" id="btnApply" style="width:100%; margin-bottom:8px;">Применить и перезагрузить</button>
+    <button class="btn" id="btnWipe" style="width:100%; color:var(--err);">Стереть базу</button>
   </div>
-</div>
+</aside>
 
-<!-- HELP DRAWER -->
-<div class="drawer-overlay" id="helpOverlay"></div>
-<div class="drawer" id="helpDrawer">
-  <div class="drawer-header">
-    Как это работает <button class="drawer-close" id="btnCloseHelp" aria-label="Закрыть">&times;</button>
-  </div>
-  <p>
-    Noosphere превращает каждую мысль в смысловой вектор. Пока вы печатаете, она ищет совпадения
-    в вашей базе и анонимно транслирует запрос узлам в вашей комнате. В ответ приходят
-    созвучные <b>общие</b> мысли.
+<aside class="drawer" id="helpDrawer">
+  <h3>Как это работает <button class="close" id="btnCloseHelp">×</button></h3>
+  <p style="color:var(--dim); line-height:1.6; margin-bottom:14px;">
+    NOOmium превращает мысль в вектор и ищет резонанс в вашей базе и у других узлов в комнате.
   </p>
-  <div class="drawer-section">Дорожки</div>
-  <p><b style="color:var(--brand)">Локально</b> — сильные совпадения в вашей базе.</p>
-  <p><b style="color:var(--world)">Мир</b> — сильные совпадения, которыми прямо сейчас делятся узлы.</p>
-  <p><b style="color:var(--seren)">Озарения</b> — близкие, но не точные мысли. Здесь живёт неожиданность.</p>
-  <div class="drawer-section">Философия</div>
-  <p>Чужие мысли нельзя сохранить себе. Их можно прочитать, понять — и написать своё.
-     Так рождается синтез, а не склад чужого.</p>
-  <div class="drawer-section">Офлайн</div>
-  <p>Без сети Noosphere работает как личная база знаний: поиск по смыслу остаётся,
-     просто дорожка «Мир» молчит.</p>
-  <div class="drawer-section">Горячие клавиши</div>
-  <p><kbd>Ctrl</kbd>+<kbd>Enter</kbd> — сохранить лично</p>
-  <p><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> — поделиться (P2P)</p>
-  <p><kbd>/</kbd> — перейти к редактору</p>
-  <p><kbd>Esc</kbd> — закрыть панели</p>
-</div>
+  <div class="section">Дорожки</div>
+  <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
+    <b style="color:var(--accent)">Локально</b> — точные совпадения в вашей базе.
+  </p>
+  <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
+    <b style="color:var(--world)">Мир</b> — совпадения от других узлов.
+  </p>
+  <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
+    <b style="color:var(--seren)">Озарения</b> — близкие, но не точные мысли.
+  </p>
+  <div class="section">Эфемерность</div>
+  <p style="color:var(--dim); line-height:1.6; margin-bottom:8px;">
+    Запросы и ответы живут ~2 минуты. Заметки не хранятся на серверах.
+  </p>
+  <div class="section">Горячие клавиши</div>
+  <p style="color:var(--dim); font:12px var(--mono); margin-bottom:4px;">Ctrl+Enter — сохранить</p>
+  <p style="color:var(--dim); font:12px var(--mono); margin-bottom:4px;">Ctrl+Shift+Enter — поделиться</p>
+  <p style="color:var(--dim); font:12px var(--mono); margin-bottom:4px;">/ — в редактор</p>
+  <p style="color:var(--dim); font:12px var(--mono);">Esc — закрыть панели</p>
+</aside>
 
-<div class="toast" id="sysToast">Система готова</div>
+<div class="toast" id="toast"></div>
 
-<!-- ================= 7. APPLICATION LOGIC ================= -->
 <script type="module">
 import * as tfMod from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 import * as nostrMod from 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
 
-// --- 1. CORE CONFIGURATION ---
-const AppConfig = {
-  DB_NAME: 'ns_core_v12',
-  DB_VERSION: 1,
+/* =========================================================
+ * CONFIG — единственный источник правды
+ * ========================================================= */
+const C = {
+  DB: 'noomium_v6',
   STORE: 'notes',
-  RELAYS: ['wss://relay.damus.io', 'wss://nos.lol'],
+  RELAYS: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.snort.social'],
   K_QUERY: 21000,
   K_ANSWER: 21001,
   MODEL: 'Xenova/all-MiniLM-L6-v2',
   DIM: 384,
-  CAPSULE_EXT: 'capsul',
-  state: { room: 'noosphere-core', theme: 'dark', threshold: 0.30, serendipity: 0.15 }
+  DEBOUNCE: 800,
+  state: {
+    room: 'noomium-core',
+    threshold: 0.30,
+    serendipity: 0.15
+  }
 };
 
 try {
-  const saved = localStorage.getItem('ns_config');
-  if (saved) Object.assign(AppConfig.state, JSON.parse(saved));
+  const s = localStorage.getItem('noomium_cfg');
+  if (s) Object.assign(C.state, JSON.parse(s));
 } catch {}
 
-// --- Russian helpers ---
-function plural(n, one, few, many) {
-  const m10 = n % 10, m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
-  return many;
-}
-const word = {
-  symbols: n => `${n} ${plural(n, 'символ', 'символа', 'символов')}`,
-  peers:   n => `${n} ${plural(n, 'узел', 'узла', 'узлов')}`,
-  thoughts:n => `${n} ${plural(n, 'мысль', 'мысли', 'мыслей')}`,
-  samples: n => `${n} ${plural(n, 'пример', 'примера', 'примеров')}`
+/* =========================================================
+ * UTILS
+ * ========================================================= */
+const uuid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+  const r = Math.random() * 16 | 0;
+  return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+});
+
+const fnv1a = (s) => {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return 'h' + (h >>> 0).toString(16);
 };
 
-// --- 2. LOCAL STORAGE (IndexedDB Wrapper) ---
-class AppStorage {
-  constructor() { this.db = null; }
+const esc = (s) => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  async open() {
-    if (this.db) return this.db;
-    return new Promise((resolve, reject) => {
-      const req = indexedDB.open(AppConfig.DB_NAME, AppConfig.DB_VERSION);
-      req.onupgradeneeded = (e) => {
-        const db = e.target.result;
-        if (!db.objectStoreNames.contains(AppConfig.STORE)) {
-          db.createObjectStore(AppConfig.STORE, { keyPath: 'id' });
-        }
-      };
-      req.onsuccess = (e) => { this.db = e.target.result; resolve(this.db); };
-      req.onerror = () => reject(req.error);
-    });
-  }
+let toastTimer;
+const toast = (msg, type = '') => {
+  const el = document.getElementById('toast');
+  el.className = `toast show ${type}`;
+  el.textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = 'toast', 2500);
+};
 
-  async tx(mode, action) {
-    const db = await this.open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(AppConfig.STORE, mode);
-      const store = tx.objectStore(AppConfig.STORE);
-      const req = action(store);
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-  }
+const setStatus = (id, text, cls = '') => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = `s ${cls}`;
+  el.innerHTML = `<span class="dot"></span>${text}`;
+};
 
-  saveNote(note) { return this.tx('readwrite', s => s.put(note)); }
-  getNote(id)    { return this.tx('readonly',  s => s.get(id)); }
-  deleteNote(id) { return this.tx('readwrite', s => s.delete(id)); }
-  getAllNotes()  { return this.tx('readonly',  s => s.getAll()); }
-  clearDB()      { return this.tx('readwrite', s => s.clear()); }
+/* =========================================================
+ * DB — тонкий wrapper над IndexedDB
+ * ========================================================= */
+const DB = (() => {
+  let db = null;
 
-  async bulkPut(notes) {
-    const db = await this.open();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(AppConfig.STORE, 'readwrite');
-      const store = tx.objectStore(AppConfig.STORE);
-      notes.forEach(n => store.put(n));
-      tx.oncomplete = () => resolve(notes.length);
-      tx.onerror = () => reject(tx.error);
-    });
-  }
-}
-const DB = new AppStorage();
-
-// --- 3. AI PIPELINE (Transformers.js + lexical fallback) ---
-class AppAI {
-  constructor() {
-    this.extractor = null;
-    this.mode = 'loading';            // 'model' | 'demo' | 'loading'
-    this.cache = new Map();
-    const { env } = tfMod;
-    if (env) { env.allowLocalModels = false; env.useBrowserCache = true; }
-  }
-
-  get ready() { return this.mode === 'model' || this.mode === 'demo'; }
-
-  async init(onProgress) {
-    if (this.extractor) { this.mode = 'model'; return; }
-    const { pipeline } = tfMod;
-    this.extractor = await pipeline('feature-extraction', AppConfig.MODEL, {
-      progress_callback: (p) => {
-        if (p.status === 'progress') {
-          if (p.total && p.total > 0) onProgress(`Загрузка модели ${Math.round((p.loaded / p.total) * 100)}%`);
-          else onProgress('Загрузка фрагментов…');
-        }
+  const open = () => new Promise((res, rej) => {
+    if (db) return res(db);
+    const req = indexedDB.open(C.DB, 1);
+    req.onupgradeneeded = e => {
+      const d = e.target.result;
+      if (!d.objectStoreNames.contains(C.STORE)) {
+        d.createObjectStore(C.STORE, { keyPath: 'id' });
       }
+    };
+    req.onsuccess = e => { db = e.target.result; res(db); };
+    req.onerror = () => rej(req.error);
+  });
+
+  const tx = async (mode, fn) => {
+    const d = await open();
+    return new Promise((res, rej) => {
+      const t = d.transaction(C.STORE, mode);
+      const s = t.objectStore(C.STORE);
+      const r = fn(s);
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
     });
-    this.mode = 'model';
-  }
+  };
 
-  // Детерминированное лексическое вложение — поиск работает офлайн / если модель не загрузилась.
-  hashEmbed(text) {
-    const dim = AppConfig.DIM;
-    const v = new Float32Array(dim);
-    const tokens = (text.toLowerCase().match(/[a-zа-яё0-9]+/gi) || []);
-    for (const tok of tokens) {
-      let h = 2166136261;
-      for (let i = 0; i < tok.length; i++) { h ^= tok.charCodeAt(i); h = Math.imul(h, 16777619); }
-      v[Math.abs(h) % dim] += 1;
-      let h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
-      v[Math.abs(h2) % dim] += 0.5;
-    }
-    let norm = 0; for (let i = 0; i < dim; i++) norm += v[i] * v[i];
-    norm = Math.sqrt(norm) || 1;
-    for (let i = 0; i < dim; i++) v[i] /= norm;
-    return Array.from(v);
-  }
-
-  async embed(text) {
-    const t = (text || '').trim();
-    if (!t) return null;
-    if (this.cache.has(t)) return this.cache.get(t);
-    let vec;
-    if (this.mode === 'model' && this.extractor) {
-      const out = await this.extractor(t, { pooling: 'mean', normalize: true });
-      vec = Array.from(out.data);
-    } else {
-      vec = this.hashEmbed(t);
-    }
-    this.cache.set(t, vec);
-    return vec;
-  }
-
-  cosine(a, b) {
-    if (!a || !b || a.length !== b.length) return 0;
-    let sum = 0;
-    for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
-    return sum;
-  }
-}
-const AI = new AppAI();
-
-// --- 4. PEER NETWORK (Nostr Ephemeral) ---
-class AppNet {
-  constructor() {
-    this.pool = null; this.sk = null; this.pk = null; this.sub = null;
-    this.currentQueryId = null;
-    this.lastQueryAt = 0;
-    this.worldAnswers = [];
-    this.peers = new Set();
-    this.ready = false;
-  }
-
-  init(onActivity, onAnswersUpdated) {
-    const { SimplePool, generateSecretKey, getPublicKey } = nostrMod;
-
-    let keyHex = localStorage.getItem('ns_key');
-    if (!keyHex) {
-      const raw = generateSecretKey();
-      keyHex = Array.from(raw).map(b => b.toString(16).padStart(2, '0')).join('');
-      localStorage.setItem('ns_key', keyHex);
-    }
-
-    this.sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
-    this.pk = getPublicKey(this.sk);
-    this.pool = new SimplePool();
-    this.ready = true;
-
-    this.sub = this.pool.subscribeMany(AppConfig.RELAYS, [{
-      kinds: [AppConfig.K_QUERY, AppConfig.K_ANSWER],
-      '#t': [AppConfig.state.room],
-      since: Math.floor(Date.now() / 1000)
-    }], {
-      onevent: async (ev) => {
-        if (ev.pubkey === this.pk) return;
-        this.peers.add(ev.pubkey);
-        onActivity(this.peers.size);
-
-        if (ev.kind === AppConfig.K_QUERY) {
-          try {
-            const data = JSON.parse(ev.content);
-            if (!data.vector) return;
-            const localNotes = await DB.getAllNotes();
-            const { threshold, serendipity } = AppConfig.state;
-            for (const note of localNotes) {
-              if (!note.shared || !note.vector) continue;
-              const score = AI.cosine(data.vector, note.vector);
-              if (score >= (threshold - serendipity)) this.sendAnswer(ev.id, note.text, note.vector);
-            }
-          } catch (e) {}
-        }
-
-        if (ev.kind === AppConfig.K_ANSWER) {
-          const eTag = ev.tags.find(t => t[0] === 'e');
-          if (eTag && eTag[1] === this.currentQueryId) {
-            try {
-              const data = JSON.parse(ev.content);
-              if (data.text && data.vector) {
-                if (!this.worldAnswers.some(a => a.id === ev.id)) {
-                  this.worldAnswers.push({
-                    id: ev.id, text: data.text, vector: data.vector,
-                    peer: ev.pubkey.slice(0, 6)
-                  });
-                  onAnswersUpdated();
-                }
-              }
-            } catch (e) {}
-          }
-        }
-      }
-    });
-  }
-
-  broadcastQuery(vector) {
-    if (!this.pool) return;
-    this.worldAnswers = [];
-    this.lastQueryAt = Date.now();
-    const { finalizeEvent } = nostrMod;
-    const ev = finalizeEvent({
-      kind: AppConfig.K_QUERY, created_at: Math.floor(Date.now() / 1000),
-      tags: [['t', AppConfig.state.room]], content: JSON.stringify({ vector })
-    }, this.sk);
-    this.currentQueryId = ev.id;
-    this.pool.publish(AppConfig.RELAYS, ev);
-  }
-
-  sendAnswer(targetId, text, vector) {
-    if (!this.pool) return;
-    const { finalizeEvent } = nostrMod;
-    const ev = finalizeEvent({
-      kind: AppConfig.K_ANSWER, created_at: Math.floor(Date.now() / 1000),
-      tags: [['t', AppConfig.state.room], ['e', targetId]],
-      content: JSON.stringify({ text, vector })
-    }, this.sk);
-    this.pool.publish(AppConfig.RELAYS, ev);
-  }
-}
-const Net = new AppNet();
-
-// --- 5. UI CONTROLLER & APP GLUE ---
-const UI = {
-  get: (id) => document.getElementById(id),
-  toastTimer: null,
-  registry: new Map(),
-
-  toast(msg, kind = '') {
-    const el = this.get('sysToast');
-    el.className = `toast ${kind}`;
-    el.textContent = msg;
-    requestAnimationFrame(() => el.classList.add('show'));
-    clearTimeout(this.toastTimer);
-    this.toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
-  },
-
-  setStatus(id, text, type = '') {
-    const el = this.get(id); const txtEl = this.get(id + 'Text');
-    if (!el || !txtEl) return;
-    el.className = `badge-status ${type}`; txtEl.textContent = text;
-  },
-
-  setTheme(theme) { document.documentElement.setAttribute('data-theme', theme); },
-
-  escapeHtml(str) {
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  },
-  escapeReg(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); },
-
-  // Карточка мысли. type: t-local | t-world | t-seren.
-  createCard(item, type, qText) {
-    this.registry.set(item.id, item);
-    const isPeer = !!item.peer;
-
-    let textHTML = this.escapeHtml(item.text);
-    if (qText) {
-      const words = qText.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-      words.forEach(w => {
-        textHTML = textHTML.replace(new RegExp(`(${this.escapeReg(w)})`, 'gi'), '<mark>$1</mark>');
+  return {
+    put: (note) => tx('readwrite', s => s.put(note)),
+    get: (id) => tx('readonly', s => s.get(id)),
+    del: (id) => tx('readwrite', s => s.delete(id)),
+    all: () => tx('readonly', s => s.getAll()),
+    clear: () => tx('readwrite', s => s.clear()),
+    reset: async () => {
+      if (db) { db.close(); db = null; }
+      await new Promise(r => {
+        const req = indexedDB.deleteDatabase(C.DB);
+        req.onsuccess = req.onerror = req.onblocked = () => r();
       });
     }
+  };
+})();
 
-    let typeLabel;
-    if (isPeer) typeLabel = `УЗЕЛ · ${item.peer}`;
-    else typeLabel = item.shared ? 'МОЁ · ОБЩЕЕ' : 'МОЁ · ЛИЧНОЕ';
+/* =========================================================
+ * AI — embeddings с lexical fallback
+ * ========================================================= */
+const AI = (() => {
+  let ext = null;
+  const cache = new Map();
 
-    const scoreRender = (typeof item.score === 'number')
-      ? `${(item.score * 100).toFixed(1)}%`
-      : (item.createdAt ? new Date(item.createdAt).toLocaleDateString('ru-RU') : '');
+  const hashEmbed = (text) => {
+    const v = new Float32Array(C.DIM);
+    const tokens = text.toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
+    for (const t of tokens) {
+      let h = 2166136261;
+      for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); }
+      v[Math.abs(h) % C.DIM] += 1;
+      const h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
+      v[Math.abs(h2) % C.DIM] += 0.5;
+    }
+    let n = 0;
+    for (let i = 0; i < C.DIM; i++) n += v[i] * v[i];
+    n = Math.sqrt(n) || 1;
+    for (let i = 0; i < C.DIM; i++) v[i] /= n;
+    return Array.from(v);
+  };
 
-    // Узловые мысли — только для чтения: прочитать, понять, написать своё.
-    let foot;
-    if (isPeer) {
-      foot = `<div class="note-foot"><span class="note-hint">прочитать · понять · написать своё</span></div>`;
-    } else {
-      foot = `<div class="note-foot"><div class="note-actions">
-        <button class="note-act" data-act="find" data-id="${item.id}">⌖ Резонанс</button>
-        <button class="note-act" data-act="toggle" data-id="${item.id}">${item.shared ? '🔒 Скрыть' : '📡 Поделиться'}</button>
-        <button class="note-act" data-act="copy" data-id="${item.id}">⧉ Копировать</button>
-        <button class="note-act danger" data-act="del" data-id="${item.id}">🗑 Удалить</button>
-      </div></div>`;
+  return {
+    mode: 'loading',
+    ready: () => ext !== null || AI.mode === 'demo',
+
+    load: async (onProgress) => {
+      if (ext) return;
+      const { env, pipeline } = tfMod;
+      if (env) { env.allowLocalModels = false; env.useBrowserCache = true; }
+      try {
+        ext = await pipeline('feature-extraction', C.MODEL, {
+          progress_callback: p => {
+            if (p.status === 'progress' && p.total > 0) onProgress?.(p.loaded / p.total * 100);
+          }
+        });
+        AI.mode = 'model';
+      } catch {
+        AI.mode = 'demo';
+      }
+    },
+
+    embed: async (text) => {
+      const t = (text || '').trim();
+      if (!t) return null;
+      if (cache.has(t)) return cache.get(t);
+      let v;
+      if (ext) {
+        const out = await ext(t, { pooling: 'mean', normalize: true });
+        v = Array.from(out.data);
+      } else {
+        v = hashEmbed(t);
+      }
+      cache.set(t, v);
+      return v;
+    },
+
+    cosine: (a, b) => {
+      if (!a || !b || a.length !== b.length) return 0;
+      let s = 0;
+      for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+      return s;
+    }
+  };
+})();
+
+/* =========================================================
+ * NET — Nostr P2P (proper implementation)
+ * ========================================================= */
+const Net = (() => {
+  const { SimplePool, generateSecretKey, getPublicKey, finalizeEvent } = nostrMod;
+  let pool = null, sk = null, pk = null, sub = null;
+  let queryId = null;
+  const peers = new Map(); // pubkey -> lastSeen timestamp
+  const answers = [];
+  let onUpdate = null;
+  let heartbeatTimer = null;
+
+  const onEvent = async (ev) => {
+    if (ev.pubkey === pk) return;
+
+    // Update peer liveness
+    peers.set(ev.pubkey, Date.now());
+
+    if (ev.kind === C.K_QUERY) {
+      try {
+        const q = JSON.parse(ev.content);
+        if (!q.vector) return;
+        const all = await DB.all();
+        for (const n of all) {
+          if (!n.shared || !n.vector) continue;
+          if (AI.cosine(q.vector, n.vector) >= (C.state.threshold - C.state.serendipity)) {
+            const ans = finalizeEvent({
+              kind: C.K_ANSWER,
+              created_at: Math.floor(Date.now() / 1000),
+              tags: [['t', C.state.room], ['e', ev.id]],
+              content: JSON.stringify({ text: n.text, vector: n.vector })
+            }, sk);
+            pool.publish(C.RELAYS, ans);
+          }
+        }
+      } catch {}
     }
 
-    return `<div class="note-card ${type}${isPeer ? ' peer' : ''}" style="animation-delay:${(Math.random() * 0.12).toFixed(3)}s">
-        <div class="note-header">
-          <span class="note-type">${typeLabel}</span>
-          <span class="note-score">${scoreRender}</span>
-        </div>
-        <div class="note-content">${textHTML}</div>
-        ${foot}
-      </div>`;
+    if (ev.kind === C.K_ANSWER) {
+      const eTag = ev.tags.find(t => t[0] === 'e');
+      if (eTag && eTag[1] === queryId) {
+        try {
+          const d = JSON.parse(ev.content);
+          if (d.text && d.vector && !answers.some(a => a.id === ev.id)) {
+            answers.push({
+              id: ev.id, text: d.text, vector: d.vector,
+              peer: ev.pubkey.slice(0, 8)
+            });
+            onUpdate?.();
+          }
+        } catch {}
+      }
+    }
+  };
+
+  const startHeartbeat = () => {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = setInterval(() => {
+      const now = Date.now();
+      let removed = 0;
+      for (const [pubkey, lastSeen] of peers) {
+        if (now - lastSeen > 60000) {
+          peers.delete(pubkey);
+          removed++;
+        }
+      }
+      if (removed > 0 || peers.size > 0) {
+        setStatus('stPeers', `${peers.size} peer${peers.size !== 1 ? 's' : ''}`, peers.size > 0 ? 'ok' : '');
+      }
+    }, 30000);
+  };
+
+  return {
+    init: (cb) => {
+      onUpdate = cb;
+      let keyHex = localStorage.getItem('noomium_sk');
+      if (!keyHex) {
+        const raw = generateSecretKey();
+        keyHex = Array.from(raw).map(b => b.toString(16).padStart(2, '0')).join('');
+        localStorage.setItem('noomium_sk', keyHex);
+      }
+      sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+      pk = getPublicKey(sk);
+      pool = new SimplePool();
+
+      // KEY FIX: subscribe to last 2 minutes, not just future
+      const now = Math.floor(Date.now() / 1000);
+      sub = pool.subscribeMany(C.RELAYS, [{
+        kinds: [C.K_QUERY, C.K_ANSWER],
+        '#t': [C.state.room],
+        since: now - 120
+      }], { onevent: onEvent });
+
+      setStatus('stNet', 'NET', 'ok');
+      startHeartbeat();
+    },
+
+    send: (vector) => {
+      if (!pool) return;
+      answers.length = 0;
+      const ev = finalizeEvent({
+        kind: C.K_QUERY,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [['t', C.state.room]],
+        content: JSON.stringify({ vector })
+      }, sk);
+      queryId = ev.id;
+      pool.publish(C.RELAYS, ev);
+    },
+
+    answers: () => answers,
+    peerCount: () => peers.size
+  };
+})();
+
+/* =========================================================
+ * UI — только рендер
+ * ========================================================= */
+const UI = {
+  registry: new Map(),
+
+  card: (item, type, query) => {
+    UI.registry.set(item.id, item);
+    const isPeer = !!item.peer;
+    let label;
+    if (isPeer) label = `peer · ${item.peer}`;
+    else label = item.shared ? 'shared' : 'private';
+
+    const score = typeof item.score === 'number'
+      ? (item.score * 100).toFixed(0) + '%'
+      : item.createdAt ? new Date(item.createdAt).toLocaleDateString('ru-RU') : '';
+
+    let html = esc(item.text);
+    if (query) {
+      const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+      for (const w of words) {
+        html = html.replace(new RegExp(`(${escRe(w)})`, 'gi'), '<mark>$1</mark>');
+      }
+    }
+
+    const foot = isPeer
+      ? `<div class="card-foot"><span class="card-hint">прочитать · понять · написать своё</span></div>`
+      : `<div class="card-foot">
+          <button class="card-act" data-act="toggle" data-id="${item.id}">${item.shared ? 'скрыть' : 'поделиться'}</button>
+          <button class="card-act" data-act="copy" data-id="${item.id}">копировать</button>
+          <button class="card-act danger" data-act="del" data-id="${item.id}">удалить</button>
+        </div>`;
+
+    return `<div class="card t-${type}${isPeer ? ' peer' : ''}" data-id="${item.id}">
+      <div class="card-head">
+        <span class="card-tag">${label}</span>
+        <span class="card-score">${score}</span>
+      </div>
+      <div class="card-body">${html}</div>
+      ${foot}
+    </div>`;
   },
 
-  renderEmpty(containerId, message, opts = {}) {
-    const c = this.get(containerId); if (!c) return;
-    if (opts.loading) {
-      c.innerHTML = `<div class="empty-state"><div class="spinner"></div><div>${this.escapeHtml(message)}</div></div>`;
+  render: (id, items, type, query) => {
+    const track = document.querySelector(`#${id} .track`);
+    if (!track) return;
+    if (!items.length) {
+      track.innerHTML = '<div class="empty">пусто</div>';
       return;
     }
-    const action = opts.actionLabel
-      ? `<button class="btn btn-ghost" data-act="${opts.actionId}">${this.escapeHtml(opts.actionLabel)}</button>`
-      : '';
-    c.innerHTML = `<div class="empty-state">
-      <svg fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/></svg>
-      <div>${this.escapeHtml(message)}</div>
-      ${action}
-    </div>`;
+    track.innerHTML = items.map(i => UI.card(i, type, query)).join('');
+  },
+
+  empty: (id, msg) => {
+    const track = document.querySelector(`#${id} .track`);
+    if (track) track.innerHTML = `<div class="empty">${esc(msg)}</div>`;
   }
 };
 
-// --- APP RUNTIME ---
-let debounceInput = null;
-let lastVectorHash = null;
+/* =========================================================
+ * APP LOGIC
+ * ========================================================= */
+let debounce = null;
+let lastVec = null;
 
-function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
-
-async function executeSearch(force = false) {
-  const text = UI.get('ioInput').value.trim();
-  if (!text || !AI.ready) {
-    UI.registry.clear();
-    ['world', 'seren'].forEach(k => {
-      UI.get(`list-${k}`).innerHTML = '';
-      UI.get(`cnt${capitalize(k)}`).textContent = '0';
+const search = async () => {
+  const text = document.getElementById('input').value.trim();
+  if (!text || !AI.ready()) {
+    ['local', 'world', 'seren'].forEach(k => {
+      UI.empty(`c-${k}`, k === 'local' ? 'начните печатать' : '—');
+      document.getElementById(`cnt${k.charAt(0).toUpperCase() + k.slice(1)}`).textContent = '0';
     });
-    UI.get('cntLocal').textContent = '0';
-    UI.renderEmpty('list-local', AI.ready ? 'Начните печатать — поиск по смысловому пространству.' : 'ИИ ещё прогревается…', { loading: !AI.ready });
     return;
   }
 
-  const queryVector = await AI.embed(text);
-  if (!queryVector) return;
+  const qv = await AI.embed(text);
+  if (!qv) return;
 
-  if (Net.ready && (force || !lastVectorHash || AI.cosine(queryVector, lastVectorHash) < 0.98)) {
-    lastVectorHash = queryVector;
-    Net.broadcastQuery(queryVector);
+  if (!lastVec || AI.cosine(qv, lastVec) < 0.98) {
+    lastVec = qv;
+    Net.send(qv);
   }
 
-  const dbNotes = await DB.getAllNotes();
-  const localScored = dbNotes.filter(n => n.vector).map(n => ({ ...n, score: AI.cosine(queryVector, n.vector) }));
-  const worldScored = Net.worldAnswers.map(ans => ({ ...ans, score: AI.cosine(queryVector, ans.vector) }));
+  const all = await DB.all();
+  const scored = all.filter(n => n.vector).map(n => ({ ...n, score: AI.cosine(qv, n.vector) }));
+  const worldScored = Net.answers().map(a => ({ ...a, score: AI.cosine(qv, a.vector) }));
 
-  const TH = AppConfig.state.threshold;
-  const SD = AppConfig.state.serendipity;
+  const TH = C.state.threshold;
+  const SD = C.state.serendipity;
 
-  const localExact = localScored.filter(n => n.score >= TH).sort((a, b) => b.score - a.score);
-  const worldExact = worldScored.filter(n => n.score >= TH).sort((a, b) => b.score - a.score);
-  const serenAll = [...localScored, ...worldScored]
+  const local = scored.filter(n => n.score >= TH).sort((a, b) => b.score - a.score);
+  const world = worldScored.filter(n => n.score >= TH).sort((a, b) => b.score - a.score);
+  const seren = [...scored, ...worldScored]
     .filter(n => n.score >= (TH - SD) && n.score < TH)
     .sort((a, b) => b.score - a.score);
 
-  UI.registry.clear();
+  UI.render('c-local', local, 'local', text);
+  UI.render('c-world', world, 'world', text);
+  UI.render('c-seren', seren, 'seren', text);
 
-  const renderList = (id, arr, typeClass, emptyMsg, emptyOpts) => {
-    const el = UI.get(id); if (!el) return;
-    if (arr.length === 0) UI.renderEmpty(id, emptyMsg, emptyOpts);
-    else el.innerHTML = arr.map(item => UI.createCard(item, typeClass, text)).join('');
-  };
+  document.getElementById('cntLocal').textContent = local.length;
+  document.getElementById('cntWorld').textContent = world.length;
+  document.getElementById('cntSeren').textContent = seren.length;
+};
 
-  renderList('list-local', localExact, 't-local', 'В вашей базе нет точных совпадений.');
+const renderHistory = async () => {
+  const all = await DB.all();
+  document.getElementById('baseCount').textContent = all.length;
 
-  const waiting = Net.ready && Net.lastQueryAt && (Date.now() - Net.lastQueryAt < 6000) && worldExact.length === 0;
-  if (waiting) UI.renderEmpty('list-world', 'Слушаю резонанс в комнате…', { loading: true });
-  else renderList('list-world', worldExact, 't-world', Net.ready ? 'Пока никто в комнате не думает так же.' : 'Сеть недоступна — для «Мира» нужны узлы.');
-
-  renderList('list-seren', serenAll, 't-seren', 'Близких мыслей не найдено.');
-
-  UI.get('cntLocal').textContent = localExact.length;
-  UI.get('cntWorld').textContent = worldExact.length;
-  UI.get('cntSeren').textContent = serenAll.length;
-}
-
-async function renderMyBase() {
-  const all = await DB.getAllNotes();
-  const c = UI.get('list-base');
-  UI.get('baseTabCount').textContent = all.length;
-
-  const shared = all.filter(n => n.shared).length;
-  UI.get('baseStats').innerHTML = `
-    <div class="stat"><div class="num">${all.length}</div><div class="lbl">Мыслей</div></div>
-    <div class="stat"><div class="num">${shared}</div><div class="lbl">Общих</div></div>
-    <div class="stat"><div class="num">${all.length - shared}</div><div class="lbl">Личных</div></div>`;
-
-  if (all.length === 0) {
-    UI.renderEmpty('list-base', 'Ваша база знаний пуста.', { actionLabel: 'Загрузить примеры', actionId: 'seed' });
-    return;
-  }
-
-  const q = UI.get('baseFilter').value.trim().toLowerCase();
-  const sort = UI.get('baseSort').value;
+  const q = document.getElementById('histSearch').value.trim().toLowerCase();
+  const sort = document.getElementById('histSort').value;
   let list = all.slice();
   if (q) list = list.filter(n => n.text.toLowerCase().includes(q));
-
   if (sort === 'old') list.sort((a, b) => a.createdAt - b.createdAt);
   else if (sort === 'az') list.sort((a, b) => a.text.localeCompare(b.text, 'ru'));
   else list.sort((a, b) => b.createdAt - a.createdAt);
 
-  UI.registry.clear();
-  if (list.length === 0) { UI.renderEmpty('list-base', 'Под фильтр ничего не подошло.'); return; }
-  c.innerHTML = list.map(note => UI.createCard(note, 't-local', q || null)).join('');
-}
+  UI.render('c-history', list, 'local', q || null);
+};
 
-function isBaseView() { return UI.get('view-base').classList.contains('active'); }
-async function refreshCurrent() { if (isBaseView()) await renderMyBase(); else await executeSearch(); }
+const saveNote = async (shared) => {
+  const text = document.getElementById('input').value.trim();
+  if (!text) { toast('пусто', 'err'); return; }
+  if (!AI.ready()) { toast('ИИ не готов', 'err'); return; }
+  const vector = await AI.embed(text);
+  await DB.put({
+    id: uuid(), text, vector, shared,
+    createdAt: Date.now(), hash: fnv1a(text)
+  });
+  document.getElementById('input').value = '';
+  lastVec = null;
+  toast(shared ? 'видимо узлам' : 'лично', 'ok');
+  search();
+  renderHistory();
+};
 
-// --- Card action delegation ---
-async function handleCardAction(act, el) {
-  if (act === 'seed') { await seedSamples(); return; }
-
-  const id = el.dataset.id;
-  const item = id ? UI.registry.get(id) : null;
-  if (!item) return;
-
-  if (act === 'find') {
-    UI.get('ioInput').value = item.text;
-    UI.get('ioCount').textContent = word.symbols(item.text.length);
-    switchToStream();
-    executeSearch(true);
-  } else if (act === 'copy') {
-    try { await navigator.clipboard.writeText(item.text); UI.toast('Скопировано в буфер.', 'ok'); }
-    catch { UI.toast('Не удалось скопировать.', 'err'); }
+const onAction = async (act, id) => {
+  if (act === 'copy') {
+    const n = await DB.get(id);
+    if (n) {
+      try {
+        await navigator.clipboard.writeText(n.text);
+        toast('скопировано', 'ok');
+      } catch { toast('не удалось', 'err'); }
+    }
   } else if (act === 'del') {
-    if (confirm('Удалить эту мысль навсегда?')) {
-      await DB.deleteNote(id);
-      UI.toast('Мысль удалена.', 'info');
-      refreshCurrent();
+    if (confirm('удалить?')) {
+      await DB.del(id);
+      toast('удалено', 'info');
+      search(); renderHistory();
     }
   } else if (act === 'toggle') {
-    const rec = await DB.getNote(id);
-    if (rec) {
-      rec.shared = !rec.shared;
-      await DB.saveNote(rec);
-      UI.toast(rec.shared ? 'Теперь видно узлам.' : 'Теперь это личное.', 'ok');
-      refreshCurrent();
+    const n = await DB.get(id);
+    if (n) {
+      n.shared = !n.shared;
+      await DB.put(n);
+      toast(n.shared ? 'shared' : 'private', 'ok');
+      search(); renderHistory();
     }
   }
-}
+};
 
-// --- Sample data ---
-const SAMPLES = [
-  'Сознание — это, возможно, то, как информация ощущается изнутри.',
-  'Мозг — машина предсказаний, постоянно минимизирующая удивление.',
-  'Города ведут себя как живые организмы со своим обменом веществ.',
-  'Сложный процент — самая мощная сила для терпеливых.',
-  'Письмо — это мышление, ставшее видимым: пишешь и понимаешь, что знаешь.',
-  'Энтропия всегда растёт, но жизнь строит локальные островки порядка.',
-  'Хороший дизайн убирает решения, а не добавляет опции.',
-  'Случайные открытия любят блуждающий, хорошо связанный ум.'
-];
-
-async function seedSamples() {
-  if (!AI.ready) { UI.toast('ИИ ещё не готов.', 'err'); return; }
-  UI.toast('Вкладываю смысл в примеры…', 'info');
-  const notes = [];
-  for (const text of SAMPLES) {
-    const vector = await AI.embed(text);
-    notes.push({ id: 's' + Math.random().toString(36).slice(2, 10), text, vector, shared: true, createdAt: Date.now() - Math.floor(Math.random() * 1e7) });
-  }
-  await DB.bulkPut(notes);
-  UI.toast(`Загружено ${word.samples(notes.length)}.`, 'ok');
-  refreshCurrent();
-}
-
-// --- Capsule export / import (.capsul) ---
-async function exportData() {
-  const notes = await DB.getAllNotes();
-  if (notes.length === 0) { UI.toast('Базе нечего экспортировать.', 'err'); return; }
-  const capsule = { app: 'noosphere', format: 'capsul', version: 1, model: AppConfig.MODEL, dim: AppConfig.DIM, exportedAt: Date.now(), notes };
+const exportData = async () => {
+  const notes = await DB.all();
+  if (!notes.length) { toast('нечего экспортировать', 'err'); return; }
+  const capsule = {
+    app: 'noomium', format: 'noo', version: 1,
+    exportedAt: Date.now(), notes
+  };
   const blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `noosphere-${new Date().toISOString().slice(0, 10)}.${AppConfig.CAPSULE_EXT}`;
+  a.download = `noomium-${new Date().toISOString().slice(0, 10)}.noo`;
   a.click();
   URL.revokeObjectURL(url);
-  UI.toast(`Экспортировано ${word.thoughts(notes.length)} в капсулу.`, 'ok');
-}
+  toast(`экспорт ${notes.length}`, 'ok');
+};
 
-async function importData(file) {
+const importData = async (file) => {
   try {
     const data = JSON.parse(await file.text());
     const notes = Array.isArray(data) ? data : data.notes;
     if (!Array.isArray(notes)) throw new Error('bad format');
-    const clean = notes.filter(n => n && n.text).map(n => ({
-      id: n.id || 'i' + Math.random().toString(36).slice(2, 10),
-      text: String(n.text),
-      vector: Array.isArray(n.vector) ? n.vector : null,
-      shared: !!n.shared,
-      createdAt: n.createdAt || Date.now()
-    }));
-    if (AI.ready) for (const n of clean) if (!n.vector) n.vector = await AI.embed(n.text);
-    await DB.bulkPut(clean);
-    UI.toast(`Импортировано ${word.thoughts(clean.length)}.`, 'ok');
-    refreshCurrent();
-  } catch (e) {
-    UI.toast('Импорт не удался: неверный файл.', 'err');
-  }
-}
 
-// --- Navigation helpers ---
-function switchToStream() {
-  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
-  document.querySelectorAll('.view-layer').forEach(el => el.classList.remove('active'));
-  document.querySelector('.tab[data-view="view-stream"]').classList.add('active');
-  UI.get('view-stream').classList.add('active');
-}
+    const existing = await DB.all();
+    const byHash = new Map(existing.filter(n => n.hash).map(n => [n.hash, n]));
+    const byId = new Map(existing.map(n => [n.id, n]));
 
-function openDrawer(d, o) { UI.get(d).classList.add('open'); UI.get(o).classList.add('open'); }
-function closeAllDrawers() {
-  ['drawer', 'drawerOverlay', 'helpDrawer', 'helpOverlay'].forEach(id => UI.get(id).classList.remove('open'));
-}
+    let added = 0, skipped = 0;
+    for (const raw of notes) {
+      if (!raw || typeof raw.text !== 'string') continue;
+      const hash = fnv1a(raw.text);
+      if (byHash.has(hash)) { skipped++; continue; }
+      if (byId.has(raw.id) && byId.get(raw.id).text === raw.text) { skipped++; continue; }
 
-// --- Bind Events ---
-function bindEvents() {
+      const note = {
+        id: raw.id || uuid(),
+        text: raw.text,
+        vector: Array.isArray(raw.vector) ? raw.vector : null,
+        shared: !!raw.shared,
+        createdAt: raw.createdAt || Date.now(),
+        hash
+      };
+      if (AI.ready() && !note.vector) {
+        try { note.vector = await AI.embed(note.text); } catch {}
+      }
+      await DB.put(note);
+      byHash.set(hash, note);
+      byId.set(note.id, note);
+      added++;
+    }
+    toast(`импорт: +${added} / ~${skipped}`, 'ok');
+    search(); renderHistory();
+  } catch (e) { toast('импорт: ' + e.message, 'err'); }
+};
+
+/* =========================================================
+ * BOOT
+ * ========================================================= */
+const bind = () => {
   document.querySelectorAll('.tab').forEach(t => {
     t.onclick = () => {
-      document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('.view-layer').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
       t.classList.add('active');
-      UI.get(t.dataset.view).classList.add('active');
-      if (t.dataset.view === 'view-base') renderMyBase();
+      document.getElementById(`view-${t.dataset.view}`).classList.add('active');
+      if (t.dataset.view === 'history') renderHistory();
     };
   });
 
-  document.querySelectorAll('.f-tab').forEach(t => {
-    t.onclick = () => {
-      document.querySelectorAll('.f-tab').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('#view-stream .node-list').forEach(el => el.classList.remove('active'));
-      t.classList.add('active');
-      const tl = UI.get(`list-${t.dataset.filter}`);
-      if (tl) tl.classList.add('active');
+  document.querySelectorAll('.fbtn').forEach(f => {
+    f.onclick = () => {
+      document.querySelectorAll('.fbtn').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.carousel').forEach(c => c.classList.remove('active'));
+      f.classList.add('active');
+      document.getElementById(`c-${f.dataset.filter}`).classList.add('active');
     };
   });
 
-  const input = UI.get('ioInput');
+  const input = document.getElementById('input');
   input.addEventListener('input', () => {
-    UI.get('ioCount').textContent = word.symbols(input.value.length);
-    clearTimeout(debounceInput);
-    debounceInput = setTimeout(() => executeSearch(), 800);
+    document.getElementById('charCount').textContent = input.value.length;
+    clearTimeout(debounce);
+    const label = document.getElementById('debounce');
+    label.textContent = '...';
+    debounce = setTimeout(() => { label.textContent = ''; search(); }, C.DEBOUNCE);
   });
 
-  UI.get('btnResonate').onclick = () => executeSearch(true);
-  UI.get('btnClear').onclick = () => {
-    input.value = ''; UI.get('ioCount').textContent = word.symbols(0);
-    executeSearch();
-  };
+  document.getElementById('btnSavePrivate').onclick = () => saveNote(false);
+  document.getElementById('btnSaveShared').onclick = () => saveNote(true);
 
-  const handleSave = async (isShared) => {
-    const text = input.value.trim();
-    if (!text) { UI.toast('Нечего сохранять.', 'err'); return; }
-    if (!AI.ready) { UI.toast('ИИ ещё не готов.', 'err'); return; }
-    const vector = await AI.embed(text);
-    const note = { id: Math.random().toString(36).slice(2, 10), text, vector, shared: isShared, createdAt: Date.now() };
-    await DB.saveNote(note);
-    input.value = ''; UI.get('ioCount').textContent = word.symbols(0);
-    lastVectorHash = null;
-    UI.toast(isShared ? 'Сохранено и видно узлам.' : 'Сохранено лично.', 'ok');
-    executeSearch();
-    if (isBaseView()) renderMyBase();
-  };
-  UI.get('btnSavePrivate').onclick = () => handleSave(false);
-  UI.get('btnSaveShared').onclick = () => handleSave(true);
+  document.getElementById('histSearch').addEventListener('input', () => {
+    clearTimeout(debounce);
+    debounce = setTimeout(renderHistory, 200);
+  });
+  document.getElementById('histSort').onchange = renderHistory;
 
-  UI.get('baseFilter').addEventListener('input', () => { clearTimeout(debounceInput); debounceInput = setTimeout(renderMyBase, 200); });
-  UI.get('baseSort').onchange = renderMyBase;
-
-  document.querySelector('.workspace').addEventListener('click', (e) => {
+  document.querySelector('.work').addEventListener('click', e => {
     const el = e.target.closest('[data-act]');
-    if (el) handleCardAction(el.dataset.act, el);
+    if (el) onAction(el.dataset.act, el.dataset.id);
   });
 
-  UI.get('btnOpenSettings').onclick = () => openDrawer('drawer', 'drawerOverlay');
-  UI.get('btnCloseSettings').onclick = closeAllDrawers;
-  UI.get('drawerOverlay').onclick = closeAllDrawers;
-  UI.get('btnHelp').onclick = () => openDrawer('helpDrawer', 'helpOverlay');
-  UI.get('btnCloseHelp').onclick = closeAllDrawers;
-  UI.get('helpOverlay').onclick = closeAllDrawers;
-
-  UI.get('cfgTheme').value = AppConfig.state.theme;
-  UI.get('cfgRoom').value = AppConfig.state.room;
-  UI.get('cfgThresh').value = AppConfig.state.threshold;
-  UI.get('cfgSeren').value = AppConfig.state.serendipity;
-  UI.get('valThresh').textContent = Number(AppConfig.state.threshold).toFixed(2);
-  UI.get('valSeren').textContent = Number(AppConfig.state.serendipity).toFixed(2);
-
-  UI.get('cfgThresh').oninput = e => UI.get('valThresh').textContent = e.target.value;
-  UI.get('cfgSeren').oninput = e => UI.get('valSeren').textContent = e.target.value;
-  UI.get('cfgTheme').onchange = e => UI.setTheme(e.target.value);
-
-  UI.get('btnSaveConfig').onclick = () => {
-    AppConfig.state.theme = UI.get('cfgTheme').value;
-    AppConfig.state.room = UI.get('cfgRoom').value.trim() || 'noosphere-core';
-    AppConfig.state.threshold = parseFloat(UI.get('cfgThresh').value);
-    AppConfig.state.serendipity = parseFloat(UI.get('cfgSeren').value);
-    localStorage.setItem('ns_config', JSON.stringify(AppConfig.state));
-    window.location.reload();
+  const openDrawer = (d) => {
+    document.getElementById(d).classList.add('open');
+    document.getElementById('overlay').classList.add('open');
+  };
+  const closeDrawers = () => {
+    document.querySelectorAll('.drawer').forEach(d => d.classList.remove('open'));
+    document.getElementById('overlay').classList.remove('open');
   };
 
-  UI.get('btnWipeDB').onclick = async () => {
-    if (confirm('Внимание: это навсегда удалит все ваши мысли. Продолжить?')) {
-      await DB.clearDB(); UI.toast('База стёрта.', 'info'); window.location.reload();
+  document.getElementById('btnSettings').onclick = () => openDrawer('drawer');
+  document.getElementById('btnHelp').onclick = () => openDrawer('helpDrawer');
+  document.getElementById('btnClose').onclick = closeDrawers;
+  document.getElementById('btnCloseHelp').onclick = closeDrawers;
+  document.getElementById('overlay').onclick = closeDrawers;
+
+  document.getElementById('setRoom').value = C.state.room;
+  document.getElementById('setThresh').value = C.state.threshold;
+  document.getElementById('setSeren').value = C.state.serendipity;
+  document.getElementById('valThresh').textContent = C.state.threshold.toFixed(2);
+  document.getElementById('valSeren').textContent = C.state.serendipity.toFixed(2);
+
+  document.getElementById('setThresh').oninput = e => {
+    C.state.threshold = parseFloat(e.target.value);
+    document.getElementById('valThresh').textContent = C.state.threshold.toFixed(2);
+  };
+  document.getElementById('setSeren').oninput = e => {
+    C.state.serendipity = parseFloat(e.target.value);
+    document.getElementById('valSeren').textContent = C.state.serendipity.toFixed(2);
+  };
+
+  document.getElementById('btnApply').onclick = () => {
+    C.state.room = document.getElementById('setRoom').value.trim() || 'noomium-core';
+    localStorage.setItem('noomium_cfg', JSON.stringify(C.state));
+    location.reload();
+  };
+
+  document.getElementById('btnWipe').onclick = async () => {
+    if (confirm('стереть всё?')) {
+      await DB.reset();
+      toast('база стёрта', 'info');
+      setTimeout(() => location.reload(), 500);
     }
   };
 
-  UI.get('btnExport').onclick = exportData;
-  UI.get('btnImport').onclick = () => UI.get('importFile').click();
-  UI.get('importFile').onchange = (e) => { if (e.target.files[0]) importData(e.target.files[0]); e.target.value = ''; };
-  UI.get('btnSeed').onclick = () => { seedSamples(); closeAllDrawers(); };
+  document.getElementById('btnExport').onclick = exportData;
+  document.getElementById('btnImport').onclick = () => document.getElementById('importFile').click();
+  document.getElementById('importFile').onchange = e => {
+    if (e.target.files[0]) importData(e.target.files[0]);
+    e.target.value = '';
+  };
 
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeAllDrawers();
-    if (e.key === '/' && document.activeElement !== input && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) {
-      e.preventDefault(); switchToStream(); input.focus();
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeDrawers();
+    if (e.key === '/' && document.activeElement !== input
+      && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) {
+      e.preventDefault(); input.focus();
     }
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
-      if (document.activeElement === input) handleSave(e.shiftKey);
+      if (document.activeElement === input) saveNote(e.shiftKey);
     }
   });
-}
+};
 
-// --- BOOTSTRAP ---
-async function BOOTSTRAP() {
-  UI.setTheme(AppConfig.state.theme);
-  bindEvents();
-  UI.get('baseTabCount').textContent = (await DB.getAllNotes()).length;
-  UI.renderEmpty('list-local', 'ИИ прогревается…', { loading: true });
-  UI.setStatus('stAI', 'ИИ загружается…', 'busy');
+const boot = async () => {
+  bind();
 
-  try {
-    await AI.init((msg) => UI.setStatus('stAI', msg, 'busy'));
-    UI.setStatus('stAI', 'ИИ активен', 'ready');
-  } catch (err) {
-    console.warn('Модель не загрузилась, лексический режим:', err);
-    AI.mode = 'demo';
-    UI.setStatus('stAI', 'ИИ: лексический режим', 'warn');
-    UI.toast('Модель недоступна — используется лексический поиск.', 'info');
-  }
-  UI.renderEmpty('list-local', 'Начните печатать — поиск по смысловому пространству.');
+  // Parallel bootstrap — UI не умирает если что-то упало
+  const results = await Promise.allSettled([
+    DB.all().then(() => setStatus('stDB', 'DB', 'ok')).catch(() => setStatus('stDB', 'DB', 'err')),
+    AI.load().then(() => setStatus('stAI', AI.mode === 'model' ? 'AI' : 'AI·demo', 'ok')).catch(() => setStatus('stAI', 'AI', 'err')),
+    new Promise((res) => {
+      try {
+        Net.init(() => search());
+        setStatus('stNet', 'NET', 'ok');
+      } catch {
+        setStatus('stNet', 'NET', 'err');
+      }
+      res();
+    })
+  ]);
 
-  try {
-    Net.init(
-      (peerCount) => UI.setStatus('stNetwork', `В сети · ${word.peers(peerCount)}`, 'active'),
-      () => { if (!isBaseView()) executeSearch(); }
-    );
-    UI.setStatus('stNetwork', `В сети · ${word.peers(0)}`, 'active');
-  } catch (err) {
-    console.warn('Сеть не инициализирована:', err);
-    UI.setStatus('stNetwork', 'Сеть недоступна', 'warn');
-  }
-}
+  UI.empty('c-local', 'начните печатать');
+  UI.empty('c-world', '—');
+  UI.empty('c-seren', '—');
 
-BOOTSTRAP();
+  renderHistory();
+};
+
+boot();
 </script>
-<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a0304d7a1dad75a1',t:'MTc4MDAwMzIxOQ=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</body>
 </html>
