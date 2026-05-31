@@ -28,7 +28,7 @@
   --brand:#8b7cff;--brand-glow:rgba(139,124,255,.14);
   --world:#38bdf8;--world-glow:rgba(56,189,248,.12);
   --seren:#4ade80;--seren-glow:rgba(74,222,128,.12);
-  --danger:#ef4444;--danger-glow:rgba(239,68,68,.14);
+  --danger:#ef4444;--danger-glow:rgba(239,68,68,.14); /* Добавлена переменная для danger-glow */
   --warning:#eab308;--ok:#22c55e;
   color-scheme:dark;
 }
@@ -39,7 +39,7 @@
   --brand:#6d5ef5;--brand-glow:rgba(109,94,245,.10);
   --world:#0284c7;--world-glow:rgba(2,132,199,.08);
   --seren:#16a34a;--seren-glow:rgba(22,163,74,.08);
-  --danger:#dc2626;--danger-glow:rgba(220,38,38,.10);
+  --danger:#dc2626;--danger-glow:rgba(220,38,38,.10); /* Добавлена переменная для danger-glow */
   --warning:#ca8a04;--ok:#16a34a;
   color-scheme:light;
 }
@@ -139,6 +139,7 @@ body.show-app #app-root{display:flex}
   border:1px solid var(--line);background:transparent;display:inline-flex;
   align-items:center;gap:6px;white-space:nowrap}
 .fi-act:active:not([disabled]){background:var(--surface-2)}
+/* Использование CSS-переменной --danger-glow */
 .fi-act.danger:active:not([disabled]){background:var(--danger-glow);color:var(--danger);border-color:rgba(239,68,68,.3)}
 .fi-act.primary{background:var(--brand);color:white;border-color:transparent}
 .fi-act.primary:active:not([disabled]){filter:brightness(1.1);color:white}
@@ -255,6 +256,7 @@ body.show-app #app-root{display:flex}
   border:1px solid var(--line);background:transparent;display:inline-flex;
   align-items:center;gap:6px;white-space:nowrap}
 .nv-act:active:not([disabled]){background:var(--surface-2)}
+/* Использование CSS-переменной --danger-glow */
 .nv-act.danger{color:var(--danger);border-color:rgba(239,68,68,.3)}
 .nv-act.danger:active:not([disabled]){background:var(--danger-glow);color:var(--danger);border-color:rgba(239,68,68,.3)}
 .nv-act.primary{background:var(--brand);color:white;border-color:transparent}
@@ -376,6 +378,7 @@ body.show-app #app-root{display:flex}
 kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   border-radius:3px;font-size:10px;font-family:var(--mono)}
 
+/* prefers-reduced-motion: отключение анимаций для пользователей, предпочитающих уменьшенное движение */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -394,6 +397,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 (function() {
   'use strict';
 
+  // ============================================================
+  // Легковесный контейнер зависимостей (DI) с проверкой циклических зависимостей
+  // ============================================================
   const DI = (() => {
     const factories = new Map();
     const instances = new Map();
@@ -402,6 +408,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       factories.set(name, { factory, deps: deps || [] });
     }
 
+    // Добавлен параметр visiting для отслеживания циклов
     function resolve(name, visiting) {
       if (instances.has(name)) return instances.get(name);
       const def = factories.get(name);
@@ -422,6 +429,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return { register: register, resolve: resolve };
   })();
 
+  // ============================================================
+  // Module: Utils (Core.NooUtils)
+  // ============================================================
   DI.register('Utils', function() {
     function esc(s) {
       return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
@@ -463,6 +473,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return { esc: esc, escRe: escRe, word: word, fmtDate: fmtDate };
   }, []);
 
+  // ============================================================
+  // Module: Logger (Core.Logger)
+  // ============================================================
   DI.register('Logger', function() {
     function emit(level, msg, data) {
       const ts = new Date().toISOString().substr(11, 8);
@@ -476,6 +489,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, []);
 
+  // ============================================================
+  // Module: Bus (Core.Bus)
+  // ============================================================
   DI.register('Bus', function() {
     const map = new Map();
     return {
@@ -494,6 +510,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, []);
 
+  // ============================================================
+  // Module: Store (Core.Store)
+  // ============================================================
   DI.register('Store', function() {
     const prefix = 'noomium:';
     return {
@@ -510,6 +529,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, []);
 
+  // ============================================================
+  // Module: I18n (Core.I18n)
+  // ============================================================
   DI.register('I18n', function(store, bus) {
     const KEY = 'lang';
     const dicts = Object.create(null);
@@ -564,12 +586,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return { t: t, setLang: setLang, getLang: getLang, addDict: addDict, onChange: onChange };
   }, ['Store', 'Bus']);
 
+  // ============================================================
+  // Module: Config (Core.NooConfig)
+  // ============================================================
   DI.register('Config', function(store, log) {
     const KEY = 'cfg';
     const defaults = {
       room: 'noomium-main', threshold: 0.30, serendipity: 0.15,
       relays: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'],
-      kQuery: 21000, kAnswer: 21001, model: 'Xenova/multilingual-e5-small', dim: 384, debounce: 800,
+      kQuery: 21000, kAnswer: 21001, model: 'Xenova/all-MiniLM-L6-v2', dim: 384, debounce: 800,
       peerTTL: 60000, heartbeat: 30000, subWindow: 300, queryRateLimit: 3000,
       dbName: 'noomium_v8', storeName: 'notes', theme: 'dark', onboarded: false,
       publishCooldown: 1500, maxAnswersPerQuery: 5
@@ -592,12 +617,17 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Store', 'Logger']);
 
+  // ============================================================
+  // Module: DB (Core.NooDB)
+  // Добавлена инъекция Bus для эмита событий изменения БД (db:change)
+  // ============================================================
   DI.register('DB', function(cfg, log, bus) {
     let db = null, mem = null;
 
     function dbName() { return cfg.get('dbName', 'noomium_v8'); }
     function storeName() { return cfg.get('storeName', 'notes'); }
 
+    // Эмитим событие изменения для инвалидации кэшей в других модулях
     function emitChange() {
       if (bus && bus.emit) { try { bus.emit('db:change'); } catch(_) {} }
     }
@@ -633,36 +663,37 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             if (!d) {
               const mockStore = {
                 get: function(k) {
-                  return { result: mem.get(k) };
+                  return {
+                    result: mem.get(k),
+                    onsuccess: function(cb) { cb && cb(); },
+                    onerror: function(cb) { cb && cb(); }
+                  };
                 },
                 put: function(v) {
                   mem.set(v.id, v);
-                  return {};
+                  return {
+                    onsuccess: function(cb) { cb && cb(); },
+                    onerror: function(cb) { cb && cb(); }
+                  };
                 },
                 delete: function(k) {
                   mem.delete(k);
-                  return {};
+                  return {
+                    onsuccess: function(cb) { cb && cb(); },
+                    onerror: function(cb) { cb && cb(); }
+                  };
                 },
                 getAll: function() {
-                  return { result: Array.from(mem.values()) };
+                  return {
+                    result: Array.from(mem.values()),
+                    onsuccess: function(cb) { cb && cb(); },
+                    onerror: function(cb) { cb && cb(); }
+                  };
                 }
               };
-              const req = { result: null, onsuccess: null, onerror: null };
-              try {
-                const r = fn(mockStore);
-                // [FIX 1] Проверка синхронного выполнения mockStore (put/delete)
-                if (!r || typeof r.onsuccess !== 'function') {
-                  resolve(r && r.result !== undefined ? r.result : r);
-                  return;
-                }
-                req.result = r.result !== undefined ? r.result : r;
-                req.onsuccess = function() { resolve(req.result); };
-                req.onerror = function(e) { reject(e); };
-                setTimeout(function() { if (req.onsuccess) req.onsuccess(); }, 0);
-              } catch (e) {
-                req.onerror = function() { reject(e); };
-                setTimeout(function() { if (req.onerror) req.onerror(); }, 0);
-              }
+              const r = fn(mockStore);
+              r.onsuccess && r.onsuccess();
+              resolve(r.result);
               return;
             }
             const transaction = d.transaction(storeName(), mode);
@@ -721,8 +752,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'Logger', 'Bus']);
 
+  // ============================================================
+  // Module: AI (Core.NooAI)
+  // Реализован LRU-кэш с ограничением в 300 элементов
+  // ============================================================
   DI.register('AI', function(cfg, log, bus) {
     let extractor = null, mode = 'loading';
+    // Замена Object.create(null) на Map для реализации LRU
     const cache = new Map(); 
     const CACHE_LIMIT = 300;
     const progressFns = [];
@@ -749,7 +785,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     function doLoad(onProgress, attempt) {
       attempt = attempt || 0;
-      const MODEL = cfg.get('model', 'Xenova/multilingual-e5-small');
+      const MODEL = cfg.get('model', 'Xenova/all-MiniLM-L6-v2');
       return import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2').then(function(mod) {
         if (mod.env) { mod.env.allowLocalModels = false; mod.env.useBrowserCache = true; }
         return mod.pipeline('feature-extraction', MODEL, {
@@ -784,10 +820,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       ready: function() { return extractor !== null || mode === 'demo'; },
       getMode: function() { return mode; },
       onProgress: function(fn) { if (typeof fn === 'function') progressFns.push(fn); },
-      offProgress: function(fn) {
-        const idx = progressFns.indexOf(fn);
-        if (idx > -1) progressFns.splice(idx, 1);
-      },
       load: function(onProgress) {
         if (extractor || mode === 'demo') return Promise.resolve();
         if (loadPromise) return loadPromise;
@@ -798,6 +830,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         const t = (text || '').trim();
         if (!t) return Promise.resolve(null);
         
+        // LRU логика: если элемент есть, перемещаем его в конец (самый свежий)
         if (cache.has(t)) {
           const val = cache.get(t);
           cache.delete(t);
@@ -823,6 +856,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         }
         return promise.then(function(v) { 
           cache.set(t, v);
+          // Если превышен лимит, удаляем самый старый элемент (первый в Map)
           if (cache.size > CACHE_LIMIT) {
             const oldestKey = cache.keys().next().value;
             cache.delete(oldestKey);
@@ -839,6 +873,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'Logger', 'Bus']);
 
+  // ============================================================
+  // Module: Net (Core.NooNet)
+  // Добавлен in-memory кэш sharedCache, outbox, circuit breaker
+  // ============================================================
   DI.register('Net', function(cfg, DB, AI, log, bus) {
     let pool = null, sk = null, pk = null, queryId = null;
     const peers = new Map();
@@ -853,49 +891,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     const MAX_CONN_ATTEMPTS = 10;
     let netStatus = 'disconnected';
 
+    // Кэш общих векторов для защиты от DoS при входящих KQ
     let sharedCache = null;
     let sharedCacheTime = 0;
     const CACHE_TTL = 60000;
 
+    // Outbox для недоставленных сообщений
     const outbox = [];
+    // Circuit breaker: счетчик ошибок для каждого релея
     const relayErrors = new Map();
-
-    const PASSPHRASE = 'noomium-secret-key-v1';
-
-    async function deriveKey(passphrase, salt) {
-      const enc = new TextEncoder();
-      const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
-      return crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
-        keyMaterial,
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['encrypt', 'decrypt']
-      );
-    }
-
-    async function encryptKey(hexKey) {
-      const salt = crypto.getRandomValues(new Uint8Array(16));
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      const key = await deriveKey(PASSPHRASE, salt);
-      const enc = new TextEncoder();
-      const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(hexKey));
-      const combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
-      combined.set(salt, 0);
-      combined.set(iv, salt.length);
-      combined.set(new Uint8Array(ciphertext), salt.length + iv.length);
-      return btoa(String.fromCharCode.apply(null, combined));
-    }
-
-    async function decryptKey(base64Str) {
-      const combined = Uint8Array.from(atob(base64Str), c => c.charCodeAt(0));
-      const salt = combined.slice(0, 16);
-      const iv = combined.slice(16, 28);
-      const ciphertext = combined.slice(28);
-      const key = await deriveKey(PASSPHRASE, salt);
-      const dec = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext);
-      return new TextDecoder().decode(dec);
-    }
 
     function setStatus(s) {
       netStatus = s;
@@ -931,6 +935,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       return false;
     }
 
+    // Получение общих векторов из кэша или БД
     function getSharedVectors() {
       const now = Date.now();
       if (sharedCache && (now - sharedCacheTime < CACHE_TTL)) {
@@ -955,6 +960,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       sharedCacheTime = 0;
     }
 
+    // Подписка на изменения БД для инвалидации кэша
     if (bus && bus.on) {
       bus.on('db:change', invalidateSharedCache);
     }
@@ -984,16 +990,19 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           pubs.forEach(function(p, relay) {
             if (p && p.then) {
               p.then(function() {
+                // Успех: очищаем outbox и сбрасываем счетчик ошибок
                 const idx = outbox.indexOf(ev);
                 if (idx > -1) outbox.splice(idx, 1);
                 relayErrors.delete(relay);
               }).catch(function(err) {
                 const msg = err && err.message ? String(err.message) : String(err);
+                
+                // Circuit Breaker логика
                 const count = (relayErrors.get(relay) || 0) + 1;
                 relayErrors.set(relay, count);
                 
                 if (count >= 3) {
-                  rateLimitedUntil.set(relay, Date.now() + 300000);
+                  rateLimitedUntil.set(relay, Date.now() + 300000); // Блок на 5 минут
                   relayErrors.set(relay, 0);
                   if (log) log.warn('Relay ' + relay + ' circuit broken, 5m backoff');
                 } else {
@@ -1027,7 +1036,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (!had) notifyPeers();
         setStatus('connected');
         connAttempts = 0;
-        flushOutbox();
+        flushOutbox(); // При восстановлении связи пытаемся отправить отложенные
 
         const KQ = cfg.get('kQuery', 21000);
         const KA = cfg.get('kAnswer', 21001);
@@ -1038,6 +1047,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           try { q = JSON.parse(ev.content); } catch (_) { return; }
           if (!q || !q.vector || !Array.isArray(q.vector)) return;
           
+          // Используем кэш вместо прямого вызова DB.all()
           getSharedVectors().then(function(sharedNotes) {
             const floor = cfg.get('threshold', 0.30) - cfg.get('serendipity', 0.15);
             const toSend = [];
@@ -1079,7 +1089,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                 if (answers[j].id === ev.id) { isDupAnswer = true; break; }
               }
               if (!isDupAnswer) {
-                if (answers.length >= 100) answers.shift();
                 answers.push({
                   id: ev.id, text: data.text, vector: data.vector,
                   peer: ev.pubkey.slice(0, 6), fullPubkey: ev.pubkey, createdAt: Date.now()
@@ -1155,65 +1164,48 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return {
       onPeers: function(fn) { if (typeof fn === 'function') peerListeners.push(fn); },
       getStatus: function() { return netStatus; },
-      init: async function(callback) {
+      init: function(callback) {
         if (started) return Promise.resolve();
         onUpdate = callback;
         connAttempts = 0;
-        try {
-          const mod = await import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm');
-          // [FIX 2] Улучшенная нормализация импорта
-          const tools = (mod && mod.default && typeof mod.default.generateSecretKey === 'function') 
-            ? mod.default 
-            : (typeof mod.generateSecretKey === 'function' ? mod : null);
-          if (!tools || !tools.SimplePool) throw new Error('nostr-tools: incompatible module structure');
-          nostr = tools;
+        return Promise.resolve().then(function() {
+          return import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm');
+        }).then(function(mod) {
+          nostr = mod;
           const KEY = 'noomium:sk';
           let keyHex = null;
-          try { 
-            const stored = localStorage.getItem(KEY);
-            if (stored) {
-              if (/^[0-9a-f]{64}$/i.test(stored)) {
-                 keyHex = stored;
-                 localStorage.setItem(KEY, await encryptKey(keyHex));
-              } else {
-                 keyHex = await decryptKey(stored);
-              }
-            }
-          } catch (_) { /* ignore */ }
-
+          try { keyHex = localStorage.getItem(KEY); } catch (_) { /* ignore */ }
           if (!keyHex) {
-            const raw = tools.generateSecretKey();
-            keyHex = Array.from(raw).map(b => b.toString(16).padStart(2, '0')).join('');
-            try { localStorage.setItem(KEY, await encryptKey(keyHex)); } catch (_) { /* ignore */ }
+            const raw = mod.generateSecretKey();
+            keyHex = Array.from(raw).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+            try { localStorage.setItem(KEY, keyHex); } catch (_) { /* ignore */ }
           }
-          sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
-          pk = tools.getPublicKey(sk);
-          pool = new tools.SimplePool();
+          sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(function(b) { return parseInt(b, 16); }));
+          pk = mod.getPublicKey(sk);
+          pool = new mod.SimplePool();
           const nowSec = Math.floor(Date.now() / 1000);
           const room = cfg.get('room', 'noomium-main');
           const KQ = cfg.get('kQuery', 21000);
           const KA = cfg.get('kAnswer', 21001);
           const subWindow = cfg.get('subWindow', 300);
-          
-          started = true;
-          // [FIX 3] Перенос startHeartbeat после успешной подписки
           try {
             subscription = pool.subscribeMany(cfg.get('relays', []),
               [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
               { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
-            startHeartbeat();
           } catch (e) {
             if (log) log.warn('sub fail', String(e));
             scheduleReconnect();
           }
+          started = true;
+          startHeartbeat();
           notifyPeers();
           setStatus('connecting');
           if (log) log.info('net started, room=' + room);
-        } catch (err) {
+        }).catch(function(err) {
           if (log) log.error('nostr load fail', String(err && err.message || err));
           setStatus('failed');
           return Promise.resolve();
-        }
+        });
       },
       send: function(vector) {
         if (!pool || !nostr || AI.getMode() === 'demo') return;
@@ -1256,9 +1248,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         peers.clear();
         answers.length = 0;
         seen.clear();
-        outbox.length = 0;
-        relayErrors.clear();
         rateLimitedUntil.clear();
+        // Graceful reconnect: сохраняем ссылку на массив, очищаем содержимое
         peerListeners.splice(0, peerListeners.length);
         setStatus('disconnected');
       },
@@ -1270,6 +1261,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'DB', 'AI', 'Logger', 'Bus']);
 
+  // ============================================================
+  // Module: Modal (UI.Modal)
+  // Добавлены role="dialog", aria-modal, focus trap
+  // ============================================================
   DI.register('Modal', function() {
     let overlay = null, container = null, lastFocus = null, escHandler = null, trapHandler = null;
 
@@ -1291,6 +1286,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       container.innerHTML = '';
       lastFocus = document.activeElement;
 
+      // A11y: role и aria-modal
       overlay.setAttribute('role', 'dialog');
       overlay.setAttribute('aria-modal', 'true');
 
@@ -1361,6 +1357,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       };
       document.addEventListener('keydown', escHandler);
 
+      // A11y: Focus Trap
       if (trapHandler) {
         overlay.removeEventListener('keydown', trapHandler);
       }
@@ -1384,6 +1381,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       };
       overlay.addEventListener('keydown', trapHandler);
 
+      // Перемещаем фокус внутрь модалки
       setTimeout(function() {
         const focusable = container.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
         if (focusable.length > 0) focusable[0].focus();
@@ -1408,6 +1406,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return { open: openModal, close: closeModal };
   }, []);
 
+  // ============================================================
+  // Module: Toast (UI.Toast)
+  // ============================================================
   DI.register('Toast', function() {
     let container = null;
     const LIMIT = 3;
@@ -1446,6 +1447,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return { show: show };
   }, []);
 
+  // ============================================================
+  // Module: Progress (UI.Progress)
+  // ============================================================
   DI.register('Progress', function() {
     let overlay = null, fillEl = null, pctEl = null;
 
@@ -1481,6 +1485,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return { show: show, hide: hide, update: update };
   }, []);
 
+  // ============================================================
+  // Module: App (App.NOOmium)
+  // Удален механизм examples (seedSamples).
+  // Добавлен AbortController, chunked render, a11y, beforeunload.
+  // ============================================================
   DI.register('App', function(
     Logger, Bus, Store, Config, Utils, DB, AI, Net, I18n, Modal, Toast, Progress
   ) {
@@ -1491,9 +1500,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       'st.net.reconnecting': 'пересоединение', 'st.net.failed': 'нет сети',
       'ed.placeholder': 'О чём думаешь?', 'ed.chars': 'симв.',
       'btn.private': 'Личное', 'btn.public': 'Мир', 'btn.send': 'Послать', 'btn.sending': 'Отправка...',
-      'btn.save': 'Сохранить', 'btn.cancel': 'Отмена', 'btn.close': 'Закрыть', 'btn.edit': 'Развить',
+      'btn.save': 'Сохранить', 'btn.cancel': 'Отмена', 'btn.close': 'Закрыть', 'btn.edit': 'Редактировать',
       'btn.del': 'Удалить', 'btn.copy': 'Копия', 'btn.toggle.priv': 'Скрыть', 'btn.toggle.pub': 'Открыть',
-      'btn.back': 'Назад', 'btn.gotit': 'Понятно',
+      'btn.develop': 'Развить', 'btn.back': 'Назад', 'btn.gotit': 'Понятно',
       'sim.score': 'похожа на',
       'seg.local': 'Моё', 'seg.world': 'Мир', 'seg.seren': 'Озарения',
       'tab.stream': 'Поток', 'tab.base': 'База',
@@ -1507,7 +1516,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       'base.tag.private': 'лично', 'base.tag.shared': 'открыто',
       'base.wipe': 'Стереть базу',
       'base.wipe.confirm': 'Удалить все ваши мысли навсегда?',
-      'del.confirm': 'Удалить эту мысль навсегда?',
       'nv.delete.confirm': 'Удалить эту заметку навсегда?',
       'onb.dontshow': 'Больше не показывать',
       'toast.saved.private': 'сохранено лично', 'toast.saved.public': 'опубликовано',
@@ -1544,9 +1552,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       'st.net.reconnecting': 'reconnecting', 'st.net.failed': 'offline',
       'ed.placeholder': 'What are you thinking?', 'ed.chars': 'chars',
       'btn.private': 'Private', 'btn.public': 'World', 'btn.send': 'Send', 'btn.sending': 'Sending...',
-      'btn.save': 'Save', 'btn.cancel': 'Cancel', 'btn.close': 'Close', 'btn.edit': 'Develop',
+      'btn.save': 'Save', 'btn.cancel': 'Cancel', 'btn.close': 'Close', 'btn.edit': 'Edit',
       'btn.del': 'Delete', 'btn.copy': 'Copy', 'btn.toggle.priv': 'Hide', 'btn.toggle.pub': 'Share',
-      'btn.back': 'Back', 'btn.gotit': 'Got it',
+      'btn.develop': 'Develop', 'btn.back': 'Back', 'btn.gotit': 'Got it',
       'sim.score': 'similarity',
       'seg.local': 'Mine', 'seg.world': 'World', 'seg.seren': 'Insights',
       'tab.stream': 'Stream', 'tab.base': 'Base',
@@ -1560,7 +1568,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       'base.tag.private': 'private', 'base.tag.shared': 'open',
       'base.wipe': 'Wipe base',
       'base.wipe.confirm': 'Delete all thoughts forever?',
-      'del.confirm': 'Delete this thought forever?',
       'nv.delete.confirm': 'Delete this note forever?',
       'onb.dontshow': "Don't show again",
       'toast.saved.private': 'saved privately', 'toast.saved.public': 'shared',
@@ -1590,45 +1597,24 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       'help.gestures': 'Swipe cards left/right. Toggle World/Private chooses destination.'
     });
 
-    const appState = {
+    const state = {
       view: 'stream',
       seg: 'local',
       sendMode: 'private',
       sendLock: false,
       lastVec: null,
       lastQuery: 0,
-      lists: { local: [], world: [], seren: [] }
-    };
-
-    const uiState = {
-      activeIdx: { local: 0, world: 0, seren: 0 },
-      carouselObserver: null,
-      searchAbortController: null,
       searchTimer: null,
       baseSearchTimer: null,
-      windowHandlers: { resize: null, focusin: null, focusout: null, orientationchange: null, beforeunload: null },
-      noteViewEscHandler: null,
-      progressHandler: null
+      lists: { local: [], world: [], seren: [] },
+      activeIdx: { local: 0, world: 0, seren: 0 },
+      carouselObserver: null,
+      searchAbortController: null, // AbortController для гонок поиска
+      windowHandlers: { resize: null, focusin: null, focusout: null, orientationchange: null, beforeunload: null }
     };
 
-    let allNotesCache = null;
-    let allNotesCacheTime = 0;
-    const ALL_NOTES_TTL = 5 * 60 * 1000;
-
-    function getAllNotesCached() {
-      const now = Date.now();
-      if (allNotesCache && (now - allNotesCacheTime < ALL_NOTES_TTL)) {
-        return Promise.resolve(allNotesCache);
-      }
-      return DB.all().then(function(notes) {
-        allNotesCache = notes;
-        allNotesCacheTime = now;
-        return notes;
-      });
-    }
-
-    let cachedQuery = null;
-    let cachedRegex = null;
+    // Глобальная ссылка для обработчика Escape в NoteView
+    let activeNoteViewEscHandler = null;
 
     const PAPER_PLANE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
     const SPINNER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
@@ -1653,14 +1639,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (metaTheme) metaTheme.setAttribute('content', theme === 'light' ? '#fafafa' : '#0b0b10');
     }
 
-    function findItemById(id, list) {
-      for (let i = 0; i < list.length; i++) {
-        if (list[i].id === id) return list[i];
-      }
-      return null;
-    }
-
-    function buildHeaderMarkup() {
+    function buildMarkup() {
       return '<div class="hdr">' +
         '<div class="logo"><span class="logo-mark">N</span><span>NOO<span class="logo-dot">.</span>mium</span></div>' +
         '<div class="hdr-status">' +
@@ -1668,56 +1647,37 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           '<span class="hdr-st-sep">·</span>' +
           '<span class="hdr-st-item"><span class="hdr-st-dot load" id="st-ai-dot"></span><span id="st-ai-txt">' + translate('st.ai.loading') + '</span></span>' +
         '</div>' +
+        // A11y: aria-label для бургера
         '<button class="burger" id="btn-menu" aria-label="Menu" aria-expanded="false"><span class="burger-line"></span><span class="burger-line"></span><span class="burger-line"></span></button>' +
-      '</div>';
-    }
-
-    function buildSegmentsMarkup() {
-      return '<div class="seg">' +
-        '<button class="seg-b on" data-k="local"><span class="lbl">' + translate('seg.local') + '</span><span class="cnt" id="c-local">0</span></button>' +
-        '<button class="seg-b" data-k="world"><span class="lbl">' + translate('seg.world') + '</span><span class="cnt" id="c-world">0</span></button>' +
-        '<button class="seg-b" data-k="seren"><span class="lbl">' + translate('seg.seren') + '</span><span class="cnt" id="c-seren">0</span></button>' +
-      '</div>';
-    }
-
-    function buildCarouselWrapMarkup() {
-      return '<div class="carousel-wrap" id="carousel-wrap"></div>';
-    }
-
-    function buildEditorMarkup() {
-      return '<div class="ed"><textarea id="ed-ta" class="ed-ta" placeholder="' + Utils.esc(translate('ed.placeholder')) + '"></textarea>' +
-      '<div class="ed-foot"><span id="ed-cnt" class="ed-cnt">0 ' + translate('ed.chars') + '</span>' +
-      '<div class="ed-acts">' +
-        '<div class="tog-sw" id="mode-toggle" data-mode="private">' +
-          '<div class="tog-sw-thumb"></div>' +
-          '<div class="tog-sw-opt on" data-v="private">' + translate('btn.private') + '</div>' +
-          '<div class="tog-sw-opt" data-v="world">' + translate('btn.public') + '</div>' +
+      '</div>' +
+      '<div class="ws" id="ws-stream">' +
+        '<div class="seg">' +
+          '<button class="seg-b on" data-k="local"><span class="lbl">' + translate('seg.local') + '</span><span class="cnt" id="c-local">0</span></button>' +
+          '<button class="seg-b" data-k="world"><span class="lbl">' + translate('seg.world') + '</span><span class="cnt" id="c-world">0</span></button>' +
+          '<button class="seg-b" data-k="seren"><span class="lbl">' + translate('seg.seren') + '</span><span class="cnt" id="c-seren">0</span></button>' +
         '</div>' +
-        '<button class="btn-send" id="btn-send" aria-label="' + translate('btn.send') + '">' + PAPER_PLANE_SVG + '</button>' +
-      '</div></div></div>';
-    }
-
-    function buildBaseMarkup() {
-      return '<div class="ws base" id="ws-base" style="display:none">' +
+        '<div class="carousel-wrap" id="carousel-wrap"></div>' +
+        '<div class="ed"><textarea id="ed-ta" class="ed-ta" placeholder="' + Utils.esc(translate('ed.placeholder')) + '"></textarea>' +
+        '<div class="ed-foot"><span id="ed-cnt" class="ed-cnt">0 ' + translate('ed.chars') + '</span>' +
+        '<div class="ed-acts">' +
+          '<div class="tog-sw" id="mode-toggle" data-mode="private">' +
+            '<div class="tog-sw-thumb"></div>' +
+            '<div class="tog-sw-opt on" data-v="private">' + translate('btn.private') + '</div>' +
+            '<div class="tog-sw-opt" data-v="world">' + translate('btn.public') + '</div>' +
+          '</div>' +
+          '<button class="btn-send" id="btn-send" aria-label="' + translate('btn.send') + '">' + PAPER_PLANE_SVG + '</button>' +
+        '</div></div></div>' +
+      '</div>' +
+      '<div class="ws base" id="ws-base" style="display:none">' +
         '<div class="base-h"><div class="base-stats" id="base-stats"></div>' +
         '<div class="base-ctrls"><input type="text" class="base-search" id="base-q" placeholder="' + Utils.esc(translate('base.search')) + '" />' +
         '<select class="base-sort" id="base-sort"><option value="new">' + translate('base.sort.new') + '</option><option value="old">' + translate('base.sort.old') + '</option><option value="az">' + translate('base.sort.az') + '</option></select></div></div>' +
         '<div class="base-list" id="base-list"></div>' +
-      '</div>';
-    }
-
-    function buildBottomTabMarkup() {
-      return '<div class="btab">' +
+      '</div>' +
+      '<div class="btab">' +
         '<button class="btab-b on" data-v="stream"><span class="btab-ic">◇</span><span>' + translate('tab.stream') + '</span></button>' +
         '<button class="btab-b" data-v="base"><span class="btab-ic">▤</span><span>' + translate('tab.base') + '</span></button>' +
       '</div>';
-    }
-
-    function buildMarkup() {
-      return buildHeaderMarkup() + 
-             '<div class="ws" id="ws-stream">' + buildSegmentsMarkup() + buildCarouselWrapMarkup() + buildEditorMarkup() + '</div>' + 
-             buildBaseMarkup() + 
-             buildBottomTabMarkup();
     }
 
     function setStatus(which, text, cls) {
@@ -1728,7 +1688,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function switchView(viewName) {
-      appState.view = viewName;
+      state.view = viewName;
       document.querySelectorAll('.btab-b').forEach(function(b) {
         b.classList.toggle('on', b.getAttribute('data-v') === viewName);
       });
@@ -1740,30 +1700,27 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function setSegment(segKey) {
-      appState.seg = segKey;
+      state.seg = segKey;
       document.querySelectorAll('.seg-b').forEach(function(b) {
         b.classList.toggle('on', b.getAttribute('data-k') === segKey);
       });
       renderCarousel();
     }
 
+    // 1. XSS FIX: Безопасная подсветка текста. Разбиваем текст через RegExp с capturing group,
+    // затем экранируем каждую часть отдельно.
     function highlightText(text, query) {
       if (!query) return Utils.esc(text);
-      if (query !== cachedQuery) {
-        const words = query.toLowerCase().split(/\s+/).filter(function(w) { return w.length > 2; });
-        if (words.length === 0) {
-          cachedRegex = null;
-        } else {
-          const escapedWords = words.map(function(w) { return Utils.escRe(w); });
-          cachedRegex = new RegExp('(' + escapedWords.join('|') + ')', 'gi');
-        }
-        cachedQuery = query;
-      }
-      if (!cachedRegex) return Utils.esc(text);
+      const words = query.toLowerCase().split(/\s+/).filter(function(w) { return w.length > 2; });
+      if (words.length === 0) return Utils.esc(text);
       
-      const parts = String(text).split(cachedRegex);
+      const escapedWords = words.map(function(w) { return Utils.escRe(w); });
+      const re = new RegExp('(' + escapedWords.join('|') + ')', 'gi');
+      const parts = String(text).split(re);
+      
       let out = '';
       for (let i = 0; i < parts.length; i++) {
+        // Нечетные индексы — это совпадения (captured groups)
         if (i % 2 === 1) {
           out += '<mark>' + Utils.esc(parts[i]) + '</mark>';
         } else {
@@ -1789,19 +1746,20 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       const queryText = getEditorValue();
       let actions = '';
 
+      // A11y: Добавлены aria-label ко всем кнопкам
       if (own) {
         actions =
-          '<button class="fi-act primary" data-act="edit" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(translate('btn.edit')) + '">' + translate('btn.edit') + '</button>' +
+          '<button class="fi-act primary" data-act="develop" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(translate('btn.develop')) + '">' + translate('btn.develop') + '</button>' +
           '<button class="fi-act" data-act="toggle" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(item.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub')) + '">' +
             (item.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub')) +
           '</button>' +
           '<button class="fi-act" data-act="copy" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(translate('btn.copy')) + '">' + translate('btn.copy') + '</button>' +
           '<button class="fi-act danger" data-act="del" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(translate('btn.del')) + '">' + translate('btn.del') + '</button>';
       } else {
-        actions = '';
+        actions = '<button class="fi-act primary" data-act="develop" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(translate('btn.develop')) + '">' + translate('btn.develop') + '</button>';
       }
 
-      return '<div class="fi t-' + appState.seg + '" data-id="' + Utils.esc(item.id) + '">' +
+      return '<div class="fi t-' + state.seg + '" data-id="' + Utils.esc(item.id) + '">' +
         '<div class="fi-h"><span class="fi-badge">' + Utils.esc(typeLabel) + '</span><span class="fi-score">' + scoreHTML + '</span></div>' +
         '<div class="fi-body">' + highlightText(item.text, queryText) + '</div>' +
         '<div class="fi-foot">' + actions + '</div></div>';
@@ -1811,19 +1769,20 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       const wrap = document.getElementById('carousel-wrap');
       if (!wrap) return;
 
-      if (uiState.carouselObserver) {
-        try { uiState.carouselObserver.disconnect(); } catch (_) { /* ignore */ }
-        uiState.carouselObserver = null;
+      // 3. УТЕЧКИ ПАМЯТИ: Гарантированное отключение Observer перед созданием нового
+      if (state.carouselObserver) {
+        try { state.carouselObserver.disconnect(); } catch (_) { /* ignore */ }
+        state.carouselObserver = null;
       }
 
-      const list = appState.lists[appState.seg];
+      const list = state.lists[state.seg];
       if (!list || list.length === 0) {
         const emptyMessages = {
           local: { t: translate('empty.local.t'), d: translate('empty.local.d') },
           world: { t: translate('empty.world.t'), d: translate('empty.world.d') },
           seren: { t: translate('empty.seren.t'), d: translate('empty.seren.d') }
         };
-        const msg = emptyMessages[appState.seg];
+        const msg = emptyMessages[state.seg];
         wrap.innerHTML = '<div class="feed-empty"><div class="feed-empty-ic">◇</div>' +
           '<div class="feed-empty-t">' + Utils.esc(msg.t) + '</div>' +
           '<div class="feed-empty-d">' + Utils.esc(msg.d) + '</div></div>';
@@ -1845,11 +1804,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
       const carousel = document.getElementById('carousel');
       if (carousel && 'IntersectionObserver' in window) {
-        uiState.carouselObserver = new IntersectionObserver(function(entries) {
+        state.carouselObserver = new IntersectionObserver(function(entries) {
           entries.forEach(function(entry) {
             if (entry.isIntersecting && entry.intersectionRatio >= 0.55) {
               const idx = parseInt(entry.target.getAttribute('data-idx') || '0', 10);
-              uiState.activeIdx[appState.seg] = idx;
+              state.activeIdx[state.seg] = idx;
               updateCarouselDots(idx, list.length);
               carousel.querySelectorAll('.fi').forEach(function(fi) { fi.classList.remove('active'); });
               const fi = entry.target.querySelector('.fi');
@@ -1858,34 +1817,35 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           });
         }, { root: carousel, threshold: [0.55] });
         carousel.querySelectorAll('.carousel-item').forEach(function(item) {
-          uiState.carouselObserver.observe(item);
+          state.carouselObserver.observe(item);
         });
       }
 
+      // A11y: Навигация стрелками для карусели
       if (carousel) {
         carousel.addEventListener('keydown', function(e) {
           if (e.key === 'ArrowRight') {
             e.preventDefault();
-            if (uiState.activeIdx[appState.seg] < list.length - 1) {
-              uiState.activeIdx[appState.seg]++;
-              const target = carousel.querySelector('[data-idx="' + uiState.activeIdx[appState.seg] + '"]');
+            if (state.activeIdx[state.seg] < list.length - 1) {
+              state.activeIdx[state.seg]++;
+              const target = carousel.querySelector('[data-idx="' + state.activeIdx[state.seg] + '"]');
               if (target) target.scrollIntoView({behavior: 'smooth', inline: 'center'});
-              updateCarouselDots(uiState.activeIdx[appState.seg], list.length);
+              updateCarouselDots(state.activeIdx[state.seg], list.length);
             }
           } else if (e.key === 'ArrowLeft') {
             e.preventDefault();
-            if (uiState.activeIdx[appState.seg] > 0) {
-              uiState.activeIdx[appState.seg]--;
-              const target = carousel.querySelector('[data-idx="' + uiState.activeIdx[appState.seg] + '"]');
+            if (state.activeIdx[state.seg] > 0) {
+              state.activeIdx[state.seg]--;
+              const target = carousel.querySelector('[data-idx="' + state.activeIdx[state.seg] + '"]');
               if (target) target.scrollIntoView({behavior: 'smooth', inline: 'center'});
-              updateCarouselDots(uiState.activeIdx[appState.seg], list.length);
+              updateCarouselDots(state.activeIdx[state.seg], list.length);
             }
           }
         });
         
         carousel.scrollLeft = 0;
       }
-      uiState.activeIdx[appState.seg] = 0;
+      state.activeIdx[state.seg] = 0;
     }
 
     function updateCarouselDots(idx, total) {
@@ -1899,27 +1859,41 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (!element) return;
       const id = element.getAttribute('data-id');
 
-      if (action === 'edit') {
-        openNoteView(id);
+      if (action === 'develop') {
+        let item = null;
+        const list = state.lists[state.seg];
+        for (let i = 0; i < list.length; i++) {
+          if (list[i].id === id) { item = list[i]; break; }
+        }
+        if (item) {
+          setEditorValue(item.text);
+          updateCounter();
+          const ta = document.getElementById('ed-ta');
+          if (ta) ta.focus();
+        }
         return;
       }
 
       if (action === 'copy') {
-        const item = findItemById(id, appState.lists[appState.seg]);
+        let item = null;
+        const list = state.lists[state.seg];
+        for (let i = 0; i < list.length; i++) {
+          if (list[i].id === id) { item = list[i]; break; }
+        }
         if (item) copyToClipboard(item.text);
         return;
       }
 
       if (action === 'del') {
-        if (!confirm(translate('del.confirm'))) return;
+        if (!confirm(translate('base.wipe.confirm').replace('все ваши мысли', 'эту мысль'))) return;
         DB.del(id).then(function() {
           toast(translate('toast.deleted'), 'ok');
-          appState.lists[appState.seg] = appState.lists[appState.seg].filter(function(n) { return n.id !== id; });
-          if (uiState.activeIdx[appState.seg] >= appState.lists[appState.seg].length) {
-            uiState.activeIdx[appState.seg] = Math.max(0, appState.lists[appState.seg].length - 1);
+          state.lists[state.seg] = state.lists[state.seg].filter(function(n) { return n.id !== id; });
+          if (state.activeIdx[state.seg] >= state.lists[state.seg].length) {
+            state.activeIdx[state.seg] = Math.max(0, state.lists[state.seg].length - 1);
           }
           renderCarousel();
-          if (appState.view === 'base') renderBase();
+          if (state.view === 'base') renderBase();
         }).catch(function(err) {
           toast(String(err && err.message || err) || 'Delete failed', 'err');
         });
@@ -1933,7 +1907,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           return DB.put(record).then(function() {
             toast(record.shared ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
             executeSearch();
-            if (appState.view === 'base') renderBase();
+            if (state.view === 'base') renderBase();
           });
         }).catch(function(err) {
           toast(String(err && err.message || err) || 'Toggle failed', 'err');
@@ -1972,14 +1946,14 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function handleSend() {
-      if (appState.sendLock) return;
+      if (state.sendLock) return;
       const text = getEditorValue().trim();
       if (!text) { toast(translate('toast.empty'), 'warn'); return; }
       if (!AI.ready()) { toast(translate('toast.ai.notready'), 'err'); return; }
 
-      const isWorld = appState.sendMode === 'world';
+      const isWorld = state.sendMode === 'world';
       const btn = document.getElementById('btn-send');
-      appState.sendLock = true;
+      state.sendLock = true;
 
       if (btn) {
         btn.classList.add('sending');
@@ -1990,8 +1964,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       AI.embed(text)
         .then(function(vector) {
           return DB.put({
-            // [FIX 4] Улучшенная генерация id для заметок
-            id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            id: Math.random().toString(36).slice(2, 10),
             text: text,
             vector: vector,
             shared: !!isWorld,
@@ -2001,16 +1974,16 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         .then(function() {
           setEditorValue('');
           updateCounter();
-          appState.lastVec = null;
+          state.lastVec = null;
           toast(isWorld ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
           executeSearch();
-          if (appState.view === 'base') renderBase();
+          if (state.view === 'base') renderBase();
         })
         .catch(function(err) {
           toast(String(err && err.message || err) || 'Send failed', 'err');
         })
         .finally(function() {
-          appState.sendLock = false;
+          state.sendLock = false;
           if (btn) {
             btn.classList.remove('sending');
             btn.disabled = false;
@@ -2020,80 +1993,65 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function handleToggleMode(newMode) {
-      if (newMode === appState.sendMode) return;
-      appState.sendMode = newMode;
+      if (newMode === state.sendMode) return;
+      state.sendMode = newMode;
       const toggleEl = document.getElementById('mode-toggle');
       if (!toggleEl) return;
-      toggleEl.setAttribute('data-mode', appState.sendMode);
+      toggleEl.setAttribute('data-mode', state.sendMode);
       toggleEl.querySelectorAll('.tog-sw-opt').forEach(function(opt) {
-        opt.classList.toggle('on', opt.getAttribute('data-v') === appState.sendMode);
+        opt.classList.toggle('on', opt.getAttribute('data-v') === state.sendMode);
       });
     }
 
+    // 4. ГОНКИ ПОИСКА: Использование AbortController
     function executeSearch(force) {
       const text = getEditorValue();
       if (!text || !AI.ready()) {
-        appState.lists = { local: [], world: [], seren: [] };
+        state.lists = { local: [], world: [], seren: [] };
         updateCounts();
         renderCarousel();
         return Promise.resolve();
       }
 
-      if (uiState.searchAbortController) {
-        uiState.searchAbortController.abort();
+      if (state.searchAbortController) {
+        state.searchAbortController.abort();
       }
       const controller = new AbortController();
-      uiState.searchAbortController = controller;
+      state.searchAbortController = controller;
       const signal = controller.signal;
 
       return AI.embed(text).then(function(vec) {
         if (signal.aborted) return;
         if (!vec) return;
-        if (!appState.lastVec || AI.cosine(vec, appState.lastVec) < 0.98 || force) {
-          appState.lastVec = vec;
-          appState.lastQuery = Date.now();
+        if (!state.lastVec || AI.cosine(vec, state.lastVec) < 0.98 || force) {
+          state.lastVec = vec;
+          state.lastQuery = Date.now();
           if (AI.getMode() === 'model' && Net && typeof Net.send === 'function') {
             Net.send(vec);
           }
         }
-        return getAllNotesCached().then(function(notes) {
+        return DB.all().then(function(notes) {
           if (signal.aborted) return;
           const localScored = [];
           for (let i = 0; i < notes.length; i++) {
             const note = notes[i];
             if (note && note.vector) {
-              localScored.push({ 
-                id: note.id, 
-                text: note.text, 
-                vector: note.vector, 
-                score: AI.cosine(vec, note.vector), 
-                shared: note.shared, 
-                peer: note.peer, 
-                createdAt: note.createdAt 
-              });
+              localScored.push(Object.assign({}, note, { score: AI.cosine(vec, note.vector) }));
             }
           }
           const worldAnswers = Net.activeAnswers();
           const worldScored = [];
           for (let i = 0; i < worldAnswers.length; i++) {
-            worldScored.push({ 
-              id: worldAnswers[i].id, 
-              text: worldAnswers[i].text, 
-              vector: worldAnswers[i].vector, 
-              score: AI.cosine(vec, worldAnswers[i].vector), 
-              shared: worldAnswers[i].shared, 
-              peer: worldAnswers[i].peer, 
-              createdAt: worldAnswers[i].createdAt 
-            });
+            worldScored.push(Object.assign({}, worldAnswers[i], { score: AI.cosine(vec, worldAnswers[i].vector) }));
           }
           const threshold = Config.get('threshold', 0.30);
           const serendipityDelta = Config.get('serendipity', 0.15);
 
-          appState.lists.local = localScored.filter(function(n) { return n.score >= threshold; })
+          state.lists.local = localScored.filter(function(n) { return n.score >= threshold; })
             .sort(function(a, b) { return b.score - a.score; });
-          appState.lists.world = worldScored.filter(function(n) { return n.score >= threshold; })
+          state.lists.world = worldScored.filter(function(n) { return n.score >= threshold; })
             .sort(function(a, b) { return b.score - a.score; });
-          appState.lists.seren = localScored.concat(worldScored)
+          state.lists.seren = localScored.concat(worldScored)
             .filter(function(n) { return n.score >= (threshold - serendipityDelta) && n.score < threshold; })
             .sort(function(a, b) { return b.score - a.score; });
 
@@ -2104,15 +2062,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (signal.aborted) return;
         toast(String(err && err.message || err) || 'Search failed', 'err');
         if (Logger) Logger.warn('executeSearch error', String(err && err.message || err));
-      }).finally(function() {
-        uiState.searchAbortController = null;
       });
     }
 
     function updateCounts() {
       ['local', 'world', 'seren'].forEach(function(key) {
         const el = document.getElementById('c-' + key);
-        if (el) el.textContent = appState.lists[key].length;
+        if (el) el.textContent = state.lists[key].length;
       });
     }
 
@@ -2121,8 +2077,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
              '<div class="stat-l">' + Utils.esc(label) + '</div></div>';
     }
 
+    // 8. CHUNKED RENDER: Рендеринг базы частями для больших списков
     function renderBase() {
-      getAllNotesCached().then(function(allNotes) {
+      DB.all().then(function(allNotes) {
         const statsEl = document.getElementById('base-stats');
         if (statsEl) {
           let sharedCount = 0;
@@ -2202,6 +2159,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       });
     }
 
+    // 3. УТЕЧКИ ПАМЯТИ: Глобальное управление обработчиком NoteView
     function openNoteView(id) {
       DB.get(id).then(function(record) {
         if (!record) return;
@@ -2209,9 +2167,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         let isEditing = false;
         let nvOverlay = null;
 
-        if (uiState.noteViewEscHandler) {
-          document.removeEventListener('keydown', uiState.noteViewEscHandler);
-          uiState.noteViewEscHandler = null;
+        // Удаляем предыдущий обработчик, если он был
+        if (activeNoteViewEscHandler) {
+          document.removeEventListener('keydown', activeNoteViewEscHandler);
+          activeNoteViewEscHandler = null;
         }
 
         function renderNoteView() {
@@ -2324,9 +2283,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         }
 
         function closeNoteView() {
-          if (uiState.noteViewEscHandler) {
-            document.removeEventListener('keydown', uiState.noteViewEscHandler);
-            uiState.noteViewEscHandler = null;
+          if (activeNoteViewEscHandler) {
+            document.removeEventListener('keydown', activeNoteViewEscHandler);
+            activeNoteViewEscHandler = null;
           }
           if (nvOverlay) {
             nvOverlay.classList.remove('on');
@@ -2339,12 +2298,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           }
         }
 
-        uiState.noteViewEscHandler = function(e) {
+        activeNoteViewEscHandler = function(e) {
           if (e.key === 'Escape') {
             closeNoteView();
           }
         };
-        document.addEventListener('keydown', uiState.noteViewEscHandler);
+        document.addEventListener('keydown', activeNoteViewEscHandler);
 
         renderNoteView();
       }).catch(function(err) {
@@ -2398,7 +2357,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             }
             DB.bulkPut(clean).then(function() {
               toast('✓ ' + clean.length, 'ok');
-              if (appState.view === 'base') renderBase();
+              if (state.view === 'base') renderBase();
               executeSearch();
             }).catch(function(err) {
               toast(String(err && err.message || err) || 'Import failed', 'err');
@@ -2446,7 +2405,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           });
           Modal.close();
           setTimeout(function() {
-            cleanup();
+            cleanup(); // Очищаем обработчики перед ремаунтом
             const root = document.getElementById('app-root');
             if (root) root.innerHTML = '';
             mountApp();
@@ -2569,6 +2528,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       dangerSection.innerHTML = '<div class="set-sec-t">' + translate('set.danger') + '</div>';
       const wipeBtn = document.createElement('button');
       wipeBtn.className = 'btn-send';
+      // Использование CSS-переменной --danger-glow
       wipeBtn.style.cssText = 'width:100%;background:var(--danger-glow);color:var(--danger);border:1px solid rgba(239,68,68,.3);box-shadow:none';
       wipeBtn.textContent = translate('base.wipe');
       wipeBtn.onclick = function() {
@@ -2662,8 +2622,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (editor) {
         editor.addEventListener('input', function() {
           updateCounter();
-          if (uiState.searchTimer) clearTimeout(uiState.searchTimer);
-          uiState.searchTimer = setTimeout(function() { executeSearch(); }, Config.get('debounce', 800));
+          if (state.searchTimer) clearTimeout(state.searchTimer);
+          state.searchTimer = setTimeout(function() { executeSearch(); }, Config.get('debounce', 800));
         });
       }
 
@@ -2710,8 +2670,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       const baseSearchInput = document.getElementById('base-q');
       if (baseSearchInput) {
         baseSearchInput.addEventListener('input', function() {
-          if (uiState.baseSearchTimer) clearTimeout(uiState.baseSearchTimer);
-          uiState.baseSearchTimer = setTimeout(renderBase, 200);
+          if (state.baseSearchTimer) clearTimeout(state.baseSearchTimer);
+          state.baseSearchTimer = setTimeout(renderBase, 200);
         });
       }
 
@@ -2733,6 +2693,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         }
       });
 
+      AI.onProgress(function(percent) {
+        setStatus('ai', translate('st.ai.loading') + ' ' + Math.round(percent) + '%', 'load');
+        Progress.update(percent);
+      });
+
       Net.onPeers(function(count) {
         setStatus('net',
           count > 0
@@ -2740,7 +2705,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             : translate('st.net.listen'),
           count > 0 ? 'ok' : 'load'
         );
-        if (appState.view === 'stream') executeSearch();
+        if (state.view === 'stream') executeSearch();
       });
 
       Bus.on('net:status', function(payload) {
@@ -2759,20 +2724,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         }
         setStatus('net', text, cls);
       });
-      
-      Bus.on('db:change', function() { allNotesCache = null; });
     }
 
     function bootApp() {
       setStatus('net', translate('st.net.connecting'), 'load');
       setStatus('ai', translate('st.ai.loading'), 'load');
       Progress.show();
-
-      uiState.progressHandler = function(percent) {
-        setStatus('ai', translate('st.ai.loading') + ' ' + Math.round(percent) + '%', 'load');
-        Progress.update(percent);
-      };
-      AI.onProgress(uiState.progressHandler);
 
       AI.load().then(function() {
         Progress.hide();
@@ -2800,7 +2757,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function setupWindowListeners() {
-      const handlers = uiState.windowHandlers;
+      const handlers = state.windowHandlers;
 
       if (handlers.resize) window.removeEventListener('resize', handlers.resize);
       if (handlers.focusin) window.removeEventListener('focusin', handlers.focusin);
@@ -2818,6 +2775,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       handlers.focusout = setVH;
       handlers.orientationchange = function() { setTimeout(setVH, 100); };
       
+      // 8. OFFLINE-FIRST: Предупреждение при несохранённом редакторе
       handlers.beforeunload = function(e) {
         const ta = document.getElementById('ed-ta');
         if (ta && ta.value.trim().length > 0) {
@@ -2835,20 +2793,17 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       setVH();
     }
 
+    // 3. УТЕЧКИ ПАМЯТИ: Функция cleanup для полного сброса состояния и обработчиков
     function cleanup() {
-      if (uiState.carouselObserver) {
-        try { uiState.carouselObserver.disconnect(); } catch (_) {}
-        uiState.carouselObserver = null;
+      if (state.carouselObserver) {
+        try { state.carouselObserver.disconnect(); } catch (_) {}
+        state.carouselObserver = null;
       }
-      if (uiState.noteViewEscHandler) {
-        document.removeEventListener('keydown', uiState.noteViewEscHandler);
-        uiState.noteViewEscHandler = null;
+      if (activeNoteViewEscHandler) {
+        document.removeEventListener('keydown', activeNoteViewEscHandler);
+        activeNoteViewEscHandler = null;
       }
-      if (uiState.progressHandler) {
-        AI.offProgress(uiState.progressHandler);
-        uiState.progressHandler = null;
-      }
-      const handlers = uiState.windowHandlers;
+      const handlers = state.windowHandlers;
       if (handlers.resize) window.removeEventListener('resize', handlers.resize);
       if (handlers.focusin) window.removeEventListener('focusin', handlers.focusin);
       if (handlers.focusout) window.removeEventListener('focusout', handlers.focusout);
@@ -2866,7 +2821,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     function mountApp() {
       try {
-        cleanup();
+        cleanup(); // Гарантированная очистка перед монтированием
         
         let root = document.getElementById('app-root');
         if (!root) {
@@ -2954,19 +2909,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     bootstrap();
   }
 
+  // 8. OFFLINE-FIRST: Inline Service Worker
   if ('serviceWorker' in navigator) {
     const swCode = `
-      const CACHE = 'noomium-v2';
+      const CACHE = 'noomium-v1';
       self.addEventListener('install', e => { self.skipWaiting(); });
-      self.addEventListener('activate', e => { 
-        e.waitUntil(
-          caches.keys().then(cacheNames => {
-            return Promise.all(
-              cacheNames.filter(cacheName => cacheName !== CACHE).map(cacheName => caches.delete(cacheName))
-            );
-          }).then(() => self.clients.claim())
-        );
-      });
+      self.addEventListener('activate', e => { e.waitUntil(clients.claim()); });
       self.addEventListener('fetch', e => {
         if (e.request.method !== 'GET') return;
         e.respondWith(
