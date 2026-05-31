@@ -394,9 +394,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 (function() {
   'use strict';
 
-  // ============================================================
-  // DI с проверкой циклических зависимостей
-  // ============================================================
   const DI = (() => {
     const factories = new Map();
     const instances = new Map();
@@ -653,6 +650,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               const req = { result: null, onsuccess: null, onerror: null };
               try {
                 const r = fn(mockStore);
+                // [FIX 1] Проверка синхронного выполнения mockStore (put/delete)
+                if (!r || typeof r.onsuccess !== 'function') {
+                  resolve(r && r.result !== undefined ? r.result : r);
+                  return;
+                }
                 req.result = r.result !== undefined ? r.result : r;
                 req.onsuccess = function() { resolve(req.result); };
                 req.onerror = function(e) { reject(e); };
@@ -1159,8 +1161,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         connAttempts = 0;
         try {
           const mod = await import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm');
-          // [FIX 2] Нормализация импортированного модуля для совместимости
-          const tools = mod.default || mod;
+          // [FIX 2] Улучшенная нормализация импорта
+          const tools = (mod && mod.default && typeof mod.default.generateSecretKey === 'function') 
+            ? mod.default 
+            : (typeof mod.generateSecretKey === 'function' ? mod : null);
+          if (!tools || !tools.SimplePool) throw new Error('nostr-tools: incompatible module structure');
           nostr = tools;
           const KEY = 'noomium:sk';
           let keyHex = null;
@@ -1177,31 +1182,30 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           } catch (_) { /* ignore */ }
 
           if (!keyHex) {
-            // [FIX 2] Использование tools вместо mod
             const raw = tools.generateSecretKey();
             keyHex = Array.from(raw).map(b => b.toString(16).padStart(2, '0')).join('');
             try { localStorage.setItem(KEY, await encryptKey(keyHex)); } catch (_) { /* ignore */ }
           }
           sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
-          // [FIX 2] Использование tools вместо mod
           pk = tools.getPublicKey(sk);
-          // [FIX 2] Использование tools вместо mod
           pool = new tools.SimplePool();
           const nowSec = Math.floor(Date.now() / 1000);
           const room = cfg.get('room', 'noomium-main');
           const KQ = cfg.get('kQuery', 21000);
           const KA = cfg.get('kAnswer', 21001);
           const subWindow = cfg.get('subWindow', 300);
+          
+          started = true;
+          // [FIX 3] Перенос startHeartbeat после успешной подписки
           try {
             subscription = pool.subscribeMany(cfg.get('relays', []),
               [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
               { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
+            startHeartbeat();
           } catch (e) {
             if (log) log.warn('sub fail', String(e));
             scheduleReconnect();
           }
-          started = true;
-          startHeartbeat();
           notifyPeers();
           setStatus('connecting');
           if (log) log.info('net started, room=' + room);
@@ -1480,7 +1484,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   DI.register('App', function(
     Logger, Bus, Store, Config, Utils, DB, AI, Net, I18n, Modal, Toast, Progress
   ) {
-    // [FIX 1] Добавлен ключ 'del.confirm' в оба словаря
     I18n.addDict('ru', {
       'app.name': 'NOOmium',
       'st.net': 'сеть', 'st.ai.loading': 'модель', 'st.ai.ready': 'ии', 'st.ai.demo': 'ии/хеш',
@@ -1908,7 +1911,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }
 
       if (action === 'del') {
-        // [FIX 1] Использование правильного ключа перевода для confirm
         if (!confirm(translate('del.confirm'))) return;
         DB.del(id).then(function() {
           toast(translate('toast.deleted'), 'ok');
@@ -1988,7 +1990,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       AI.embed(text)
         .then(function(vector) {
           return DB.put({
-            id: Math.random().toString(36).slice(2, 10),
+            // [FIX 4] Улучшенная генерация id для заметок
+            id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
             text: text,
             vector: vector,
             shared: !!isWorld,
