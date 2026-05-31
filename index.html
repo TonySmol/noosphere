@@ -567,7 +567,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return { t: t, setLang: setLang, getLang: getLang, addDict: addDict, onChange: onChange };
   }, ['Store', 'Bus']);
 
-  // 1.2. Config: модель Xenova/multilingual-e5-small, dim: 384
   DI.register('Config', function(store, log) {
     const KEY = 'cfg';
     const defaults = {
@@ -596,7 +595,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Store', 'Logger']);
 
-  // 2.5. DB: исправлен mockStore для корректной работы tx().then
   DI.register('DB', function(cfg, log, bus) {
     let db = null, mem = null;
 
@@ -721,9 +719,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'Logger', 'Bus']);
 
-  // [FIX] 1.1. Удалена функция verifyAndImport для устранения ошибки Hash mismatch
-
-  // 2.1. AI: offProgress, LRU-кэш 300 элементов
   DI.register('AI', function(cfg, log, bus) {
     let extractor = null, mode = 'loading';
     const cache = new Map(); 
@@ -753,7 +748,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     function doLoad(onProgress, attempt) {
       attempt = attempt || 0;
       const MODEL = cfg.get('model', 'Xenova/multilingual-e5-small');
-      // [FIX] 1.1. Стандартный динамический импорт без проверки хэша
       return import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2').then(function(mod) {
         if (mod.env) { mod.env.allowLocalModels = false; mod.env.useBrowserCache = true; }
         return mod.pipeline('feature-extraction', MODEL, {
@@ -843,9 +837,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'Logger', 'Bus']);
 
-  // 1.2. Net: шифрование приватного ключа через Web Crypto API
-  // 2.2. Net: очистка outbox и relayErrors при stop
-  // 2.3. Net: ограничение answers до 100 элементов
   DI.register('Net', function(cfg, DB, AI, log, bus) {
     let pool = null, sk = null, pk = null, queryId = null;
     const peers = new Map();
@@ -1086,7 +1077,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                 if (answers[j].id === ev.id) { isDupAnswer = true; break; }
               }
               if (!isDupAnswer) {
-                // 2.3. Ограничение размера answers
                 if (answers.length >= 100) answers.shift();
                 answers.push({
                   id: ev.id, text: data.text, vector: data.vector,
@@ -1168,9 +1158,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         onUpdate = callback;
         connAttempts = 0;
         try {
-          // [FIX] 1.1. Стандартный динамический импорт без проверки хэша
           const mod = await import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm');
-          nostr = mod;
+          // [FIX 2] Нормализация импортированного модуля для совместимости
+          const tools = mod.default || mod;
+          nostr = tools;
           const KEY = 'noomium:sk';
           let keyHex = null;
           try { 
@@ -1186,13 +1177,16 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           } catch (_) { /* ignore */ }
 
           if (!keyHex) {
-            const raw = mod.generateSecretKey();
+            // [FIX 2] Использование tools вместо mod
+            const raw = tools.generateSecretKey();
             keyHex = Array.from(raw).map(b => b.toString(16).padStart(2, '0')).join('');
             try { localStorage.setItem(KEY, await encryptKey(keyHex)); } catch (_) { /* ignore */ }
           }
           sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
-          pk = mod.getPublicKey(sk);
-          pool = new mod.SimplePool();
+          // [FIX 2] Использование tools вместо mod
+          pk = tools.getPublicKey(sk);
+          // [FIX 2] Использование tools вместо mod
+          pool = new tools.SimplePool();
           const nowSec = Math.floor(Date.now() / 1000);
           const room = cfg.get('room', 'noomium-main');
           const KQ = cfg.get('kQuery', 21000);
@@ -1258,7 +1252,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         peers.clear();
         answers.length = 0;
         seen.clear();
-        // 2.2. Очистка outbox и relayErrors
         outbox.length = 0;
         relayErrors.clear();
         rateLimitedUntil.clear();
@@ -1487,7 +1480,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   DI.register('App', function(
     Logger, Bus, Store, Config, Utils, DB, AI, Net, I18n, Modal, Toast, Progress
   ) {
-    // [FIX] 2.1. Обновлены переводы: 'btn.edit' теперь 'Развить'/'Develop', 'btn.develop' удалён
+    // [FIX 1] Добавлен ключ 'del.confirm' в оба словаря
     I18n.addDict('ru', {
       'app.name': 'NOOmium',
       'st.net': 'сеть', 'st.ai.loading': 'модель', 'st.ai.ready': 'ии', 'st.ai.demo': 'ии/хеш',
@@ -1511,6 +1504,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       'base.tag.private': 'лично', 'base.tag.shared': 'открыто',
       'base.wipe': 'Стереть базу',
       'base.wipe.confirm': 'Удалить все ваши мысли навсегда?',
+      'del.confirm': 'Удалить эту мысль навсегда?',
       'nv.delete.confirm': 'Удалить эту заметку навсегда?',
       'onb.dontshow': 'Больше не показывать',
       'toast.saved.private': 'сохранено лично', 'toast.saved.public': 'опубликовано',
@@ -1563,6 +1557,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       'base.tag.private': 'private', 'base.tag.shared': 'open',
       'base.wipe': 'Wipe base',
       'base.wipe.confirm': 'Delete all thoughts forever?',
+      'del.confirm': 'Delete this thought forever?',
       'nv.delete.confirm': 'Delete this note forever?',
       'onb.dontshow': "Don't show again",
       'toast.saved.private': 'saved privately', 'toast.saved.public': 'shared',
@@ -1592,7 +1587,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       'help.gestures': 'Swipe cards left/right. Toggle World/Private chooses destination.'
     });
 
-    // 4.4. Разделение состояния на appState и uiState
     const appState = {
       view: 'stream',
       seg: 'local',
@@ -1614,7 +1608,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       progressHandler: null
     };
 
-    // 3.1. Кэширование DB.all()
     let allNotesCache = null;
     let allNotesCacheTime = 0;
     const ALL_NOTES_TTL = 5 * 60 * 1000;
@@ -1631,7 +1624,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       });
     }
 
-    // 3.2. Кэширование RegExp для highlightText
     let cachedQuery = null;
     let cachedRegex = null;
 
@@ -1658,7 +1650,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (metaTheme) metaTheme.setAttribute('content', theme === 'light' ? '#fafafa' : '#0b0b10');
     }
 
-    // 4.2. findItemById
     function findItemById(id, list) {
       for (let i = 0; i < list.length; i++) {
         if (list[i].id === id) return list[i];
@@ -1666,7 +1657,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       return null;
     }
 
-    // 4.3. Декомпозиция buildMarkup
     function buildHeaderMarkup() {
       return '<div class="hdr">' +
         '<div class="logo"><span class="logo-mark">N</span><span>NOO<span class="logo-dot">.</span>mium</span></div>' +
@@ -1782,7 +1772,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     function isOwnItem(item) { return !item.peer; }
 
-    // [FIX] 2.2. Изменён renderItemHTML: свои -> edit (Развить), чужие -> без кнопок
     function renderItemHTML(item) {
       if (!item) return '';
       const own = isOwnItem(item);
@@ -1806,7 +1795,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           '<button class="fi-act" data-act="copy" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(translate('btn.copy')) + '">' + translate('btn.copy') + '</button>' +
           '<button class="fi-act danger" data-act="del" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(translate('btn.del')) + '">' + translate('btn.del') + '</button>';
       } else {
-        // Полностью удалены все кнопки для чужих мыслей
         actions = '';
       }
 
@@ -1904,7 +1892,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (counter) counter.textContent = (idx + 1) + ' / ' + total;
     }
 
-    // [FIX] 2.3. Обновлён handleItemAction: удалён 'develop', добавлен 'edit'
     function handleItemAction(action, element) {
       if (!element) return;
       const id = element.getAttribute('data-id');
@@ -1921,7 +1908,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }
 
       if (action === 'del') {
-        if (!confirm(translate('base.wipe.confirm').replace('все ваши мысли', 'эту мысль'))) return;
+        // [FIX 1] Использование правильного ключа перевода для confirm
+        if (!confirm(translate('del.confirm'))) return;
         DB.del(id).then(function() {
           toast(translate('toast.deleted'), 'ok');
           appState.lists[appState.seg] = appState.lists[appState.seg].filter(function(n) { return n.id !== id; });
@@ -2039,7 +2027,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       });
     }
 
-    // 2.4. Сброс searchAbortController
     function executeSearch(force) {
       const text = getEditorValue();
       if (!text || !AI.ready()) {
@@ -2066,14 +2053,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             Net.send(vec);
           }
         }
-        // 3.1. Использование getAllNotesCached
         return getAllNotesCached().then(function(notes) {
           if (signal.aborted) return;
           const localScored = [];
           for (let i = 0; i < notes.length; i++) {
             const note = notes[i];
             if (note && note.vector) {
-              // 3.3. Облегчение state.lists
               localScored.push({ 
                 id: note.id, 
                 text: note.text, 
@@ -2134,7 +2119,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function renderBase() {
-      // 3.1. Использование getAllNotesCached
       getAllNotesCached().then(function(allNotes) {
         const statsEl = document.getElementById('base-stats');
         if (statsEl) {
@@ -2215,8 +2199,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       });
     }
 
-    // 4.1. Инкапсуляция activeNoteViewEscHandler в uiState
-    // 2.4. Проверка openNoteView: кнопка «Развить» использует translate('btn.edit')
     function openNoteView(id) {
       DB.get(id).then(function(record) {
         if (!record) return;
@@ -2775,7 +2757,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         setStatus('net', text, cls);
       });
       
-      // 3.1. Инвалидация кэша DB.all()
       Bus.on('db:change', function() { allNotesCache = null; });
     }
 
@@ -2784,7 +2765,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       setStatus('ai', translate('st.ai.loading'), 'load');
       Progress.show();
 
-      // 2.1. Сохранение ссылки на progressHandler для последующего offProgress
       uiState.progressHandler = function(percent) {
         setStatus('ai', translate('st.ai.loading') + ' ' + Math.round(percent) + '%', 'load');
         Progress.update(percent);
@@ -2861,7 +2841,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         document.removeEventListener('keydown', uiState.noteViewEscHandler);
         uiState.noteViewEscHandler = null;
       }
-      // 2.1. Удаление обработчика прогресса
       if (uiState.progressHandler) {
         AI.offProgress(uiState.progressHandler);
         uiState.progressHandler = null;
@@ -2972,7 +2951,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     bootstrap();
   }
 
-  // 5. Service Worker: сброс кэша при смене версии
   if ('serviceWorker' in navigator) {
     const swCode = `
       const CACHE = 'noomium-v2';
