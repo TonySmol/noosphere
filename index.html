@@ -53,7 +53,7 @@ button[disabled]{opacity:.45;cursor:not-allowed}
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:3px}
-#app-root{height:100vh;height:100dvh;display:none;flex-direction:column;overflow:hidden}
+#app-root{height:100vh;height:100dvh;display:none;flex-direction:column;overflow:hidden;}
 body.show-app #app-root{display:flex}
 .hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;
   padding-top:calc(10px + var(--safe-top));padding-bottom:10px;background:var(--surface);
@@ -650,7 +650,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               const req = { result: null, onsuccess: null, onerror: null };
               try {
                 const r = fn(mockStore);
-                // [FIX 1] Проверка синхронного выполнения mockStore (put/delete)
                 if (!r || typeof r.onsuccess !== 'function') {
                   resolve(r && r.result !== undefined ? r.result : r);
                   return;
@@ -751,8 +750,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       attempt = attempt || 0;
       const MODEL = cfg.get('model', 'Xenova/multilingual-e5-small');
       return import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2').then(function(mod) {
+        const pipelineFn = (mod.pipeline || (mod.default && mod.default.pipeline));
+        if (!pipelineFn) throw new Error('transformers: pipeline not found');
         if (mod.env) { mod.env.allowLocalModels = false; mod.env.useBrowserCache = true; }
-        return mod.pipeline('feature-extraction', MODEL, {
+        return pipelineFn('feature-extraction', MODEL, {
           quantized: true,
           progress_callback: function(p) {
             if (p.status === 'progress' && p.total > 0) {
@@ -980,32 +981,33 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }
       try {
         const pubs = pool.publish(goodRelays, ev);
-        if (pubs && pubs.forEach) {
-          pubs.forEach(function(p, relay) {
-            if (p && p.then) {
-              p.then(function() {
+        for (let i = 0; i < goodRelays.length; i++) {
+          const relay = goodRelays[i];
+          const p = pubs && pubs[i] ? pubs[i] : null;
+          if (p && p.then) {
+            (function(promise, relayUrl) {
+              promise.then(function() {
                 const idx = outbox.indexOf(ev);
                 if (idx > -1) outbox.splice(idx, 1);
-                relayErrors.delete(relay);
+                relayErrors.delete(relayUrl);
               }).catch(function(err) {
-                const msg = err && err.message ? String(err.message) : String(err);
-                const count = (relayErrors.get(relay) || 0) + 1;
-                relayErrors.set(relay, count);
+                const count = (relayErrors.get(relayUrl) || 0) + 1;
+                relayErrors.set(relayUrl, count);
                 
                 if (count >= 3) {
-                  rateLimitedUntil.set(relay, Date.now() + 300000);
-                  relayErrors.set(relay, 0);
-                  if (log) log.warn('Relay ' + relay + ' circuit broken, 5m backoff');
+                  rateLimitedUntil.set(relayUrl, Date.now() + 300000);
+                  relayErrors.set(relayUrl, 0);
+                  if (log) log.warn('Relay ' + relayUrl + ' circuit broken, 5m backoff');
                 } else {
-                  rateLimitedUntil.set(relay, Date.now() + 60000);
-                  if (log) log.warn('Relay ' + relay + ' error ' + count + ', 60s backoff');
+                  rateLimitedUntil.set(relayUrl, Date.now() + 60000);
+                  if (log) log.warn('Relay ' + relayUrl + ' error ' + count + ', 60s backoff');
                 }
                 
                 if (outbox.indexOf(ev) === -1) outbox.push(ev);
                 if (netStatus !== 'connected') scheduleReconnect();
               });
-            }
-          });
+            })(p, relay);
+          }
         }
       } catch (err) {
         if (log) log.warn('publish throw', String(err));
@@ -1016,6 +1018,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     function onEvent(ev) {
       try {
+        if (!ev || !ev.pubkey) return;
         if (!ev || typeof ev !== 'object') return;
         if (!Array.isArray(ev.tags)) return;
         if (!isValidEvent(ev)) return;
@@ -1161,7 +1164,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         connAttempts = 0;
         try {
           const mod = await import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm');
-          // [FIX 2] Улучшенная нормализация импорта
           const tools = (mod && mod.default && typeof mod.default.generateSecretKey === 'function') 
             ? mod.default 
             : (typeof mod.generateSecretKey === 'function' ? mod : null);
@@ -1196,7 +1198,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           const subWindow = cfg.get('subWindow', 300);
           
           started = true;
-          // [FIX 3] Перенос startHeartbeat после успешной подписки
           try {
             subscription = pool.subscribeMany(cfg.get('relays', []),
               [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
@@ -1248,7 +1249,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           try { subscription.close(); } catch (_) { /* ignore */ }
         }
         if (pool && typeof pool.close === 'function') {
-          try { pool.close(); } catch (_) { /* ignore */ }
+          try { pool.close(cfg.get('relays', [])); } catch (_) { /* ignore */ }
+        }
+        if (bus && bus.off) {
+          try { bus.off('db:change', invalidateSharedCache); } catch (_) { /* ignore */ }
         }
         started = false;
         subscription = null;
@@ -1259,7 +1263,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         outbox.length = 0;
         relayErrors.clear();
         rateLimitedUntil.clear();
-        peerListeners.splice(0, peerListeners.length);
         setStatus('disconnected');
       },
       restart: function(callback) {
@@ -1990,7 +1993,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       AI.embed(text)
         .then(function(vector) {
           return DB.put({
-            // [FIX 4] Улучшенная генерация id для заметок
             id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
             text: text,
             vector: vector,
