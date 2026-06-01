@@ -3149,71 +3149,83 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   if ('serviceWorker' in navigator) {
     var appVersionMeta = document.querySelector('meta[name="app-version"]');
     var appVersion = appVersionMeta ? appVersionMeta.getAttribute('content') : '0';
-    const swCode = `
-      const CACHE = 'noomium-v' + ` + JSON.stringify(appVersion) + `;
-      self.addEventListener('install', e => { self.skipWaiting(); });
-      self.addEventListener('activate', e => { 
-        e.waitUntil(
-          caches.keys().then(cacheNames => {
-            return Promise.all(
-              cacheNames.filter(cacheName => cacheName !== CACHE).map(cacheName => caches.delete(cacheName))
+    
+    var storedVersion = null;
+    try { storedVersion = localStorage.getItem('noomium:appVersion'); } catch(e) {}
+    
+    if (storedVersion !== appVersion) {
+      var doReload = function() {
+        try { localStorage.setItem('noomium:appVersion', appVersion); } catch(e) {}
+        location.reload(true);
+      };
+      
+      if (window.caches) {
+        caches.keys().then(function(keys) {
+          return Promise.all(keys.map(function(key) { return caches.delete(key); }));
+        }).then(doReload).catch(doReload);
+      } else {
+        doReload();
+      }
+    } else {
+      const swCode = `
+        const CACHE = 'noomium-v' + ` + JSON.stringify(appVersion) + `;
+        self.addEventListener('install', e => { self.skipWaiting(); });
+        self.addEventListener('activate', e => { 
+          e.waitUntil(
+            caches.keys().then(cacheNames => {
+              return Promise.all(
+                cacheNames.filter(cacheName => cacheName !== CACHE).map(cacheName => caches.delete(cacheName))
+              );
+            }).then(() => self.clients.claim())
+          );
+        });
+        self.addEventListener('message', function(event) { if (event.data && event.data.type === 'SKIP_WAITING') { self.skipWaiting(); } });
+        self.addEventListener('fetch', e => {
+          if (e.request.method !== 'GET') return;
+          if (e.request.mode === 'navigate') {
+            e.respondWith(
+              fetch(e.request).then(res => {
+                if (res && res.status === 200) {
+                  const clone = res.clone();
+                  caches.open(CACHE).then(c => c.put(e.request, clone));
+                }
+                return res;
+              }).catch(() => caches.match(e.request).then(r => r || caches.match('/')))
             );
-          }).then(() => self.clients.claim())
-        );
-      });
-      self.addEventListener('message', function(event) { if (event.data && event.data.type === 'SKIP_WAITING') { self.skipWaiting(); } });
-      self.addEventListener('fetch', e => {
-        if (e.request.method !== 'GET') return;
-        if (e.request.mode === 'navigate') {
+            return;
+          }
           e.respondWith(
-            fetch(e.request).then(res => {
-              if (res && res.status === 200) {
+            caches.match(e.request).then(r => r || fetch(e.request).then(res => {
+              if (res.status === 200 && (e.request.url.startsWith(self.location.origin) || e.request.url.includes('jsdelivr'))) {
                 const clone = res.clone();
                 caches.open(CACHE).then(c => c.put(e.request, clone));
               }
               return res;
-            }).catch(() => caches.match(e.request).then(r => r || caches.match('/')))
+            }).catch(() => caches.match('/')))
           );
-          return;
-        }
-        e.respondWith(
-          caches.match(e.request).then(r => r || fetch(e.request).then(res => {
-            if (res.status === 200 && (e.request.url.startsWith(self.location.origin) || e.request.url.includes('jsdelivr'))) {
-              const clone = res.clone();
-              caches.open(CACHE).then(c => c.put(e.request, clone));
-            }
-            return res;
-          }).catch(() => caches.match('/')))
-        );
-      });
-    `;
-    try {
-      const blob = new Blob([swCode], { type: 'application/javascript' });
-      const swUrl = URL.createObjectURL(blob);
-      navigator.serviceWorker.register(swUrl).then(function(reg) {
-        reg.update();
-        if (reg.waiting) {
-          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-        }
-        reg.onupdatefound = function() {
-          const installing = reg.installing;
-          if (installing) {
-            installing.onstatechange = function() {
-              if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-                installing.postMessage({ type: 'SKIP_WAITING' });
-                window.location.reload();
-              }
-            };
+        });
+      `;
+      try {
+        const blob = new Blob([swCode], { type: 'application/javascript' });
+        const swUrl = URL.createObjectURL(blob);
+        navigator.serviceWorker.register(swUrl).then(function(reg) {
+          if (reg.waiting) {
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
           }
-        };
-      }).catch(function() { /* ignore SW errors */ });
-      
-      navigator.serviceWorker.addEventListener('controllerchange', function() {
-        if (navigator.serviceWorker.controller) {
-          window.location.reload();
-        }
-      });
-    } catch(e) { /* ignore */ }
+          reg.onupdatefound = function() {
+            const installing = reg.installing;
+            if (installing) {
+              installing.onstatechange = function() {
+                if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+                  installing.postMessage({ type: 'SKIP_WAITING' });
+                  window.location.reload();
+                }
+              };
+            }
+          };
+        }).catch(function() { /* ignore SW errors */ });
+      } catch(e) { /* ignore */ }
+    }
   }
 <!-- NOOMIUM_MODULE_END SW -->
 })();
