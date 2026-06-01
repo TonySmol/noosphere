@@ -568,7 +568,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     const KEY = 'cfg';
     const defaults = {
       room: 'noomium-main', threshold: 0.30, serendipity: 0.15,
-      relays: ['wss://offchain.pub', 'wss://relay.nostr.info', 'wss://nostr.mom', 'wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net', 'wss://relay.snort.social', 'wss://relay.nostr.band', 'wss://relay.nostr.wine', 'wss://nostr.rocks', 'wss://relay.pleb.mom', 'wss://nostr.swiss-enigma.ch', 'wss://relay.nostr.kiwi', 'wss://nostr21.com', 'wss://relay.nostr.com.au', 'wss://nostr-pub.wellorder.net', 'wss://relay.nostrgraph.net', 'wss://nostr.vulpem.com', 'wss://relay.minds.com', 'wss://nostr.bitcoiner.social', 'wss://nostr.oxtr.dev', 'wss://nostr.sathoarder.com', 'wss://relay.nostrich.de', 'wss://nostr.roundrockbitcoiners.com', 'wss://nostr.ono.re', 'wss://relay.nostr.sk', 'wss://nostr.nodeofsven.com', 'wss://nostr.zebedee.cloud', 'wss://relay.nostr.vet', 'wss://nostr.massmux.com'],
+      relays: ['wss://offchain.pub', 'wss://relay.nostr.info', 'wss://nostr.mom'],
       kQuery: 21000, kAnswer: 21001, model: 'Xenova/multilingual-e5-small', dim: 384, debounce: 800,
       peerTTL: 60000, heartbeat: 30000, subWindow: 300, queryRateLimit: 3000,
       dbName: 'noomium_v8', storeName: 'notes', theme: 'dark', onboarded: false,
@@ -960,11 +960,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       bus.on('db:change', invalidateSharedCache);
     }
 
-        function flushOutbox() {
+    function flushOutbox() {
       if (outbox.length === 0 || !pool) return;
-      // Отправляем не больше 2 сообщений за раз, чтобы не перегружать релеи
-      const batch = outbox.splice(0, 2);
-      batch.forEach(function(ev) { safePublish(ev); });
+      const limit = Math.min(2, outbox.length);
+      const toSend = outbox.splice(0, limit);
+      toSend.forEach(function(ev) { safePublish(ev); });
     }
 
     function safePublish(ev) {
@@ -984,33 +984,30 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         const pubs = pool.publish(goodRelays, ev);
         for (let i = 0; i < goodRelays.length; i++) {
           const relay = goodRelays[i];
-          const p = pubs && pubs[i] ? pubs[i] : null;
+          const p = (pubs && typeof pubs.get === 'function') ? pubs.get(relay) : (Array.isArray(pubs) ? pubs[i] : null);
           if (p && p.then) {
             (function(promise, relayUrl) {
               promise.then(function() {
                 const idx = outbox.indexOf(ev);
                 if (idx > -1) outbox.splice(idx, 1);
                 relayErrors.delete(relayUrl);
-                        }).catch(function(err) {
-            const count = (relayErrors.get(relayUrl) || 0) + 1;
-            relayErrors.set(relayUrl, count);
-            
-            // Смягчённый circuit breaker
-            if (count >= 5) {
-              rateLimitedUntil.set(relayUrl, Date.now() + 120000); // 2 минуты
-              relayErrors.set(relayUrl, 0);
-              if (log) log.warn('Relay ' + relayUrl + ' circuit broken, 2m backoff');
-            } else if (count === 1) {
-              rateLimitedUntil.set(relayUrl, Date.now() + 15000); // 15 секунд за первую ошибку
-              if (log) log.warn('Relay ' + relayUrl + ' error 1, 15s backoff');
-            } else {
-              rateLimitedUntil.set(relayUrl, Date.now() + 30000); // 30 секунд за последующие
-              if (log) log.warn('Relay ' + relayUrl + ' error ' + count + ', 30s backoff');
-            }
-            
-            if (outbox.indexOf(ev) === -1) outbox.push(ev);
-            if (netStatus !== 'connected') scheduleReconnect();
-          });
+              }).catch(function(err) {
+                const count = (relayErrors.get(relayUrl) || 0) + 1;
+                relayErrors.set(relayUrl, count);
+                
+                if (count >= 5) {
+                  rateLimitedUntil.set(relayUrl, Date.now() + 120000);
+                  relayErrors.set(relayUrl, 0);
+                  if (log) log.warn('Relay ' + relayUrl + ' circuit broken, 2m backoff');
+                } else {
+                  const backoff = count === 1 ? 15000 : 30000;
+                  rateLimitedUntil.set(relayUrl, Date.now() + backoff);
+                  if (log) log.warn('Relay ' + relayUrl + ' error ' + count + ', ' + (backoff / 1000) + 's backoff');
+                }
+                
+                if (outbox.indexOf(ev) === -1) outbox.push(ev);
+                if (netStatus !== 'connected') scheduleReconnect();
+              });
             })(p, relay);
           }
         }
@@ -1035,24 +1032,27 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (!had) notifyPeers();
         setStatus('connected');
         connAttempts = 0;
+        flushOutbox();
 
         const KQ = cfg.get('kQuery', 21000);
         const KA = cfg.get('kAnswer', 21001);
         const room = cfg.get('room', 'noomium-main');
 
         if (ev.kind === KQ) {
-                    // Проверяем, есть ли доступные релеи для ответа
-          const now = Date.now();
-          const activeRelays = cfg.get('relays', []).filter(r => (rateLimitedUntil.get(r) || 0) <= now);
-          if (activeRelays.length === 0) {
-            if (log) log.warn('No good relays, skipping auto-answer');
-            return;
-          }
           let q;
           try { q = JSON.parse(ev.content); } catch (_) { return; }
           if (!q || !q.vector || !Array.isArray(q.vector)) return;
           
           getSharedVectors().then(function(sharedNotes) {
+            const checkRelays = cfg.get('relays', []);
+            const nowCheck = Date.now();
+            let hasActiveRelay = false;
+            for (let r = 0; r < checkRelays.length; r++) {
+              const until = rateLimitedUntil.get(checkRelays[r]) || 0;
+              if (until <= nowCheck) { hasActiveRelay = true; break; }
+            }
+            if (!hasActiveRelay) return;
+
             const floor = cfg.get('threshold', 0.30) - cfg.get('serendipity', 0.15);
             const toSend = [];
             for (let i = 0; i < sharedNotes.length; i++) {
@@ -2857,6 +2857,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         document.removeEventListener('keydown', uiState.noteViewEscHandler);
         uiState.noteViewEscHandler = null;
       }
+      if (uiState.searchTimer) { clearTimeout(uiState.searchTimer); uiState.searchTimer = null; }
+      if (uiState.baseSearchTimer) { clearTimeout(uiState.baseSearchTimer); uiState.baseSearchTimer = null; }
       if (uiState.progressHandler) {
         AI.offProgress(uiState.progressHandler);
         uiState.progressHandler = null;
