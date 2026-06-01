@@ -960,10 +960,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       bus.on('db:change', invalidateSharedCache);
     }
 
-    function flushOutbox() {
+        function flushOutbox() {
       if (outbox.length === 0 || !pool) return;
-      const toSend = outbox.splice(0, outbox.length);
-      toSend.forEach(function(ev) { safePublish(ev); });
+      // Отправляем не больше 2 сообщений за раз, чтобы не перегружать релеи
+      const batch = outbox.splice(0, 2);
+      batch.forEach(function(ev) { safePublish(ev); });
     }
 
     function safePublish(ev) {
@@ -990,22 +991,26 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                 const idx = outbox.indexOf(ev);
                 if (idx > -1) outbox.splice(idx, 1);
                 relayErrors.delete(relayUrl);
-              }).catch(function(err) {
-                const count = (relayErrors.get(relayUrl) || 0) + 1;
-                relayErrors.set(relayUrl, count);
-                
-                if (count >= 3) {
-                  rateLimitedUntil.set(relayUrl, Date.now() + 300000);
-                  relayErrors.set(relayUrl, 0);
-                  if (log) log.warn('Relay ' + relayUrl + ' circuit broken, 5m backoff');
-                } else {
-                  rateLimitedUntil.set(relayUrl, Date.now() + 60000);
-                  if (log) log.warn('Relay ' + relayUrl + ' error ' + count + ', 60s backoff');
-                }
-                
-                if (outbox.indexOf(ev) === -1) outbox.push(ev);
-                if (netStatus !== 'connected') scheduleReconnect();
-              });
+                        }).catch(function(err) {
+            const count = (relayErrors.get(relayUrl) || 0) + 1;
+            relayErrors.set(relayUrl, count);
+            
+            // Смягчённый circuit breaker
+            if (count >= 5) {
+              rateLimitedUntil.set(relayUrl, Date.now() + 120000); // 2 минуты
+              relayErrors.set(relayUrl, 0);
+              if (log) log.warn('Relay ' + relayUrl + ' circuit broken, 2m backoff');
+            } else if (count === 1) {
+              rateLimitedUntil.set(relayUrl, Date.now() + 15000); // 15 секунд за первую ошибку
+              if (log) log.warn('Relay ' + relayUrl + ' error 1, 15s backoff');
+            } else {
+              rateLimitedUntil.set(relayUrl, Date.now() + 30000); // 30 секунд за последующие
+              if (log) log.warn('Relay ' + relayUrl + ' error ' + count + ', 30s backoff');
+            }
+            
+            if (outbox.indexOf(ev) === -1) outbox.push(ev);
+            if (netStatus !== 'connected') scheduleReconnect();
+          });
             })(p, relay);
           }
         }
@@ -1030,13 +1035,19 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (!had) notifyPeers();
         setStatus('connected');
         connAttempts = 0;
-        flushOutbox();
 
         const KQ = cfg.get('kQuery', 21000);
         const KA = cfg.get('kAnswer', 21001);
         const room = cfg.get('room', 'noomium-main');
 
         if (ev.kind === KQ) {
+                    // Проверяем, есть ли доступные релеи для ответа
+          const now = Date.now();
+          const activeRelays = cfg.get('relays', []).filter(r => (rateLimitedUntil.get(r) || 0) <= now);
+          if (activeRelays.length === 0) {
+            if (log) log.warn('No good relays, skipping auto-answer');
+            return;
+          }
           let q;
           try { q = JSON.parse(ev.content); } catch (_) { return; }
           if (!q || !q.vector || !Array.isArray(q.vector)) return;
