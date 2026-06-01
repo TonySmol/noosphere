@@ -2824,26 +2824,35 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       };
       AI.onProgress(uiState.progressHandler);
 
+      var aiLoaded = false;
+      var netInitialized = false;
+
+      function checkOnboarding() {
+        if (aiLoaded && netInitialized && !Config.get('onboarded', false)) {
+          openHelp(true);
+        }
+      }
+
       AI.load().then(function() {
         Progress.hide();
         setStatus('ai',
           AI.getMode() === 'model' ? translate('st.ai.ready') : translate('st.ai.demo'),
           AI.getMode() === 'model' ? 'ok' : 'warn'
         );
-        if (!Config.get('onboarded', false)) {
-          setTimeout(function() {
-            openHelp(true);
-          }, 500);
-        }
+        aiLoaded = true;
+        checkOnboarding();
       }).catch(function(err) {
         Progress.hide();
         if (Logger) Logger.error('AI', String(err && err.message || err));
         setStatus('ai', translate('st.ai.demo'), 'warn');
+        aiLoaded = true;
+        checkOnboarding();
       });
 
       function tryInit(password, attempts) {
         Net.init(function() { executeSearch(); }, password).then(function() {
-          // init success
+          netInitialized = true;
+          checkOnboarding();
         }).catch(function(err) {
           if (err && err.message === 'WRONG_PASSWORD') {
             toast('Неверный пароль', 'err');
