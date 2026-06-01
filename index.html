@@ -743,7 +743,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   // ============================================================
   DI.register('AI', function(cfg, log, bus) {
     // [FIX] SHA-256 хэш для @xenova/transformers@2.17.2 (замените на актуальный)
-    const TRANSFORMERS_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
     
     let extractor = null, mode = 'loading';
     const cache = new Map(); 
@@ -777,48 +776,37 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function doLoad(onProgress, attempt) {
-      attempt = attempt || 0;
-      const MODEL = cfg.get('model', 'Xenova/multilingual-e5-small');
-      const URL = 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
-      
-      return fetch(URL).then(function(res) {
-        return res.text().then(function(code) {
-          return verifyModule(code, TRANSFORMERS_HASH).then(function(ok) {
-            if (!ok) throw new Error('Integrity check failed for ' + URL);
-            const blob = new Blob([code], { type: 'application/javascript' });
-            const blobUrl = URL.createObjectURL(blob);
-            return import(blobUrl).finally(function() { URL.revokeObjectURL(blobUrl); });
-          });
-        });
-      }).then(function(mod) {
+    attempt = attempt || 0;
+    const MODEL = cfg.get('model', 'Xenova/multilingual-e5-small');
+    return import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2').then(function(mod) {
         if (mod.env) { mod.env.allowLocalModels = false; mod.env.useBrowserCache = true; }
         return mod.pipeline('feature-extraction', MODEL, {
-          quantized: true,
-          progress_callback: function(p) {
-            if (p.status === 'progress' && p.total > 0) {
-              const pct = p.loaded / p.total * 100;
-              if (typeof onProgress === 'function') onProgress(pct);
-              for (let i = 0; i < progressFns.length; i++) {
-                try { progressFns[i](pct); } catch (_) { /* ignore */ }
-              }
-              if (bus && bus.emit) bus.emit('ai:progress', { pct: pct });
+            quantized: true,
+            progress_callback: function(p) {
+                if (p.status === 'progress' && p.total > 0) {
+                    const pct = p.loaded / p.total * 100;
+                    if (typeof onProgress === 'function') onProgress(pct);
+                    for (let i = 0; i < progressFns.length; i++) {
+                        try { progressFns[i](pct); } catch (_) { /* ignore */ }
+                    }
+                    if (bus && bus.emit) bus.emit('ai:progress', { pct: pct });
+                }
             }
-          }
         });
-      }).then(function(pipe) {
+    }).then(function(pipe) {
         extractor = pipe;
         mode = 'model';
         if (log) log.info('AI loaded: ' + MODEL);
-      }).catch(function(err) {
+    }).catch(function(err) {
         if (attempt < 2) {
-          const delay = Math.min(30000, 2000 * Math.pow(2, attempt));
-          if (log) log.warn('AI load fail, retry ' + (attempt + 1) + ' in ' + delay + 'ms', String(err && err.message || err));
-          return new Promise(function(r) { setTimeout(r, delay); }).then(function() { return doLoad(onProgress, attempt + 1); });
+            const delay = Math.min(30000, 2000 * Math.pow(2, attempt));
+            if (log) log.warn('AI load fail, retry ' + (attempt + 1) + ' in ' + delay + 'ms', String(err && err.message || err));
+            return new Promise(function(r) { setTimeout(r, delay); }).then(function() { return doLoad(onProgress, attempt + 1); });
         }
         if (log) log.warn('AI load failed, hash mode', String(err && err.message || err));
         mode = 'demo';
-      });
-    }
+    });
+}
 
     return {
       ready: function() { return extractor !== null || mode === 'demo'; },
@@ -885,7 +873,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   // ============================================================
   DI.register('Net', function(cfg, DB, AI, log, bus) {
     // [FIX] SHA-256 хэш для nostr-tools@2.7.2 (замените на актуальный)
-    const NOSTR_TOOLS_HASH = '0000000000000000000000000000000000000000000000000000000000000000';
     
     let pool = null, sk = null, pk = null, queryId = null;
     const peers = new Map();
@@ -1225,7 +1212,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         try {
           // [FIX] Проверка целостности nostr-tools
           const URL = 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
-          const mod = await fetch(URL).then(function(res) {
+          cconst mod = await import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm');
             return res.text().then(function(code) {
               return verifyModule(code, NOSTR_TOOLS_HASH).then(function(ok) {
                 if (!ok) throw new Error('Integrity check failed for ' + URL);
