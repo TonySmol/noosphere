@@ -882,11 +882,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     const outbox = [];
     const relayErrors = new Map();
 
-    const PASSPHRASE = 'noomium-secret-key-v1';
-
-    async function deriveKey(passphrase, salt) {
+    async function deriveKey(password, salt) {
       const enc = new TextEncoder();
-      const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+      const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
       return crypto.subtle.deriveKey(
         { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
         keyMaterial,
@@ -896,10 +894,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       );
     }
 
-    async function encryptKey(hexKey) {
+    async function encryptKey(hexKey, password) {
       const salt = crypto.getRandomValues(new Uint8Array(16));
       const iv = crypto.getRandomValues(new Uint8Array(12));
-      const key = await deriveKey(PASSPHRASE, salt);
+      const key = await deriveKey(password, salt);
       const enc = new TextEncoder();
       const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(hexKey));
       const combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
@@ -909,12 +907,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       return btoa(String.fromCharCode.apply(null, combined));
     }
 
-    async function decryptKey(base64Str) {
-      const combined = Uint8Array.from(atob(base64Str), c => c.charCodeAt(0));
+    async function decryptKey(base64Str, password) {
+      const combined = Uint8Array.from(atob(base64Str), function(c) { return c.charCodeAt(0); });
       const salt = combined.slice(0, 16);
       const iv = combined.slice(16, 28);
       const ciphertext = combined.slice(28);
-      const key = await deriveKey(PASSPHRASE, salt);
+      const key = await deriveKey(password, salt);
       const dec = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext);
       return new TextDecoder().decode(dec);
     }
@@ -1190,7 +1188,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return {
       onPeers: function(fn) { if (typeof fn === 'function') peerListeners.push(fn); },
       getStatus: function() { return netStatus; },
-      init: async function(callback) {
+      isKeyEncrypted: function() {
+        try {
+          const stored = localStorage.getItem('noomium:sk');
+          return !!(stored && !/^[0-9a-f]{64}$/i.test(stored));
+        } catch (e) {
+          return false;
+        }
+      },
+      init: async function(callback, password) {
         if (started) return Promise.resolve();
         onUpdate = callback;
         connAttempts = 0;
@@ -1208,19 +1214,21 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             if (stored) {
               if (/^[0-9a-f]{64}$/i.test(stored)) {
                  keyHex = stored;
-                 localStorage.setItem(KEY, await encryptKey(keyHex));
+                 localStorage.setItem(KEY, await encryptKey(keyHex, password));
               } else {
-                 keyHex = await decryptKey(stored);
+                 keyHex = await decryptKey(stored, password);
               }
             }
-          } catch (_) { /* ignore */ }
+          } catch (e) { 
+            throw new Error('WRONG_PASSWORD');
+          }
 
           if (!keyHex) {
             const raw = tools.generateSecretKey();
-            keyHex = Array.from(raw).map(b => b.toString(16).padStart(2, '0')).join('');
-            try { localStorage.setItem(KEY, await encryptKey(keyHex)); } catch (_) { /* ignore */ }
+            keyHex = Array.from(raw).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+            try { localStorage.setItem(KEY, await encryptKey(keyHex, password)); } catch (_) { /* ignore */ }
           }
-          sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+          sk = new Uint8Array(keyHex.match(/.{1,2}/g).map(function(b) { return parseInt(b, 16); }));
           pk = tools.getPublicKey(sk);
           pool = new tools.SimplePool();
           const nowSec = Math.floor(Date.now() / 1000);
@@ -1243,9 +1251,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           setStatus('connecting');
           if (log) log.info('net started, room=' + room);
         } catch (err) {
-          if (log) log.error('nostr load fail', String(err && err.message || err));
-          setStatus('failed');
-          return Promise.resolve();
+          if (log && err.message !== 'WRONG_PASSWORD') log.error('nostr load fail', String(err && err.message || err));
+          if (err.message !== 'WRONG_PASSWORD') setStatus('failed');
+          throw err;
         }
       },
       send: function(vector) {
@@ -2833,12 +2841,117 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         setStatus('ai', translate('st.ai.demo'), 'warn');
       });
 
-      Net.init(function() { executeSearch(); }).then(function() {
-        // init success
-      }).catch(function(err) {
-        if (Logger) Logger.error('Net', String(err && err.message || err));
-        setStatus('net', translate('st.net.failed'), 'err');
-      });
+      function tryInit(password, attempts) {
+        Net.init(function() { executeSearch(); }, password).then(function() {
+          // init success
+        }).catch(function(err) {
+          if (err && err.message === 'WRONG_PASSWORD') {
+            toast('Неверный пароль', 'err');
+            var nextAttempts = attempts + 1;
+            if (nextAttempts >= 3) {
+              showResetModal();
+            } else {
+              promptExistingPassword(tryInit, nextAttempts);
+            }
+          } else {
+            if (Logger) Logger.error('Net', String(err && err.message || err));
+            setStatus('net', translate('st.net.failed'), 'err');
+          }
+        });
+      }
+
+      function showResetModal() {
+        var body = document.createElement('div');
+        body.innerHTML = '<p style="color:var(--text-2);margin-bottom:16px">Превышено количество попыток. Необходимо сбросить данные.</p>';
+        Modal.open({
+          title: 'Ошибка доступа',
+          body: body,
+          buttons: [
+            {
+              text: 'Сбросить данные', danger: true, primary: true,
+              onClick: function() {
+                DB.reset().then(function() {
+                  location.reload();
+                });
+              }
+            }
+          ]
+        });
+      }
+
+      function promptNewPassword(callback) {
+        var body = document.createElement('div');
+        body.innerHTML = '<div class="fg"><label class="fl">Придумайте пароль</label><input type="password" class="fi-input" id="pwd1" /></div>' +
+                         '<div class="fg"><label class="fl">Подтвердите пароль</label><input type="password" class="fi-input" id="pwd2" /></div>';
+        var errorEl = document.createElement('div');
+        errorEl.style.color = 'var(--danger)';
+        errorEl.style.fontSize = '12px';
+        errorEl.style.marginTop = '8px';
+        body.appendChild(errorEl);
+
+        Modal.open({
+          title: 'Защита данных',
+          body: body,
+          buttons: [
+            {
+              text: 'Сохранить', primary: true,
+              onClick: function() {
+                var p1 = document.getElementById('pwd1').value;
+                var p2 = document.getElementById('pwd2').value;
+                if (!p1) { errorEl.textContent = 'Пароль не может быть пустым'; return; }
+                if (p1 !== p2) { errorEl.textContent = 'Пароли не совпадают'; return; }
+                Modal.close();
+                callback(p1);
+              }
+            }
+          ]
+        });
+      }
+
+      function promptExistingPassword(callback, attempts) {
+        var body = document.createElement('div');
+        body.innerHTML = '<div class="fg"><label class="fl">Введите пароль</label><input type="password" class="fi-input" id="pwd1" /></div>';
+        var errorEl = document.createElement('div');
+        errorEl.style.color = 'var(--danger)';
+        errorEl.style.fontSize = '12px';
+        errorEl.style.marginTop = '8px';
+        body.appendChild(errorEl);
+
+        var buttons = [];
+        if (attempts >= 3) {
+          buttons.push({
+            text: 'Сбросить данные', danger: true,
+            onClick: function() {
+              DB.reset().then(function() {
+                location.reload();
+              });
+            }
+          });
+        }
+        buttons.push({
+          text: 'Войти', primary: true,
+          onClick: function() {
+            var p1 = document.getElementById('pwd1').value;
+            if (!p1) { errorEl.textContent = 'Введите пароль'; return; }
+            Modal.close();
+            callback(p1, attempts);
+          }
+        });
+
+        Modal.open({
+          title: 'Доступ к данным',
+          body: body,
+          buttons: buttons
+        });
+      }
+
+      if (!Net.isKeyEncrypted()) {
+        promptNewPassword(function(pwd) {
+          tryInit(pwd, 0);
+        });
+      } else {
+        promptExistingPassword(tryInit, 0);
+      }
     }
 
     function setupWindowListeners() {
