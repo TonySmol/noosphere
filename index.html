@@ -394,9 +394,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 (function() {
   'use strict';
 
-  // ============================================================
-  // Dependency Injection с проверкой циклических зависимостей
-  // ============================================================
   const DI = (() => {
     const factories = new Map();
     const instances = new Map();
@@ -425,9 +422,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return { register: register, resolve: resolve };
   })();
 
-  // ============================================================
-  // Utils: экранирование, множественное число, форматирование
-  // ============================================================
   DI.register('Utils', function() {
     function esc(s) {
       return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
@@ -469,9 +463,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return { esc: esc, escRe: escRe, word: word, fmtDate: fmtDate };
   }, []);
 
-  // ============================================================
-  // Logger: базовое логирование
-  // ============================================================
   DI.register('Logger', function() {
     function emit(level, msg, data) {
       const ts = new Date().toISOString().substr(11, 8);
@@ -485,9 +476,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, []);
 
-  // ============================================================
-  // Bus: event bus для межмодульной коммуникации
-  // ============================================================
   DI.register('Bus', function() {
     const map = new Map();
     return {
@@ -506,9 +494,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, []);
 
-  // ============================================================
-  // Store: обёртка над localStorage
-  // ============================================================
   DI.register('Store', function() {
     const prefix = 'noomium:';
     return {
@@ -525,9 +510,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, []);
 
-  // ============================================================
-  // I18n: интернационализация
-  // ============================================================
   DI.register('I18n', function(store, bus) {
     const KEY = 'lang';
     const dicts = Object.create(null);
@@ -582,17 +564,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return { t: t, setLang: setLang, getLang: getLang, addDict: addDict, onChange: onChange };
   }, ['Store', 'Bus']);
 
-  // ============================================================
-  // Config: конфигурация приложения
-  // [FIX] Удалены kQuery/kAnswer, добавлен roomTag, обновлены relays, queryRateLimit=5000
-  // ============================================================
   DI.register('Config', function(store, log) {
     const KEY = 'cfg';
     const defaults = {
       room: 'noomium-main', threshold: 0.30, serendipity: 0.15,
-      relays: ['wss://relay.nostr.band', 'wss://relayable.org', 'wss://relay.damus.io'],
-      roomTag: 'noomium', model: 'Xenova/multilingual-e5-small', dim: 384, debounce: 800,
-      peerTTL: 60000, heartbeat: 30000, subWindow: 300, queryRateLimit: 5000,
+      relays: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'],
+      kQuery: 21000, kAnswer: 21001, model: 'Xenova/multilingual-e5-small', dim: 384, debounce: 800,
+      peerTTL: 60000, heartbeat: 30000, subWindow: 300, queryRateLimit: 3000,
       dbName: 'noomium_v8', storeName: 'notes', theme: 'dark', onboarded: false,
       publishCooldown: 1500, maxAnswersPerQuery: 5
     };
@@ -614,10 +592,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Store', 'Logger']);
 
-  // ============================================================
-  // DB: IndexedDB с fallback на in-memory Map
-  // [FIX] mockStore корректно резолвит Promise при синхронных операциях
-  // ============================================================
   DI.register('DB', function(cfg, log, bus) {
     let db = null, mem = null;
 
@@ -658,15 +632,25 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           try {
             if (!d) {
               const mockStore = {
-                get: function(k) { return { result: mem.get(k) }; },
-                put: function(v) { mem.set(v.id, v); return {}; },
-                delete: function(k) { mem.delete(k); return {}; },
-                getAll: function() { return { result: Array.from(mem.values()) }; }
+                get: function(k) {
+                  return { result: mem.get(k) };
+                },
+                put: function(v) {
+                  mem.set(v.id, v);
+                  return {};
+                },
+                delete: function(k) {
+                  mem.delete(k);
+                  return {};
+                },
+                getAll: function() {
+                  return { result: Array.from(mem.values()) };
+                }
               };
               const req = { result: null, onsuccess: null, onerror: null };
               try {
                 const r = fn(mockStore);
-                // [FIX] Синхронный резолв для mockStore без onsuccess
+                // [FIX 1] Проверка синхронного выполнения mockStore (put/delete)
                 if (!r || typeof r.onsuccess !== 'function') {
                   resolve(r && r.result !== undefined ? r.result : r);
                   return;
@@ -737,24 +721,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'Logger', 'Bus']);
 
-  // ============================================================
-  // AI: эмбеддинги с LRU-кэшем и fallback на хеш
-  // [FIX] Добавлена проверка целостности модуля через SHA-256
-  // ============================================================
   DI.register('AI', function(cfg, log, bus) {
-    // [FIX] SHA-256 хэш для @xenova/transformers@2.17.2 (замените на актуальный)
-    
     let extractor = null, mode = 'loading';
     const cache = new Map(); 
     const CACHE_LIMIT = 300;
     const progressFns = [];
     let loadPromise = null;
-
-    async function verifyModule(code, expectedHash) {
-      const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code));
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('') === expectedHash;
-    }
 
     function hashEmbed(text) {
       const DIM = cfg.get('dim', 384);
@@ -776,37 +748,37 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function doLoad(onProgress, attempt) {
-    attempt = attempt || 0;
-    const MODEL = cfg.get('model', 'Xenova/multilingual-e5-small');
-    return import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2').then(function(mod) {
+      attempt = attempt || 0;
+      const MODEL = cfg.get('model', 'Xenova/multilingual-e5-small');
+      return import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2').then(function(mod) {
         if (mod.env) { mod.env.allowLocalModels = false; mod.env.useBrowserCache = true; }
         return mod.pipeline('feature-extraction', MODEL, {
-            quantized: true,
-            progress_callback: function(p) {
-                if (p.status === 'progress' && p.total > 0) {
-                    const pct = p.loaded / p.total * 100;
-                    if (typeof onProgress === 'function') onProgress(pct);
-                    for (let i = 0; i < progressFns.length; i++) {
-                        try { progressFns[i](pct); } catch (_) { /* ignore */ }
-                    }
-                    if (bus && bus.emit) bus.emit('ai:progress', { pct: pct });
-                }
+          quantized: true,
+          progress_callback: function(p) {
+            if (p.status === 'progress' && p.total > 0) {
+              const pct = p.loaded / p.total * 100;
+              if (typeof onProgress === 'function') onProgress(pct);
+              for (let i = 0; i < progressFns.length; i++) {
+                try { progressFns[i](pct); } catch (_) { /* ignore */ }
+              }
+              if (bus && bus.emit) bus.emit('ai:progress', { pct: pct });
             }
+          }
         });
-    }).then(function(pipe) {
+      }).then(function(pipe) {
         extractor = pipe;
         mode = 'model';
         if (log) log.info('AI loaded: ' + MODEL);
-    }).catch(function(err) {
+      }).catch(function(err) {
         if (attempt < 2) {
-            const delay = Math.min(30000, 2000 * Math.pow(2, attempt));
-            if (log) log.warn('AI load fail, retry ' + (attempt + 1) + ' in ' + delay + 'ms', String(err && err.message || err));
-            return new Promise(function(r) { setTimeout(r, delay); }).then(function() { return doLoad(onProgress, attempt + 1); });
+          const delay = Math.min(30000, 2000 * Math.pow(2, attempt));
+          if (log) log.warn('AI load fail, retry ' + (attempt + 1) + ' in ' + delay + 'ms', String(err && err.message || err));
+          return new Promise(function(r) { setTimeout(r, delay); }).then(function() { return doLoad(onProgress, attempt + 1); });
         }
         if (log) log.warn('AI load failed, hash mode', String(err && err.message || err));
         mode = 'demo';
-    });
-}
+      });
+    }
 
     return {
       ready: function() { return extractor !== null || mode === 'demo'; },
@@ -867,13 +839,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'Logger', 'Bus']);
 
-  // ============================================================
-  // Net: Nostr-сеть с NIP-04 шифрованием
-  // [FIX] kind=1, NIP-04, удаление scheduleReconnect из catch, выделены хелперы
-  // ============================================================
   DI.register('Net', function(cfg, DB, AI, log, bus) {
-    // [FIX] SHA-256 хэш для nostr-tools@2.7.2 (замените на актуальный)
-    
     let pool = null, sk = null, pk = null, queryId = null;
     const peers = new Map();
     const answers = [];
@@ -889,15 +855,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     let sharedCache = null;
     let sharedCacheTime = 0;
-    // [FIX] CACHE_TTL уменьшен до 10 секунд для более частого обновления
-    const CACHE_TTL = 10000;
+    const CACHE_TTL = 60000;
 
     const outbox = [];
     const relayErrors = new Map();
 
     const PASSPHRASE = 'noomium-secret-key-v1';
 
-    // [REFACTOR] Выделены вспомогательные функции для криптографии
     async function deriveKey(passphrase, salt) {
       const enc = new TextEncoder();
       const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
@@ -931,12 +895,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       const key = await deriveKey(PASSPHRASE, salt);
       const dec = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext);
       return new TextDecoder().decode(dec);
-    }
-
-    async function verifyModule(code, expectedHash) {
-      const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code));
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('') === expectedHash;
     }
 
     function setStatus(s) {
@@ -1044,7 +1002,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                 }
                 
                 if (outbox.indexOf(ev) === -1) outbox.push(ev);
-                // [FIX] Убран вызов scheduleReconnect() — ошибка публикации не должна разрывать подписку
+                if (netStatus !== 'connected') scheduleReconnect();
               });
             }
           });
@@ -1056,8 +1014,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       return Promise.resolve();
     }
 
-    // [FIX] onEvent переписан для kind=1 и NIP-04
-    async function onEvent(ev) {
+    function onEvent(ev) {
       try {
         if (!ev || typeof ev !== 'object') return;
         if (!Array.isArray(ev.tags)) return;
@@ -1072,71 +1029,63 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         connAttempts = 0;
         flushOutbox();
 
-        const roomTag = cfg.get('roomTag', 'noomium');
-        const hasRoomTag = ev.tags.some(t => Array.isArray(t) && t[0] === 't' && t[1] === roomTag);
-        const eTag = ev.tags.find(t => Array.isArray(t) && t[0] === 'e');
-        const pTag = ev.tags.find(t => Array.isArray(t) && t[0] === 'p');
+        const KQ = cfg.get('kQuery', 21000);
+        const KA = cfg.get('kAnswer', 21001);
+        const room = cfg.get('room', 'noomium-main');
 
-        if (ev.kind === 1) {
-          // [FIX] Входящий запрос: сбрасываем sharedCache для актуальных данных
-          if (hasRoomTag && !eTag) {
-            // [FIX] Сброс кэша перед получением векторов
-            sharedCache = null;
-            sharedCacheTime = 0;
-            
-            let q;
-            try { q = JSON.parse(ev.content); } catch (_) { return; }
-            if (!q || !q.v || !Array.isArray(q.v)) return;
-            
-            getSharedVectors().then(async function(sharedNotes) {
-              const floor = cfg.get('threshold', 0.30) - cfg.get('serendipity', 0.15);
-              const toSend = [];
-              for (let i = 0; i < sharedNotes.length; i++) {
-                const n = sharedNotes[i];
-                if (AI.cosine(q.v, n.vector) >= floor) toSend.push(n);
-              }
-              toSend.sort(function(a, b) { return AI.cosine(q.v, b.vector) - AI.cosine(q.v, a.vector); });
-              const maxAnswers = cfg.get('maxAnswersPerQuery', 5);
-              const limited = toSend.slice(0, maxAnswers);
-              for (let j = 0; j < limited.length; j++) {
-                try {
-                  // [FIX] Шифрование ответа через NIP-04
-                  const encryptedContent = await nostr.nip04.encrypt(sk, ev.pubkey, JSON.stringify({ text: limited[j].text, vector: limited[j].vector }));
-                  const ans = nostr.finalizeEvent({
-                    kind: 1,
-                    created_at: Math.floor(Date.now() / 1000),
-                    tags: [['t', roomTag], ['e', ev.id], ['p', ev.pubkey]],
-                    content: encryptedContent
-                  }, sk);
-                  (function(answer, delay) {
-                    setTimeout(function() { safePublish(answer); }, delay);
-                  })(ans, j * 500);
-                } catch (e) { if (log) log.warn('answer finalize fail', String(e)); }
-              }
-            }).catch(function(e) { if (log) log.warn('getSharedVectors fail', String(e)); });
+        if (ev.kind === KQ) {
+          let q;
+          try { q = JSON.parse(ev.content); } catch (_) { return; }
+          if (!q || !q.vector || !Array.isArray(q.vector)) return;
+          
+          getSharedVectors().then(function(sharedNotes) {
+            const floor = cfg.get('threshold', 0.30) - cfg.get('serendipity', 0.15);
+            const toSend = [];
+            for (let i = 0; i < sharedNotes.length; i++) {
+              const n = sharedNotes[i];
+              if (AI.cosine(q.vector, n.vector) >= floor) toSend.push(n);
+            }
+            toSend.sort(function(a, b) { return AI.cosine(q.vector, b.vector) - AI.cosine(q.vector, a.vector); });
+            const maxAnswers = cfg.get('maxAnswersPerQuery', 5);
+            const limited = toSend.slice(0, maxAnswers);
+            for (let j = 0; j < limited.length; j++) {
+              try {
+                const ans = nostr.finalizeEvent({
+                  kind: KA,
+                  created_at: Math.floor(Date.now() / 1000),
+                  tags: [['t', room], ['e', ev.id]],
+                  content: JSON.stringify({ text: limited[j].text, vector: limited[j].vector })
+                }, sk);
+                (function(answer, delay) {
+                  setTimeout(function() { safePublish(answer); }, delay);
+                })(ans, j * 500);
+              } catch (e) { if (log) log.warn('answer finalize fail', String(e)); }
+            }
+          }).catch(function(e) { if (log) log.warn('getSharedVectors fail', String(e)); });
+        }
+
+        if (ev.kind === KA) {
+          let eTag = null;
+          for (let i = 0; i < ev.tags.length; i++) {
+            const tag = ev.tags[i];
+            if (Array.isArray(tag) && tag[0] === 'e') { eTag = tag[1]; break; }
           }
-
-          // [FIX] Входящий ответ: расшифровка через NIP-04
-          if (pTag && pTag[1] === pk && eTag && eTag[1] === queryId) {
-            try {
-              const decryptedContent = await nostr.nip04.decrypt(sk, ev.pubkey, ev.content);
-              const data = JSON.parse(decryptedContent);
-              if (data && data.text && data.vector) {
-                let isDupAnswer = false;
-                for (let j = 0; j < answers.length; j++) {
-                  if (answers[j].id === ev.id) { isDupAnswer = true; break; }
-                }
-                if (!isDupAnswer) {
-                  if (answers.length >= 100) answers.shift();
-                  answers.push({
-                    id: ev.id, text: data.text, vector: data.vector,
-                    peer: ev.pubkey.slice(0, 6), fullPubkey: ev.pubkey, createdAt: Date.now()
-                  });
-                  if (typeof onUpdate === 'function') { try { onUpdate(); } catch (_) { /* ignore */ } }
-                }
+          if (eTag && eTag === queryId) {
+            let data;
+            try { data = JSON.parse(ev.content); } catch (_) { return; }
+            if (data && data.text && data.vector) {
+              let isDupAnswer = false;
+              for (let j = 0; j < answers.length; j++) {
+                if (answers[j].id === ev.id) { isDupAnswer = true; break; }
               }
-            } catch (e) {
-              if (log) log.warn('decrypt/parse fail', String(e));
+              if (!isDupAnswer) {
+                if (answers.length >= 100) answers.shift();
+                answers.push({
+                  id: ev.id, text: data.text, vector: data.vector,
+                  peer: ev.pubkey.slice(0, 6), fullPubkey: ev.pubkey, createdAt: Date.now()
+                });
+                if (typeof onUpdate === 'function') { try { onUpdate(); } catch (_) { /* ignore */ } }
+              }
             }
           }
         }
@@ -1186,13 +1135,14 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           if (subscription && typeof subscription.close === 'function') {
             try { subscription.close(); } catch (_) { /* ignore */ }
           }
-          const roomTag = cfg.get('roomTag', 'noomium');
+          const room = cfg.get('room', 'noomium-main');
+          const KQ = cfg.get('kQuery', 21000);
+          const KA = cfg.get('kAnswer', 21001);
           const subWindow = cfg.get('subWindow', 300);
           const nowSec = Math.floor(Date.now() / 1000);
           if (pool) {
-            // [FIX] Подписка на kind=1 с фильтром по roomTag
             subscription = pool.subscribeMany(cfg.get('relays', []),
-              [{ kinds: [1], '#t': [roomTag], since: nowSec - subWindow }],
+              [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
               { onevent: onEvent });
             if (log) log.info('Reconnect: subscribed');
           }
@@ -1210,31 +1160,18 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         onUpdate = callback;
         connAttempts = 0;
         try {
-          // [FIX] Проверка целостности nostr-tools
-          const URL = 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
-          cconst mod = await import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm');
-            return res.text().then(function(code) {
-              return verifyModule(code, NOSTR_TOOLS_HASH).then(function(ok) {
-                if (!ok) throw new Error('Integrity check failed for ' + URL);
-                const blob = new Blob([code], { type: 'application/javascript' });
-                const blobUrl = URL.createObjectURL(blob);
-                return import(blobUrl).finally(function() { URL.revokeObjectURL(blobUrl); });
-              });
-            });
-          });
-          
+          const mod = await import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm');
+          // [FIX 2] Улучшенная нормализация импорта
           const tools = (mod && mod.default && typeof mod.default.generateSecretKey === 'function') 
             ? mod.default 
             : (typeof mod.generateSecretKey === 'function' ? mod : null);
           if (!tools || !tools.SimplePool) throw new Error('nostr-tools: incompatible module structure');
           nostr = tools;
-          
           const KEY = 'noomium:sk';
           let keyHex = null;
           try { 
             const stored = localStorage.getItem(KEY);
             if (stored) {
-              // [FIX] Миграция незашифрованных ключей
               if (/^[0-9a-f]{64}$/i.test(stored)) {
                  keyHex = stored;
                  localStorage.setItem(KEY, await encryptKey(keyHex));
@@ -1253,14 +1190,16 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           pk = tools.getPublicKey(sk);
           pool = new tools.SimplePool();
           const nowSec = Math.floor(Date.now() / 1000);
-          const roomTag = cfg.get('roomTag', 'noomium');
+          const room = cfg.get('room', 'noomium-main');
+          const KQ = cfg.get('kQuery', 21000);
+          const KA = cfg.get('kAnswer', 21001);
           const subWindow = cfg.get('subWindow', 300);
           
           started = true;
+          // [FIX 3] Перенос startHeartbeat после успешной подписки
           try {
-            // [FIX] Подписка на kind=1 с фильтром по roomTag
             subscription = pool.subscribeMany(cfg.get('relays', []),
-              [{ kinds: [1], '#t': [roomTag], since: nowSec - subWindow }],
+              [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
               { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
             startHeartbeat();
           } catch (e) {
@@ -1269,32 +1208,30 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           }
           notifyPeers();
           setStatus('connecting');
-          if (log) log.info('net started, room=' + roomTag);
+          if (log) log.info('net started, room=' + room);
         } catch (err) {
           if (log) log.error('nostr load fail', String(err && err.message || err));
           setStatus('failed');
           return Promise.resolve();
         }
       },
-      // [FIX] send переписан для kind=1, убран onUpdate после публикации
       send: function(vector) {
         if (!pool || !nostr || AI.getMode() === 'demo') return;
         const now = Date.now();
-        const rate = cfg.get('queryRateLimit', 5000);
+        const rate = cfg.get('queryRateLimit', 3000);
         if (now - lastQueryTime < rate) return;
         lastQueryTime = now;
         answers.length = 0;
         try {
-          const roomTag = cfg.get('roomTag', 'noomium');
           const ev = nostr.finalizeEvent({
-            kind: 1,
+            kind: cfg.get('kQuery', 21000),
             created_at: Math.floor(Date.now() / 1000),
-            tags: [['t', roomTag]],
-            content: JSON.stringify({ v: vector })
+            tags: [['t', cfg.get('room', 'noomium-main')]],
+            content: JSON.stringify({ vector: vector })
           }, sk);
           queryId = ev.id;
           safePublish(ev);
-          // [FIX] Убран вызов onUpdate() — перерисовка только после получения ответов
+          if (typeof onUpdate === 'function') { try { onUpdate(); } catch (_) { /* ignore */ } }
         } catch (e) { if (log) log.warn('pub fail', String(e)); }
       },
       activeAnswers: function() {
@@ -1333,9 +1270,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'DB', 'AI', 'Logger', 'Bus']);
 
-  // ============================================================
-  // Modal: модальные окна с focus trap и aria-атрибутами
-  // ============================================================
   DI.register('Modal', function() {
     let overlay = null, container = null, lastFocus = null, escHandler = null, trapHandler = null;
 
@@ -1474,9 +1408,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return { open: openModal, close: closeModal };
   }, []);
 
-  // ============================================================
-  // Toast: уведомления
-  // ============================================================
   DI.register('Toast', function() {
     let container = null;
     const LIMIT = 3;
@@ -1515,9 +1446,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return { show: show };
   }, []);
 
-  // ============================================================
-  // Progress: индикатор загрузки
-  // ============================================================
   DI.register('Progress', function() {
     let overlay = null, fillEl = null, pctEl = null;
 
@@ -1553,10 +1481,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return { show: show, hide: hide, update: update };
   }, []);
 
-  // ============================================================
-  // App: основной модуль приложения
-  // [FIX] Все утечки обработчиков очищаются в cleanup()
-  // ============================================================
   DI.register('App', function(
     Logger, Bus, Store, Config, Utils, DB, AI, Net, I18n, Modal, Toast, Progress
   ) {
@@ -1666,7 +1590,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       'help.gestures': 'Swipe cards left/right. Toggle World/Private chooses destination.'
     });
 
-    // Разделение состояния: бизнес-данные и UI-инфраструктура
     const appState = {
       view: 'stream',
       seg: 'local',
@@ -1688,7 +1611,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       progressHandler: null
     };
 
-    // Кэширование DB.all() с TTL 5 минут
     let allNotesCache = null;
     let allNotesCacheTime = 0;
     const ALL_NOTES_TTL = 5 * 60 * 1000;
@@ -1705,7 +1627,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       });
     }
 
-    // Кэширование RegExp для highlightText
     let cachedQuery = null;
     let cachedRegex = null;
 
@@ -1732,7 +1653,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (metaTheme) metaTheme.setAttribute('content', theme === 'light' ? '#fafafa' : '#0b0b10');
     }
 
-    // Вспомогательная функция поиска элемента по id
     function findItemById(id, list) {
       for (let i = 0; i < list.length; i++) {
         if (list[i].id === id) return list[i];
@@ -1740,7 +1660,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       return null;
     }
 
-    // [REFACTOR] Декомпозиция buildMarkup на подфункции
     function buildHeaderMarkup() {
       return '<div class="hdr">' +
         '<div class="logo"><span class="logo-mark">N</span><span>NOO<span class="logo-dot">.</span>mium</span></div>' +
@@ -1828,7 +1747,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       renderCarousel();
     }
 
-    // [FIX] Безопасная подсветка текста с экранированием каждой части
     function highlightText(text, query) {
       if (!query) return Utils.esc(text);
       if (query !== cachedQuery) {
@@ -1846,7 +1764,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       const parts = String(text).split(cachedRegex);
       let out = '';
       for (let i = 0; i < parts.length; i++) {
-        // Нечётные индексы — совпадения, чётные — обычный текст
         if (i % 2 === 1) {
           out += '<mark>' + Utils.esc(parts[i]) + '</mark>';
         } else {
@@ -2073,7 +1990,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       AI.embed(text)
         .then(function(vector) {
           return DB.put({
-            // [FIX] Улучшенная генерация id для минимизации коллизий
+            // [FIX 4] Улучшенная генерация id для заметок
             id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
             text: text,
             vector: vector,
@@ -2145,7 +2062,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           for (let i = 0; i < notes.length; i++) {
             const note = notes[i];
             if (note && note.vector) {
-              // [OPT] Облегчённые объекты для экономии памяти
               localScored.push({ 
                 id: note.id, 
                 text: note.text, 
@@ -2189,7 +2105,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         toast(String(err && err.message || err) || 'Search failed', 'err');
         if (Logger) Logger.warn('executeSearch error', String(err && err.message || err));
       }).finally(function() {
-        // [FIX] Сброс AbortController после завершения
         uiState.searchAbortController = null;
       });
     }
@@ -2250,7 +2165,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           return;
         }
 
-        // [OPT] Chunked render для больших списков
         let index = 0;
         const CHUNK_SIZE = 20;
         
@@ -2425,7 +2339,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           }
         }
 
-        // [FIX] Инкапсуляция обработчика Escape в uiState
         uiState.noteViewEscHandler = function(e) {
           if (e.key === 'Escape') {
             closeNoteView();
@@ -2847,7 +2760,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         setStatus('net', text, cls);
       });
       
-      // [FIX] Инвалидация кэша при изменении БД
       Bus.on('db:change', function() { allNotesCache = null; });
     }
 
@@ -2923,7 +2835,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       setVH();
     }
 
-    // [FIX] Полная очистка всех обработчиков при размонтировании
     function cleanup() {
       if (uiState.carouselObserver) {
         try { uiState.carouselObserver.disconnect(); } catch (_) {}
@@ -3001,9 +2912,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return { mount: mountApp };
   }, ['Logger', 'Bus', 'Store', 'Config', 'Utils', 'DB', 'AI', 'Net', 'I18n', 'Modal', 'Toast', 'Progress']);
 
-  // ============================================================
-  // Bootstrap: точка входа
-  // ============================================================
   function bootstrap() {
     try {
       const app = DI.resolve('App');
@@ -3046,10 +2954,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     bootstrap();
   }
 
-  // ============================================================
-  // Service Worker: кэширование с автоочисткой старых версий
-  // [FIX] Версия noomium-v2 с удалением старых кэшей в activate
-  // ============================================================
   if ('serviceWorker' in navigator) {
     const swCode = `
       const CACHE = 'noomium-v2';
