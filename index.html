@@ -564,13 +564,14 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return { t: t, setLang: setLang, getLang: getLang, addDict: addDict, onChange: onChange };
   }, ['Store', 'Bus']);
 
+  // [FIX 2, 3] Обновлены relays и queryRateLimit
   DI.register('Config', function(store, log) {
     const KEY = 'cfg';
     const defaults = {
       room: 'noomium-main', threshold: 0.30, serendipity: 0.15,
-      relays: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.primal.net'],
-      kQuery: 21000, kAnswer: 21001, model: 'Xenova/multilingual-e5-small', dim: 384, debounce: 800,
-      peerTTL: 60000, heartbeat: 30000, subWindow: 300, queryRateLimit: 3000,
+      relays: ['wss://relay.nostr.band', 'wss://relayable.org', 'wss://relay.damus.io'],
+      roomTag: 'noomium', model: 'Xenova/multilingual-e5-small', dim: 384, debounce: 800,
+      peerTTL: 60000, heartbeat: 30000, subWindow: 300, queryRateLimit: 5000,
       dbName: 'noomium_v8', storeName: 'notes', theme: 'dark', onboarded: false,
       publishCooldown: 1500, maxAnswersPerQuery: 5
     };
@@ -650,7 +651,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               const req = { result: null, onsuccess: null, onerror: null };
               try {
                 const r = fn(mockStore);
-                // [FIX 1] Проверка синхронного выполнения mockStore (put/delete)
                 if (!r || typeof r.onsuccess !== 'function') {
                   resolve(r && r.result !== undefined ? r.result : r);
                   return;
@@ -839,6 +839,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'Logger', 'Bus']);
 
+  // [FIX 1, 2] Убран scheduleReconnect при ошибке публикации, убран onUpdate в send
   DI.register('Net', function(cfg, DB, AI, log, bus) {
     let pool = null, sk = null, pk = null, queryId = null;
     const peers = new Map();
@@ -1002,7 +1003,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                 }
                 
                 if (outbox.indexOf(ev) === -1) outbox.push(ev);
-                if (netStatus !== 'connected') scheduleReconnect();
+                // [FIX 1] Убран вызов scheduleReconnect() при ошибке публикации
               });
             }
           });
@@ -1014,7 +1015,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       return Promise.resolve();
     }
 
-    function onEvent(ev) {
+    async function onEvent(ev) {
       try {
         if (!ev || typeof ev !== 'object') return;
         if (!Array.isArray(ev.tags)) return;
@@ -1029,63 +1030,64 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         connAttempts = 0;
         flushOutbox();
 
-        const KQ = cfg.get('kQuery', 21000);
-        const KA = cfg.get('kAnswer', 21001);
-        const room = cfg.get('room', 'noomium-main');
+        const roomTag = cfg.get('roomTag', 'noomium');
+        const hasRoomTag = ev.tags.some(t => Array.isArray(t) && t[0] === 't' && t[1] === roomTag);
+        const eTag = ev.tags.find(t => Array.isArray(t) && t[0] === 'e');
+        const pTag = ev.tags.find(t => Array.isArray(t) && t[0] === 'p');
 
-        if (ev.kind === KQ) {
-          let q;
-          try { q = JSON.parse(ev.content); } catch (_) { return; }
-          if (!q || !q.vector || !Array.isArray(q.vector)) return;
-          
-          getSharedVectors().then(function(sharedNotes) {
-            const floor = cfg.get('threshold', 0.30) - cfg.get('serendipity', 0.15);
-            const toSend = [];
-            for (let i = 0; i < sharedNotes.length; i++) {
-              const n = sharedNotes[i];
-              if (AI.cosine(q.vector, n.vector) >= floor) toSend.push(n);
-            }
-            toSend.sort(function(a, b) { return AI.cosine(q.vector, b.vector) - AI.cosine(q.vector, a.vector); });
-            const maxAnswers = cfg.get('maxAnswersPerQuery', 5);
-            const limited = toSend.slice(0, maxAnswers);
-            for (let j = 0; j < limited.length; j++) {
-              try {
-                const ans = nostr.finalizeEvent({
-                  kind: KA,
-                  created_at: Math.floor(Date.now() / 1000),
-                  tags: [['t', room], ['e', ev.id]],
-                  content: JSON.stringify({ text: limited[j].text, vector: limited[j].vector })
-                }, sk);
-                (function(answer, delay) {
-                  setTimeout(function() { safePublish(answer); }, delay);
-                })(ans, j * 500);
-              } catch (e) { if (log) log.warn('answer finalize fail', String(e)); }
-            }
-          }).catch(function(e) { if (log) log.warn('getSharedVectors fail', String(e)); });
-        }
-
-        if (ev.kind === KA) {
-          let eTag = null;
-          for (let i = 0; i < ev.tags.length; i++) {
-            const tag = ev.tags[i];
-            if (Array.isArray(tag) && tag[0] === 'e') { eTag = tag[1]; break; }
+        if (ev.kind === 1) {
+          if (hasRoomTag && !eTag) {
+            let q;
+            try { q = JSON.parse(ev.content); } catch (_) { return; }
+            if (!q || !q.v || !Array.isArray(q.v)) return;
+            
+            getSharedVectors().then(async function(sharedNotes) {
+              const floor = cfg.get('threshold', 0.30) - cfg.get('serendipity', 0.15);
+              const toSend = [];
+              for (let i = 0; i < sharedNotes.length; i++) {
+                const n = sharedNotes[i];
+                if (AI.cosine(q.v, n.vector) >= floor) toSend.push(n);
+              }
+              toSend.sort(function(a, b) { return AI.cosine(q.v, b.vector) - AI.cosine(q.v, a.vector); });
+              const maxAnswers = cfg.get('maxAnswersPerQuery', 5);
+              const limited = toSend.slice(0, maxAnswers);
+              for (let j = 0; j < limited.length; j++) {
+                try {
+                  const encryptedContent = await nostr.nip04.encrypt(sk, ev.pubkey, JSON.stringify({ text: limited[j].text, vector: limited[j].vector }));
+                  const ans = nostr.finalizeEvent({
+                    kind: 1,
+                    created_at: Math.floor(Date.now() / 1000),
+                    tags: [['t', roomTag], ['e', ev.id], ['p', ev.pubkey]],
+                    content: encryptedContent
+                  }, sk);
+                  (function(answer, delay) {
+                    setTimeout(function() { safePublish(answer); }, delay);
+                  })(ans, j * 500);
+                } catch (e) { if (log) log.warn('answer finalize fail', String(e)); }
+              }
+            }).catch(function(e) { if (log) log.warn('getSharedVectors fail', String(e)); });
           }
-          if (eTag && eTag === queryId) {
-            let data;
-            try { data = JSON.parse(ev.content); } catch (_) { return; }
-            if (data && data.text && data.vector) {
-              let isDupAnswer = false;
-              for (let j = 0; j < answers.length; j++) {
-                if (answers[j].id === ev.id) { isDupAnswer = true; break; }
+
+          if (pTag && pTag[1] === pk && eTag && eTag[1] === queryId) {
+            try {
+              const decryptedContent = await nostr.nip04.decrypt(sk, ev.pubkey, ev.content);
+              const data = JSON.parse(decryptedContent);
+              if (data && data.text && data.vector) {
+                let isDupAnswer = false;
+                for (let j = 0; j < answers.length; j++) {
+                  if (answers[j].id === ev.id) { isDupAnswer = true; break; }
+                }
+                if (!isDupAnswer) {
+                  if (answers.length >= 100) answers.shift();
+                  answers.push({
+                    id: ev.id, text: data.text, vector: data.vector,
+                    peer: ev.pubkey.slice(0, 6), fullPubkey: ev.pubkey, createdAt: Date.now()
+                  });
+                  if (typeof onUpdate === 'function') { try { onUpdate(); } catch (_) { /* ignore */ } }
+                }
               }
-              if (!isDupAnswer) {
-                if (answers.length >= 100) answers.shift();
-                answers.push({
-                  id: ev.id, text: data.text, vector: data.vector,
-                  peer: ev.pubkey.slice(0, 6), fullPubkey: ev.pubkey, createdAt: Date.now()
-                });
-                if (typeof onUpdate === 'function') { try { onUpdate(); } catch (_) { /* ignore */ } }
-              }
+            } catch (e) {
+              if (log) log.warn('decrypt/parse fail', String(e));
             }
           }
         }
@@ -1135,14 +1137,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           if (subscription && typeof subscription.close === 'function') {
             try { subscription.close(); } catch (_) { /* ignore */ }
           }
-          const room = cfg.get('room', 'noomium-main');
-          const KQ = cfg.get('kQuery', 21000);
-          const KA = cfg.get('kAnswer', 21001);
+          const roomTag = cfg.get('roomTag', 'noomium');
           const subWindow = cfg.get('subWindow', 300);
           const nowSec = Math.floor(Date.now() / 1000);
           if (pool) {
             subscription = pool.subscribeMany(cfg.get('relays', []),
-              [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
+              [{ kinds: [1], '#t': [roomTag], since: nowSec - subWindow }],
               { onevent: onEvent });
             if (log) log.info('Reconnect: subscribed');
           }
@@ -1161,7 +1161,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         connAttempts = 0;
         try {
           const mod = await import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm');
-          // [FIX 2] Улучшенная нормализация импорта
           const tools = (mod && mod.default && typeof mod.default.generateSecretKey === 'function') 
             ? mod.default 
             : (typeof mod.generateSecretKey === 'function' ? mod : null);
@@ -1190,16 +1189,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           pk = tools.getPublicKey(sk);
           pool = new tools.SimplePool();
           const nowSec = Math.floor(Date.now() / 1000);
-          const room = cfg.get('room', 'noomium-main');
-          const KQ = cfg.get('kQuery', 21000);
-          const KA = cfg.get('kAnswer', 21001);
+          const roomTag = cfg.get('roomTag', 'noomium');
           const subWindow = cfg.get('subWindow', 300);
           
           started = true;
-          // [FIX 3] Перенос startHeartbeat после успешной подписки
           try {
             subscription = pool.subscribeMany(cfg.get('relays', []),
-              [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
+              [{ kinds: [1], '#t': [roomTag], since: nowSec - subWindow }],
               { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
             startHeartbeat();
           } catch (e) {
@@ -1208,7 +1204,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           }
           notifyPeers();
           setStatus('connecting');
-          if (log) log.info('net started, room=' + room);
+          if (log) log.info('net started, room=' + roomTag);
         } catch (err) {
           if (log) log.error('nostr load fail', String(err && err.message || err));
           setStatus('failed');
@@ -1218,20 +1214,21 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       send: function(vector) {
         if (!pool || !nostr || AI.getMode() === 'demo') return;
         const now = Date.now();
-        const rate = cfg.get('queryRateLimit', 3000);
+        const rate = cfg.get('queryRateLimit', 5000);
         if (now - lastQueryTime < rate) return;
         lastQueryTime = now;
         answers.length = 0;
         try {
+          const roomTag = cfg.get('roomTag', 'noomium');
           const ev = nostr.finalizeEvent({
-            kind: cfg.get('kQuery', 21000),
+            kind: 1,
             created_at: Math.floor(Date.now() / 1000),
-            tags: [['t', cfg.get('room', 'noomium-main')]],
-            content: JSON.stringify({ vector: vector })
+            tags: [['t', roomTag]],
+            content: JSON.stringify({ v: vector })
           }, sk);
           queryId = ev.id;
           safePublish(ev);
-          if (typeof onUpdate === 'function') { try { onUpdate(); } catch (_) { /* ignore */ } }
+          // [FIX 2] Убран вызов onUpdate() после отправки запроса
         } catch (e) { if (log) log.warn('pub fail', String(e)); }
       },
       activeAnswers: function() {
@@ -1990,7 +1987,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       AI.embed(text)
         .then(function(vector) {
           return DB.put({
-            // [FIX 4] Улучшенная генерация id для заметок
             id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
             text: text,
             vector: vector,
