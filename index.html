@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
+<meta name="app-version" content="1.0.0">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -3125,8 +3126,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
 <!-- NOOMIUM_MODULE_START SW -->
   if ('serviceWorker' in navigator) {
+    var appVersionMeta = document.querySelector('meta[name="app-version"]');
+    var appVersion = appVersionMeta ? appVersionMeta.getAttribute('content') : '0';
     const swCode = `
-      const CACHE = 'noomium-v2';
+      const CACHE = 'noomium-v' + ` + JSON.stringify(appVersion) + `;
       self.addEventListener('install', e => { self.skipWaiting(); });
       self.addEventListener('activate', e => { 
         e.waitUntil(
@@ -3140,6 +3143,18 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       self.addEventListener('message', function(event) { if (event.data && event.data.type === 'SKIP_WAITING') { self.skipWaiting(); } });
       self.addEventListener('fetch', e => {
         if (e.request.method !== 'GET') return;
+        if (e.request.mode === 'navigate') {
+          e.respondWith(
+            fetch(e.request).then(res => {
+              if (res && res.status === 200) {
+                const clone = res.clone();
+                caches.open(CACHE).then(c => c.put(e.request, clone));
+              }
+              return res;
+            }).catch(() => caches.match(e.request).then(r => r || caches.match('/')))
+          );
+          return;
+        }
         e.respondWith(
           caches.match(e.request).then(r => r || fetch(e.request).then(res => {
             if (res.status === 200 && (e.request.url.startsWith(self.location.origin) || e.request.url.includes('jsdelivr'))) {
