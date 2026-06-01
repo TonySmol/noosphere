@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.0.5">
+<meta name="app-version" content="1.1.0">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1533,43 +1533,1602 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END Progress -->
 
 <!-- NOOMIUM_MODULE_START App.State -->
-... код из блока App.State ...
+  var Logger = DI.resolve('Logger');
+  var Bus = DI.resolve('Bus');
+  var Store = DI.resolve('Store');
+  var Config = DI.resolve('Config');
+  var Utils = DI.resolve('Utils');
+  var DB = DI.resolve('DB');
+  var AI = DI.resolve('AI');
+  var Net = DI.resolve('Net');
+  var I18n = DI.resolve('I18n');
+  var Modal = DI.resolve('Modal');
+  var Toast = DI.resolve('Toast');
+  var Progress = DI.resolve('Progress');
+
+  var appState = {
+    view: 'stream',
+    seg: 'local',
+    sendMode: 'private',
+    sendLock: false,
+    lastVec: null,
+    lastQuery: 0,
+    lists: { local: [], world: [], seren: [] }
+  };
+
+  var uiState = {
+    activeIdx: { local: 0, world: 0, seren: 0 },
+    carouselObserver: null,
+    searchAbortController: null,
+    searchTimer: null,
+    baseSearchTimer: null,
+    windowHandlers: { resize: null, focusin: null, focusout: null, orientationchange: null, beforeunload: null },
+    noteViewEscHandler: null,
+    progressHandler: null
+  };
+
+  var allNotesCache = null;
+  var allNotesCacheTime = 0;
+  var ALL_NOTES_TTL = 5 * 60 * 1000;
+
+  function getAllNotesCached() {
+    var now = Date.now();
+    if (allNotesCache && (now - allNotesCacheTime < ALL_NOTES_TTL)) {
+      return Promise.resolve(allNotesCache);
+    }
+    return DB.all().then(function(notes) {
+      allNotesCache = notes;
+      allNotesCacheTime = now;
+      return notes;
+    });
+  }
+
+  var cachedQuery = null;
+  var cachedRegex = null;
+
+  var PAPER_PLANE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+  var SPINNER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
+
+  function getEditorValue() {
+    var ta = document.getElementById('ed-ta');
+    return ta ? ta.value : '';
+  }
+  function setEditorValue(val) {
+    var ta = document.getElementById('ed-ta');
+    if (ta) ta.value = val;
+  }
+
+  function translate(key, params, fallback) { return I18n.t(key, params, fallback); }
+  function toast(msg, type) { if (Toast && Toast.show) Toast.show(type || 'info', msg); }
+
+  function applyTheme(theme) {
+    document.body.setAttribute('data-theme', theme);
+    Config.set('theme', theme);
+    Config.save();
+    var metaTheme = document.querySelector('meta[name="theme-color"]');
+    if (metaTheme) metaTheme.setAttribute('content', theme === 'light' ? '#fafafa' : '#0b0b10');
+  }
+
+  function findItemById(id, list) {
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id) return list[i];
+    }
+    return null;
+  }
+
+  function setStatus(which, text, cls) {
+    var dot = document.getElementById('st-' + which + '-dot');
+    var txtEl = document.getElementById('st-' + which + '-txt');
+    if (dot) dot.className = 'hdr-st-dot ' + (cls || '');
+    if (txtEl) txtEl.textContent = text;
+  }
 <!-- NOOMIUM_MODULE_END App.State -->
 
 <!-- NOOMIUM_MODULE_START UI.Layout -->
-... код из блока UI.Layout ...
+  function buildHeaderMarkup() {
+    return '<div class="hdr">' +
+      '<div class="logo"><span class="logo-mark">N</span><span>NOO<span class="logo-dot">.</span>mium</span></div>' +
+      '<div class="hdr-status">' +
+        '<span class="hdr-st-item"><span class="hdr-st-dot load" id="st-net-dot"></span><span id="st-net-txt">' + translate('st.net') + '</span></span>' +
+        '<span class="hdr-st-sep">·</span>' +
+        '<span class="hdr-st-item"><span class="hdr-st-dot load" id="st-ai-dot"></span><span id="st-ai-txt">' + translate('st.ai.loading') + '</span></span>' +
+      '</div>' +
+      '<button class="burger" id="btn-menu" aria-label="Menu" aria-expanded="false"><span class="burger-line"></span><span class="burger-line"></span><span class="burger-line"></span></button>' +
+    '</div>';
+  }
+
+  function buildSegmentsMarkup() {
+    return '<div class="seg">' +
+      '<button class="seg-b on" data-k="local"><span class="lbl">' + translate('seg.local') + '</span><span class="cnt" id="c-local">0</span></button>' +
+      '<button class="seg-b" data-k="world"><span class="lbl">' + translate('seg.world') + '</span><span class="cnt" id="c-world">0</span></button>' +
+      '<button class="seg-b" data-k="seren"><span class="lbl">' + translate('seg.seren') + '</span><span class="cnt" id="c-seren">0</span></button>' +
+    '</div>';
+  }
+
+  function buildCarouselWrapMarkup() {
+    return '<div class="carousel-wrap" id="carousel-wrap"></div>';
+  }
+
+  function buildEditorMarkup() {
+    return '<div class="ed"><textarea id="ed-ta" class="ed-ta" placeholder="' + Utils.esc(translate('ed.placeholder')) + '"></textarea>' +
+    '<div class="ed-foot"><span id="ed-cnt" class="ed-cnt">0 ' + translate('ed.chars') + '</span>' +
+    '<div class="ed-acts">' +
+      '<div class="tog-sw" id="mode-toggle" data-mode="private">' +
+        '<div class="tog-sw-thumb"></div>' +
+        '<div class="tog-sw-opt on" data-v="private">' + translate('btn.private') + '</div>' +
+        '<div class="tog-sw-opt" data-v="world">' + translate('btn.public') + '</div>' +
+      '</div>' +
+      '<button class="btn-send" id="btn-send" aria-label="' + translate('btn.send') + '">' + PAPER_PLANE_SVG + '</button>' +
+    '</div></div></div>';
+  }
+
+  function buildBaseMarkup() {
+    return '<div class="ws base" id="ws-base" style="display:none">' +
+      '<div class="base-h"><div class="base-stats" id="base-stats"></div>' +
+      '<div class="base-ctrls"><input type="text" class="base-search" id="base-q" placeholder="' + Utils.esc(translate('base.search')) + '" />' +
+      '<select class="base-sort" id="base-sort"><option value="new">' + translate('base.sort.new') + '</option><option value="old">' + translate('base.sort.old') + '</option><option value="az">' + translate('base.sort.az') + '</option></select></div></div>' +
+      '<div class="base-list" id="base-list"></div>' +
+    '</div>';
+  }
+
+  function buildBottomTabMarkup() {
+    return '<div class="btab">' +
+      '<button class="btab-b on" data-v="stream"><span class="btab-ic">◇</span><span>' + translate('tab.stream') + '</span></button>' +
+      '<button class="btab-b" data-v="base"><span class="btab-ic">▤</span><span>' + translate('tab.base') + '</span></button>' +
+    '</div>';
+  }
+
+  function buildMarkup() {
+    return buildHeaderMarkup() + 
+           '<div class="ws" id="ws-stream">' + buildSegmentsMarkup() + buildCarouselWrapMarkup() + buildEditorMarkup() + '</div>' + 
+           buildBaseMarkup() + 
+           buildBottomTabMarkup();
+  }
+
+  function switchView(viewName) {
+    appState.view = viewName;
+    document.querySelectorAll('.btab-b').forEach(function(b) {
+      b.classList.toggle('on', b.getAttribute('data-v') === viewName);
+    });
+    var streamEl = document.getElementById('ws-stream');
+    var baseEl = document.getElementById('ws-base');
+    if (streamEl) streamEl.style.display = viewName === 'stream' ? 'flex' : 'none';
+    if (baseEl) baseEl.style.display = viewName === 'base' ? 'flex' : 'none';
+    if (viewName === 'base') renderBase();
+  }
+
+  function setSegment(segKey) {
+    appState.seg = segKey;
+    document.querySelectorAll('.seg-b').forEach(function(b) {
+      b.classList.toggle('on', b.getAttribute('data-k') === segKey);
+    });
+    renderCarousel();
+  }
 <!-- NOOMIUM_MODULE_END UI.Layout -->
 
 <!-- NOOMIUM_MODULE_START UI.Carousel -->
-... код из блока UI.Carousel ...
+  function highlightText(text, query) {
+    if (!query) return Utils.esc(text);
+    if (query !== cachedQuery) {
+      var words = query.toLowerCase().split(/\s+/).filter(function(w) { return w.length > 2; });
+      if (words.length === 0) {
+        cachedRegex = null;
+      } else {
+        var escapedWords = words.map(function(w) { return Utils.escRe(w); });
+        cachedRegex = new RegExp('(' + escapedWords.join('|') + ')', 'gi');
+      }
+      cachedQuery = query;
+    }
+    if (!cachedRegex) return Utils.esc(text);
+    
+    var parts = String(text).split(cachedRegex);
+    var out = '';
+    for (var i = 0; i < parts.length; i++) {
+      if (i % 2 === 1) {
+        out += '<mark>' + Utils.esc(parts[i]) + '</mark>';
+      } else {
+        out += Utils.esc(parts[i]);
+      }
+    }
+    return out;
+  }
+
+  function isOwnItem(item) { return !item.peer; }
+
+  function renderItemHTML(item) {
+    if (!item) return '';
+    var own = isOwnItem(item);
+    var typeLabel = own
+      ? (item.shared ? translate('base.tag.shared') : translate('base.tag.private'))
+      : ('· ' + item.peer);
+    var scoreNum = typeof item.score === 'number' ? Math.round(item.score * 100) : null;
+    var scoreHTML = scoreNum !== null
+      ? '<span class="fi-score-label">' + Utils.esc(translate('sim.score')) + '</span>' +
+        '<span class="fi-score-value">' + Utils.esc(String(scoreNum)) + '%</span>'
+      : '';
+    var queryText = getEditorValue();
+    var actions = '';
+
+    if (own) {
+      actions =
+        '<button class="fi-act primary" data-act="edit" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(translate('btn.edit')) + '">' + translate('btn.edit') + '</button>' +
+        '<button class="fi-act" data-act="toggle" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(item.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub')) + '">' +
+          (item.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub')) +
+        '</button>' +
+        '<button class="fi-act" data-act="copy" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(translate('btn.copy')) + '">' + translate('btn.copy') + '</button>' +
+        '<button class="fi-act danger" data-act="del" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(translate('btn.del')) + '">' + translate('btn.del') + '</button>';
+    } else {
+      actions = '';
+    }
+
+    return '<div class="fi t-' + appState.seg + '" data-id="' + Utils.esc(item.id) + '">' +
+      '<div class="fi-h"><span class="fi-badge">' + Utils.esc(typeLabel) + '</span><span class="fi-score">' + scoreHTML + '</span></div>' +
+      '<div class="fi-body">' + highlightText(item.text, queryText) + '</div>' +
+      '<div class="fi-foot">' + actions + '</div></div>';
+  }
+
+  function renderCarousel() {
+    var wrap = document.getElementById('carousel-wrap');
+    if (!wrap) return;
+
+    if (uiState.carouselObserver) {
+      try { uiState.carouselObserver.disconnect(); } catch (_) { /* ignore */ }
+      uiState.carouselObserver = null;
+    }
+
+    var list = appState.lists[appState.seg];
+    if (!list || list.length === 0) {
+      var emptyMessages = {
+        local: { t: translate('empty.local.t'), d: translate('empty.local.d') },
+        world: { t: translate('empty.world.t'), d: translate('empty.world.d') },
+        seren: { t: translate('empty.seren.t'), d: translate('empty.seren.d') }
+      };
+      var msg = emptyMessages[appState.seg];
+      wrap.innerHTML = '<div class="feed-empty"><div class="feed-empty-ic">◇</div>' +
+        '<div class="feed-empty-t">' + Utils.esc(msg.t) + '</div>' +
+        '<div class="feed-empty-d">' + Utils.esc(msg.d) + '</div></div>';
+      return;
+    }
+
+    var html = '<div class="carousel" id="carousel" tabindex="0">';
+    for (var i = 0; i < list.length; i++) {
+      html += '<div class="carousel-item" data-idx="' + i + '">' + renderItemHTML(list[i]) + '</div>';
+    }
+    html += '</div>';
+    html += '<div class="carousel-dots" id="carousel-dots">';
+    for (var j = 0; j < list.length; j++) {
+      html += '<span class="carousel-dot' + (j === 0 ? ' active' : '') + '" data-i="' + j + '"></span>';
+    }
+    html += '<span class="carousel-counter" id="carousel-counter">1 / ' + list.length + '</span>';
+    html += '</div>';
+    wrap.innerHTML = html;
+
+    var carousel = document.getElementById('carousel');
+    if (carousel && 'IntersectionObserver' in window) {
+      uiState.carouselObserver = new IntersectionObserver(function(entries) {
+        entries.forEach(function(entry) {
+          if (entry.isIntersecting && entry.intersectionRatio >= 0.55) {
+            var idx = parseInt(entry.target.getAttribute('data-idx') || '0', 10);
+            uiState.activeIdx[appState.seg] = idx;
+            updateCarouselDots(idx, list.length);
+            carousel.querySelectorAll('.fi').forEach(function(fi) { fi.classList.remove('active'); });
+            var fi = entry.target.querySelector('.fi');
+            if (fi) fi.classList.add('active');
+          }
+        });
+      }, { root: carousel, threshold: [0.55] });
+      carousel.querySelectorAll('.carousel-item').forEach(function(item) {
+        uiState.carouselObserver.observe(item);
+      });
+    }
+
+    if (carousel) {
+      carousel.addEventListener('keydown', function(e) {
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          if (uiState.activeIdx[appState.seg] < list.length - 1) {
+            uiState.activeIdx[appState.seg]++;
+            var target = carousel.querySelector('[data-idx="' + uiState.activeIdx[appState.seg] + '"]');
+            if (target) target.scrollIntoView({behavior: 'smooth', inline: 'center'});
+            updateCarouselDots(uiState.activeIdx[appState.seg], list.length);
+          }
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          if (uiState.activeIdx[appState.seg] > 0) {
+            uiState.activeIdx[appState.seg]--;
+            var target = carousel.querySelector('[data-idx="' + uiState.activeIdx[appState.seg] + '"]');
+            if (target) target.scrollIntoView({behavior: 'smooth', inline: 'center'});
+            updateCarouselDots(uiState.activeIdx[appState.seg], list.length);
+          }
+        }
+      });
+      
+      carousel.scrollLeft = 0;
+    }
+    uiState.activeIdx[appState.seg] = 0;
+  }
+
+  function updateCarouselDots(idx, total) {
+    var dots = document.querySelectorAll('#carousel-dots .carousel-dot');
+    dots.forEach(function(d, i) { d.classList.toggle('active', i === idx); });
+    var counter = document.getElementById('carousel-counter');
+    if (counter) counter.textContent = (idx + 1) + ' / ' + total;
+  }
+
+  function handleItemAction(action, element) {
+    if (!element) return;
+    var id = element.getAttribute('data-id');
+
+    if (action === 'edit') {
+      openNoteView(id);
+      return;
+    }
+
+    if (action === 'copy') {
+      var item = findItemById(id, appState.lists[appState.seg]);
+      if (item) copyToClipboard(item.text);
+      return;
+    }
+
+    if (action === 'del') {
+      if (!confirm(translate('del.confirm'))) return;
+      DB.del(id).then(function() {
+        toast(translate('toast.deleted'), 'ok');
+        appState.lists[appState.seg] = appState.lists[appState.seg].filter(function(n) { return n.id !== id; });
+        if (uiState.activeIdx[appState.seg] >= appState.lists[appState.seg].length) {
+          uiState.activeIdx[appState.seg] = Math.max(0, appState.lists[appState.seg].length - 1);
+        }
+        renderCarousel();
+        if (appState.view === 'base') renderBase();
+      }).catch(function(err) {
+        toast(String(err && err.message || err) || 'Delete failed', 'err');
+      });
+      return;
+    }
+
+    if (action === 'toggle') {
+      DB.get(id).then(function(record) {
+        if (!record) return;
+        record.shared = !record.shared;
+        return DB.put(record).then(function() {
+          toast(record.shared ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
+          executeSearch();
+          if (appState.view === 'base') renderBase();
+        });
+      }).catch(function(err) {
+        toast(String(err && err.message || err) || 'Toggle failed', 'err');
+      });
+      return;
+    }
+  }
+
+  function copyToClipboard(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(
+          function() { toast(translate('toast.copied'), 'ok'); },
+          function() { toast(translate('toast.copy.fail'), 'err'); }
+        );
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.top = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); toast(translate('toast.copied'), 'ok'); }
+        catch (err) { toast(translate('toast.copy.fail'), 'err'); }
+        document.body.removeChild(ta);
+      }
+    } catch (err) {
+      toast(translate('toast.copy.fail'), 'err');
+    }
+  }
 <!-- NOOMIUM_MODULE_END UI.Carousel -->
 
 <!-- NOOMIUM_MODULE_START UI.Base -->
-... код из блока UI.Base ...
+  function updateCounts() {
+    ['local', 'world', 'seren'].forEach(function(key) {
+      var el = document.getElementById('c-' + key);
+      if (el) el.textContent = appState.lists[key].length;
+    });
+  }
+
+  function buildStatCard(value, label) {
+    return '<div class="stat"><div class="stat-v">' + Utils.esc(String(value)) + '</div>' +
+           '<div class="stat-l">' + Utils.esc(label) + '</div></div>';
+  }
+
+  function renderBase() {
+    getAllNotesCached().then(function(allNotes) {
+      var statsEl = document.getElementById('base-stats');
+      if (statsEl) {
+        var sharedCount = 0;
+        for (var i = 0; i < allNotes.length; i++) {
+          if (allNotes[i] && allNotes[i].shared) sharedCount++;
+        }
+        statsEl.innerHTML =
+          buildStatCard(allNotes.length, translate('base.stat.total')) +
+          buildStatCard(sharedCount, translate('base.stat.open')) +
+          buildStatCard(allNotes.length - sharedCount, translate('base.stat.priv'));
+      }
+
+      var queryInput = document.getElementById('base-q');
+      var sortSelect = document.getElementById('base-sort');
+      var queryValue = queryInput ? queryInput.value.trim().toLowerCase() : '';
+      var sortValue = sortSelect ? sortSelect.value : 'new';
+
+      var list = allNotes.slice();
+      if (queryValue) {
+        list = list.filter(function(n) { return n.text && n.text.toLowerCase().indexOf(queryValue) >= 0; });
+      }
+      if (sortValue === 'old') {
+        list.sort(function(a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+      } else if (sortValue === 'az') {
+        list.sort(function(a, b) { return (a.text || '').localeCompare(b.text || '', I18n.getLang() === 'en' ? 'en' : 'ru'); });
+      } else {
+        list.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+      }
+
+      var container = document.getElementById('base-list');
+      if (!container) return;
+      container.innerHTML = '';
+
+      if (list.length === 0) {
+        var emptyTitle = translate('empty.base.t');
+        var emptyDesc = allNotes.length === 0 ? translate('empty.base.d') : translate('empty.base.empty');
+        container.innerHTML = '<div class="feed-empty"><div class="feed-empty-ic">▤</div>' +
+          '<div class="feed-empty-t">' + Utils.esc(emptyTitle) + '</div>' +
+          '<div class="feed-empty-d">' + Utils.esc(emptyDesc) + '</div></div>';
+        return;
+      }
+
+      var index = 0;
+      var CHUNK_SIZE = 20;
+      
+      function renderChunk() {
+        var fragment = document.createDocumentFragment();
+        var end = Math.min(index + CHUNK_SIZE, list.length);
+        for (; index < end; index++) {
+          var note = list[index];
+          var div = document.createElement('div');
+          var dateStr = Utils.fmtDate(note.createdAt, I18n.getLang());
+          var escapedText = Utils.esc(note.text);
+          var isLongText = escapedText.length > 120;
+          div.className = 'bi ' + (note.shared ? 'shared' : '');
+          div.setAttribute('data-id', note.id);
+          div.innerHTML = '<div class="bi-t' + (isLongText ? ' truncated' : '') + '">' + escapedText + '</div>' +
+            '<div class="bi-f"><div class="bi-meta">' +
+              '<span class="bi-tag">' + Utils.esc(note.shared ? translate('base.tag.shared') : translate('base.tag.private')) + '</span>' +
+              '<span class="bi-date">' + Utils.esc(dateStr) + '</span>' +
+            '</div></div>';
+          fragment.appendChild(div);
+        }
+        container.appendChild(fragment);
+        if (index < list.length) {
+          if ('requestIdleCallback' in window) {
+            requestIdleCallback(renderChunk);
+          } else {
+            setTimeout(renderChunk, 0);
+          }
+        }
+      }
+      renderChunk();
+    }).catch(function(err) {
+      toast(String(err && err.message || err) || 'Base load failed', 'err');
+      if (Logger) Logger.warn('renderBase error', String(err && err.message || err));
+    });
+  }
+
+  function openNoteView(id) {
+    DB.get(id).then(function(record) {
+      if (!record) return;
+
+      var isEditing = false;
+      var nvOverlay = null;
+
+      if (uiState.noteViewEscHandler) {
+        document.removeEventListener('keydown', uiState.noteViewEscHandler);
+        uiState.noteViewEscHandler = null;
+      }
+
+      function renderNoteView() {
+        if (!nvOverlay) {
+          nvOverlay = document.createElement('div');
+          nvOverlay.className = 'nv on';
+          document.body.appendChild(nvOverlay);
+        }
+
+        var dateStr = Utils.fmtDate(record.createdAt, I18n.getLang());
+        var tagLabel = record.shared ? translate('base.tag.shared') : translate('base.tag.private');
+
+        var bodyContent = '';
+        var topFooter = '';
+        var bottomFooter = '';
+
+        if (isEditing) {
+          bodyContent = '<textarea class="nv-ta" id="nv-ta">' + Utils.esc(record.text) + '</textarea>';
+          bottomFooter =
+            '<button class="nv-act" id="nv-cancel">' + Utils.esc(translate('btn.cancel')) + '</button>' +
+            '<button class="nv-act primary" id="nv-save">' + Utils.esc(translate('btn.save')) + '</button>';
+        } else {
+          bodyContent =
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">' +
+              '<span class="bi-tag">' + Utils.esc(tagLabel) + '</span>' +
+              '<span style="font-size:11px;color:var(--text-3);font-family:var(--mono)">' + Utils.esc(dateStr) + '</span>' +
+            '</div>' +
+            '<div class="nv-text">' + Utils.esc(record.text) + '</div>';
+          topFooter =
+            '<button class="nv-act danger" id="nv-del" aria-label="' + Utils.esc(translate('btn.del')) + '">' + Utils.esc(translate('btn.del')) + '</button>' +
+            '<button class="nv-act" id="nv-copy" aria-label="' + Utils.esc(translate('btn.copy')) + '">' + Utils.esc(translate('btn.copy')) + '</button>' +
+            '<button class="nv-act" id="nv-toggle" aria-label="' + Utils.esc(record.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub')) + '">' + Utils.esc(record.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub')) + '</button>';
+          bottomFooter =
+            '<button class="nv-act" id="nv-cancel" aria-label="' + Utils.esc(translate('btn.cancel')) + '">' + Utils.esc(translate('btn.cancel')) + '</button>' +
+            '<button class="nv-act primary" id="nv-edit" aria-label="' + Utils.esc(translate('btn.edit')) + '">' + Utils.esc(translate('btn.edit')) + '</button>';
+        }
+
+        nvOverlay.innerHTML =
+          (topFooter ? '<div class="nv-f">' + topFooter + '</div>' : '') +
+          '<div class="nv-b">' + bodyContent + '</div>' +
+          '<div class="nv-f-bottom">' + bottomFooter + '</div>';
+
+        var cancelBtn = document.getElementById('nv-cancel');
+        if (cancelBtn) cancelBtn.onclick = function() {
+          if (isEditing) {
+            isEditing = false;
+            renderNoteView();
+          } else {
+            closeNoteView();
+          }
+        };
+
+        if (isEditing) {
+          var saveBtn = document.getElementById('nv-save');
+          if (saveBtn) saveBtn.onclick = function() {
+            var ta = document.getElementById('nv-ta');
+            if (!ta) return;
+            var newText = ta.value.trim();
+            if (!newText) { toast(translate('toast.empty'), 'err'); return; }
+            record.text = newText;
+            AI.embed(newText).then(function(v) {
+              record.vector = v;
+              return DB.put(record);
+            }).then(function() {
+              toast(translate('toast.edit.saved'), 'ok');
+              isEditing = false;
+              renderNoteView();
+              renderBase();
+              executeSearch();
+            }).catch(function(err) {
+              toast(String(err && err.message || err) || 'Edit failed', 'err');
+            });
+          };
+        } else {
+          var delBtn = document.getElementById('nv-del');
+          var copyBtn = document.getElementById('nv-copy');
+          var toggleBtn = document.getElementById('nv-toggle');
+          var editBtn = document.getElementById('nv-edit');
+
+          if (delBtn) delBtn.onclick = function() {
+            if (!confirm(translate('nv.delete.confirm'))) return;
+            DB.del(id).then(function() {
+              toast(translate('toast.deleted'), 'ok');
+              closeNoteView();
+              renderBase();
+              executeSearch();
+            }).catch(function(err) {
+              toast(String(err && err.message || err) || 'Delete failed', 'err');
+            });
+          };
+          if (copyBtn) copyBtn.onclick = function() {
+            copyToClipboard(record.text);
+          };
+          if (toggleBtn) toggleBtn.onclick = function() {
+            record.shared = !record.shared;
+            DB.put(record).then(function() {
+              toast(record.shared ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
+              renderNoteView();
+              renderBase();
+              executeSearch();
+            }).catch(function(err) {
+              toast(String(err && err.message || err) || 'Toggle failed', 'err');
+            });
+          };
+          if (editBtn) editBtn.onclick = function() {
+            isEditing = true;
+            renderNoteView();
+          };
+        }
+      }
+
+      function closeNoteView() {
+        if (uiState.noteViewEscHandler) {
+          document.removeEventListener('keydown', uiState.noteViewEscHandler);
+          uiState.noteViewEscHandler = null;
+        }
+        if (nvOverlay) {
+          nvOverlay.classList.remove('on');
+          setTimeout(function() {
+            if (nvOverlay && nvOverlay.parentNode) {
+              try { nvOverlay.parentNode.removeChild(nvOverlay); } catch (_) { /* ignore */ }
+            }
+            nvOverlay = null;
+          }, 200);
+        }
+      }
+
+      uiState.noteViewEscHandler = function(e) {
+        if (e.key === 'Escape') {
+          closeNoteView();
+        }
+      };
+      document.addEventListener('keydown', uiState.noteViewEscHandler);
+
+      renderNoteView();
+    }).catch(function(err) {
+      toast(String(err && err.message || err) || 'Load note failed', 'err');
+    });
+  }
+
+  function exportData() {
+    DB.all().then(function(notes) {
+      if (!notes || notes.length === 0) { toast('0', 'err'); return; }
+      var capsule = { app: 'noomium', format: 'v1', version: 1, exportedAt: Date.now(), notes: notes };
+      var blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'noomium-' + new Date().toISOString().slice(0, 10) + '.json';
+      document.body.appendChild(anchor);
+      anchor.click();
+      URL.revokeObjectURL(url);
+      anchor.remove();
+      toast('✓ ' + notes.length, 'ok');
+    }).catch(function(err) {
+      toast(String(err && err.message || err) || 'Export failed', 'err');
+    });
+  }
+
+  function importData() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.onchange = function() {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function() {
+        try {
+          var data = JSON.parse(String(reader.result || '{}'));
+          var notes = Array.isArray(data) ? data : (data.notes || []);
+          if (!Array.isArray(notes)) throw new Error('bad format');
+          var clean = [];
+          for (var i = 0; i < notes.length; i++) {
+            var note = notes[i];
+            if (!note || typeof note.text !== 'string' || !note.text.trim()) continue;
+            clean.push({
+              id: note.id || ('i' + Math.random().toString(36).slice(2, 10)),
+              text: note.text.trim(),
+              vector: Array.isArray(note.vector) ? note.vector : null,
+              shared: !!note.shared,
+              createdAt: typeof note.createdAt === 'number' ? note.createdAt : Date.now()
+            });
+          }
+          DB.bulkPut(clean).then(function() {
+            toast('✓ ' + clean.length, 'ok');
+            if (appState.view === 'base') renderBase();
+            executeSearch();
+          }).catch(function(err) {
+            toast(String(err && err.message || err) || 'Import failed', 'err');
+          });
+        } catch (err) {
+          toast(String(err && err.message || err) || 'Import parse failed', 'err');
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }
 <!-- NOOMIUM_MODULE_END UI.Base -->
 
 <!-- NOOMIUM_MODULE_START App.Logic -->
-... код из блока App.Logic ...
+  function updateCounter() {
+    var value = getEditorValue();
+    var counter = document.getElementById('ed-cnt');
+    if (counter) counter.textContent = Utils.word('symbols', value.length, I18n.getLang());
+  }
+
+  function handleToggleMode(newMode) {
+    if (newMode === appState.sendMode) return;
+    appState.sendMode = newMode;
+    var toggleEl = document.getElementById('mode-toggle');
+    if (!toggleEl) return;
+    toggleEl.setAttribute('data-mode', appState.sendMode);
+    toggleEl.querySelectorAll('.tog-sw-opt').forEach(function(opt) {
+      opt.classList.toggle('on', opt.getAttribute('data-v') === appState.sendMode);
+    });
+  }
+
+  function handleSend() {
+    if (appState.sendLock) return;
+    var text = getEditorValue().trim();
+    if (!text) { toast(translate('toast.empty'), 'warn'); return; }
+    if (!AI.ready()) { toast(translate('toast.ai.notready'), 'err'); return; }
+
+    var isWorld = appState.sendMode === 'world';
+    var btn = document.getElementById('btn-send');
+    appState.sendLock = true;
+
+    if (btn) {
+      btn.classList.add('sending');
+      btn.disabled = true;
+      btn.innerHTML = SPINNER_SVG;
+    }
+
+    AI.embed(text)
+      .then(function(vector) {
+        return DB.put({
+          id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          text: text,
+          vector: vector,
+          shared: !!isWorld,
+          createdAt: Date.now()
+        });
+      })
+      .then(function() {
+        setEditorValue('');
+        updateCounter();
+        appState.lastVec = null;
+        toast(isWorld ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
+        executeSearch();
+        if (appState.view === 'base') renderBase();
+      })
+      .catch(function(err) {
+        toast(String(err && err.message || err) || 'Send failed', 'err');
+      })
+      .finally(function() {
+        appState.sendLock = false;
+        if (btn) {
+          btn.classList.remove('sending');
+          btn.disabled = false;
+          btn.innerHTML = PAPER_PLANE_SVG;
+        }
+      });
+  }
+
+  function executeSearch(force) {
+    var text = getEditorValue();
+    if (!text || !AI.ready()) {
+      appState.lists = { local: [], world: [], seren: [] };
+      updateCounts();
+      renderCarousel();
+      return Promise.resolve();
+    }
+
+    if (uiState.searchAbortController) {
+      uiState.searchAbortController.abort();
+    }
+    var controller = new AbortController();
+    uiState.searchAbortController = controller;
+    var signal = controller.signal;
+
+    return AI.embed(text).then(function(vec) {
+      if (signal.aborted) return;
+      if (!vec) return;
+      if (!appState.lastVec || AI.cosine(vec, appState.lastVec) < 0.98 || force) {
+        appState.lastVec = vec;
+        appState.lastQuery = Date.now();
+        if (AI.getMode() === 'model' && Net && typeof Net.send === 'function') {
+          Net.send(vec);
+        }
+      }
+      return getAllNotesCached().then(function(notes) {
+        if (signal.aborted) return;
+        var localScored = [];
+        for (var i = 0; i < notes.length; i++) {
+          var note = notes[i];
+          if (note && note.vector) {
+            localScored.push({ 
+              id: note.id, 
+              text: note.text, 
+              vector: note.vector, 
+              score: AI.cosine(vec, note.vector), 
+              shared: note.shared, 
+              peer: note.peer, 
+              createdAt: note.createdAt 
+            });
+          }
+        }
+        var worldAnswers = Net.activeAnswers();
+        var worldScored = [];
+        for (var i = 0; i < worldAnswers.length; i++) {
+          worldScored.push({ 
+            id: worldAnswers[i].id, 
+            text: worldAnswers[i].text, 
+            vector: worldAnswers[i].vector, 
+            score: AI.cosine(vec, worldAnswers[i].vector), 
+            shared: worldAnswers[i].shared, 
+            peer: worldAnswers[i].peer, 
+            createdAt: worldAnswers[i].createdAt 
+          });
+        }
+        var threshold = Config.get('threshold', 0.30);
+        var serendipityDelta = Config.get('serendipity', 0.15);
+
+        appState.lists.local = localScored.filter(function(n) { return n.score >= threshold; })
+          .sort(function(a, b) { return b.score - a.score; });
+        appState.lists.world = worldScored.filter(function(n) { return n.score >= threshold; })
+          .sort(function(a, b) { return b.score - a.score; });
+        appState.lists.seren = localScored.concat(worldScored)
+          .filter(function(n) { return n.score >= (threshold - serendipityDelta) && n.score < threshold; })
+          .sort(function(a, b) { return b.score - a.score; });
+
+        updateCounts();
+        renderCarousel();
+      });
+    }).catch(function(err) {
+      if (signal.aborted) return;
+      toast(String(err && err.message || err) || 'Search failed', 'err');
+      if (Logger) Logger.warn('executeSearch error', String(err && err.message || err));
+    }).finally(function() {
+      uiState.searchAbortController = null;
+    });
+  }
 <!-- NOOMIUM_MODULE_END App.Logic -->
 
 <!-- NOOMIUM_MODULE_START UI.Menu -->
-... код из блока UI.Menu ...
+  function openMenu() {
+    var body = document.createElement('div');
+
+    var appSection = document.createElement('div');
+    appSection.className = 'set-sec';
+    appSection.innerHTML = '<div class="set-sec-t">' + translate('menu.settings') + '</div>';
+
+    var themeRow = document.createElement('button');
+    themeRow.className = 'tog ' + (Config.get('theme', 'dark') === 'light' ? 'on' : '');
+    themeRow.innerHTML = '<span class="tog-ic">◐</span><span class="tog-lbl">' + translate('menu.theme') + '</span><div class="tog-track"><div class="tog-thumb"></div></div>';
+    themeRow.onclick = function() {
+      var current = Config.get('theme', 'dark');
+      var next = current === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      themeRow.classList.toggle('on', next === 'light');
+    };
+    appSection.appendChild(themeRow);
+
+    var langRow = document.createElement('div');
+    langRow.style.marginTop = '8px';
+    langRow.innerHTML = '<div class="fl" style="margin-bottom:5px">' + translate('menu.lang') + '</div>';
+    var langSwitch = document.createElement('div');
+    langSwitch.className = 'lang-sw';
+    ['ru', 'en'].forEach(function(lang) {
+      var langBtn = document.createElement('button');
+      langBtn.className = 'lang-sw-b' + (I18n.getLang() === lang ? ' on' : '');
+      langBtn.textContent = lang.toUpperCase();
+      langBtn.onclick = function() {
+        I18n.setLang(lang);
+        langSwitch.querySelectorAll('.lang-sw-b').forEach(function(x) {
+          x.classList.toggle('on', x.textContent.toLowerCase() === lang);
+        });
+        Modal.close();
+        setTimeout(function() {
+          cleanup();
+          var root = document.getElementById('app-root');
+          if (root) root.innerHTML = '';
+          mountApp();
+        }, 50);
+      };
+      langSwitch.appendChild(langBtn);
+    });
+    langRow.appendChild(langSwitch);
+    appSection.appendChild(langRow);
+
+    var helpBtn = document.createElement('button');
+    helpBtn.className = 'tog';
+    helpBtn.style.marginTop = '8px';
+    helpBtn.innerHTML = '<span class="tog-ic">?</span><span class="tog-lbl">' + translate('menu.help') + '</span><span class="tog-arr">→</span>';
+    helpBtn.onclick = function() { Modal.close(); setTimeout(function() { openHelp(false); }, 200); };
+    appSection.appendChild(helpBtn);
+    body.appendChild(appSection);
+
+    var netSection = document.createElement('div');
+    netSection.className = 'set-sec';
+    netSection.innerHTML = '<div class="set-sec-t">' + translate('set.advanced') + '</div>';
+
+    var roomInput = document.createElement('input');
+    roomInput.type = 'text';
+    roomInput.className = 'fi-input';
+    roomInput.value = Config.get('room', 'noomium-main');
+    var roomGroup = document.createElement('div');
+    roomGroup.className = 'fg';
+    roomGroup.innerHTML = '<label class="fl">' + translate('set.room') + '</label>';
+    roomGroup.appendChild(roomInput);
+    var roomHint = document.createElement('div');
+    roomHint.className = 'fh';
+    roomHint.textContent = translate('set.room.hint');
+    roomGroup.appendChild(roomHint);
+    netSection.appendChild(roomGroup);
+
+    var thresholdInput = document.createElement('input');
+    thresholdInput.type = 'range';
+    thresholdInput.className = 'fr';
+    thresholdInput.min = '0.1';
+    thresholdInput.max = '0.7';
+    thresholdInput.step = '0.05';
+    thresholdInput.value = Config.get('threshold', 0.30);
+    var thresholdValue = document.createElement('span');
+    thresholdValue.className = 'rv';
+    thresholdValue.textContent = Number(Config.get('threshold', 0.30)).toFixed(2);
+    thresholdInput.oninput = function(e) { thresholdValue.textContent = parseFloat(e.target.value).toFixed(2); };
+    var thresholdGroup = document.createElement('div');
+    thresholdGroup.className = 'fg';
+    thresholdGroup.innerHTML = '<label class="fl">' + translate('set.threshold') + '</label>';
+    var thresholdWrapper = document.createElement('div');
+    thresholdWrapper.appendChild(thresholdInput);
+    thresholdWrapper.appendChild(thresholdValue);
+    thresholdGroup.appendChild(thresholdWrapper);
+    var thresholdHint = document.createElement('div');
+    thresholdHint.className = 'fh';
+    thresholdHint.textContent = translate('set.threshold.hint');
+    thresholdGroup.appendChild(thresholdHint);
+    netSection.appendChild(thresholdGroup);
+
+    var serenInput = document.createElement('input');
+    serenInput.type = 'range';
+    serenInput.className = 'fr';
+    serenInput.min = '0.05';
+    serenInput.max = '0.3';
+    serenInput.step = '0.01';
+    serenInput.value = Config.get('serendipity', 0.15);
+    var serenValue = document.createElement('span');
+    serenValue.className = 'rv';
+    serenValue.textContent = Number(Config.get('serendipity', 0.15)).toFixed(2);
+    serenInput.oninput = function(e) { serenValue.textContent = parseFloat(e.target.value).toFixed(2); };
+    var serenGroup = document.createElement('div');
+    serenGroup.className = 'fg';
+    serenGroup.innerHTML = '<label class="fl">' + translate('set.seren') + '</label>';
+    var serenWrapper = document.createElement('div');
+    serenWrapper.appendChild(serenInput);
+    serenWrapper.appendChild(serenValue);
+    serenGroup.appendChild(serenWrapper);
+    var serenHint = document.createElement('div');
+    serenHint.className = 'fh';
+    serenHint.textContent = translate('set.seren.hint');
+    serenGroup.appendChild(serenHint);
+    netSection.appendChild(serenGroup);
+
+    var relaysInput = document.createElement('textarea');
+    relaysInput.className = 'fi-textarea';
+    relaysInput.value = Config.get('relays', []).join('\n');
+    var relaysGroup = document.createElement('div');
+    relaysGroup.className = 'fg';
+    relaysGroup.innerHTML = '<label class="fl">' + translate('set.relays') + '</label>';
+    relaysGroup.appendChild(relaysInput);
+    var relaysHint = document.createElement('div');
+    relaysHint.className = 'fh';
+    relaysHint.textContent = translate('set.relays.hint');
+    relaysGroup.appendChild(relaysHint);
+    netSection.appendChild(relaysGroup);
+    body.appendChild(netSection);
+
+    var dataSection = document.createElement('div');
+    dataSection.className = 'set-sec';
+    dataSection.innerHTML = '<div class="set-sec-t">' + translate('set.data') + '</div>';
+
+    var exportBtn = document.createElement('button');
+    exportBtn.className = 'tog';
+    exportBtn.style.marginTop = '4px';
+    exportBtn.innerHTML = '<span class="tog-ic">↓</span><span class="tog-lbl">' + translate('menu.export') + '</span><span class="tog-arr">→</span>';
+    exportBtn.onclick = function() { Modal.close(); setTimeout(exportData, 200); };
+    dataSection.appendChild(exportBtn);
+
+    var importBtn = document.createElement('button');
+    importBtn.className = 'tog';
+    importBtn.style.marginTop = '4px';
+    importBtn.innerHTML = '<span class="tog-ic">↑</span><span class="tog-lbl">' + translate('menu.import') + '</span><span class="tog-arr">→</span>';
+    importBtn.onclick = function() { Modal.close(); setTimeout(importData, 200); };
+    dataSection.appendChild(importBtn);
+    body.appendChild(dataSection);
+
+    var dangerSection = document.createElement('div');
+    dangerSection.className = 'set-sec';
+    dangerSection.innerHTML = '<div class="set-sec-t">' + translate('set.danger') + '</div>';
+
+    var clearCacheBtn = document.createElement('button');
+    clearCacheBtn.className = 'btn-send';
+    clearCacheBtn.style.cssText = 'width:100%;margin-bottom:8px';
+    clearCacheBtn.textContent = 'Сбросить кеш';
+    clearCacheBtn.onclick = function() {
+      if (window.caches) {
+        caches.keys().then(function(keys) {
+          return Promise.all(keys.map(function(key) { return caches.delete(key); }));
+        }).then(function() {
+          toast('Кеш сброшен', 'ok');
+          setTimeout(function() { location.reload(true); }, 500);
+        }).catch(function() {
+          setTimeout(function() { location.reload(true); }, 500);
+        });
+      } else {
+        setTimeout(function() { location.reload(true); }, 500);
+      }
+    };
+    dangerSection.appendChild(clearCacheBtn);
+
+    var wipeBtn = document.createElement('button');
+    wipeBtn.className = 'btn-send';
+    wipeBtn.style.cssText = 'width:100%;background:var(--danger-glow);color:var(--danger);border:1px solid rgba(239,68,68,.3);box-shadow:none';
+    wipeBtn.textContent = translate('base.wipe');
+    wipeBtn.onclick = function() {
+      if (!confirm(translate('base.wipe.confirm'))) return;
+      DB.reset().then(function() {
+        toast(translate('toast.base.wiped'), 'ok');
+        setTimeout(function() { location.reload(); }, 500);
+      }).catch(function(err) {
+        toast(String(err && err.message || err) || 'Wipe failed', 'err');
+      });
+    };
+    dangerSection.appendChild(wipeBtn);
+    body.appendChild(dangerSection);
+
+    Modal.open({
+      title: '', body: body,
+      buttons: [
+        { text: translate('btn.cancel'), primary: false, onClick: function() { Modal.close(); } },
+        {
+          text: translate('btn.save'), primary: true,
+          onClick: function() {
+            Config.set('room', roomInput.value.trim() || 'noomium-main');
+            Config.set('threshold', parseFloat(thresholdInput.value));
+            Config.set('serendipity', parseFloat(serenInput.value));
+            var relaysText = relaysInput.value.trim();
+            var relays = relaysText
+              ? relaysText.split(/[\n,]+/).map(function(r) { return r.trim(); }).filter(function(r) { return r && /^wss?:\/\//.test(r); })
+              : Config.defaults().relays;
+            Config.set('relays', relays);
+            Config.save();
+            Modal.close();
+            toast(translate('toast.net.restart'), 'info');
+            setTimeout(function() {
+              if (Net && Net.restart) Net.restart(function() { executeSearch(); });
+            }, 300);
+          }
+        }
+      ]
+    });
+  }
 <!-- NOOMIUM_MODULE_END UI.Menu -->
 
 <!-- NOOMIUM_MODULE_START UI.Help -->
-... код из блока UI.Help ...
+  function openHelp(showOnboarding) {
+    var body = document.createElement('div');
+    body.innerHTML =
+      '<div class="help-sec"><div class="help-st">' + translate('seg.local') + '</div><div class="help-sd">' + translate('help.local') + '</div></div>' +
+      '<div class="help-sec"><div class="help-st">' + translate('seg.world') + '</div><div class="help-sd">' + translate('help.world') + '</div></div>' +
+      '<div class="help-sec"><div class="help-st">' + translate('seg.seren') + '</div><div class="help-sd">' + translate('help.seren') + '</div></div>' +
+      '<div class="help-box">' + translate('help.philosophy') + '</div>' +
+      '<div class="help-box">' + translate('help.gestures') + '</div>' +
+      '<div style="margin-top:12px"><div class="help-st">' + translate('help.keys') + '</div>' +
+      '<div class="help-keys"><div>' + translate('help.k1') + '</div><div>' + translate('help.k2') + '</div></div></div>';
+
+    var checkbox = null;
+    if (showOnboarding) {
+      var row = document.createElement('label');
+      row.className = 'onb-row';
+      checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      var span = document.createElement('span');
+      span.textContent = translate('onb.dontshow');
+      row.appendChild(checkbox);
+      row.appendChild(span);
+      body.appendChild(row);
+    }
+
+    var buttons = [];
+    if (showOnboarding) {
+      buttons.push({
+        text: translate('btn.gotit'), primary: true,
+        onClick: function() {
+          if (checkbox && checkbox.checked) {
+            Config.set('onboarded', true);
+            Config.save();
+          }
+          Modal.close();
+        }
+      });
+    } else {
+      buttons.push({ text: translate('btn.close'), primary: true, onClick: function() { Modal.close(); } });
+    }
+
+    Modal.open({
+      title: translate('help.title'),
+      body: body,
+      buttons: buttons
+    });
+  }
 <!-- NOOMIUM_MODULE_END UI.Help -->
 
 <!-- NOOMIUM_MODULE_START App.Events -->
-... код из блока App.Events ...
+  function bindEvents() {
+    var editor = document.getElementById('ed-ta');
+    if (editor) {
+      editor.addEventListener('input', function() {
+        updateCounter();
+        if (uiState.searchTimer) clearTimeout(uiState.searchTimer);
+        uiState.searchTimer = setTimeout(function() { executeSearch(); }, Config.get('debounce', 800));
+      });
+    }
+
+    var sendBtn = document.getElementById('btn-send');
+    if (sendBtn) sendBtn.onclick = handleSend;
+
+    var modeToggle = document.getElementById('mode-toggle');
+    if (modeToggle) {
+      modeToggle.addEventListener('click', function(e) {
+        var opt = e.target.closest('.tog-sw-opt');
+        if (opt) {
+          var value = opt.getAttribute('data-v');
+          if (value) handleToggleMode(value);
+        }
+      });
+    }
+
+    document.querySelectorAll('.seg-b').forEach(function(b) {
+      b.onclick = function() { setSegment(b.getAttribute('data-k')); };
+    });
+    document.querySelectorAll('.btab-b').forEach(function(b) {
+      b.onclick = function() { switchView(b.getAttribute('data-v')); };
+    });
+
+    var carouselWrap = document.getElementById('carousel-wrap');
+    if (carouselWrap) {
+      carouselWrap.addEventListener('click', function(e) {
+        var el = e.target.closest('[data-act]');
+        if (el) handleItemAction(el.getAttribute('data-act'), el);
+      });
+    }
+
+    var baseContainer = document.getElementById('ws-base');
+    if (baseContainer) {
+      baseContainer.addEventListener('click', function(e) {
+        var bi = e.target.closest('.bi');
+        if (bi) {
+          var id = bi.getAttribute('data-id');
+          if (id) openNoteView(id);
+        }
+      });
+    }
+
+    var baseSearchInput = document.getElementById('base-q');
+    if (baseSearchInput) {
+      baseSearchInput.addEventListener('input', function() {
+        if (uiState.baseSearchTimer) clearTimeout(uiState.baseSearchTimer);
+        uiState.baseSearchTimer = setTimeout(renderBase, 200);
+      });
+    }
+
+    var baseSortSelect = document.getElementById('base-sort');
+    if (baseSortSelect) baseSortSelect.onchange = renderBase;
+
+    var menuBtn = document.getElementById('btn-menu');
+    if (menuBtn) menuBtn.onclick = openMenu;
+
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') Modal.close();
+      if (e.key === '/' && document.activeElement && document.activeElement !== editor) {
+        e.preventDefault();
+        if (editor) editor.focus();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && document.activeElement === editor) {
+        e.preventDefault();
+        handleSend();
+      }
+    });
+
+    Net.onPeers(function(count) {
+      setStatus('net',
+        count > 0
+          ? translate('st.net.online') + ' · ' + Utils.word('peers', count, I18n.getLang())
+          : translate('st.net.listen'),
+        count > 0 ? 'ok' : 'load'
+      );
+      if (appState.view === 'stream') executeSearch();
+    });
+
+    Bus.on('net:status', function(payload) {
+      var status = payload && payload.status ? payload.status : 'disconnected';
+      var text = translate('st.net');
+      var cls = 'load';
+      if (status === 'connected') {
+        text = translate('st.net.online') + ' · ' + Utils.word('peers', Net.peerCount(), I18n.getLang());
+        cls = 'ok';
+      } else if (status === 'connecting') {
+        text = translate('st.net.connecting'); cls = 'load';
+      } else if (status === 'reconnecting') {
+        text = translate('st.net.reconnecting'); cls = 'warn';
+      } else if (status === 'failed') {
+        text = translate('st.net.failed'); cls = 'err';
+      }
+      setStatus('net', text, cls);
+    });
+    
+    Bus.on('db:change', function() { allNotesCache = null; });
+  }
+
+  function setupWindowListeners() {
+    var handlers = uiState.windowHandlers;
+
+    if (handlers.resize) window.removeEventListener('resize', handlers.resize);
+    if (handlers.focusin) window.removeEventListener('focusin', handlers.focusin);
+    if (handlers.focusout) window.removeEventListener('focusout', handlers.focusout);
+    if (handlers.orientationchange) window.removeEventListener('orientationchange', handlers.orientationchange);
+    if (handlers.beforeunload) window.removeEventListener('beforeunload', handlers.beforeunload);
+
+    var setVH = function() {
+      var vh = window.innerHeight * 0.01;
+      document.documentElement.style.setProperty('--vh', vh + 'px');
+    };
+
+    handlers.resize = setVH;
+    handlers.focusin = setVH;
+    handlers.focusout = setVH;
+    handlers.orientationchange = function() { setTimeout(setVH, 100); };
+    
+    handlers.beforeunload = function(e) {
+      var ta = document.getElementById('ed-ta');
+      if (ta && ta.value.trim().length > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+
+    window.addEventListener('resize', handlers.resize);
+    window.addEventListener('focusin', handlers.focusin);
+    window.addEventListener('focusout', handlers.focusout);
+    window.addEventListener('orientationchange', handlers.orientationchange);
+    window.addEventListener('beforeunload', handlers.beforeunload);
+
+    setVH();
+  }
+
+  function cleanup() {
+    if (uiState.carouselObserver) {
+      try { uiState.carouselObserver.disconnect(); } catch (_) {}
+      uiState.carouselObserver = null;
+    }
+    if (uiState.noteViewEscHandler) {
+      document.removeEventListener('keydown', uiState.noteViewEscHandler);
+      uiState.noteViewEscHandler = null;
+    }
+    if (uiState.searchTimer) { clearTimeout(uiState.searchTimer); uiState.searchTimer = null; }
+    if (uiState.baseSearchTimer) { clearTimeout(uiState.baseSearchTimer); uiState.baseSearchTimer = null; }
+    if (uiState.progressHandler) {
+      AI.offProgress(uiState.progressHandler);
+      uiState.progressHandler = null;
+    }
+    var handlers = uiState.windowHandlers;
+    if (handlers.resize) window.removeEventListener('resize', handlers.resize);
+    if (handlers.focusin) window.removeEventListener('focusin', handlers.focusin);
+    if (handlers.focusout) window.removeEventListener('focusout', handlers.focusout);
+    if (handlers.orientationchange) window.removeEventListener('orientationchange', handlers.orientationchange);
+    if (handlers.beforeunload) window.removeEventListener('beforeunload', handlers.beforeunload);
+    
+    handlers.resize = null;
+    handlers.focusin = null;
+    handlers.focusout = null;
+    handlers.orientationchange = null;
+    handlers.beforeunload = null;
+  }
 <!-- NOOMIUM_MODULE_END App.Events -->
 
 <!-- NOOMIUM_MODULE_START App.Boot -->
-... код из блока App.Boot ...
+  function bootApp() {
+    setStatus('net', translate('st.net.connecting'), 'load');
+    setStatus('ai', translate('st.ai.loading'), 'load');
+    Progress.show();
+
+    uiState.progressHandler = function(percent) {
+      setStatus('ai', translate('st.ai.loading') + ' ' + Math.round(percent) + '%', 'load');
+      Progress.update(percent);
+    };
+    AI.onProgress(uiState.progressHandler);
+
+    var aiLoaded = false;
+    var netInitialized = false;
+
+    function checkOnboarding() {
+      if (aiLoaded && netInitialized && !Config.get('onboarded', false)) {
+        openHelp(true);
+      }
+    }
+
+    AI.load().then(function() {
+      Progress.hide();
+      setStatus('ai',
+        AI.getMode() === 'model' ? translate('st.ai.ready') : translate('st.ai.demo'),
+        AI.getMode() === 'model' ? 'ok' : 'warn'
+      );
+      aiLoaded = true;
+      checkOnboarding();
+    }).catch(function(err) {
+      Progress.hide();
+      if (Logger) Logger.error('AI', String(err && err.message || err));
+      setStatus('ai', translate('st.ai.demo'), 'warn');
+      aiLoaded = true;
+      checkOnboarding();
+    });
+
+    function tryInit(password, attempts) {
+      Net.init(function() { executeSearch(); }, password).then(function() {
+        netInitialized = true;
+        checkOnboarding();
+      }).catch(function(err) {
+        if (err && err.message === 'WRONG_PASSWORD') {
+          toast('Неверный пароль', 'err');
+          var nextAttempts = attempts + 1;
+          if (nextAttempts >= 3) {
+            showResetModal();
+          } else {
+            promptExistingPassword(tryInit, nextAttempts);
+          }
+        } else {
+          if (Logger) Logger.error('Net', String(err && err.message || err));
+          setStatus('net', translate('st.net.failed'), 'err');
+        }
+      });
+    }
+
+    function showResetModal() {
+      var body = document.createElement('div');
+      body.innerHTML = '<p style="color:var(--text-2);margin-bottom:16px">Превышено количество попыток. Необходимо сбросить данные.</p>';
+      Modal.open({
+        title: 'Ошибка доступа',
+        body: body,
+        buttons: [
+          {
+            text: 'Сбросить данные', danger: true, primary: true,
+            onClick: function() {
+              DB.reset().then(function() {
+                location.reload();
+              });
+            }
+          }
+        ]
+      });
+    }
+
+    function promptNewPassword(callback) {
+      var body = document.createElement('div');
+      body.innerHTML = '<div class="fg"><label class="fl">Придумайте пароль</label><input type="password" class="fi-input" id="pwd1" /></div>' +
+                       '<div class="fg"><label class="fl">Подтвердите пароль</label><input type="password" class="fi-input" id="pwd2" /></div>';
+      var errorEl = document.createElement('div');
+      errorEl.style.color = 'var(--danger)';
+      errorEl.style.fontSize = '12px';
+      errorEl.style.marginTop = '8px';
+      body.appendChild(errorEl);
+
+      Modal.open({
+        title: 'Защита данных',
+        body: body,
+        buttons: [
+          {
+            text: 'Сохранить', primary: true,
+            onClick: function() {
+              var p1 = document.getElementById('pwd1').value;
+              var p2 = document.getElementById('pwd2').value;
+              if (!p1) { errorEl.textContent = 'Пароль не может быть пустым'; return; }
+              if (p1 !== p2) { errorEl.textContent = 'Пароли не совпадают'; return; }
+              Modal.close();
+              callback(p1);
+            }
+          }
+        ]
+      });
+    }
+
+    function promptExistingPassword(callback, attempts) {
+      var body = document.createElement('div');
+      body.innerHTML = '<div class="fg"><label class="fl">Введите пароль</label><input type="password" class="fi-input" id="pwd1" /></div>';
+      var errorEl = document.createElement('div');
+      errorEl.style.color = 'var(--danger)';
+      errorEl.style.fontSize = '12px';
+      errorEl.style.marginTop = '8px';
+      body.appendChild(errorEl);
+
+      var buttons = [];
+      if (attempts >= 3) {
+        buttons.push({
+          text: 'Сбросить данные', danger: true,
+          onClick: function() {
+            DB.reset().then(function() {
+              location.reload();
+            });
+          }
+        });
+      }
+      buttons.push({
+        text: 'Войти', primary: true,
+        onClick: function() {
+          var p1 = document.getElementById('pwd1').value;
+          if (!p1) { errorEl.textContent = 'Введите пароль'; return; }
+          Modal.close();
+          callback(p1, attempts);
+        }
+      });
+
+      Modal.open({
+        title: 'Доступ к данным',
+        body: body,
+        buttons: buttons
+      });
+    }
+
+    if (!Net.isKeyEncrypted()) {
+      promptNewPassword(function(pwd) {
+        tryInit(pwd, 0);
+      });
+    } else {
+      promptExistingPassword(tryInit, 0);
+    }
+  }
+
+  function mountApp() {
+    try {
+      cleanup();
+      
+      var root = document.getElementById('app-root');
+      if (!root) {
+        root = document.createElement('div');
+        root.id = 'app-root';
+        document.body.appendChild(root);
+      }
+      document.body.classList.add('show-app');
+      root.innerHTML = buildMarkup();
+      setupWindowListeners();
+      bindEvents();
+      bootApp();
+      if (Logger) Logger.info('App mounted');
+    } catch (err) {
+      console.error('App mount failed:', err);
+      var root = document.getElementById('app-root');
+      if (root) {
+        root.textContent = '';
+        var wrapper = document.createElement('div');
+        wrapper.style.cssText = 'padding:40px;text-align:center;color:#ef4444';
+
+        var heading = document.createElement('h2');
+        heading.textContent = 'NOOmium failed to start';
+
+        var message = document.createElement('p');
+        message.style.cssText = 'color:#a0a0ae;margin-top:10px';
+        message.textContent = String(err && err.message || err);
+
+        var reloadBtn = document.createElement('button');
+        reloadBtn.style.cssText = 'margin-top:20px;padding:10px 20px;background:#8b7cff;color:white;border:none;border-radius:8px;cursor:pointer';
+        reloadBtn.textContent = 'Reload';
+        reloadBtn.onclick = function() { location.reload(); };
+
+        wrapper.appendChild(heading);
+        wrapper.appendChild(message);
+        wrapper.appendChild(reloadBtn);
+        root.appendChild(wrapper);
+        document.body.classList.add('show-app');
+      }
+    }
+  }
 <!-- NOOMIUM_MODULE_END App.Boot -->
 
 <!-- NOOMIUM_MODULE_START App -->
-... код из блока App (только словари и DI.register) ...
+  I18n.addDict('ru', {
+    'app.name': 'NOOmium',
+    'st.net': 'сеть', 'st.ai.loading': 'модель', 'st.ai.ready': 'ии', 'st.ai.demo': 'ии/хеш',
+    'st.net.online': 'онлайн', 'st.net.listen': 'слушаю', 'st.net.connecting': 'соединение',
+    'st.net.reconnecting': 'пересоединение', 'st.net.failed': 'нет сети',
+    'ed.placeholder': 'О чём думаешь?', 'ed.chars': 'симв.',
+    'btn.private': 'Личное', 'btn.public': 'Мир', 'btn.send': 'Послать', 'btn.sending': 'Отправка...',
+    'btn.save': 'Сохранить', 'btn.cancel': 'Отмена', 'btn.close': 'Закрыть', 'btn.edit': 'Развить',
+    'btn.del': 'Удалить', 'btn.copy': 'Копия', 'btn.toggle.priv': 'Скрыть', 'btn.toggle.pub': 'Открыть',
+    'btn.back': 'Назад', 'btn.gotit': 'Понятно',
+    'sim.score': 'похожа на',
+    'seg.local': 'Моё', 'seg.world': 'Мир', 'seg.seren': 'Озарения',
+    'tab.stream': 'Поток', 'tab.base': 'База',
+    'empty.local.t': 'Пока нет мыслей', 'empty.local.d': 'Начните печатать в поле выше',
+    'empty.world.t': 'Никто не думает так же', 'empty.world.d': 'Ждём открытые мысли других',
+    'empty.seren.t': 'Озарений нет', 'empty.seren.d': 'Попробуйте другую формулировку',
+    'empty.base.t': 'База пуста', 'empty.base.d': 'Запишите первую мысль',
+    'empty.base.empty': 'Под фильтр ничего не подошло',
+    'base.stat.total': 'всего', 'base.stat.open': 'открыто', 'base.stat.priv': 'лично',
+    'base.search': 'поиск...', 'base.sort.new': 'новые', 'base.sort.old': 'старые', 'base.sort.az': 'а-я',
+    'base.tag.private': 'лично', 'base.tag.shared': 'открыто',
+    'base.wipe': 'Стереть базу',
+    'base.wipe.confirm': 'Удалить все ваши мысли навсегда?',
+    'del.confirm': 'Удалить эту мысль навсегда?',
+    'nv.delete.confirm': 'Удалить эту заметку навсегда?',
+    'onb.dontshow': 'Больше не показывать',
+    'toast.saved.private': 'сохранено лично', 'toast.saved.public': 'опубликовано',
+    'toast.copied': 'скопировано', 'toast.deleted': 'удалено',
+    'toast.copy.fail': 'не удалось',
+    'toast.empty': 'напишите что-нибудь', 'toast.ai.notready': 'ии не готов',
+    'toast.net.restart': 'перезапуск сети...', 'toast.base.wiped': 'база стёрта',
+    'toast.edit.saved': 'сохранено',
+    'toast.sending': 'отправка...',
+    'toast.network.err': 'нет соединения',
+    'menu.settings': 'Настройки', 'menu.help': 'Как это работает', 'menu.theme': 'Тема',
+    'menu.lang': 'Язык', 'menu.theme.dark': 'Тёмная', 'menu.theme.light': 'Светлая',
+    'menu.export': 'Экспорт', 'menu.import': 'Импорт',
+    'set.title': 'Настройки', 'set.room': 'Комната', 'set.room.hint': 'Nostr-топик группы',
+    'set.threshold': 'Порог', 'set.threshold.hint': 'выше = строже',
+    'set.seren': 'Дельта озарений', 'set.seren.hint': 'ширина поиска',
+    'set.relays': 'Релеи', 'set.relays.hint': 'один wss:// на строку',
+    'set.advanced': 'Расширенные',
+    'set.data': 'Данные', 'set.danger': 'Опасная зона',
+    'help.title': 'Как это работает',
+    'help.intro': 'NOOmium превращает мысли в смысловые векторы и ищет созвучие в вашей базе и среди открытых мыслей.',
+    'help.local': 'Сильные совпадения в вашей базе',
+    'help.world': 'Открытые мысли других людей',
+    'help.seren': 'Близкие, но неожиданные — источник вдохновения',
+    'help.philosophy': 'Чужие мысли нельзя сохранить. Их можно прочитать, понять и написать своё.',
+    'help.keys': 'Горячие клавиши', 'help.k1': 'Ctrl+Enter — отправить',
+    'help.k2': '/ — фокус на поле ввода',
+    'help.gestures': 'Свайпы влево/вправо по карточкам. Переключатель «Мир/Личное» выбирает, куда послать мысль.'
+  });
+  I18n.addDict('en', {
+    'app.name': 'NOOmium',
+    'st.net': 'net', 'st.ai.loading': 'model', 'st.ai.ready': 'ai', 'st.ai.demo': 'ai/hash',
+    'st.net.online': 'online', 'st.net.listen': 'listening', 'st.net.connecting': 'connecting',
+    'st.net.reconnecting': 'reconnecting', 'st.net.failed': 'offline',
+    'ed.placeholder': 'What are you thinking?', 'ed.chars': 'chars',
+    'btn.private': 'Private', 'btn.public': 'World', 'btn.send': 'Send', 'btn.sending': 'Sending...',
+    'btn.save': 'Save', 'btn.cancel': 'Cancel', 'btn.close': 'Close', 'btn.edit': 'Develop',
+    'btn.del': 'Delete', 'btn.copy': 'Copy', 'btn.toggle.priv': 'Hide', 'btn.toggle.pub': 'Share',
+    'btn.back': 'Back', 'btn.gotit': 'Got it',
+    'sim.score': 'similarity',
+    'seg.local': 'Mine', 'seg.world': 'World', 'seg.seren': 'Insights',
+    'tab.stream': 'Stream', 'tab.base': 'Base',
+    'empty.local.t': 'No thoughts yet', 'empty.local.d': 'Start typing above',
+    'empty.world.t': 'Nobody thinks alike', 'empty.world.d': 'Waiting for open thoughts',
+    'empty.seren.t': 'No insights', 'empty.seren.d': 'Try different wording',
+    'empty.base.t': 'Base is empty', 'empty.base.d': 'Write your first thought',
+    'empty.base.empty': 'Nothing matches',
+    'base.stat.total': 'total', 'base.stat.open': 'open', 'base.stat.priv': 'private',
+    'base.search': 'search...', 'base.sort.new': 'newest', 'base.sort.old': 'oldest', 'base.sort.az': 'a-z',
+    'base.tag.private': 'private', 'base.tag.shared': 'open',
+    'base.wipe': 'Wipe base',
+    'base.wipe.confirm': 'Delete all thoughts forever?',
+    'del.confirm': 'Delete this thought forever?',
+    'nv.delete.confirm': 'Delete this note forever?',
+    'onb.dontshow': "Don't show again",
+    'toast.saved.private': 'saved privately', 'toast.saved.public': 'shared',
+    'toast.copied': 'copied', 'toast.deleted': 'deleted',
+    'toast.copy.fail': 'copy failed',
+    'toast.empty': 'write something', 'toast.ai.notready': 'ai not ready',
+    'toast.net.restart': 'restarting net...', 'toast.base.wiped': 'base wiped',
+    'toast.edit.saved': 'saved',
+    'toast.sending': 'sending...',
+    'toast.network.err': 'no connection',
+    'menu.settings': 'Settings', 'menu.help': 'How it works', 'menu.theme': 'Theme',
+    'menu.lang': 'Language', 'menu.theme.dark': 'Dark', 'menu.theme.light': 'Light',
+    'menu.export': 'Export', 'menu.import': 'Import',
+    'set.title': 'Settings', 'set.room': 'Room', 'set.room.hint': 'Nostr group topic',
+    'set.threshold': 'Threshold', 'set.threshold.hint': 'higher = stricter',
+    'set.seren': 'Insights delta', 'set.seren.hint': 'search width',
+    'set.relays': 'Relays', 'set.relays.hint': 'one wss:// per line',
+    'set.advanced': 'Advanced',
+    'set.data': 'Data', 'set.danger': 'Danger zone',
+    'help.title': 'How it works',
+    'help.intro': 'NOOmium turns thoughts into semantic vectors and finds resonance in your base and among others.',
+    'help.local': 'Strong matches in your base',
+    'help.world': 'Open thoughts from others',
+    'help.seren': 'Close but unexpected — source of inspiration',
+    'help.philosophy': "Others' thoughts cannot be saved. Read, understand, write your own.",
+    'help.keys': 'Hotkeys', 'help.k1': 'Ctrl+Enter — send', 'help.k2': '/ — focus editor',
+    'help.gestures': 'Swipe cards left/right. Toggle World/Private chooses destination.'
+  });
+
+  DI.register('App', function(
+    Logger, Bus, Store, Config, Utils, DB, AI, Net, I18n, Modal, Toast, Progress
+  ) {
+    applyTheme(Config.get('theme', 'dark'));
+    return { mount: mountApp };
+  }, ['Logger', 'Bus', 'Store', 'Config', 'Utils', 'DB', 'AI', 'Net', 'I18n', 'Modal', 'Toast', 'Progress']);
 <!-- NOOMIUM_MODULE_END App -->
 
 <!-- NOOMIUM_MODULE_START Bootstrap -->
