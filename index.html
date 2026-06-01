@@ -2982,6 +2982,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           }).then(() => self.clients.claim())
         );
       });
+      self.addEventListener('message', function(event) { if (event.data && event.data.type === 'SKIP_WAITING') { self.skipWaiting(); } });
       self.addEventListener('fetch', e => {
         if (e.request.method !== 'GET') return;
         e.respondWith(
@@ -2998,7 +2999,22 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     try {
       const blob = new Blob([swCode], { type: 'application/javascript' });
       const swUrl = URL.createObjectURL(blob);
-      navigator.serviceWorker.register(swUrl).catch(function() { /* ignore SW errors */ });
+      navigator.serviceWorker.register(swUrl).then(function(reg) {
+        if (reg.waiting) {
+          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        }
+        reg.onupdatefound = function() {
+          const installing = reg.installing;
+          if (installing) {
+            installing.onstatechange = function() {
+              if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+                installing.postMessage({ type: 'SKIP_WAITING' });
+                window.location.reload();
+              }
+            };
+          }
+        };
+      }).catch(function() { /* ignore SW errors */ });
     } catch(e) { /* ignore */ }
   }
 })();
