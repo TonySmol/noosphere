@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.1.5">
+<meta name="app-version" content="1.1.6">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1065,7 +1065,34 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (ev.kind === KQ) {
           var q;
           try { q = JSON.parse(ev.content); } catch (_) { return; }
-          if (!q || !q.vector || !Array.isArray(q.vector)) return;
+          
+          if (!q || typeof q !== 'object' || Array.isArray(q)) {
+            if (log) log.warn('Invalid query format: not an object');
+            return;
+          }
+          
+          var qKeys = Object.keys(q);
+          if (qKeys.length !== 1 || qKeys[0] !== 'vector') {
+            if (log) log.warn('Invalid query format: extra fields');
+            return;
+          }
+          
+          if (!Array.isArray(q.vector)) {
+            if (log) log.warn('Invalid query format: vector not array');
+            return;
+          }
+          
+          var isValidVector = true;
+          for (var i = 0; i < q.vector.length; i++) {
+            if (typeof q.vector[i] !== 'number') {
+              isValidVector = false;
+              break;
+            }
+          }
+          if (!isValidVector) {
+            if (log) log.warn('Invalid query format: vector elements not numbers');
+            return;
+          }
           
           getSharedVectors().then(function(sharedNotes) {
             var checkRelays = cfg.get('relays', []);
@@ -1111,19 +1138,57 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           if (eTag && eTag === queryId) {
             var data;
             try { data = JSON.parse(ev.content); } catch (_) { return; }
-            if (data && data.text && data.vector) {
-              var isDupAnswer = false;
-              for (var j = 0; j < answers.length; j++) {
-                if (answers[j].id === ev.id) { isDupAnswer = true; break; }
+            
+            if (!data || typeof data !== 'object' || Array.isArray(data)) {
+              return;
+            }
+            
+            var dKeys = Object.keys(data);
+            if (dKeys.length !== 2) {
+              return;
+            }
+            
+            var hasText = false, hasVector = false;
+            for (var i = 0; i < dKeys.length; i++) {
+              if (dKeys[i] === 'text') hasText = true;
+              else if (dKeys[i] === 'vector') hasVector = true;
+              else { return; }
+            }
+            
+            if (!hasText || !hasVector) {
+              return;
+            }
+            
+            if (typeof data.text !== 'string') {
+              return;
+            }
+            
+            if (!Array.isArray(data.vector)) {
+              return;
+            }
+            
+            var isValidAnsVector = true;
+            for (var i = 0; i < data.vector.length; i++) {
+              if (typeof data.vector[i] !== 'number') {
+                isValidAnsVector = false;
+                break;
               }
-              if (!isDupAnswer) {
-                if (answers.length >= 100) answers.shift();
-                answers.push({
-                  id: ev.id, text: data.text, vector: data.vector,
-                  peer: ev.pubkey.slice(0, 6), fullPubkey: ev.pubkey, createdAt: Date.now()
-                });
-                if (typeof onUpdate === 'function') { try { onUpdate(); } catch (_) { /* ignore */ } }
-              }
+            }
+            if (!isValidAnsVector) {
+              return;
+            }
+
+            var isDupAnswer = false;
+            for (var j = 0; j < answers.length; j++) {
+              if (answers[j].id === ev.id) { isDupAnswer = true; break; }
+            }
+            if (!isDupAnswer) {
+              if (answers.length >= 100) answers.shift();
+              answers.push({
+                id: ev.id, text: data.text, vector: data.vector,
+                peer: ev.pubkey.slice(0, 6), fullPubkey: ev.pubkey, createdAt: Date.now()
+              });
+              if (typeof onUpdate === 'function') { try { onUpdate(); } catch (_) { /* ignore */ } }
             }
           }
         }
@@ -1342,6 +1407,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'DB', 'AI', 'Logger', 'Bus']);
 <!-- NOOMIUM_MODULE_END Net -->
+  
 <!-- NOOMIUM_MODULE_START Modal -->
   DI.register('Modal', function() {
     let overlay = null, container = null, lastFocus = null, escHandler = null, trapHandler = null;
