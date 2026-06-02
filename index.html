@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.1.6">
+<meta name="app-version" content="1.1.8">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1258,6 +1258,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     return {
       onPeers: function(fn) { if (typeof fn === 'function') peerListeners.push(fn); },
+      offPeers: function(fn) {
+        var idx = peerListeners.indexOf(fn);
+        if (idx > -1) peerListeners.splice(idx, 1);
+      },
       getStatus: function() { return netStatus; },
       isKeyEncrypted: function() {
         try {
@@ -2746,6 +2750,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END UI.Help -->
 
 <!-- NOOMIUM_MODULE_START App.Events -->
+  var busHandlers = [];
+  var netPeerHandler = null;
+
   function bindEvents() {
     var editor = document.getElementById('ed-ta');
     if (editor) {
@@ -2822,7 +2829,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }
     });
 
-    Net.onPeers(function(count) {
+    netPeerHandler = function(count) {
       setStatus('net',
         count > 0
           ? translate('st.net.online') + ' · ' + Utils.word('peers', count, I18n.getLang())
@@ -2830,9 +2837,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         count > 0 ? 'ok' : 'load'
       );
       if (appState.view === 'stream') executeSearch();
-    });
+    };
+    Net.onPeers(netPeerHandler);
 
-    Bus.on('net:status', function(payload) {
+    var netStatusHandler = function(payload) {
       var status = payload && payload.status ? payload.status : 'disconnected';
       var text = translate('st.net');
       var cls = 'load';
@@ -2847,9 +2855,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         text = translate('st.net.failed'); cls = 'err';
       }
       setStatus('net', text, cls);
-    });
+    };
+    Bus.on('net:status', netStatusHandler);
+    busHandlers.push({event: 'net:status', fn: netStatusHandler});
     
-    Bus.on('db:change', function() { allNotesCache = null; });
+    var dbChangeHandler = function() { allNotesCache = null; };
+    Bus.on('db:change', dbChangeHandler);
+    busHandlers.push({event: 'db:change', fn: dbChangeHandler});
   }
 
   function setupWindowListeners() {
@@ -2915,6 +2927,16 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     handlers.focusout = null;
     handlers.orientationchange = null;
     handlers.beforeunload = null;
+
+    for (var i = 0; i < busHandlers.length; i++) {
+      Bus.off(busHandlers[i].event, busHandlers[i].fn);
+    }
+    busHandlers = [];
+
+    if (netPeerHandler) {
+      Net.offPeers(netPeerHandler);
+      netPeerHandler = null;
+    }
   }
 <!-- NOOMIUM_MODULE_END App.Events -->
 
