@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.1.22">
+<meta name="app-version" content="1.1.23">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1783,6 +1783,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     lastVec: null,
     lastQuery: 0,
     netAuthorized: false,
+    requestNetworkAuth: null,
     lists: { local: [], world: [], seren: [] }
   };
 
@@ -1952,6 +1953,16 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
     setupWindowListeners();
     bindEvents();
+
+    if (AI.ready()) {
+      var mode = AI.getMode();
+      setStatus('ai',
+        mode === 'model' ? translate('st.ai.ready') : translate('st.ai.demo'),
+        mode === 'model' ? 'ok' : 'warn'
+      );
+    } else {
+      setStatus('ai', translate('st.ai.loading'), 'load');
+    }
     
     switchView(savedView);
     setSegment(savedSeg);
@@ -2617,9 +2628,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (!appState.lastVec || AI.cosine(vec, appState.lastVec) < Config.get('vectorSimilarityThreshold', 0.98) || force) {
         appState.lastVec = vec;
         appState.lastQuery = Date.now();
-        if (AI.getMode() === 'model' && (appState.seg === 'world' || appState.seg === 'seren') && Net && typeof Net.send === 'function') {
-    Net.send(vec);
-}
+        if (AI.getMode() === 'model' && appState.netAuthorized && Net && typeof Net.send === 'function') {
+          Net.send(vec);
+        }
       }
       return getAllNotesCached().then(function(notes) {
         if (signal.aborted) return;
@@ -2638,7 +2649,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             });
           }
         }
-        var worldAnswers = Net.activeAnswers();
+        var worldAnswers = appState.netAuthorized ? Net.activeAnswers() : [];
         var worldScored = [];
         for (var i = 0; i < worldAnswers.length; i++) {
           worldScored.push({ 
@@ -3303,9 +3314,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       var forgotBtn = document.createElement('button');
       forgotBtn.type = 'button';
       forgotBtn.className = 'nv-act danger';
-      forgotBtn.textContent = translate('btn.forgot');
+      forgotBtn.textContent = translate('btn.reset_storage');
       forgotBtn.style.cssText = 'margin-top:10px;width:100%;justify-content:center;display:inline-flex';
       forgotBtn.onclick = function() {
+        if (!confirm(translate('reset_storage.confirm'))) return;
         Modal.close();
         DB.reset().then(function() {
           location.reload();
@@ -3349,13 +3361,28 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       });
     }
 
-    if (!Net.isKeyEncrypted()) {
-      promptNewPassword(function(pwd) {
-        tryInit(pwd, 0);
-      });
-    } else {
-      promptExistingPassword(tryInit, 0);
+    function requestNetworkAuth(onSuccess) {
+      if (appState.netAuthorized) {
+        if (typeof onSuccess === 'function') onSuccess();
+        return;
+      }
+      
+      var initCallback = function(password) {
+        tryInit(password, 0).then(function() {
+          if (typeof onSuccess === 'function') onSuccess();
+        }).catch(function() {
+          // Ошибки обработаны в tryInit
+        });
+      };
+
+      if (Net.isKeyEncrypted()) {
+        promptExistingPassword(initCallback, 0);
+      } else {
+        promptNewPassword(initCallback);
+      }
     }
+
+    appState.requestNetworkAuth = requestNetworkAuth;
   }
 
   function mountApp() {
@@ -3415,6 +3442,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     'btn.save': 'Сохранить', 'btn.cancel': 'Отмена', 'btn.close': 'Закрыть', 'btn.edit': 'Развить',
     'btn.del': 'Удалить', 'btn.copy': 'Копия', 'btn.toggle.priv': 'Скрыть', 'btn.toggle.pub': 'Открыть',
     'btn.back': 'Назад', 'btn.gotit': 'Понятно', 'btn.forgot': 'Забыли пароль?',
+    'btn.reset_storage': 'Сброс хранилища',
+    'reset_storage.confirm': 'Все данные будут удалены безвозвратно. Продолжить?',
     'sim.score': 'похожа на',
     'seg.local': 'Моё', 'seg.world': 'Мир', 'seg.seren': 'Озарения',
     'tab.stream': 'Поток', 'tab.base': 'База',
@@ -3470,6 +3499,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     'btn.save': 'Save', 'btn.cancel': 'Cancel', 'btn.close': 'Close', 'btn.edit': 'Develop',
     'btn.del': 'Delete', 'btn.copy': 'Copy', 'btn.toggle.priv': 'Hide', 'btn.toggle.pub': 'Share',
     'btn.back': 'Back', 'btn.gotit': 'Got it', 'btn.forgot': 'Forgot password?',
+    'btn.reset_storage': 'Reset Storage',
+    'reset_storage.confirm': 'All data will be permanently deleted. Continue?',
     'sim.score': 'similarity',
     'seg.local': 'Mine', 'seg.world': 'World', 'seg.seren': 'Insights',
     'tab.stream': 'Stream', 'tab.base': 'Base',
