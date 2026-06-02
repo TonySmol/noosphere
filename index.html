@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.1.20">
+<meta name="app-version" content="1.1.21">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1001,8 +1001,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function setStatus(s) {
+      var wasDisconnected = (netStatus !== 'connected');
       netStatus = s;
       if (bus && bus.emit) { try { bus.emit('net:status', { status: s }); } catch (_) { /* ignore */ } }
+      if (s === 'connected' && wasDisconnected) {
+        flushOutbox();
+      }
     }
 
     function notifyPeers() {
@@ -1332,7 +1336,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }, hbInterval);
 
       if (flushTimer) clearInterval(flushTimer);
-      flushTimer = setInterval(function() { flushOutbox(); }, cfg.get('offlineFlushInterval', 30000));
+      flushTimer = setInterval(function() {
+        if (netStatus === 'connected') {
+          flushOutbox();
+        }
+      }, cfg.get('offlineFlushInterval', 30000));
     }
 
     function scheduleReconnect() {
@@ -1379,25 +1387,57 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }, delay);
     }
 
-    function listen(callback) {
-      if (started) {
-        if (typeof callback === 'function') callback();
-        return Promise.resolve();
-      }
+    function init(callback, password) {
+      if (started) return Promise.resolve();
       onUpdate = callback;
       connAttempts = 0;
       
-      var p = import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm').then(function(mod) {
-          var tools = (mod && mod.default && typeof mod.default.generateSecretKey === 'function') 
-            ? mod.default 
-            : (typeof mod.generateSecretKey === 'function' ? mod : null);
-          if (!tools || !tools.SimplePool) throw new Error('nostr-tools: incompatible module structure');
-          nostr = tools;
-          return tools;
-      });
+      var loadAndDecrypt = function() {
+          var p = import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm').then(function(mod) {
+              var tools = (mod && mod.default && typeof mod.default.generateSecretKey === 'function') 
+                ? mod.default 
+                : (typeof mod.generateSecretKey === 'function' ? mod : null);
+              if (!tools || !tools.SimplePool) throw new Error('nostr-tools: incompatible module structure');
+              nostr = tools;
+              return tools;
+          });
 
-      return p.then(function() {
-          if (!pool) {
+          if (sk) {
+              return p.then(function() { return true; });
+          }
+
+          return p.then(function(tools) {
+              var KEY = 'noomium:sk';
+              var stored = localStorage.getItem(KEY);
+              if (stored) {
+                if (/^[0-9a-f]{64}$/i.test(stored)) {
+                   var keyHex = stored;
+                   return encryptKey(keyHex, password).then(function(encrypted) {
+                       localStorage.setItem(KEY, encrypted);
+                       return keyHex;
+                   });
+                } else {
+                   return decryptKey(stored, password).catch(function() {
+                       throw new Error('WRONG_PASSWORD');
+                   });
+                }
+              }
+              
+              var raw = tools.generateSecretKey();
+              var keyHex = Array.from(raw).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+              return encryptKey(keyHex, password).then(function(encrypted) {
+                  try { localStorage.setItem(KEY, encrypted); } catch (_) { /* ignore */ }
+                  return keyHex;
+              });
+          }).then(function(hex) {
+              sk = new Uint8Array(hex.match(/.{1,2}/g).map(function(b) { return parseInt(b, 16); }));
+              pk = nostr.getPublicKey(sk);
+              return true;
+          });
+      };
+      
+      return loadAndDecrypt().then(function() {
+          if (!pool && nostr) {
               pool = new nostr.SimplePool();
           }
           var nowSec = Math.floor(Date.now() / 1000);
@@ -1417,62 +1457,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             scheduleReconnect();
           }
           notifyPeers();
-          setStatus('connecting');
-          if (log) log.info('net started listening, room=' + room);
-          if (typeof callback === 'function') callback();
+          setStatus('connected');
+          if (log) log.info('net started, room=' + room);
       }).catch(function(err) {
-          if (log) log.error('nostr load fail', String(err && err.message || err));
-          setStatus('failed');
-          throw err;
+        if (log && err.message !== 'WRONG_PASSWORD') log.error('nostr load fail', String(err && err.message || err));
+        if (err.message !== 'WRONG_PASSWORD') setStatus('failed');
+        throw err;
       });
-    }
-
-    function authorize(callback, password) {
-      var doAuth = function() {
-        if (sk !== null) {
-          if (typeof callback === 'function') callback();
-          return Promise.resolve();
-        }
-        
-        var KEY = 'noomium:sk';
-        var stored = localStorage.getItem(KEY);
-        var keyPromise;
-        
-        if (stored) {
-          if (/^[0-9a-f]{64}$/i.test(stored)) {
-             var keyHex = stored;
-             keyPromise = encryptKey(keyHex, password).then(function(encrypted) {
-                 localStorage.setItem(KEY, encrypted);
-                 return keyHex;
-             });
-          } else {
-             keyPromise = decryptKey(stored, password).catch(function() {
-                 throw new Error('WRONG_PASSWORD');
-             });
-          }
-        } else {
-            if (!nostr) {
-                return Promise.reject(new Error('nostr-tools not loaded'));
-            }
-            var raw = nostr.generateSecretKey();
-            var keyHex = Array.from(raw).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-            keyPromise = encryptKey(keyHex, password).then(function(encrypted) {
-                try { localStorage.setItem(KEY, encrypted); } catch (_) { /* ignore */ }
-                return keyHex;
-            });
-        }
-        
-        return keyPromise.then(function(hex) {
-            sk = new Uint8Array(hex.match(/.{1,2}/g).map(function(b) { return parseInt(b, 16); }));
-            pk = nostr.getPublicKey(sk);
-            if (typeof callback === 'function') callback();
-        });
-      };
-
-      if (!started) {
-        return listen().then(doAuth);
-      }
-      return doAuth();
     }
 
     return {
@@ -1492,8 +1483,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           return false;
         }
       },
-      listen: listen,
-      authorize: authorize,
+      init: init,
       send: function(vector) {
         if (!pool || !nostr || !sk || AI.getMode() === 'demo') return;
         var now = Date.now();
@@ -1546,9 +1536,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         setStatus('disconnected');
         if (bus && bus.emit) { try { bus.emit('net:outbox', { count: 0 }); } catch(_) {} }
       },
-      restart: function(callback) {
+      restart: function(callback, password) {
         this.stop();
-        return this.listen(callback);
+        return this.init(callback, password);
       }
     };
   }, ['Config', 'DB', 'AI', 'Logger', 'Bus']);
@@ -1793,7 +1783,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     lastVec: null,
     lastQuery: 0,
     netAuthorized: false,
-    netListening: false,
     lists: { local: [], world: [], seren: [] }
   };
 
@@ -3203,7 +3192,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     I18n.addDict('ru', { 'btn.forgot': 'Забыли пароль?' });
     I18n.addDict('en', { 'btn.forgot': 'Forgot password?' });
 
-    setStatus('net', translate('st.net.listen'), 'load');
+    setStatus('net', translate('st.net.connecting'), 'load');
     setStatus('ai', translate('st.ai.loading'), 'load');
     Progress.show();
 
@@ -3214,9 +3203,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     AI.onProgress(uiState.progressHandler);
 
     var aiLoaded = false;
+    var netInitialized = false;
 
     function checkOnboarding() {
-      if (aiLoaded && !Config.get('onboarded', false)) {
+      if (aiLoaded && netInitialized && !Config.get('onboarded', false)) {
         openHelp(true);
       }
     }
@@ -3228,13 +3218,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         AI.getMode() === 'model' ? 'ok' : 'warn'
       );
       aiLoaded = true;
-      
-      Net.listen(function() { executeSearch(); }).then(function() {
-        appState.netListening = true;
-      }).catch(function(err) {
-        if (Logger) Logger.error('Net listen', String(err && err.message || err));
-      });
-      
       checkOnboarding();
     }).catch(function(err) {
       Progress.hide();
@@ -3244,11 +3227,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       checkOnboarding();
     });
 
-    function tryAuthorize(password, attempts) {
-      return Net.authorize(function() {
-        // success
-      }, password).then(function() {
+    function tryInit(password, attempts) {
+      Net.init(function() { executeSearch(); }, password).then(function() {
+        netInitialized = true;
         appState.netAuthorized = true;
+        checkOnboarding();
       }).catch(function(err) {
         if (err && err.message === 'WRONG_PASSWORD') {
           toast('Неверный пароль', 'err');
@@ -3256,13 +3239,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           if (nextAttempts >= Config.get('maxPasswordAttempts', 3)) {
             showResetModal();
           } else {
-            promptExistingPassword(function(pwd) { tryAuthorize(pwd, nextAttempts); }, nextAttempts);
+            promptExistingPassword(tryInit, nextAttempts);
           }
         } else {
           if (Logger) Logger.error('Net', String(err && err.message || err));
           setStatus('net', translate('st.net.failed'), 'err');
         }
-        throw err;
       });
     }
 
@@ -3367,28 +3349,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       });
     }
 
-    function requestNetworkAuth(onSuccess) {
-      if (appState.netAuthorized) {
-        if (typeof onSuccess === 'function') onSuccess();
-        return;
-      }
-      
-      var initCallback = function(password) {
-        tryAuthorize(password, 0).then(function() {
-          if (typeof onSuccess === 'function') onSuccess();
-        }).catch(function() {
-          // Ошибки обработаны в tryAuthorize
-        });
-      };
-
-      if (Net.isKeyEncrypted()) {
-        promptExistingPassword(initCallback, 0);
-      } else {
-        promptNewPassword(initCallback);
-      }
+    if (!Net.isKeyEncrypted()) {
+      promptNewPassword(function(pwd) {
+        tryInit(pwd, 0);
+      });
+    } else {
+      promptExistingPassword(tryInit, 0);
     }
-
-    appState.requestNetworkAuth = requestNetworkAuth;
   }
 
   function mountApp() {
