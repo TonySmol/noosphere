@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.1.17">
+<meta name="app-version" content="1.1.18">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1150,6 +1150,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         var room = cfg.get('room', 'noomium-main');
 
         if (ev.kind === KQ) {
+          if (!sk) return;
           var q;
           try { q = JSON.parse(ev.content); } catch (_) { return; }
           
@@ -1354,6 +1355,102 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }, delay);
     }
 
+    function listen(callback) {
+      if (started) {
+        if (typeof callback === 'function') callback();
+        return Promise.resolve();
+      }
+      onUpdate = callback;
+      connAttempts = 0;
+      
+      var p = import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm').then(function(mod) {
+          var tools = (mod && mod.default && typeof mod.default.generateSecretKey === 'function') 
+            ? mod.default 
+            : (typeof mod.generateSecretKey === 'function' ? mod : null);
+          if (!tools || !tools.SimplePool) throw new Error('nostr-tools: incompatible module structure');
+          nostr = tools;
+          return tools;
+      });
+
+      return p.then(function() {
+          if (!pool) {
+              pool = new nostr.SimplePool();
+          }
+          var nowSec = Math.floor(Date.now() / 1000);
+          var room = cfg.get('room', 'noomium-main');
+          var KQ = cfg.get('kQuery', 21000);
+          var KA = cfg.get('kAnswer', 21001);
+          var subWindow = cfg.get('subWindow', 300);
+          
+          started = true;
+          try {
+            subscription = pool.subscribeMany(cfg.get('relays', []),
+              [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
+              { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
+            startHeartbeat();
+          } catch (e) {
+            if (log) log.warn('sub fail', String(e));
+            scheduleReconnect();
+          }
+          notifyPeers();
+          setStatus('connecting');
+          if (log) log.info('net started listening, room=' + room);
+          if (typeof callback === 'function') callback();
+      }).catch(function(err) {
+          if (log) log.error('nostr load fail', String(err && err.message || err));
+          setStatus('failed');
+          throw err;
+      });
+    }
+
+    function authorize(callback, password) {
+      var doAuth = function() {
+        if (sk !== null) {
+          if (typeof callback === 'function') callback();
+          return Promise.resolve();
+        }
+        
+        var KEY = 'noomium:sk';
+        var stored = localStorage.getItem(KEY);
+        var keyPromise;
+        
+        if (stored) {
+          if (/^[0-9a-f]{64}$/i.test(stored)) {
+             var keyHex = stored;
+             keyPromise = encryptKey(keyHex, password).then(function(encrypted) {
+                 localStorage.setItem(KEY, encrypted);
+                 return keyHex;
+             });
+          } else {
+             keyPromise = decryptKey(stored, password).catch(function() {
+                 throw new Error('WRONG_PASSWORD');
+             });
+          }
+        } else {
+            if (!nostr) {
+                return Promise.reject(new Error('nostr-tools not loaded'));
+            }
+            var raw = nostr.generateSecretKey();
+            var keyHex = Array.from(raw).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+            keyPromise = encryptKey(keyHex, password).then(function(encrypted) {
+                try { localStorage.setItem(KEY, encrypted); } catch (_) { /* ignore */ }
+                return keyHex;
+            });
+        }
+        
+        return keyPromise.then(function(hex) {
+            sk = new Uint8Array(hex.match(/.{1,2}/g).map(function(b) { return parseInt(b, 16); }));
+            pk = nostr.getPublicKey(sk);
+            if (typeof callback === 'function') callback();
+        });
+      };
+
+      if (!started) {
+        return listen().then(doAuth);
+      }
+      return doAuth();
+    }
+
     return {
       onPeers: function(fn) { if (typeof fn === 'function') peerListeners.push(fn); },
       offPeers: function(fn) {
@@ -1362,6 +1459,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       },
       getStatus: function() { return netStatus; },
       getOutboxLength: function() { return outbox.length; },
+      hasKey: function() { return sk !== null; },
       isKeyEncrypted: function() {
         try {
           var stored = localStorage.getItem('noomium:sk');
@@ -1370,86 +1468,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           return false;
         }
       },
-      init: function(callback, password) {
-        if (started) return Promise.resolve();
-        onUpdate = callback;
-        connAttempts = 0;
-        
-        var loadAndDecrypt = function() {
-            var p = import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm').then(function(mod) {
-                var tools = (mod && mod.default && typeof mod.default.generateSecretKey === 'function') 
-                  ? mod.default 
-                  : (typeof mod.generateSecretKey === 'function' ? mod : null);
-                if (!tools || !tools.SimplePool) throw new Error('nostr-tools: incompatible module structure');
-                nostr = tools;
-                return tools;
-            });
-
-            if (sk) {
-                return p.then(function() { return true; });
-            }
-
-            return p.then(function(tools) {
-                var KEY = 'noomium:sk';
-                var stored = localStorage.getItem(KEY);
-                if (stored) {
-                  if (/^[0-9a-f]{64}$/i.test(stored)) {
-                     var keyHex = stored;
-                     return encryptKey(keyHex, password).then(function(encrypted) {
-                         localStorage.setItem(KEY, encrypted);
-                         return keyHex;
-                     });
-                  } else {
-                     return decryptKey(stored, password).catch(function() {
-                         throw new Error('WRONG_PASSWORD');
-                     });
-                  }
-                }
-                
-                var raw = tools.generateSecretKey();
-                var keyHex = Array.from(raw).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
-                return encryptKey(keyHex, password).then(function(encrypted) {
-                    try { localStorage.setItem(KEY, encrypted); } catch (_) { /* ignore */ }
-                    return keyHex;
-                });
-            }).then(function(hex) {
-                sk = new Uint8Array(hex.match(/.{1,2}/g).map(function(b) { return parseInt(b, 16); }));
-                pk = nostr.getPublicKey(sk);
-                return true;
-            });
-        };
-        
-        return loadAndDecrypt().then(function() {
-            if (!pool && nostr) {
-                pool = new nostr.SimplePool();
-            }
-            var nowSec = Math.floor(Date.now() / 1000);
-            var room = cfg.get('room', 'noomium-main');
-            var KQ = cfg.get('kQuery', 21000);
-            var KA = cfg.get('kAnswer', 21001);
-            var subWindow = cfg.get('subWindow', 300);
-            
-            started = true;
-            try {
-              subscription = pool.subscribeMany(cfg.get('relays', []),
-                [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
-                { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
-              startHeartbeat();
-            } catch (e) {
-              if (log) log.warn('sub fail', String(e));
-              scheduleReconnect();
-            }
-            notifyPeers();
-            setStatus('connecting');
-            if (log) log.info('net started, room=' + room);
-        }).catch(function(err) {
-          if (log && err.message !== 'WRONG_PASSWORD') log.error('nostr load fail', String(err && err.message || err));
-          if (err.message !== 'WRONG_PASSWORD') setStatus('failed');
-          throw err;
-        });
-      },
+      listen: listen,
+      authorize: authorize,
       send: function(vector) {
-        if (!pool || !nostr || AI.getMode() === 'demo') return;
+        if (!pool || !nostr || !sk || AI.getMode() === 'demo') return;
         var now = Date.now();
         var rate = cfg.get('queryRateLimit', 3000);
         if (now - lastQueryTime < rate) return;
@@ -1499,15 +1521,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         setStatus('disconnected');
         if (bus && bus.emit) { try { bus.emit('net:outbox', { count: 0 }); } catch(_) {} }
       },
-      restart: function(callback, password) {
+      restart: function(callback) {
         this.stop();
-        if (typeof password === 'undefined' && sk !== null) {
-          return this.init(callback);
-        }
-        if (typeof password === 'undefined' && sk === null) {
-          return Promise.reject(new Error('Password required'));
-        }
-        return this.init(callback, password);
+        return this.listen(callback);
       }
     };
   }, ['Config', 'DB', 'AI', 'Logger', 'Bus']);
@@ -1752,6 +1768,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     lastVec: null,
     lastQuery: 0,
     netAuthorized: false,
+    netListening: false,
     lists: { local: [], world: [], seren: [] }
   };
 
@@ -2586,7 +2603,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (!appState.lastVec || AI.cosine(vec, appState.lastVec) < Config.get('vectorSimilarityThreshold', 0.98) || force) {
         appState.lastVec = vec;
         appState.lastQuery = Date.now();
-        if (AI.getMode() === 'model' && appState.netAuthorized && Net && typeof Net.send === 'function') {
+        if (AI.getMode() === 'model' && Net && typeof Net.send === 'function') {
           Net.send(vec);
         }
       }
@@ -2607,7 +2624,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             });
           }
         }
-        var worldAnswers = appState.netAuthorized ? Net.activeAnswers() : [];
+        var worldAnswers = Net.activeAnswers();
         var worldScored = [];
         for (var i = 0; i < worldAnswers.length; i++) {
           worldScored.push({ 
@@ -3186,6 +3203,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         AI.getMode() === 'model' ? 'ok' : 'warn'
       );
       aiLoaded = true;
+      
+      Net.listen(function() { executeSearch(); }).then(function() {
+        appState.netListening = true;
+      }).catch(function(err) {
+        if (Logger) Logger.error('Net listen', String(err && err.message || err));
+      });
+      
       checkOnboarding();
     }).catch(function(err) {
       Progress.hide();
@@ -3195,9 +3219,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       checkOnboarding();
     });
 
-    function tryInit(password, attempts) {
-      return Net.init(function() { executeSearch(); }, password).then(function() {
+    function tryAuthorize(password, attempts) {
+      return Net.authorize(function() {
         // success
+      }, password).then(function() {
+        appState.netAuthorized = true;
       }).catch(function(err) {
         if (err && err.message === 'WRONG_PASSWORD') {
           toast('Неверный пароль', 'err');
@@ -3205,7 +3231,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           if (nextAttempts >= Config.get('maxPasswordAttempts', 3)) {
             showResetModal();
           } else {
-            promptExistingPassword(function(pwd) { tryInit(pwd, nextAttempts); }, nextAttempts);
+            promptExistingPassword(function(pwd) { tryAuthorize(pwd, nextAttempts); }, nextAttempts);
           }
         } else {
           if (Logger) Logger.error('Net', String(err && err.message || err));
@@ -3323,11 +3349,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }
       
       var initCallback = function(password) {
-        tryInit(password, 0).then(function() {
-          appState.netAuthorized = true;
+        tryAuthorize(password, 0).then(function() {
           if (typeof onSuccess === 'function') onSuccess();
         }).catch(function() {
-          // Ошибки обработаны в tryInit
+          // Ошибки обработаны в tryAuthorize
         });
       };
 
