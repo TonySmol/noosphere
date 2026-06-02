@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.1.18">
+<meta name="app-version" content="1.1.19">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1332,7 +1332,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (log) log.info('Reconnect attempt ' + connAttempts + ' in ' + delay + 'ms');
       setStatus('reconnecting');
       setTimeout(function() {
-        reconnecting = false;
         try {
           if (subscription && typeof subscription.close === 'function') {
             try { subscription.close(); } catch (_) { /* ignore */ }
@@ -1348,9 +1347,18 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
               { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
             if (log) log.info('Reconnect: subscribed');
+            reconnecting = false;
+          } else {
+            throw new Error('Pool not available');
           }
         } catch (err) {
           if (log) log.warn('Reconnect fail', String(err));
+          if (started && connAttempts < cfg.get('reconnectMaxAttempts', 10)) {
+            scheduleReconnect();
+          } else {
+            reconnecting = false;
+            setStatus('failed');
+          }
         }
       }, delay);
     }
@@ -1518,6 +1526,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         outbox.length = 0;
         relayErrors.clear();
         rateLimitedUntil.clear();
+        reconnecting = false;
         setStatus('disconnected');
         if (bus && bus.emit) { try { bus.emit('net:outbox', { count: 0 }); } catch(_) {} }
       },
