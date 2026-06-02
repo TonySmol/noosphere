@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.1.11">
+<meta name="app-version" content="1.1.12">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2121,6 +2121,89 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END UI.Carousel -->
 
 <!-- NOOMIUM_MODULE_START UI.Base -->
+  var baseOffset = 0;
+  var baseIsLoading = false;
+  var baseHasMore = true;
+  var baseTotalNotes = 0;
+
+  function onBaseScroll(e) {
+    var el = e.target;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
+      loadBaseNotesChunked();
+    }
+  }
+
+  function loadBaseNotesChunked() {
+    if (baseIsLoading || !baseHasMore) return;
+    baseIsLoading = true;
+    
+    var chunkSize = Config.get('baseChunkSize', 20);
+    var container = document.getElementById('base-list');
+    var queryInput = document.getElementById('base-q');
+    var sortSelect = document.getElementById('base-sort');
+    var queryValue = queryInput ? queryInput.value.trim().toLowerCase() : '';
+    var sortValue = sortSelect ? sortSelect.value : 'new';
+    
+    DB.getAllPaginated(baseOffset, chunkSize).then(function(chunk) {
+      baseIsLoading = false;
+      if (!chunk || chunk.length === 0) {
+        baseHasMore = false;
+        if (baseOffset === 0 && container) {
+          var emptyTitle = translate('empty.base.t');
+          var emptyDesc = baseTotalNotes === 0 ? translate('empty.base.d') : translate('empty.base.empty');
+          container.innerHTML = '<div class="feed-empty"><div class="feed-empty-ic">▤</div>' +
+            '<div class="feed-empty-t">' + Utils.esc(emptyTitle) + '</div>' +
+            '<div class="feed-empty-d">' + Utils.esc(emptyDesc) + '</div></div>';
+        }
+        return;
+      }
+      
+      if (chunk.length < chunkSize) {
+        baseHasMore = false;
+      }
+      
+      var filtered = chunk;
+      if (queryValue) {
+        filtered = filtered.filter(function(n) { return n.text && n.text.toLowerCase().indexOf(queryValue) >= 0; });
+      }
+      if (sortValue === 'old') {
+        filtered.sort(function(a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+      } else if (sortValue === 'az') {
+        filtered.sort(function(a, b) { return (a.text || '').localeCompare(b.text || '', I18n.getLang() === 'en' ? 'en' : 'ru'); });
+      } else {
+        filtered.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+      }
+      
+      var fragment = document.createDocumentFragment();
+      for (var i = 0; i < filtered.length; i++) {
+        var note = filtered[i];
+        var div = document.createElement('div');
+        var dateStr = Utils.fmtDate(note.createdAt, I18n.getLang());
+        var escapedText = Utils.esc(note.text);
+        var isLongText = escapedText.length > Config.get('truncateTextLength', 120);
+        div.className = 'bi ' + (note.shared ? 'shared' : '');
+        div.setAttribute('data-id', note.id);
+        div.innerHTML = '<div class="bi-t' + (isLongText ? ' truncated' : '') + '">' + escapedText + '</div>' +
+          '<div class="bi-f"><div class="bi-meta">' +
+            '<span class="bi-tag">' + Utils.esc(note.shared ? translate('base.tag.shared') : translate('base.tag.private')) + '</span>' +
+            '<span class="bi-date">' + Utils.esc(dateStr) + '</span>' +
+          '</div></div>';
+        fragment.appendChild(div);
+      }
+      if (container) container.appendChild(fragment);
+      
+      baseOffset += chunk.length;
+      
+      if (filtered.length === 0 && baseHasMore) {
+        loadBaseNotesChunked();
+      }
+      
+    }).catch(function(err) {
+      baseIsLoading = false;
+      toast(String(err && err.message || err) || 'Chunk load failed', 'err');
+    });
+  }
+
   function updateCounts() {
     ['local', 'world', 'seren'].forEach(function(key) {
       var el = document.getElementById('c-' + key);
@@ -2134,6 +2217,17 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   }
 
   function renderBase() {
+    var container = document.getElementById('base-list');
+    if (container) {
+      container.innerHTML = '';
+      container.removeEventListener('scroll', onBaseScroll);
+      container.addEventListener('scroll', onBaseScroll);
+    }
+    
+    baseOffset = 0;
+    baseHasMore = true;
+    baseIsLoading = false;
+
     getAllNotesCached().then(function(allNotes) {
       var statsEl = document.getElementById('base-stats');
       if (statsEl) {
@@ -2146,68 +2240,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           buildStatCard(sharedCount, translate('base.stat.open')) +
           buildStatCard(allNotes.length - sharedCount, translate('base.stat.priv'));
       }
-
-      var queryInput = document.getElementById('base-q');
-      var sortSelect = document.getElementById('base-sort');
-      var queryValue = queryInput ? queryInput.value.trim().toLowerCase() : '';
-      var sortValue = sortSelect ? sortSelect.value : 'new';
-
-      var list = allNotes.slice();
-      if (queryValue) {
-        list = list.filter(function(n) { return n.text && n.text.toLowerCase().indexOf(queryValue) >= 0; });
-      }
-      if (sortValue === 'old') {
-        list.sort(function(a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
-      } else if (sortValue === 'az') {
-        list.sort(function(a, b) { return (a.text || '').localeCompare(b.text || '', I18n.getLang() === 'en' ? 'en' : 'ru'); });
-      } else {
-        list.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
-      }
-
-      var container = document.getElementById('base-list');
-      if (!container) return;
-      container.innerHTML = '';
-
-      if (list.length === 0) {
-        var emptyTitle = translate('empty.base.t');
-        var emptyDesc = allNotes.length === 0 ? translate('empty.base.d') : translate('empty.base.empty');
-        container.innerHTML = '<div class="feed-empty"><div class="feed-empty-ic">▤</div>' +
-          '<div class="feed-empty-t">' + Utils.esc(emptyTitle) + '</div>' +
-          '<div class="feed-empty-d">' + Utils.esc(emptyDesc) + '</div></div>';
-        return;
-      }
-
-      var index = 0;
-      var CHUNK_SIZE = Config.get('baseChunkSize', 20);
       
-      function renderChunk() {
-        var fragment = document.createDocumentFragment();
-        var end = Math.min(index + CHUNK_SIZE, list.length);
-        for (; index < end; index++) {
-          var note = list[index];
-          var div = document.createElement('div');
-          var dateStr = Utils.fmtDate(note.createdAt, I18n.getLang());
-          var escapedText = Utils.esc(note.text);
-          var isLongText = escapedText.length > Config.get('truncateTextLength', 120);
-          div.className = 'bi ' + (note.shared ? 'shared' : '');
-          div.setAttribute('data-id', note.id);
-          div.innerHTML = '<div class="bi-t' + (isLongText ? ' truncated' : '') + '">' + escapedText + '</div>' +
-            '<div class="bi-f"><div class="bi-meta">' +
-              '<span class="bi-tag">' + Utils.esc(note.shared ? translate('base.tag.shared') : translate('base.tag.private')) + '</span>' +
-              '<span class="bi-date">' + Utils.esc(dateStr) + '</span>' +
-            '</div></div>';
-          fragment.appendChild(div);
-        }
-        container.appendChild(fragment);
-        if (index < list.length) {
-          if ('requestIdleCallback' in window) {
-            requestIdleCallback(renderChunk);
-          } else {
-            setTimeout(renderChunk, 0);
-          }
-        }
-      }
-      renderChunk();
+      baseTotalNotes = allNotes.length;
+      loadBaseNotesChunked();
     }).catch(function(err) {
       toast(String(err && err.message || err) || 'Base load failed', 'err');
       if (Logger) Logger.warn('renderBase error', String(err && err.message || err));
