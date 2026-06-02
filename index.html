@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.1.19">
+<meta name="app-version" content="1.1.20">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -951,7 +951,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     var connAttempts = 0;
     var netStatus = 'disconnected';
 
-    var sharedCache = null;
+    var sharedCache = [];
+    var sharedCacheOffset = 0;
+    var sharedCacheComplete = false;
     var sharedCacheTime = 0;
     var CACHE_TTL = cfg.get('sharedCacheTTL', 60000);
 
@@ -1034,25 +1036,39 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     function getSharedVectors() {
       var now = Date.now();
-      if (sharedCache && (now - sharedCacheTime < CACHE_TTL)) {
+      if (sharedCacheComplete && (now - sharedCacheTime < CACHE_TTL)) {
         return Promise.resolve(sharedCache);
       }
-      return DB.all().then(function(notes) {
-        var res = [];
-        for (var i = 0; i < notes.length; i++) {
-          var n = notes[i];
-          if (n && n.shared && n.vector) {
-            res.push({ id: n.id, text: n.text, vector: n.vector });
+      if (now - sharedCacheTime >= CACHE_TTL) {
+        sharedCache = [];
+        sharedCacheOffset = 0;
+        sharedCacheComplete = false;
+      }
+      var chunkSize = cfg.get('baseChunkSize', 20);
+      return DB.getAllPaginated(sharedCacheOffset, chunkSize).then(function(chunk) {
+        if (!chunk || chunk.length === 0) {
+          sharedCacheComplete = true;
+        } else {
+          for (var i = 0; i < chunk.length; i++) {
+            var n = chunk[i];
+            if (n && n.shared && n.vector) {
+              sharedCache.push({ id: n.id, text: n.text, vector: n.vector });
+            }
+          }
+          sharedCacheOffset += chunk.length;
+          if (chunk.length < chunkSize) {
+            sharedCacheComplete = true;
           }
         }
-        sharedCache = res;
-        sharedCacheTime = now;
-        return res;
+        sharedCacheTime = Date.now();
+        return sharedCache;
       });
     }
 
     function invalidateSharedCache() {
-      sharedCache = null;
+      sharedCache = [];
+      sharedCacheOffset = 0;
+      sharedCacheComplete = false;
       sharedCacheTime = 0;
     }
 
@@ -1255,7 +1271,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               return;
             }
             
-            if (/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(data.text)) {
+            if (/[\x00-\x08\x0B\x0C\x0E-\x1F\u200B-\u200F\u2028-\u202F\uFE00-\uFE0F\u200D\uFEFF]/.test(data.text)) {
               return;
             }
             
