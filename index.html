@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.1.13">
+<meta name="app-version" content="1.1.14">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1731,6 +1731,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     sendLock: false,
     lastVec: null,
     lastQuery: 0,
+    netAuthorized: false,
     lists: { local: [], world: [], seren: [] }
   };
 
@@ -2493,6 +2494,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     if (!text) { toast(translate('toast.empty'), 'warn'); return; }
     if (!AI.ready()) { toast(translate('toast.ai.notready'), 'err'); return; }
 
+    if (appState.sendMode === 'world' && !appState.netAuthorized) {
+      appState.requestNetworkAuth(handleSend);
+      return;
+    }
+
     var isWorld = appState.sendMode === 'world';
     var btn = document.getElementById('btn-send');
     appState.sendLock = true;
@@ -2556,7 +2562,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (!appState.lastVec || AI.cosine(vec, appState.lastVec) < Config.get('vectorSimilarityThreshold', 0.98) || force) {
         appState.lastVec = vec;
         appState.lastQuery = Date.now();
-        if (AI.getMode() === 'model' && Net && typeof Net.send === 'function') {
+        if (AI.getMode() === 'model' && appState.netAuthorized && Net && typeof Net.send === 'function') {
           Net.send(vec);
         }
       }
@@ -2577,7 +2583,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             });
           }
         }
-        var worldAnswers = Net.activeAnswers();
+        var worldAnswers = appState.netAuthorized ? Net.activeAnswers() : [];
         var worldScored = [];
         for (var i = 0; i < worldAnswers.length; i++) {
           worldScored.push({ 
@@ -3081,7 +3087,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     I18n.addDict('ru', { 'btn.forgot': 'Забыли пароль?' });
     I18n.addDict('en', { 'btn.forgot': 'Forgot password?' });
 
-    setStatus('net', translate('st.net.connecting'), 'load');
+    setStatus('net', translate('st.net.listen'), 'load');
     setStatus('ai', translate('st.ai.loading'), 'load');
     Progress.show();
 
@@ -3092,10 +3098,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     AI.onProgress(uiState.progressHandler);
 
     var aiLoaded = false;
-    var netInitialized = false;
 
     function checkOnboarding() {
-      if (aiLoaded && netInitialized && !Config.get('onboarded', false)) {
+      if (aiLoaded && !Config.get('onboarded', false)) {
         openHelp(true);
       }
     }
@@ -3117,9 +3122,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     });
 
     function tryInit(password, attempts) {
-      Net.init(function() { executeSearch(); }, password).then(function() {
-        netInitialized = true;
-        checkOnboarding();
+      return Net.init(function() { executeSearch(); }, password).then(function() {
+        // success
       }).catch(function(err) {
         if (err && err.message === 'WRONG_PASSWORD') {
           toast('Неверный пароль', 'err');
@@ -3127,12 +3131,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           if (nextAttempts >= Config.get('maxPasswordAttempts', 3)) {
             showResetModal();
           } else {
-            promptExistingPassword(tryInit, nextAttempts);
+            promptExistingPassword(function(pwd) { tryInit(pwd, nextAttempts); }, nextAttempts);
           }
         } else {
           if (Logger) Logger.error('Net', String(err && err.message || err));
           setStatus('net', translate('st.net.failed'), 'err');
         }
+        throw err;
       });
     }
 
@@ -3237,13 +3242,29 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       });
     }
 
-    if (!Net.isKeyEncrypted()) {
-      promptNewPassword(function(pwd) {
-        tryInit(pwd, 0);
-      });
-    } else {
-      promptExistingPassword(tryInit, 0);
+    function requestNetworkAuth(onSuccess) {
+      if (appState.netAuthorized) {
+        if (typeof onSuccess === 'function') onSuccess();
+        return;
+      }
+      
+      var initCallback = function(password) {
+        tryInit(password, 0).then(function() {
+          appState.netAuthorized = true;
+          if (typeof onSuccess === 'function') onSuccess();
+        }).catch(function() {
+          // Ошибки обработаны в tryInit
+        });
+      };
+
+      if (Net.isKeyEncrypted()) {
+        promptExistingPassword(initCallback, 0);
+      } else {
+        promptNewPassword(initCallback);
+      }
     }
+
+    appState.requestNetworkAuth = requestNetworkAuth;
   }
 
   function mountApp() {
