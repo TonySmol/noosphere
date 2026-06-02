@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.1.14">
+<meta name="app-version" content="1.1.15">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -618,7 +618,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       toastDefaultDuration: 2200,
       progressFocusDelay: 50,
       modalFocusDelay: 50,
-      maxAnswerTextLength: 10000
+      maxAnswerTextLength: 10000,
+      offlineQueueMaxSize: 100,
+      offlineFlushInterval: 30000
     };
     var state = Object.assign({}, defaults);
     try {
@@ -940,7 +942,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     var pool = null, sk = null, pk = null, queryId = null;
     var peers = new Map();
     var answers = [];
-    var onUpdate = null, hbTimer = null, lastQueryTime = 0;
+    var onUpdate = null, hbTimer = null, flushTimer = null, lastQueryTime = 0;
     var nostr = null, subscription = null;
     var peerListeners = [];
     var started = false, reconnecting = false;
@@ -1058,11 +1060,22 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       bus.on('db:change', invalidateSharedCache);
     }
 
+    function addToOutbox(ev) {
+      if (outbox.indexOf(ev) === -1) {
+        if (outbox.length >= cfg.get('offlineQueueMaxSize', 100)) {
+          outbox.shift();
+        }
+        outbox.push(ev);
+      }
+      if (bus && bus.emit) { try { bus.emit('net:outbox', { count: outbox.length }); } catch(_) {} }
+    }
+
     function flushOutbox() {
       if (outbox.length === 0 || !pool) return;
       var limit = Math.min(cfg.get('outboxBatchSize', 2), outbox.length);
       var toSend = outbox.splice(0, limit);
       toSend.forEach(function(ev) { safePublish(ev); });
+      if (bus && bus.emit) { try { bus.emit('net:outbox', { count: outbox.length }); } catch(_) {} }
     }
 
     function safePublish(ev) {
@@ -1075,7 +1088,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }
       if (goodRelays.length === 0) {
         if (log) log.warn('All relays rate-limited, skipping publish');
-        if (outbox.indexOf(ev) === -1) outbox.push(ev);
+        addToOutbox(ev);
         return Promise.resolve();
       }
       try {
@@ -1089,6 +1102,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                 var idx = outbox.indexOf(ev);
                 if (idx > -1) outbox.splice(idx, 1);
                 relayErrors.delete(relayUrl);
+                if (bus && bus.emit) { try { bus.emit('net:outbox', { count: outbox.length }); } catch(_) {} }
               }).catch(function(err) {
                 var count = (relayErrors.get(relayUrl) || 0) + 1;
                 relayErrors.set(relayUrl, count);
@@ -1103,14 +1117,14 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                   if (log) log.warn('Relay ' + relayUrl + ' error ' + count + ', ' + (backoff / 1000) + 's backoff');
                 }
                 
-                if (outbox.indexOf(ev) === -1) outbox.push(ev);
+                addToOutbox(ev);
               });
             })(p, relay);
           }
         }
       } catch (err) {
         if (log) log.warn('publish throw', String(err));
-        if (outbox.indexOf(ev) === -1) outbox.push(ev);
+        addToOutbox(ev);
       }
       return Promise.resolve();
     }
@@ -1299,6 +1313,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           }
         }
       }, hbInterval);
+
+      if (flushTimer) clearInterval(flushTimer);
+      flushTimer = setInterval(function() { flushOutbox(); }, cfg.get('offlineFlushInterval', 30000));
     }
 
     function scheduleReconnect() {
@@ -1344,6 +1361,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (idx > -1) peerListeners.splice(idx, 1);
       },
       getStatus: function() { return netStatus; },
+      getOutboxLength: function() { return outbox.length; },
       isKeyEncrypted: function() {
         try {
           var stored = localStorage.getItem('noomium:sk');
@@ -1459,6 +1477,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       peerCount: function() { return peers.size; },
       stop: function() {
         if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
+        if (flushTimer) { clearInterval(flushTimer); flushTimer = null; }
         if (subscription && typeof subscription.close === 'function') {
           try { subscription.close(); } catch (_) { /* ignore */ }
         }
@@ -1478,6 +1497,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         relayErrors.clear();
         rateLimitedUntil.clear();
         setStatus('disconnected');
+        if (bus && bus.emit) { try { bus.emit('net:outbox', { count: 0 }); } catch(_) {} }
       },
       restart: function(callback, password) {
         this.stop();
@@ -1813,6 +1833,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         '<span class="hdr-st-item"><span class="hdr-st-dot load" id="st-ai-dot"></span><span id="st-ai-txt">' + translate('st.ai.loading') + '</span></span>' +
       '</div>' +
       '<button class="burger" id="btn-menu" aria-label="Menu" aria-expanded="false"><span class="burger-line"></span><span class="burger-line"></span><span class="burger-line"></span></button>' +
+    '</div>' +
+    '<div id="offline-bar" style="display:none;background:var(--danger-glow);color:var(--danger);font-size:11px;padding:4px 14px;text-align:center;font-weight:500;border-bottom:1px solid var(--line-strong)">' +
+      '<span id="offline-text">' + translate('offline.bar') + '</span>' +
+      '<span id="offline-queue" style="margin-left:8px;display:none">(' + translate('offline.queue').replace('{count}', '0') + ')</span>' +
     '</div>';
   }
 
@@ -2993,6 +3017,17 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         text = translate('st.net.failed'); cls = 'err';
       }
       setStatus('net', text, cls);
+
+      var bar = document.getElementById('offline-bar');
+      if (bar) {
+        if (status !== 'connected' && status !== 'disconnected') {
+          bar.style.display = 'block';
+          var textEl = document.getElementById('offline-text');
+          if (textEl) textEl.textContent = translate('offline.bar');
+        } else if (Net.getOutboxLength() === 0) {
+          bar.style.display = 'none';
+        }
+      }
     };
     Bus.on('net:status', netStatusHandler);
     busHandlers.push({event: 'net:status', fn: netStatusHandler});
@@ -3004,6 +3039,18 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     var i18nHandler = function() { refreshUI(); };
     Bus.on('i18n:change', i18nHandler);
     busHandlers.push({event: 'i18n:change', fn: i18nHandler});
+
+    var outboxHandler = function(payload) {
+      var count = payload && typeof payload.count === 'number' ? payload.count : 0;
+      var bar = document.getElementById('offline-bar');
+      var queueEl = document.getElementById('offline-queue');
+      if (!bar || !queueEl) return;
+      bar.style.display = count > 0 ? 'block' : 'none';
+      queueEl.style.display = count > 0 ? 'inline' : 'none';
+      queueEl.textContent = '(' + translate('offline.queue').replace('{count}', count) + ')';
+    };
+    Bus.on('net:outbox', outboxHandler);
+    busHandlers.push({event: 'net:outbox', fn: outboxHandler});
   }
 
   function setupWindowListeners() {
@@ -3323,7 +3370,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     'btn.private': 'Личное', 'btn.public': 'Мир', 'btn.send': 'Послать', 'btn.sending': 'Отправка...',
     'btn.save': 'Сохранить', 'btn.cancel': 'Отмена', 'btn.close': 'Закрыть', 'btn.edit': 'Развить',
     'btn.del': 'Удалить', 'btn.copy': 'Копия', 'btn.toggle.priv': 'Скрыть', 'btn.toggle.pub': 'Открыть',
-    'btn.back': 'Назад', 'btn.gotit': 'Понятно',
+    'btn.back': 'Назад', 'btn.gotit': 'Понятно', 'btn.forgot': 'Забыли пароль?',
     'sim.score': 'похожа на',
     'seg.local': 'Моё', 'seg.world': 'Мир', 'seg.seren': 'Озарения',
     'tab.stream': 'Поток', 'tab.base': 'База',
@@ -3365,7 +3412,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     'help.philosophy': 'Чужие мысли нельзя сохранить. Их можно прочитать, понять и написать своё.',
     'help.keys': 'Горячие клавиши', 'help.k1': 'Ctrl+Enter — отправить',
     'help.k2': '/ — фокус на поле ввода',
-    'help.gestures': 'Свайпы влево/вправо по карточкам. Переключатель «Мир/Личное» выбирает, куда послать мысль.'
+    'help.gestures': 'Свайпы влево/вправо по карточкам. Переключатель «Мир/Личное» выбирает, куда послать мысль.',
+    'offline.bar': 'Нет сети',
+    'offline.queue': 'Ожидают: {count}'
   });
   I18n.addDict('en', {
     'app.name': 'NOOmium',
@@ -3376,7 +3425,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     'btn.private': 'Private', 'btn.public': 'World', 'btn.send': 'Send', 'btn.sending': 'Sending...',
     'btn.save': 'Save', 'btn.cancel': 'Cancel', 'btn.close': 'Close', 'btn.edit': 'Develop',
     'btn.del': 'Delete', 'btn.copy': 'Copy', 'btn.toggle.priv': 'Hide', 'btn.toggle.pub': 'Share',
-    'btn.back': 'Back', 'btn.gotit': 'Got it',
+    'btn.back': 'Back', 'btn.gotit': 'Got it', 'btn.forgot': 'Forgot password?',
     'sim.score': 'similarity',
     'seg.local': 'Mine', 'seg.world': 'World', 'seg.seren': 'Insights',
     'tab.stream': 'Stream', 'tab.base': 'Base',
@@ -3417,7 +3466,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     'help.seren': 'Close but unexpected — source of inspiration',
     'help.philosophy': "Others' thoughts cannot be saved. Read, understand, write your own.",
     'help.keys': 'Hotkeys', 'help.k1': 'Ctrl+Enter — send', 'help.k2': '/ — focus editor',
-    'help.gestures': 'Swipe cards left/right. Toggle World/Private chooses destination.'
+    'help.gestures': 'Swipe cards left/right. Toggle World/Private chooses destination.',
+    'offline.bar': 'Offline',
+    'offline.queue': 'Pending: {count}'
   });
 
   DI.register('App', function(
