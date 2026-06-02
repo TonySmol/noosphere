@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.1.8">
+<meta name="app-version" content="1.1.9">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -611,7 +611,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
 <!-- NOOMIUM_MODULE_START DB -->
   DI.register('DB', function(cfg, log, bus) {
-    let db = null, mem = null;
+    var db = null, mem = null;
 
     function dbName() { return cfg.get('dbName', 'noomium_v8'); }
     function storeName() { return cfg.get('storeName', 'notes'); }
@@ -625,10 +625,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (db) return resolve(db);
         if (!window.indexedDB) { mem = new Map(); return resolve(null); }
         try {
-          const req = indexedDB.open(dbName(), 1);
+          var req = indexedDB.open(dbName(), 1);
           req.onupgradeneeded = function(e) {
-            const d = e.target.result;
-            const s = storeName();
+            var d = e.target.result;
+            var s = storeName();
             if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' });
           };
           req.onsuccess = function(e) { db = e.target.result; resolve(db); };
@@ -649,7 +649,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return new Promise(function(resolve, reject) {
           try {
             if (!d) {
-              const mockStore = {
+              var mockStore = {
                 get: function(k) {
                   return { result: mem.get(k) };
                 },
@@ -665,9 +665,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                   return { result: Array.from(mem.values()) };
                 }
               };
-              const req = { result: null, onsuccess: null, onerror: null };
+              var req = { result: null, onsuccess: null, onerror: null };
               try {
-                const r = fn(mockStore);
+                var r = fn(mockStore);
                 if (!r || typeof r.onsuccess !== 'function') {
                   resolve(r && r.result !== undefined ? r.result : r);
                   return;
@@ -682,9 +682,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               }
               return;
             }
-            const transaction = d.transaction(storeName(), mode);
-            const store = transaction.objectStore(storeName());
-            const r = fn(store);
+            var transaction = d.transaction(storeName(), mode);
+            var store = transaction.objectStore(storeName());
+            var r = fn(store);
             r.onsuccess = function() { resolve(r.result); };
             r.onerror = function() {
               if (log) log.warn('DB op error', String(r.error));
@@ -707,18 +707,62 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return tx('readwrite', function(s) { return s.delete(id); }).then(function(res) { emitChange(); return res; }); 
       },
       all: function() { return tx('readonly', function(s) { return s.getAll(); }); },
+      getAllPaginated: function(offset, limit) {
+        return open().then(function(d) {
+          return new Promise(function(resolve, reject) {
+            if (!d) {
+              var all = mem ? Array.from(mem.values()) : [];
+              resolve(all.slice(offset, offset + limit));
+              return;
+            }
+            var transaction = d.transaction(storeName(), 'readonly');
+            var store = transaction.objectStore(storeName());
+            var request = store.openCursor();
+            var result = [];
+            var advanced = false;
+            
+            request.onsuccess = function(event) {
+              var cursor = event.target.result;
+              if (!cursor) {
+                resolve(result);
+                return;
+              }
+              if (!advanced && offset > 0) {
+                advanced = true;
+                try {
+                  cursor.advance(offset);
+                } catch (e) {
+                  resolve(result);
+                }
+                return;
+              }
+              result.push(cursor.value);
+              if (result.length >= limit) {
+                resolve(result);
+                return;
+              }
+              cursor.continue();
+            };
+            
+            request.onerror = function() {
+              if (log) log.warn('DB cursor error', String(request.error));
+              reject(request.error);
+            };
+          });
+        });
+      },
       bulkPut: function(notes) {
         return open().then(function(d) {
           return new Promise(function(resolve, reject) {
             try {
               if (!d) {
-                for (let i = 0; i < notes.length; i++) mem.set(notes[i].id, notes[i]);
+                for (var i = 0; i < notes.length; i++) mem.set(notes[i].id, notes[i]);
                 emitChange();
                 return resolve(notes.length);
               }
-              const transaction = d.transaction(storeName(), 'readwrite');
-              const store = transaction.objectStore(storeName());
-              for (let i = 0; i < notes.length; i++) store.put(notes[i]);
+              var transaction = d.transaction(storeName(), 'readwrite');
+              var store = transaction.objectStore(storeName());
+              for (var i = 0; i < notes.length; i++) store.put(notes[i]);
               transaction.oncomplete = function() { emitChange(); resolve(notes.length); };
               transaction.onerror = function() { reject(transaction.error); };
             } catch (err) { reject(err); }
@@ -730,7 +774,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (mem) mem.clear();
         return new Promise(function(resolve) {
           try {
-            const req = indexedDB.deleteDatabase(dbName());
+            var req = indexedDB.deleteDatabase(dbName());
             req.onsuccess = req.onerror = req.onblocked = function() { emitChange(); resolve(); };
           } catch (_) { emitChange(); resolve(); }
         });
