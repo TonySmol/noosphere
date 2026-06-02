@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.1.9">
+<meta name="app-version" content="1.1.10">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -525,13 +525,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
 <!-- NOOMIUM_MODULE_START I18n -->
   DI.register('I18n', function(store, bus) {
-    const KEY = 'lang';
-    const dicts = Object.create(null);
-    let current = 'ru';
-    const listeners = [];
+    var KEY = 'lang';
+    var dicts = Object.create(null);
+    var current = 'ru';
+    var listeners = [];
 
     function format(str, params) {
-      const s = String(str == null ? '' : str);
+      var s = String(str == null ? '' : str);
       if (!params) return s;
       return s.replace(/\{(\w+)\}/g, function(match, k) {
         return (params[k] !== undefined && params[k] !== null) ? String(params[k]) : match;
@@ -541,7 +541,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     function setLang(lang) {
       current = String(lang || 'ru');
       try { if (store) store.set(KEY, current); } catch (_) { /* ignore */ }
-      for (let i = 0; i < listeners.length; i++) {
+      for (var i = 0; i < listeners.length; i++) {
         try { listeners[i](current); } catch (_) { /* ignore */ }
       }
       if (bus && bus.emit) { try { bus.emit('i18n:change', { lang: current }); } catch (_) { /* ignore */ } }
@@ -554,23 +554,23 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function t(key, params, fallback) {
-      const d = dicts[current] || {};
-      let val = Object.prototype.hasOwnProperty.call(d, key) ? d[key] : undefined;
+      var d = dicts[current] || {};
+      var val = Object.prototype.hasOwnProperty.call(d, key) ? d[key] : undefined;
       if (val === undefined) {
-        const en = dicts['en'] || {};
+        var en = dicts['en'] || {};
         val = Object.prototype.hasOwnProperty.call(en, key) ? en[key] : undefined;
       }
-      const out = val !== undefined ? val : (fallback !== undefined ? fallback : String(key));
+      var out = val !== undefined ? val : (fallback !== undefined ? fallback : String(key));
       return format(out, params);
     }
 
     function onChange(fn) { if (typeof fn === 'function') listeners.push(fn); }
 
     try {
-      const saved = store ? store.get(KEY, null) : null;
+      var saved = store ? store.get(KEY, null) : null;
       if (saved && (saved === 'ru' || saved === 'en')) current = saved;
       else {
-        const pref = (navigator.language || 'ru').toLowerCase();
+        var pref = (navigator.language || 'ru').toLowerCase();
         current = pref.indexOf('ru') === 0 ? 'ru' : 'en';
       }
     } catch (_) { /* ignore */ }
@@ -1845,6 +1845,31 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     });
     renderCarousel();
   }
+
+  function refreshUI() {
+    var savedView = appState.view;
+    var savedSeg = appState.seg;
+    var savedText = getEditorValue();
+    var savedMode = appState.sendMode;
+    
+    cleanup();
+    var root = document.getElementById('app-root');
+    if (root) {
+      root.innerHTML = buildMarkup();
+    }
+    setupWindowListeners();
+    bindEvents();
+    
+    switchView(savedView);
+    setSegment(savedSeg);
+    handleToggleMode(savedMode);
+    setEditorValue(savedText);
+    updateCounter();
+    
+    if (AI.ready()) {
+      executeSearch(true);
+    }
+  }
 <!-- NOOMIUM_MODULE_END UI.Layout -->
 
 <!-- NOOMIUM_MODULE_START UI.Carousel -->
@@ -2547,16 +2572,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       langBtn.textContent = lang.toUpperCase();
       langBtn.onclick = function() {
         I18n.setLang(lang);
-        langSwitch.querySelectorAll('.lang-sw-b').forEach(function(x) {
-          x.classList.toggle('on', x.textContent.toLowerCase() === lang);
-        });
         Modal.close();
-        setTimeout(function() {
-          cleanup();
-          var root = document.getElementById('app-root');
-          if (root) root.innerHTML = '';
-          mountApp();
-        }, 50);
       };
       langSwitch.appendChild(langBtn);
     });
@@ -2906,6 +2922,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     var dbChangeHandler = function() { allNotesCache = null; };
     Bus.on('db:change', dbChangeHandler);
     busHandlers.push({event: 'db:change', fn: dbChangeHandler});
+
+    var i18nHandler = function() { refreshUI(); };
+    Bus.on('i18n:change', i18nHandler);
+    busHandlers.push({event: 'i18n:change', fn: i18nHandler});
   }
 
   function setupWindowListeners() {
