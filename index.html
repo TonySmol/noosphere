@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.1">
+<meta name="app-version" content="1.2.2">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -836,8 +836,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   }, ['Config', 'Logger', 'Bus']);
 <!-- NOOMIUM_MODULE_END DB -->
 
-  <!-- NOOMIUM_MODULE_START BaseUI -->
-  DI.register('BaseUI', function(cfg, DB, Utils, I18n, Toast, Logger) {
+<!-- NOOMIUM_MODULE_START BaseUI -->
+  DI.register('BaseUI', function(Config, DB, Utils, I18n, Toast, Logger) {
     let containerEl = null;
     let listEl = null;
     let searchEl = null;
@@ -907,7 +907,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         const div = document.createElement('div');
         const dateStr = Utils.fmtDate(note.createdAt, I18n.getLang());
         const escapedText = Utils.esc(note.text);
-        const isLongText = escapedText.length > cfg.get('truncateTextLength', 120);
+        const isLongText = escapedText.length > Config.get('truncateTextLength', 120);
         div.className = 'bi ' + (note.shared ? 'shared' : '');
         div.setAttribute('data-id', note.id);
         div.innerHTML = '<div class="bi-t' + (isLongText ? ' truncated' : '') + '">' + escapedText + '</div>' +
@@ -932,7 +932,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     function loadChunk() {
       if (isLoading || !hasMore || !listEl) return;
       isLoading = true;
-      const limit = cfg.get('baseChunkSize', 20);
+      const limit = Config.get('baseChunkSize', 20);
       
       if (currentSort === 'az' || currentSearch) {
         getAllNotes().then(function(allNotes) {
@@ -999,7 +999,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         searchTimer = setTimeout(function() {
           currentSearch = searchEl.value.trim().toLowerCase();
           refresh();
-        }, cfg.get('baseSearchDebounce', 200));
+        }, Config.get('baseSearchDebounce', 200));
       };
       searchEl.addEventListener('input', searchHandler);
       
@@ -1017,8 +1017,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             try {
               if (typeof openNoteView === 'function') {
                 openNoteView(id);
-              } else if (window.openNoteView) {
-                window.openNoteView(id);
               }
             } catch (err) {
               if (Logger) Logger.warn('openNoteView error', String(err));
@@ -1030,6 +1028,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     function refresh() {
       offset = 0;
+      allNotesCache = null;
+      allNotesCacheTime = 0;
       hasMore = true;
       isLoading = false;
       if (listEl) listEl.innerHTML = '';
@@ -2105,22 +2105,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     progressHandler: null
   };
 
-  var allNotesCache = null;
-  var allNotesCacheTime = 0;
-  var ALL_NOTES_TTL = 5 * 60 * 1000;
-
-  function getAllNotesCached() {
-    var now = Date.now();
-    if (allNotesCache && (now - allNotesCacheTime < ALL_NOTES_TTL)) {
-      return Promise.resolve(allNotesCache);
-    }
-    return DB.all().then(function(notes) {
-      allNotesCache = notes;
-      allNotesCacheTime = now;
-      return notes;
-    });
-  }
-
   var cachedQuery = null;
   var cachedRegex = null;
 
@@ -2205,12 +2189,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   }
 
   function buildBaseMarkup() {
-    return '<div class="ws base" id="ws-base" style="display:none">' +
-      '<div class="base-h"><div class="base-stats" id="base-stats"></div>' +
-      '<div class="base-ctrls"><input type="text" class="base-search" id="base-q" placeholder="' + Utils.esc(translate('base.search')) + '" />' +
-      '<select class="base-sort" id="base-sort"><option value="new">' + translate('base.sort.new') + '</option><option value="old">' + translate('base.sort.old') + '</option><option value="az">' + translate('base.sort.az') + '</option></select></div></div>' +
-      '<div class="base-list" id="base-list"></div>' +
-    '</div>';
+    return '<div class="ws base" id="ws-base" style="display:none"></div>';
   }
 
   function buildBottomTabMarkup() {
@@ -2236,7 +2215,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     var baseEl = document.getElementById('ws-base');
     if (streamEl) streamEl.style.display = viewName === 'stream' ? 'flex' : 'none';
     if (baseEl) baseEl.style.display = viewName === 'base' ? 'flex' : 'none';
-    if (viewName === 'base') renderBase();
+    if (viewName === 'base') {
+      var baseUI = DI.resolve('BaseUI');
+      if (baseUI && typeof baseUI.mount === 'function') {
+        baseUI.mount(document.getElementById('ws-base'));
+      }
+    }
   }
 
   function setSegment(segKey) {
@@ -2456,7 +2440,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           uiState.activeIdx[appState.seg] = Math.max(0, appState.lists[appState.seg].length - 1);
         }
         renderCarousel();
-        if (appState.view === 'base') renderBase();
+        if (appState.view === 'base') {
+          var baseUI = DI.resolve('BaseUI');
+          if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
+        }
       }).catch(function(err) {
         toast(String(err && err.message || err) || 'Delete failed', 'err');
       });
@@ -2470,7 +2457,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return DB.put(record).then(function() {
           toast(record.shared ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
           executeSearch();
-          if (appState.view === 'base') renderBase();
+          if (appState.view === 'base') {
+            var baseUI = DI.resolve('BaseUI');
+            if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
+          }
         });
       }).catch(function(err) {
         toast(String(err && err.message || err) || 'Toggle failed', 'err');
@@ -2898,7 +2888,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         appState.lastVec = null;
         toast(isWorld ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
         executeSearch();
-        if (appState.view === 'base') renderBase();
+        if (appState.view === 'base') {
+          var baseUI = DI.resolve('BaseUI');
+          if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
+        }
       })
       .catch(function(err) {
         toast(String(err && err.message || err) || 'Send failed', 'err');
@@ -2939,7 +2932,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           Net.send(vec);
         }
       }
-      return getAllNotesCached().then(function(notes) {
+      return DB.all().then(function(notes) {
         if (signal.aborted) return;
         var localScored = [];
         for (var i = 0; i < notes.length; i++) {
@@ -2990,6 +2983,222 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }).finally(function() {
       uiState.searchAbortController = null;
     });
+  }
+
+  function openNoteView(id) {
+    DB.get(id).then(function(record) {
+      if (!record) return;
+
+      var isEditing = false;
+      var nvOverlay = null;
+
+      if (uiState.noteViewEscHandler) {
+        document.removeEventListener('keydown', uiState.noteViewEscHandler);
+        uiState.noteViewEscHandler = null;
+      }
+
+      function renderNoteView() {
+        if (!nvOverlay) {
+          nvOverlay = document.createElement('div');
+          nvOverlay.className = 'nv on';
+          document.body.appendChild(nvOverlay);
+        }
+
+        var dateStr = Utils.fmtDate(record.createdAt, I18n.getLang());
+        var tagLabel = record.shared ? translate('base.tag.shared') : translate('base.tag.private');
+
+        var bodyContent = '';
+        var topFooter = '';
+        var bottomFooter = '';
+
+        if (isEditing) {
+          bodyContent = '<textarea class="nv-ta" id="nv-ta">' + Utils.esc(record.text) + '</textarea>';
+          bottomFooter =
+            '<button class="nv-act" id="nv-cancel">' + Utils.esc(translate('btn.cancel')) + '</button>' +
+            '<button class="nv-act primary" id="nv-save">' + Utils.esc(translate('btn.save')) + '</button>';
+        } else {
+          bodyContent =
+            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">' +
+              '<span class="bi-tag">' + Utils.esc(tagLabel) + '</span>' +
+              '<span style="font-size:11px;color:var(--text-3);font-family:var(--mono)">' + Utils.esc(dateStr) + '</span>' +
+            '</div>' +
+            '<div class="nv-text">' + Utils.esc(record.text) + '</div>';
+          topFooter =
+            '<button class="nv-act danger" id="nv-del" aria-label="' + Utils.esc(translate('btn.del')) + '">' + Utils.esc(translate('btn.del')) + '</button>' +
+            '<button class="nv-act" id="nv-copy" aria-label="' + Utils.esc(translate('btn.copy')) + '">' + Utils.esc(translate('btn.copy')) + '</button>' +
+            '<button class="nv-act" id="nv-toggle" aria-label="' + Utils.esc(record.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub')) + '">' + Utils.esc(record.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub')) + '</button>';
+          bottomFooter =
+            '<button class="nv-act" id="nv-cancel" aria-label="' + Utils.esc(translate('btn.cancel')) + '">' + Utils.esc(translate('btn.cancel')) + '</button>' +
+            '<button class="nv-act primary" id="nv-edit" aria-label="' + Utils.esc(translate('btn.edit')) + '">' + Utils.esc(translate('btn.edit')) + '</button>';
+        }
+
+        nvOverlay.innerHTML =
+          (topFooter ? '<div class="nv-f">' + topFooter + '</div>' : '') +
+          '<div class="nv-b">' + bodyContent + '</div>' +
+          '<div class="nv-f-bottom">' + bottomFooter + '</div>';
+
+        var cancelBtn = document.getElementById('nv-cancel');
+        if (cancelBtn) cancelBtn.onclick = function() {
+          if (isEditing) {
+            isEditing = false;
+            renderNoteView();
+          } else {
+            closeNoteView();
+          }
+        };
+
+        if (isEditing) {
+          var saveBtn = document.getElementById('nv-save');
+          if (saveBtn) saveBtn.onclick = function() {
+            var ta = document.getElementById('nv-ta');
+            if (!ta) return;
+            var newText = ta.value.trim();
+            if (!newText) { toast(translate('toast.empty'), 'err'); return; }
+            record.text = newText;
+            AI.embed(newText).then(function(v) {
+              record.vector = v;
+              return DB.put(record);
+            }).then(function() {
+              toast(translate('toast.edit.saved'), 'ok');
+              isEditing = false;
+              renderNoteView();
+              var baseUI = DI.resolve('BaseUI');
+              if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
+              executeSearch();
+            }).catch(function(err) {
+              toast(String(err && err.message || err) || 'Edit failed', 'err');
+            });
+          };
+        } else {
+          var delBtn = document.getElementById('nv-del');
+          var copyBtn = document.getElementById('nv-copy');
+          var toggleBtn = document.getElementById('nv-toggle');
+          var editBtn = document.getElementById('nv-edit');
+
+          if (delBtn) delBtn.onclick = function() {
+            if (!confirm(translate('nv.delete.confirm'))) return;
+            DB.del(id).then(function() {
+              toast(translate('toast.deleted'), 'ok');
+              closeNoteView();
+              var baseUI = DI.resolve('BaseUI');
+              if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
+              executeSearch();
+            }).catch(function(err) {
+              toast(String(err && err.message || err) || 'Delete failed', 'err');
+            });
+          };
+          if (copyBtn) copyBtn.onclick = function() {
+            copyToClipboard(record.text);
+          };
+          if (toggleBtn) toggleBtn.onclick = function() {
+            record.shared = !record.shared;
+            DB.put(record).then(function() {
+              toast(record.shared ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
+              renderNoteView();
+              var baseUI = DI.resolve('BaseUI');
+              if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
+              executeSearch();
+            }).catch(function(err) {
+              toast(String(err && err.message || err) || 'Toggle failed', 'err');
+            });
+          };
+          if (editBtn) editBtn.onclick = function() {
+            isEditing = true;
+            renderNoteView();
+          };
+        }
+      }
+
+      function closeNoteView() {
+        if (uiState.noteViewEscHandler) {
+          document.removeEventListener('keydown', uiState.noteViewEscHandler);
+          uiState.noteViewEscHandler = null;
+        }
+        if (nvOverlay) {
+          nvOverlay.classList.remove('on');
+          setTimeout(function() {
+            if (nvOverlay && nvOverlay.parentNode) {
+              try { nvOverlay.parentNode.removeChild(nvOverlay); } catch (_) { /* ignore */ }
+            }
+            nvOverlay = null;
+          }, Config.get('noteViewAnimationDelay', 200));
+        }
+      }
+
+      uiState.noteViewEscHandler = function(e) {
+        if (e.key === 'Escape') {
+          closeNoteView();
+        }
+      };
+      document.addEventListener('keydown', uiState.noteViewEscHandler);
+
+      renderNoteView();
+    }).catch(function(err) {
+      toast(String(err && err.message || err) || 'Load note failed', 'err');
+    });
+  }
+
+  function exportData() {
+    DB.all().then(function(notes) {
+      if (!notes || notes.length === 0) { toast('0', 'err'); return; }
+      var capsule = { app: 'noomium', format: 'v1', version: 1, exportedAt: Date.now(), notes: notes };
+      var blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'noomium-' + new Date().toISOString().slice(0, 10) + '.json';
+      document.body.appendChild(anchor);
+      anchor.click();
+      URL.revokeObjectURL(url);
+      anchor.remove();
+      toast('✓ ' + notes.length, 'ok');
+    }).catch(function(err) {
+      toast(String(err && err.message || err) || 'Export failed', 'err');
+    });
+  }
+
+  function importData() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.onchange = function() {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function() {
+        try {
+          var data = JSON.parse(String(reader.result || '{}'));
+          var notes = Array.isArray(data) ? data : (data.notes || []);
+          if (!Array.isArray(notes)) throw new Error('bad format');
+          var clean = [];
+          for (var i = 0; i < notes.length; i++) {
+            var note = notes[i];
+            if (!note || typeof note.text !== 'string' || !note.text.trim()) continue;
+            clean.push({
+              id: note.id || ('i' + Math.random().toString(36).slice(2, 10)),
+              text: note.text.trim(),
+              vector: Array.isArray(note.vector) ? note.vector : null,
+              shared: !!note.shared,
+              createdAt: typeof note.createdAt === 'number' ? note.createdAt : Date.now()
+            });
+          }
+          DB.bulkPut(clean).then(function() {
+            toast('✓ ' + clean.length, 'ok');
+            if (appState.view === 'base') {
+              var baseUI = DI.resolve('BaseUI');
+              if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
+            }
+            executeSearch();
+          }).catch(function(err) {
+            toast(String(err && err.message || err) || 'Import failed', 'err');
+          });
+        } catch (err) {
+          toast(String(err && err.message || err) || 'Import parse failed', 'err');
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
   }
 <!-- NOOMIUM_MODULE_END App.Logic -->
 
@@ -3300,6 +3509,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
   }
 
+  function updateCounts() {
+    ['local', 'world', 'seren'].forEach(function(key) {
+      var el = document.getElementById('c-' + key);
+      if (el) el.textContent = appState.lists[key].length;
+    });
+  }
+
   function bindEvents() {
     var editor = document.getElementById('ed-ta');
     if (editor) {
@@ -3338,28 +3554,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (el) handleItemAction(el.getAttribute('data-act'), el);
       });
     }
-
-    var baseContainer = document.getElementById('ws-base');
-    if (baseContainer) {
-      baseContainer.addEventListener('click', function(e) {
-        var bi = e.target.closest('.bi');
-        if (bi) {
-          var id = bi.getAttribute('data-id');
-          if (id) openNoteView(id);
-        }
-      });
-    }
-
-    var baseSearchInput = document.getElementById('base-q');
-    if (baseSearchInput) {
-      baseSearchInput.addEventListener('input', function() {
-        if (uiState.baseSearchTimer) clearTimeout(uiState.baseSearchTimer);
-        uiState.baseSearchTimer = setTimeout(renderBase, Config.get('baseSearchDebounce', 200));
-      });
-    }
-
-    var baseSortSelect = document.getElementById('base-sort');
-    if (baseSortSelect) baseSortSelect.onchange = renderBase;
 
     var menuBtn = document.getElementById('btn-menu');
     if (menuBtn) menuBtn.onclick = openMenu;
@@ -3407,7 +3601,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     Bus.on('net:status', netStatusHandler);
     busHandlers.push({event: 'net:status', fn: netStatusHandler});
     
-    var dbChangeHandler = function() { allNotesCache = null; };
+    var dbChangeHandler = function() { 
+      var baseUI = DI.resolve('BaseUI');
+      if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
+    };
     Bus.on('db:change', dbChangeHandler);
     busHandlers.push({event: 'db:change', fn: dbChangeHandler});
 
@@ -3466,6 +3663,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   }
 
   function cleanup() {
+    try {
+      var baseUI = DI.resolve('BaseUI');
+      if (baseUI && typeof baseUI.destroy === 'function') baseUI.destroy();
+    } catch (_) { }
+
     if (uiState.carouselObserver) {
       try { uiState.carouselObserver.disconnect(); } catch (_) {}
       uiState.carouselObserver = null;
