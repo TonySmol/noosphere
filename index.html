@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.3">
+<meta name="app-version" content="1.2.4">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1152,6 +1152,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     function onEvent(ev) {
       try {
         if (!ev || !ev.pubkey) return;
+        
+        // Verify cryptographic signature to prevent relay spoofing
+        if (nostr && typeof nostr.verifyEvent === 'function') {
+          if (!nostr.verifyEvent(ev)) {
+            if (log) log.warn('Invalid event signature', ev.id);
+            return;
+          }
+        }
+        
         if (!ev || typeof ev !== 'object') return;
         if (!Array.isArray(ev.tags)) return;
         if (!isValidEvent(ev)) return;
