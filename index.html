@@ -7,16 +7,9 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https://cdn.jsdelivr.net https://huggingface.co wss:; img-src 'self' data: blob:; worker-src 'self' blob:; base-uri 'self'; form-action 'self';">
   <title>NOOmium</title>
   
-  <!-- DaisyUI (без Tailwind CDN) -->
   <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet" type="text/css" />
-  
-  <!-- Alpine.js CSP Build (без unsafe-eval) -->
   <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/csp@3.14.1/dist/cdn.min.js"></script>
-  
-  <!-- Dexie.js (IndexedDB) -->
   <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.7/dist/dexie.min.js"></script>
-  
-  <!-- Day.js -->
   <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/plugin/relativeTime.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/locale/ru.js"></script>
@@ -28,7 +21,7 @@
 </head>
 <body class="bg-base-100 min-h-screen">
   
-  <div id="app" x-data="() => appComponent()" x-init="() => init()" x-cloak>
+  <div x-data="app" x-init="init()" x-cloak>
     
     <!-- HEADER -->
     <div class="navbar bg-base-200 shadow-lg sticky top-0 z-40">
@@ -37,16 +30,12 @@
       </div>
       <div class="flex-none gap-2">
         <div class="badge badge-ghost gap-2">
-          <span class="w-2 h-2 rounded-full" :class="() => status.storage.class"></span>
-          <span class="text-xs" x-text="() => status.storage.text"></span>
+          <span class="w-2 h-2 rounded-full" :class="status.storage.class"></span>
+          <span class="text-xs" x-text="status.storage.text"></span>
         </div>
         <div class="badge badge-ghost gap-2">
-          <span class="w-2 h-2 rounded-full" :class="() => status.ai.class"></span>
-          <span class="text-xs" x-text="() => status.ai.text"></span>
-        </div>
-        <div class="badge badge-ghost gap-2">
-          <span class="w-2 h-2 rounded-full" :class="() => status.network.class"></span>
-          <span class="text-xs" x-text="() => status.network.text"></span>
+          <span class="w-2 h-2 rounded-full" :class="status.ai.class"></span>
+          <span class="text-xs" x-text="status.ai.text"></span>
         </div>
       </div>
     </div>
@@ -59,25 +48,24 @@
         <div class="card-body">
           <textarea 
             x-model="editorText"
-            @input="() => onEditorInput()"
+            @input="onEditorInput()"
             class="textarea textarea-bordered h-24 text-lg"
             placeholder="О чём думаешь?"
           ></textarea>
           <div class="flex justify-between items-center mt-2">
-            <span class="text-sm opacity-70" x-text="() => editorText.length + ' симв.'"></span>
+            <span class="text-sm opacity-70" x-text="editorText.length + ' симв.'"></span>
             <div class="flex gap-2">
               <div class="btn-group">
                 <button class="btn btn-sm"
-                        :class="() => editorMode === 'private' ? 'btn-primary' : 'btn-ghost'"
-                        @click="() => setEditorMode('private')">Личное</button>
+                        :class="editorMode === 'private' ? 'btn-primary' : 'btn-ghost'"
+                        @click="setEditorMode('private')">Личное</button>
                 <button class="btn btn-sm"
-                        :class="() => editorMode === 'world' ? 'btn-primary' : 'btn-ghost'"
-                        @click="() => setEditorMode('world')">Мир</button>
+                        :class="editorMode === 'world' ? 'btn-primary' : 'btn-ghost'"
+                        @click="setEditorMode('world')">Мир</button>
               </div>
               <button class="btn btn-primary"
-                      :disabled="() => !canSend"
-                      @click="() => sendNote()">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                      :disabled="!canSend"
+                      @click="sendNote()">
                 Послать
               </button>
             </div>
@@ -87,31 +75,28 @@
 
       <!-- TABS -->
       <div role="tablist" class="tabs tabs-lifted mb-4">
-        <a role="tab" class="tab" :class="() => ({ 'tab-active': activeTab === 'stream' })"
-           @click="() => activeTab = 'stream'">Поток</a>
-        <a role="tab" class="tab" :class="() => ({ 'tab-active': activeTab === 'base' })"
-           @click="() => activeTab = 'base'">База</a>
+        <a role="tab" class="tab" :class="{ 'tab-active': activeTab === 'stream' }"
+           @click="activeTab = 'stream'">Поток</a>
+        <a role="tab" class="tab" :class="{ 'tab-active': activeTab === 'base' }"
+           @click="activeTab = 'base'">База</a>
       </div>
 
       <!-- STREAM TAB -->
-      <div x-show="() => activeTab === 'stream'" class="space-y-6">
+      <div x-show="activeTab === 'stream'" class="space-y-6">
         
-        <!-- MY THOUGHTS -->
-        <section x-show="() => searchResults.my.length > 0">
-          <h3 class="text-lg font-bold mb-2 flex items-center gap-2">
-            <span class="badge badge-primary badge-sm"></span> Моё
-          </h3>
+        <section x-show="searchResults.my.length > 0">
+          <h3 class="text-lg font-bold mb-2">Моё</h3>
           <div class="space-y-2">
             <template x-for="note in searchResults.my" :key="note.id">
               <div class="card bg-base-200 shadow">
                 <div class="card-body p-4">
-                  <p x-text="() => note.text"></p>
+                  <p x-text="note.text"></p>
                   <div class="flex justify-between items-center mt-2">
-                    <span class="badge badge-primary badge-sm" x-text="() => Math.round(note.score * 100) + '%'"></span>
+                    <span class="badge badge-primary badge-sm" x-text="Math.round(note.score * 100) + '%'"></span>
                     <div class="flex gap-1">
-                      <button class="btn btn-ghost btn-xs" @click="() => toggleShared(note.id)" 
-                              x-text="() => note.shared ? 'Скрыть' : 'Открыть'"></button>
-                      <button class="btn btn-ghost btn-xs btn-error" @click="() => deleteNote(note.id)">Удалить</button>
+                      <button class="btn btn-ghost btn-xs" @click="toggleShared(note.id)" 
+                              x-text="note.shared ? 'Скрыть' : 'Открыть'"></button>
+                      <button class="btn btn-ghost btn-xs btn-error" @click="deleteNote(note.id)">Удалить</button>
                     </div>
                   </div>
                 </div>
@@ -120,18 +105,15 @@
           </div>
         </section>
 
-        <!-- INSIGHTS -->
-        <section x-show="() => searchResults.insights.length > 0">
-          <h3 class="text-lg font-bold mb-2 flex items-center gap-2">
-            <span class="badge badge-accent badge-sm"></span> Озарения
-          </h3>
+        <section x-show="searchResults.insights.length > 0">
+          <h3 class="text-lg font-bold mb-2">Озарения</h3>
           <div class="space-y-2">
             <template x-for="note in searchResults.insights" :key="note.id">
               <div class="card bg-base-200 shadow">
                 <div class="card-body p-4">
-                  <p x-text="() => note.text"></p>
+                  <p x-text="note.text"></p>
                   <div class="flex justify-end mt-2">
-                    <span class="badge badge-accent badge-sm" x-text="() => Math.round(note.score * 100) + '%'"></span>
+                    <span class="badge badge-accent badge-sm" x-text="Math.round(note.score * 100) + '%'"></span>
                   </div>
                 </div>
               </div>
@@ -139,42 +121,41 @@
           </div>
         </section>
 
-        <!-- EMPTY STATES -->
-        <div x-show="() => searchResults.my.length === 0 && searchResults.insights.length === 0 && editorText.length > 0" 
+        <div x-show="searchResults.my.length === 0 && searchResults.insights.length === 0 && editorText.length > 0" 
              class="text-center py-10 opacity-50">
-          <p>Ничего не найдено. Попробуйте другую формулировку.</p>
+          <p>Ничего не найдено.</p>
         </div>
         
-        <div x-show="() => editorText.length === 0" class="text-center py-10 opacity-50">
-          <p>Начните печатать, чтобы найти созвучия в вашей базе.</p>
+        <div x-show="editorText.length === 0" class="text-center py-10 opacity-50">
+          <p>Начните печатать.</p>
         </div>
       </div>
 
       <!-- BASE TAB -->
-      <div x-show="() => activeTab === 'base'">
+      <div x-show="activeTab === 'base'">
         <div class="stats shadow mb-4 w-full">
           <div class="stat">
             <div class="stat-title">Всего</div>
-            <div class="stat-value text-lg" x-text="() => baseStats.total"></div>
+            <div class="stat-value text-lg" x-text="baseStats.total"></div>
           </div>
           <div class="stat">
             <div class="stat-title">Открыто</div>
-            <div class="stat-value text-lg" x-text="() => baseStats.shared"></div>
+            <div class="stat-value text-lg" x-text="baseStats.shared"></div>
           </div>
           <div class="stat">
             <div class="stat-title">Лично</div>
-            <div class="stat-value text-lg" x-text="() => baseStats.private"></div>
+            <div class="stat-value text-lg" x-text="baseStats.private"></div>
           </div>
         </div>
         <div class="space-y-2">
           <template x-for="note in allNotes" :key="note.id">
-            <div class="card bg-base-200 shadow cursor-pointer hover:bg-base-300 transition-colors">
+            <div class="card bg-base-200 shadow cursor-pointer">
               <div class="card-body p-4">
-                <p class="line-clamp-3" x-text="() => note.text"></p>
+                <p class="line-clamp-3" x-text="note.text"></p>
                 <div class="flex justify-between items-center mt-2">
-                  <span class="badge badge-sm" :class="() => note.shared ? 'badge-secondary' : 'badge-ghost'"
-                        x-text="() => note.shared ? 'открыто' : 'лично'"></span>
-                  <span class="text-xs opacity-60" x-text="() => formatDate(note.createdAt)"></span>
+                  <span class="badge badge-sm" :class="note.shared ? 'badge-secondary' : 'badge-ghost'"
+                        x-text="note.shared ? 'открыто' : 'лично'"></span>
+                  <span class="text-xs opacity-60" x-text="formatDate(note.createdAt)"></span>
                 </div>
               </div>
             </div>
@@ -185,15 +166,15 @@
     </main>
 
     <!-- PASSWORD MODAL -->
-    <dialog class="modal" :class="() => ({ 'modal-open': showPasswordModal })">
+    <dialog class="modal" :class="{ 'modal-open': showPasswordModal }">
       <div class="modal-box">
         <h3 class="font-bold text-lg">Защита данных</h3>
-        <p class="py-4 opacity-70" x-text="() => passwordModalText"></p>
+        <p class="py-4 opacity-70" x-text="passwordModalText"></p>
         <div class="form-control">
           <input type="password" x-model="password" placeholder="Пароль" class="input input-bordered" />
         </div>
         <div class="modal-action">
-          <button class="btn btn-primary" @click="() => confirmPassword()">Сохранить</button>
+          <button class="btn btn-primary" @click="confirmPassword()">Сохранить</button>
         </div>
       </div>
     </dialog>
@@ -428,117 +409,10 @@
     });
 
     // ================================================================
-    // MODULE: AI (Transformers.js + Hash fallback)
+    // ALPINE COMPONENT (Правильный синтаксис CSP)
     // ================================================================
-    Kernel.register('ai', async (kernel) => {
-      const config = kernel.get('config');
-      const aiConfig = config.get('ai');
-      
-      let mode = 'loading';
-      let progress = 0;
-      let extractor = null;
-      const cache = new Map();
-
-      const hashEmbed = (text) => {
-        const DIM = aiConfig.dim;
-        const vec = new Float32Array(DIM);
-        const tokens = (text || '').toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
-        for (const tok of tokens) {
-          let h = 2166136261;
-          for (let i = 0; i < tok.length; i++) {
-            h ^= tok.charCodeAt(i);
-            h = Math.imul(h, 16777619);
-          }
-          vec[Math.abs(h) % DIM] += 1;
-          const h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
-          vec[Math.abs(h2) % DIM] += 0.5;
-        }
-        let norm = 0;
-        for (let i = 0; i < DIM; i++) norm += vec[i] * vec[i];
-        norm = Math.sqrt(norm) || 1;
-        for (let i = 0; i < DIM; i++) vec[i] /= norm;
-        return Array.from(vec);
-      };
-
-      const load = async () => {
-        if (mode !== 'loading') return;
-        try {
-          const { pipeline, env } = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
-          env.allowLocalModels = false;
-          env.useBrowserCache = true;
-          extractor = await pipeline('feature-extraction', aiConfig.model, {
-            quantized: true,
-            progress_callback: (p) => {
-              if (p.status === 'progress' && p.total > 0) {
-                progress = (p.loaded / p.total) * 100;
-                kernel.emit('ai:progress', { progress });
-              }
-            }
-          });
-          mode = 'model';
-          kernel.emit('ai:ready', { mode });
-        } catch (err) {
-          kernel.logger.warn('AI model load failed, using hash fallback', err);
-          mode = 'hash';
-          kernel.emit('ai:ready', { mode });
-        }
-      };
-
-      const embed = async (text) => {
-        const t = (text || '').trim();
-        if (!t) return null;
-        
-        if (cache.has(t)) {
-          const val = cache.get(t);
-          cache.delete(t);
-          cache.set(t, val);
-          return val;
-        }
-        
-        let vec;
-        if (mode === 'model' && extractor) {
-          try {
-            const out = await extractor(t, { pooling: 'mean', normalize: true });
-            vec = Array.from(out.data);
-          } catch (err) {
-            kernel.logger.warn('Embed failed, using hash', err);
-            vec = hashEmbed(t);
-          }
-        } else {
-          vec = hashEmbed(t);
-        }
-        
-        cache.set(t, vec);
-        if (cache.size > aiConfig.cacheLimit) {
-          const oldestKey = cache.keys().next().value;
-          cache.delete(oldestKey);
-        }
-        return vec;
-      };
-
-      const cosine = (a, b) => {
-        if (!a || !b || a.length !== b.length) return 0;
-        let sum = 0;
-        for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
-        return Math.abs(sum) < 1e-8 ? 0 : sum;
-      };
-
-      load();
-
-      return {
-        get mode() { return mode; },
-        get progress() { return progress; },
-        get ready() { return mode !== 'loading'; },
-        embed,
-        cosine
-      };
-    });
-
-    // ================================================================
-    // UI: Alpine Component
-    // ================================================================
-    function appComponent() {
-      const component = {
+    document.addEventListener('alpine:init', () => {
+      Alpine.data('app', () => ({
         editorText: '',
         editorMode: 'private',
         activeTab: 'stream',
@@ -547,11 +421,9 @@
         showPasswordModal: false,
         passwordModalText: 'Придумайте пароль для шифрования вашего приватного ключа.',
         password: '',
-        isNewUser: false,
         status: {
           storage: { class: 'bg-warning animate-pulse', text: 'loading' },
-          ai: { class: 'bg-warning animate-pulse', text: 'loading' },
-          network: { class: 'bg-warning animate-pulse', text: 'loading' }
+          ai: { class: 'bg-warning animate-pulse', text: 'loading' }
         },
         _searchTimer: null,
 
@@ -560,8 +432,6 @@
             await Kernel.boot();
             
             const storage = Kernel.get('storage');
-            const ai = Kernel.get('ai');
-            
             this.allNotes = storage.all();
             this.status.storage = { class: 'bg-success', text: 'ready' };
             
@@ -572,25 +442,11 @@
               }
             });
 
-            Kernel.on('ai:progress', ({ progress }) => {
-              this.status.ai = { class: 'bg-info animate-pulse', text: `AI ${Math.round(progress)}%` };
-            });
-
-            Kernel.on('ai:ready', ({ mode }) => {
-              this.status.ai = { 
-                class: mode === 'model' ? 'bg-success' : 'bg-warning', 
-                text: mode === 'model' ? 'AI' : 'AI/hash' 
-              };
-            });
-
             const stored = localStorage.getItem('noomium:sk');
-            this.isNewUser = !stored;
             this.showPasswordModal = true;
             this.passwordModalText = stored 
               ? 'Введите пароль для доступа к данным.' 
               : 'Придумайте пароль для шифрования вашего приватного ключа.';
-            
-            this.status.network = { class: 'bg-warning', text: 'disconnected' };
           } catch (err) {
             Kernel.logger.error('App init failed', err);
             this.status.storage = { class: 'bg-error', text: 'error' };
@@ -598,7 +454,7 @@
         },
 
         get canSend() {
-          return this.editorText.trim().length > 0 && Kernel.get('ai').ready;
+          return this.editorText.trim().length > 0;
         },
 
         get baseStats() {
@@ -622,36 +478,17 @@
         },
 
         async runSearch(queryText) {
-          const ai = Kernel.get('ai');
-          if (!queryText || !ai.ready) {
-            this.searchResults = { my: [], insights: [] };
-            return;
-          }
-          
-          const vec = await ai.embed(queryText);
-          if (!vec) return;
-
-          const config = Kernel.get('config').get('search');
-          const localNotes = this.allNotes
-            .filter(n => n.vector)
-            .map(n => ({ ...n, score: ai.cosine(vec, n.vector) }))
-            .sort((a, b) => b.score - a.score);
-
-          this.searchResults.my = localNotes.filter(n => n.score >= config.threshold);
-          this.searchResults.insights = localNotes.filter(n => n.score >= (config.threshold - config.serendipity) && n.score < config.threshold);
+          // TODO: Implement search logic
+          this.searchResults = { my: [], insights: [] };
         },
 
         async sendNote() {
           if (!this.canSend) return;
           
-          const ai = Kernel.get('ai');
           const storage = Kernel.get('storage');
-          const vec = await ai.embed(this.editorText);
-          
           const note = {
             id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
             text: this.editorText.trim(),
-            vector: vec,
             shared: this.editorMode === 'world',
             createdAt: Date.now()
           };
@@ -698,10 +535,8 @@
         formatDate(ts) {
           return dayjs(ts).fromNow();
         }
-      };
-
-      return component;
-    }
+      }));
+    });
   </script>
 </body>
 </html>
