@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.1.25">
+<meta name="app-version" content="1.2.0">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1761,6 +1761,86 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   }, []);
 <!-- NOOMIUM_MODULE_END Progress -->
 
+<!-- NOOMIUM_MODULE_START StateManager -->
+DI.register('StateManager', function() {
+  /**
+   * Внутреннее состояние приложения (единый источник истины)
+   * @type {Object}
+   */
+  var state = {
+    view: 'stream',
+    seg: 'local',
+    sendMode: 'private',
+    sendLock: false,
+    lastVec: null,
+    lastQuery: 0,
+    netAuthorized: false,
+    requestNetworkAuth: null,
+    lists: { local: [], world: [], seren: [] }
+  };
+  
+  /**
+   * Список подписчиков на изменения состояния
+   * @type {Function[]}
+   */
+  var listeners = [];
+  
+  /**
+   * Получить текущее состояние
+   * @returns {Object} Текущее состояние
+   */
+  function getState() {
+    return state;
+  }
+  
+  /**
+   * Обновить состояние (частичное обновление)
+   * @param {Object} partial - Объект с изменениями
+   */
+  function setState(partial) {
+    if (partial && typeof partial === 'object') {
+      Object.assign(state, partial);
+      // Уведомляем всех подписчиков
+      for (var i = 0; i < listeners.length; i++) {
+        try { listeners[i](state); } catch (e) { /* ignore listener errors */ }
+      }
+    }
+  }
+  
+  /**
+   * Подписаться на изменения состояния
+   * @param {Function} listener - Функция-обработчик
+   * @returns {Function} Функция для отписки
+   */
+  function subscribe(listener) {
+    if (typeof listener === 'function') {
+      listeners.push(listener);
+    }
+    return function unsubscribe() {
+      var idx = listeners.indexOf(listener);
+      if (idx > -1) listeners.splice(idx, 1);
+    };
+  }
+  
+  /**
+   * Dispatch action (заготовка для будущего)
+   * @param {Object} action - Объект действия
+   */
+  function dispatch(action) {
+    if (action && typeof action === 'object') {
+      setState(action);
+    }
+  }
+  
+  return {
+    getState: getState,
+    setState: setState,
+    subscribe: subscribe,
+    dispatch: dispatch
+  };
+}, []);
+<!-- NOOMIUM_MODULE_END StateManager -->
+  
 <!-- NOOMIUM_MODULE_START App.State -->
   var Logger = DI.resolve('Logger');
   var Bus = DI.resolve('Bus');
@@ -1774,19 +1854,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   var Modal = DI.resolve('Modal');
   var Toast = DI.resolve('Toast');
   var Progress = DI.resolve('Progress');
+  var StateManager = DI.resolve('StateManager');
 
-  var appState = {
-    view: 'stream',
-    seg: 'local',
-    sendMode: 'private',
-    sendLock: false,
-    lastVec: null,
-    lastQuery: 0,
-    netAuthorized: false,
-    requestNetworkAuth: null,
-    lists: { local: [], world: [], seren: [] }
-  };
+  // Временная обратная совместимость: appState теперь ссылка на состояние из StateManager
+  var appState = StateManager.getState();
 
+  // UI-специфичные временные переменные (остаются локальными)
   var uiState = {
     activeIdx: { local: 0, world: 0, seren: 0 },
     carouselObserver: null,
