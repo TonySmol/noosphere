@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
-    script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+    script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net;
     style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
     connect-src 'self' https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co wss:;
     img-src 'self' data: blob:;
@@ -18,7 +18,7 @@
     form-action 'self';
   ">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◆</text></svg>">
-  <link rel="manifest" href='data:application/manifest+json,{"name":"NOOmium","short_name":"NOOmium","start_url":".","display":"standalone","background_color":"%231d232a","theme_color":"%231d232a"}'>
+  <link rel="manifest" href='data:application/manifest+json,{"name":"NOOmium","short_name":"NOOmium","start_url":"./","display":"standalone","background_color":"%231d232a","theme_color":"%231d232a"}'>
   <title>NOOmium</title>
 
   <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet">
@@ -69,7 +69,7 @@
       <section class="card bg-base-200 shadow-xl mb-6">
         <div class="card-body">
           <textarea
-            x-model="editorText"
+            x-model:value="editorText"
             @input="onEditorInput"
             class="textarea textarea-bordered h-24 text-lg"
             placeholder="О чём думаешь?"></textarea>
@@ -181,7 +181,7 @@
         <div class="form-control">
           <input
             type="password"
-            x-model="password"
+            x-model:value="password"
             @keydown.enter="confirmPassword"
             placeholder="Пароль (минимум 4 символа)"
             class="input input-bordered"
@@ -200,7 +200,7 @@
         <h3 class="font-bold text-lg">Настройки</h3>
         <div class="py-4 space-y-3">
           <button class="btn btn-outline w-full justify-start" @click="openChangePassword">🔑 Сменить пароль</button>
-          <button class="btn btn-outline w-full justify-start" @click="exportData">⬇ Экспорт базы</button>
+          <button class="btn btn-outline w-full justify-start" @click="openExportPassword">⬇ Экспорт базы</button>
           <button class="btn btn-outline w-full justify-start" @click="importData">⬆ Импорт базы</button>
           <button class="btn btn-outline btn-error w-full justify-start" @click="wipeData">🗑 Стереть всё</button>
         </div>
@@ -215,14 +215,47 @@
       <div class="modal-box">
         <h3 class="font-bold text-lg">Смена пароля</h3>
         <div class="py-4 space-y-3">
-          <input type="password" x-model="oldPassword" placeholder="Текущий пароль" class="input input-bordered w-full">
-          <input type="password" x-model="newPassword" placeholder="Новый пароль (минимум 4 символа)" class="input input-bordered w-full">
-          <input type="password" x-model="confirmNewPassword" placeholder="Подтвердите новый пароль" class="input input-bordered w-full">
+          <input type="password" x-model:value="oldPassword" placeholder="Текущий пароль" class="input input-bordered w-full">
+          <input type="password" x-model:value="newPassword" placeholder="Новый пароль (минимум 4 символа)" class="input input-bordered w-full">
+          <input type="password" x-model:value="confirmNewPassword" placeholder="Подтвердите новый пароль" class="input input-bordered w-full">
           <p x-show="hasChangePasswordError" class="text-error text-sm" x-text="changePasswordError"></p>
         </div>
         <div class="modal-action">
           <button class="btn" @click="closeChangePassword">Отмена</button>
           <button class="btn btn-primary" @click="doChangePassword">Сменить</button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- EXPORT PASSWORD MODAL -->
+    <dialog class="modal" :class="exportPasswordModalClass">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg">Пароль для экспорта</h3>
+        <p class="py-2 opacity-70">Этот пароль защитит вашу резервную копию. Запомните его — без него импорт невозможен.</p>
+        <div class="py-4 space-y-3">
+          <input type="password" x-model:value="exportPassword" placeholder="Пароль экспорта (минимум 4 символа)" class="input input-bordered w-full">
+          <input type="password" x-model:value="exportPasswordConfirm" placeholder="Подтвердите пароль" class="input input-bordered w-full">
+          <p x-show="hasExportPasswordError" class="text-error text-sm" x-text="exportPasswordError"></p>
+        </div>
+        <div class="modal-action">
+          <button class="btn" @click="closeExportPassword">Отмена</button>
+          <button class="btn btn-primary" @click="doExport">Экспортировать</button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- IMPORT PASSWORD MODAL -->
+    <dialog class="modal" :class="importPasswordModalClass">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg">Пароль от резервной копии</h3>
+        <p class="py-2 opacity-70">Введите пароль, который использовался при создании этой резервной копии.</p>
+        <div class="py-4 space-y-3">
+          <input type="password" x-model:value="importPassword" @keydown.enter="doImport" placeholder="Пароль импорта" class="input input-bordered w-full">
+          <p x-show="hasImportPasswordError" class="text-error text-sm" x-text="importPasswordError"></p>
+        </div>
+        <div class="modal-action">
+          <button class="btn" @click="closeImportPassword">Отмена</button>
+          <button class="btn btn-primary" @click="doImport">Импортировать</button>
         </div>
       </div>
     </dialog>
@@ -235,7 +268,7 @@
           <button class="btn btn-sm" @click="toggleEditNote" x-text="noteViewEditBtnText"></button>
         </div>
         <div x-show="isNoteViewEditing" class="form-control">
-          <textarea x-model="noteViewText" class="textarea textarea-bordered h-48"></textarea>
+          <textarea x-model:value="noteViewText" class="textarea textarea-bordered h-48"></textarea>
         </div>
         <div x-show="isNoteViewReadOnly" class="whitespace-pre-wrap" x-text="noteViewText"></div>
         <div class="modal-action">
@@ -342,7 +375,8 @@ Kernel.register('config', () => {
       model: 'Xenova/multilingual-e5-small',
       dim: 384,
       cacheLimit: 300,
-      embedTimeout: 30000
+      embedTimeout: 30000,
+      initTimeout: 60000
     },
     search: {
       threshold: 0.30,
@@ -391,7 +425,6 @@ Kernel.register('crypto', (kernel) => {
   let dek = null;
   let ready = false;
 
-  // LRU cache for decrypted plaintexts
   const plaintextCache = new Map();
   const plaintextLimit = config.get('cache').plaintextLimit;
 
@@ -547,7 +580,6 @@ Kernel.register('crypto', (kernel) => {
         );
         dek = new Uint8Array(rawDek);
         ready = true;
-        // Persist with current session (no main password) — caller must handle
         return true;
       } catch (err) {
         throw new Error('WRONG_IMPORT_PASSWORD');
@@ -681,6 +713,7 @@ Kernel.register('ai', (kernel) => {
   let workerReady = false;
   let pendingEmbed = new Map();
   let reqId = 0;
+  let initTimer = null;
 
   const cache = new Map();
 
@@ -705,7 +738,13 @@ Kernel.register('ai', (kernel) => {
     return Array.from(vec);
   };
 
-  // Worker code (inline blob)
+  const switchToHash = (reason) => {
+    if (mode === 'hash') return;
+    mode = 'hash';
+    kernel.emit('ai:ready', { mode });
+    kernel.logger.warn('AI switched to hash mode', reason);
+  };
+
   const workerCode = `
     let pipeline = null;
     let env = null;
@@ -713,21 +752,25 @@ Kernel.register('ai', (kernel) => {
       const { type, payload, reqId } = e.data;
       try {
         if (type === 'init') {
-          const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
-          pipeline = mod.pipeline;
-          env = mod.env;
-          env.allowLocalModels = false;
-          env.useBrowserCache = true;
-          const extractor = await pipeline('feature-extraction', payload.model, {
-            quantized: true,
-            progress_callback: (p) => {
-              if (p.status === 'progress' && p.total > 0) {
-                self.postMessage({ type: 'progress', payload: { loaded: p.loaded, total: p.total } });
+          try {
+            const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
+            pipeline = mod.pipeline;
+            env = mod.env;
+            env.allowLocalModels = false;
+            env.useBrowserCache = true;
+            const extractor = await pipeline('feature-extraction', payload.model, {
+              quantized: true,
+              progress_callback: (p) => {
+                if (p.status === 'progress' && p.total > 0) {
+                  self.postMessage({ type: 'progress', payload: { loaded: p.loaded, total: p.total } });
+                }
               }
-            }
-          });
-          self._extractor = extractor;
-          self.postMessage({ type: 'ready', reqId });
+            });
+            self._extractor = extractor;
+            self.postMessage({ type: 'ready', reqId });
+          } catch (initErr) {
+            self.postMessage({ type: 'ready-fallback', payload: { error: initErr.message || 'init failed' } });
+          }
         } else if (type === 'embed') {
           if (!self._extractor) {
             self.postMessage({ type: 'error', reqId, payload: { error: 'extractor not ready' } });
@@ -753,10 +796,14 @@ Kernel.register('ai', (kernel) => {
           progress = (payload.loaded / payload.total) * 100;
           kernel.emit('ai:progress', { progress });
         } else if (type === 'ready') {
+          if (initTimer) { clearTimeout(initTimer); initTimer = null; }
           workerReady = true;
           mode = 'model';
           kernel.emit('ai:ready', { mode });
           kernel.logger.info('AI worker ready');
+        } else if (type === 'ready-fallback') {
+          if (initTimer) { clearTimeout(initTimer); initTimer = null; }
+          switchToHash(payload?.error || 'worker init failed');
         } else if (type === 'embed-result') {
           const pending = pendingEmbed.get(reqId);
           if (pending) {
@@ -769,22 +816,22 @@ Kernel.register('ai', (kernel) => {
             pending.reject(new Error(payload.error));
             pendingEmbed.delete(reqId);
           } else if (reqId === undefined) {
-            kernel.logger.warn('AI worker init error', payload.error);
-            mode = 'hash';
-            kernel.emit('ai:ready', { mode });
+            switchToHash(payload?.error || 'worker error');
           }
         }
       };
       worker.onerror = (err) => {
-        kernel.logger.warn('AI worker onerror, using hash', err);
-        mode = 'hash';
-        kernel.emit('ai:ready', { mode });
+        switchToHash(err.message || 'worker onerror');
       };
       worker.postMessage({ type: 'init', payload: { model: aiConfig.model } });
+      
+      initTimer = setTimeout(() => {
+        if (!workerReady && mode === 'loading') {
+          switchToHash('init timeout');
+        }
+      }, aiConfig.initTimeout);
     } catch (err) {
-      kernel.logger.warn('Worker not supported, using hash', err);
-      mode = 'hash';
-      kernel.emit('ai:ready', { mode });
+      switchToHash(err.message || 'worker not supported');
     }
   };
 
@@ -986,7 +1033,6 @@ Kernel.register('backup', (kernel) => {
       throw new Error('Invalid backup format');
     }
 
-    // Decrypt imported DEK to verify password
     await crypto.importKeyWithPassword(capsule.encryptedDek, importPassword);
 
     let imported = 0;
@@ -1007,7 +1053,6 @@ Kernel.register('backup', (kernel) => {
         ct: null
       };
 
-      // Re-encrypt private notes with current session DEK
       if (!isShared) {
         try {
           const enc = await crypto.encryptText(note.text);
@@ -1083,17 +1128,24 @@ document.addEventListener('alpine:init', () => {
     toast: { show: false, text: '', type: 'info' },
     _searchTimer: null,
 
-    // Settings
     showSettingsModal: false,
 
-    // Change password
     showChangePasswordModal: false,
     oldPassword: '',
     newPassword: '',
     confirmNewPassword: '',
     changePasswordError: '',
 
-    // Note view/edit
+    showExportPasswordModal: false,
+    exportPassword: '',
+    exportPasswordConfirm: '',
+    exportPasswordError: '',
+
+    showImportPasswordModal: false,
+    importPassword: '',
+    importPasswordError: '',
+    _importFile: null,
+
     showNoteViewModal: false,
     noteViewId: null,
     noteViewText: '',
@@ -1101,17 +1153,12 @@ document.addEventListener('alpine:init', () => {
     noteViewIsShared: false,
     isNoteViewEditing: false,
 
-    // Confirm dialog
     showConfirmDialog: false,
     confirmTitle: '',
     confirmMessage: '',
     confirmButtonText: 'Подтвердить',
     _confirmResolve: null,
 
-    // Import file
-    _importResolve: null,
-
-    // --- lifecycle ---
     async init() {
       try {
         await Kernel.boot();
@@ -1142,7 +1189,6 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    // --- getters ---
     get charCount() { return `${this.editorText.length} симв.`; },
     get isSendDisabled() {
       const textOk = this.editorText.trim().length > 0;
@@ -1203,6 +1249,10 @@ document.addEventListener('alpine:init', () => {
     get settingsModalClass() { return { 'modal-open': this.showSettingsModal }; },
     get changePasswordModalClass() { return { 'modal-open': this.showChangePasswordModal }; },
     get hasChangePasswordError() { return this.changePasswordError.length > 0; },
+    get exportPasswordModalClass() { return { 'modal-open': this.showExportPasswordModal }; },
+    get hasExportPasswordError() { return this.exportPasswordError.length > 0; },
+    get importPasswordModalClass() { return { 'modal-open': this.showImportPasswordModal }; },
+    get hasImportPasswordError() { return this.importPasswordError.length > 0; },
     get noteViewModalClass() { return { 'modal-open': this.showNoteViewModal }; },
     get noteViewTitle() { return this.isNoteViewEditing ? 'Редактирование' : 'Заметка'; },
     get noteViewEditBtnText() { return this.isNoteViewEditing ? 'Отмена' : 'Редактировать'; },
@@ -1215,7 +1265,6 @@ document.addEventListener('alpine:init', () => {
         : this.toast.type === 'success' ? 'alert-success' : 'alert-info';
     },
 
-    // --- methods ---
     setPrivateMode() { this.editorMode = 'private'; },
     setWorldMode() { this.editorMode = 'world'; },
     setStreamTab() { this.activeTab = 'stream'; },
@@ -1262,7 +1311,6 @@ document.addEventListener('alpine:init', () => {
           note.text = '[зашифровано]';
         }
 
-        // Pass plainText so middleware can vectorize correctly
         await storage.put(note);
         Kernel.emit('note:saved', { note, plainText: text });
 
@@ -1277,7 +1325,6 @@ document.addEventListener('alpine:init', () => {
     async toggleShared(id) {
       const storage = Kernel.get('storage');
       const crypto = Kernel.get('crypto');
-      const ai = Kernel.get('ai');
       const note = storage.getNote(id);
       if (!note) return;
 
@@ -1305,7 +1352,6 @@ document.addEventListener('alpine:init', () => {
         }
 
         await storage.put(note);
-        // Re-emit with plainText to re-vectorize properly
         Kernel.emit('note:saved', { note, plainText });
 
         crypto.invalidatePlaintextCache(id);
@@ -1461,10 +1507,6 @@ document.addEventListener('alpine:init', () => {
 
       const crypto = Kernel.get('crypto');
       try {
-        // Verify old password by trying to derive MK and decrypt DEK
-        // Re-init with old password to ensure it's correct
-        // Simpler approach: changePassword assumes old is current session password
-        // For robustness: re-decrypt DEK with oldPassword first
         await crypto.initialize(this.oldPassword);
         await crypto.changePassword(this.oldPassword, this.newPassword);
         this.showChangePasswordModal = false;
@@ -1478,16 +1520,30 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    async exportData() {
+    openExportPassword() {
       this.showSettingsModal = false;
-      const pwd = prompt('Введите пароль для шифрования экспорта:');
-      if (!pwd || pwd.length < 4) {
-        this.showToast('Пароль экспорта: минимум 4 символа', 'error');
+      this.exportPassword = '';
+      this.exportPasswordConfirm = '';
+      this.exportPasswordError = '';
+      this.showExportPasswordModal = true;
+    },
+
+    closeExportPassword() { this.showExportPasswordModal = false; },
+
+    async doExport() {
+      this.exportPasswordError = '';
+      if (this.exportPassword.length < 4) {
+        this.exportPasswordError = 'Минимум 4 символа';
+        return;
+      }
+      if (this.exportPassword !== this.exportPasswordConfirm) {
+        this.exportPasswordError = 'Пароли не совпадают';
         return;
       }
       try {
         const backup = Kernel.get('backup');
-        await backup.exportAll(pwd);
+        await backup.exportAll(this.exportPassword);
+        this.showExportPasswordModal = false;
         this.showToast('Экспорт завершён', 'success');
       } catch (err) {
         Kernel.logger.error('Export failed', err);
@@ -1504,20 +1560,41 @@ document.addEventListener('alpine:init', () => {
     async handleImportFile(e) {
       const file = e.target.files && e.target.files[0];
       if (!file) return;
-      const pwd = prompt('Введите пароль от резервной копии:');
-      if (!pwd) { e.target.value = ''; return; }
+      this._importFile = file;
+      this.importPassword = '';
+      this.importPasswordError = '';
+      this.showImportPasswordModal = true;
+      e.target.value = '';
+    },
+
+    closeImportPassword() {
+      this.showImportPasswordModal = false;
+      this._importFile = null;
+    },
+
+    async doImport() {
+      this.importPasswordError = '';
+      if (!this.importPassword) {
+        this.importPasswordError = 'Введите пароль';
+        return;
+      }
+      if (!this._importFile) {
+        this.importPasswordError = 'Файл не выбран';
+        return;
+      }
       try {
         const backup = Kernel.get('backup');
-        const count = await backup.importAll(file, pwd);
+        const count = await backup.importAll(this._importFile, this.importPassword);
+        this.showImportPasswordModal = false;
+        this._importFile = null;
         this.showToast(`Импортировано: ${count}`, 'success');
       } catch (err) {
-        if (err.message === 'WRONG_IMPORT_PASSWORD') this.showToast('Неверный пароль от копии', 'error');
+        if (err.message === 'WRONG_IMPORT_PASSWORD') this.importPasswordError = 'Неверный пароль от копии';
         else {
           Kernel.logger.error('Import failed', err);
-          this.showToast('Ошибка импорта', 'error');
+          this.importPasswordError = 'Ошибка импорта';
         }
       }
-      e.target.value = '';
     },
 
     async wipeData() {
@@ -1587,7 +1664,7 @@ document.addEventListener('alpine:init', () => {
 // ===========================================================================
 if ('serviceWorker' in navigator) {
   const swCode = `
-    const CACHE = 'noomium-v2-r1';
+    const CACHE = 'noomium-v2-r2';
     const CORE_ASSETS = [
       './',
       'https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css',
@@ -1617,7 +1694,6 @@ if ('serviceWorker' in navigator) {
       if (e.request.method !== 'GET') return;
       const url = new URL(e.request.url);
 
-      // Network-first for HTML navigation
       if (e.request.mode === 'navigate') {
         e.respondWith(
           fetch(e.request).then((res) => {
@@ -1631,7 +1707,6 @@ if ('serviceWorker' in navigator) {
         return;
       }
 
-      // Cache-first for CDN/static assets
       e.respondWith(
         caches.match(e.request).then((cached) => {
           if (cached) return cached;
