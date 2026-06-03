@@ -663,71 +663,381 @@ Alpine.store('crypto', {
   }
 });
 
-    // ============================================================
-    // STORE: db (Dexie wrapper)
-    // ============================================================
-    Alpine.store('db', {
-      _dexie: null,
-      _cache: [],
+// ============================================================
+// STORE: db (Dexie wrapper)
+// ============================================================
+Alpine.store('db', {
+  _dexie: null,
+  _cache: [],
 
-      async init() {
-        // TODO: create Dexie instance, open, populate _cache
-      },
-      async put(note) {
-        // TODO: upsert, update _cache, emit change event
-      },
-      async get(id) {
-        // TODO: find by id
-      },
-      async delete(id) {
-        // TODO: remove, update _cache
-      },
-      async toggleShared(id) {
-        // TODO: flip shared flag
-      },
-      all() {
-        return this._cache;
-      },
-      async bulkPut(notes) {
-        // TODO: bulk insert
-      },
-      async reset() {
-        // TODO: clear DB and _cache
+  /**
+   * Инициализация Dexie: создание схемы, открытие, загрузка кеша.
+   * Схема notes: id (primary key), индексы на shared, createdAt, replyTo, parentId.
+   * vector и text не индексируются (vector — массив, text — полнотекст не нужен).
+   */
+  async init() {
+    if (typeof Dexie === 'undefined') {
+      throw new Error('Dexie.js is not loaded');
+    }
+    const dbName = $store.config.dbName;
+
+    try {
+      this._dexie = new Dexie(dbName);
+      this._dexie.version(1).stores({
+        notes: 'id, shared, createdAt, replyTo, parentId'
+      });
+      await this._dexie.open();
+      this._cache = await this._dexie.notes.toArray();
+    } catch (err) {
+      console.error('db.init failed:', err);
+      this._dexie = null;
+      this._cache = [];
+      throw err;
+    }
+  },
+
+  /**
+   * Сохранить или обновить заметку.
+   * @param {Object} note — объект с полем id и остальными полями
+   * @returns {Promise<string>} id сохранённой заметки
+   */
+  async put(note) {
+    if (!note || typeof note.id !== 'string' || !note.id) {
+      throw new Error('db.put: note with id required');
+    }
+    if (!this._dexie) throw new Error('db.put: db not initialized');
+
+    const normalized = {
+      id: note.id,
+      text: typeof note.text === 'string' ? note.text : '',
+      vector: Array.isArray(note.vector) ? note.vector : null,
+      shared: !!note.shared,
+      createdAt: typeof note.createdAt === 'number' ? note.createdAt : Date.now(),
+      replyTo: typeof note.replyTo === 'string' ? note.replyTo : null,
+      parentId: typeof note.parentId === 'string' ? note.parentId : null
+    };
+
+    await this._dexie.notes.put(normalized);
+    this._syncCache(normalized);
+    return normalized.id;
+  },
+
+  /**
+   * Получить заметку по id. Сначала в кеше, потом в БД.
+   * @param {string} id
+   * @returns {Promise<Object|null>}
+   */
+  async get(id) {
+    if (typeof id !== 'string' || !id) return null;
+
+    // Быстрый путь: кеш
+    const cached = this._cache.find(n => n.id === id);
+    if (cached) return cached;
+
+    if (!this._dexie) return null;
+
+    try {
+      const fromDb = await this._dexie.notes.get(id);
+      if (fromDb) {
+        this._syncCache(fromDb);
+        return fromDb;
       }
-    });
+      return null;
+    } catch (err) {
+      console.warn('db.get failed:', err);
+      return null;
+    }
+  },
 
-    // ============================================================
-    // STORE: ai (Transformers.js embeddings)
-    // ============================================================
-    Alpine.store('ai', {
-      mode: 'loading',      // 'loading' | 'model' | 'hash'
-      progress: 0,
-      _extractor: null,
-      _cache: new Map(),
+  /**
+   * Удалить заметку по id.
+   * @param {string} id
+   */
+  async delete(id) {
+    if (typeof id !== 'string' || !id) return;
+    if (!this._dexie) return;
 
-      get ready() { return this.mode !== 'loading'; },
-      get statusDotClass() {
-        return this.mode === 'model' ? 'bg-success' 
-             : this.mode === 'hash'  ? 'bg-warning' 
-             : 'bg-info animate-pulse';
-      },
-      get statusText() {
-        return this.mode === 'model' ? 'AI' 
-             : this.mode === 'hash'  ? 'AI/hash' 
-             : `AI ${this.progress}%`;
-      },
+    try {
+      await this._dexie.notes.delete(id);
+      this._cache = this._cache.filter(n => n.id !== id);
+    } catch (err) {
+      console.warn('db.delete failed:', err);
+    }
+  },
 
-      async load() {
-        // TODO: dynamic import of transformers.js, load pipeline, set mode='model'
-        // on fail: fallback to mode='hash'
-      },
-      async embed(text) {
-        // TODO: use _extractor or hash fallback, manage _cache
-      },
-      cosine(a, b) {
-        // TODO: cosine similarity
+  /**
+   * Переключить флаг shared у заметки.
+   * @param {string} id
+   */
+  async toggleShared(id) {
+    if (typeof id !== 'string' || !id) return;
+    if (!this._dexie) return;
+
+    const note = await this.get(id);
+    if (!note) return;
+
+    const updated = { ...note, shared: !note.shared };
+    await this._dexie.notes.put(updated);
+    this._syncCache(updated);
+  },
+
+  /**
+   * Возвращает актуальный кеш. Синхронный метод.
+   * @returns {Array<Object>}
+   */
+  all() {
+    return this._cache;
+  },
+
+  /**
+   * Массовая вставка/обновление.
+   * @param {Array<Object>} notes
+   */
+  async bulkPut(notes) {
+    if (!Array.isArray(notes) || notes.length === 0) return;
+    if (!this._dexie) throw new Error('db.bulkPut: db not initialized');
+
+    const normalized = notes.map(note => ({
+      id: String(note.id),
+      text: typeof note.text === 'string' ? note.text : '',
+      vector: Array.isArray(note.vector) ? note.vector : null,
+      shared: !!note.shared,
+      createdAt: typeof note.createdAt === 'number' ? note.createdAt : Date.now(),
+      replyTo: typeof note.replyTo === 'string' ? note.replyTo : null,
+      parentId: typeof note.parentId === 'string' ? note.parentId : null
+    }));
+
+    await this._dexie.notes.bulkPut(normalized);
+    // Перезагружаем кеш из БД, чтобы гарантировать консистентность
+    this._cache = await this._dexie.notes.toArray();
+  },
+
+  /**
+   * Полное удаление базы и очистка кеша.
+   */
+  async reset() {
+    const dbName = $store.config.dbName;
+    try {
+      if (this._dexie) {
+        try { this._dexie.close(); } catch (_) { /* ignore */ }
+        this._dexie = null;
       }
+      await Dexie.delete(dbName);
+      this._cache = [];
+    } catch (err) {
+      console.warn('db.reset failed:', err);
+      this._cache = [];
+    }
+  },
+
+  // ---------- Приватные хелперы ----------
+
+  /**
+   * Обновить или добавить запись в _cache.
+   */
+  _syncCache(note) {
+    const idx = this._cache.findIndex(n => n.id === note.id);
+    if (idx >= 0) {
+      this._cache[idx] = note;
+    } else {
+      this._cache.push(note);
+    }
+  }
+});
+
+// ============================================================
+// STORE: ai (Transformers.js embeddings)
+// ============================================================
+Alpine.store('ai', {
+  mode: 'loading',          // 'loading' | 'model' | 'hash'
+  progress: 0,
+  _extractor: null,
+  _cache: new Map(),
+  _loadPromise: null,
+
+  get ready() {
+    return this.mode !== 'loading';
+  },
+
+  get statusDotClass() {
+    return this.mode === 'model' ? 'bg-success'
+         : this.mode === 'hash'  ? 'bg-warning'
+         : 'bg-info animate-pulse';
+  },
+
+  get statusText() {
+    if (this.mode === 'model') return 'AI';
+    if (this.mode === 'hash')  return 'AI/hash';
+    return `AI ${Math.round(this.progress)}%`;
+  },
+
+  /**
+   * Загрузка модели Transformers.js.
+   * Повторные вызовы возвращают тот же промис (singleton).
+   */
+  async load() {
+    if (this._extractor || this.mode === 'hash') return;
+    if (this._loadPromise) return this._loadPromise;
+
+    this._loadPromise = this._doLoad().finally(() => {
+      this._loadPromise = null;
     });
+    return this._loadPromise;
+  },
+
+  async _doLoad() {
+    const model = $store.config.ai.model;
+    try {
+      const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
+      const { pipeline, env } = mod;
+
+      if (typeof pipeline !== 'function') {
+        throw new Error('transformers: pipeline is not a function');
+      }
+
+      env.allowLocalModels = false;
+      env.useBrowserCache = true;
+
+      this._extractor = await pipeline('feature-extraction', model, {
+        quantized: true,
+        progress_callback: (p) => {
+          if (p && p.status === 'progress' && typeof p.total === 'number' && p.total > 0) {
+            this.progress = Math.min(100, (p.loaded / p.total) * 100);
+          }
+        }
+      });
+
+      this.mode = 'model';
+      this.progress = 100;
+    } catch (err) {
+      console.warn('ai.load failed, fallback to hash:', err && err.message || err);
+      this.mode = 'hash';
+      this._extractor = null;
+      this.progress = 0;
+    }
+  },
+
+  /**
+   * Получить векторное представление текста.
+   * @param {string} text
+   * @returns {Promise<number[]|null>}
+   */
+  async embed(text) {
+    const t = typeof text === 'string' ? text.trim() : '';
+    if (!t) return null;
+
+    // LRU-кеш: при доступе удаляем и добавляем в конец (Map сохраняет порядок)
+    if (this._cache.has(t)) {
+      const cached = this._cache.get(t);
+      this._cache.delete(t);
+      this._cache.set(t, cached);
+      return cached;
+    }
+
+    let vec;
+    if (this.mode === 'model' && this._extractor) {
+      vec = await this._embedWithModel(t);
+    }
+    // Если model не сработал или mode === 'hash'
+    if (!vec) {
+      vec = this._hashEmbed(t);
+    }
+
+    // Сохраняем в кеш с лимитом
+    this._cache.set(t, vec);
+    const limit = $store.config.ai.cacheLimit;
+    if (this._cache.size > limit) {
+      // Удаляем самую старую запись (первую в Map)
+      const oldestKey = this._cache.keys().next().value;
+      this._cache.delete(oldestKey);
+    }
+    return vec;
+  },
+
+  /**
+   * Эмбеддинг через модель с таймаутом.
+   * При ошибке возвращает null — вызывающий код использует _hashEmbed.
+   */
+  async _embedWithModel(text) {
+    const timeoutMs = $store.config.ai.embedTimeout;
+    try {
+      const result = await Promise.race([
+        this._extractor(text, { pooling: 'mean', normalize: true }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('embed timeout')), timeoutMs)
+        )
+      ]);
+      if (result && result.data) {
+        return Array.from(result.data);
+      }
+      return null;
+    } catch (err) {
+      console.warn('ai._embedWithModel failed, will use hash:', err && err.message || err);
+      return null;
+    }
+  },
+
+  /**
+   * Детерминированный хеш-эмбеддинг (FNV-1a).
+   * Используется как fallback при недоступности модели.
+   * @param {string} text
+   * @returns {number[]} массив длины dim
+   */
+  _hashEmbed(text) {
+    const DIM = $store.config.ai.dim;
+    const vec = new Float32Array(DIM);
+    const tokens = (text || '').toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
+
+    for (let t = 0; t < tokens.length; t++) {
+      const tok = tokens[t];
+      // FNV-1a
+      let h = 2166136261;
+      for (let i = 0; i < tok.length; i++) {
+        h ^= tok.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      vec[Math.abs(h) % DIM] += 1;
+
+      // Дополнительная псевдо-хеш функция для распределения
+      const h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
+      vec[Math.abs(h2) % DIM] += 0.5;
+    }
+
+    // L2-нормализация
+    let norm = 0;
+    for (let i = 0; i < DIM; i++) norm += vec[i] * vec[i];
+    norm = Math.sqrt(norm) || 1;
+    for (let i = 0; i < DIM; i++) vec[i] /= norm;
+
+    return Array.from(vec);
+  },
+
+  /**
+   * Косинусное сходство двух векторов.
+   * @param {number[]} a
+   * @param {number[]} b
+   * @returns {number} значение в диапазоне [-1, 1], или 0 при ошибке
+   */
+  cosine(a, b) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return 0;
+    if (a.length === 0 || b.length === 0) return 0;
+    if (a.length !== b.length) return 0;
+
+    let sum = 0;
+    let normA = 0;
+    let normB = 0;
+    for (let i = 0; i < a.length; i++) {
+      sum += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+    const denom = Math.sqrt(normA) * Math.sqrt(normB);
+    if (denom < 1e-10) return 0;
+    const score = sum / denom;
+    // Защита от NaN/Infinity
+    return Number.isFinite(score) ? score : 0;
+  }
+});
 
     // ============================================================
     // STORE: nostr (NDK + nostr-tools for keys)
