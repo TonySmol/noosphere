@@ -7,17 +7,10 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>NOOmium</title>
 
-  <!-- Tailwind CSS + DaisyUI -->
   <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet" type="text/css" />
   <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- Alpine.js -->
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
-
-  <!-- Dexie.js (IndexedDB wrapper) -->
   <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.7/dist/dexie.min.js"></script>
-
-  <!-- Day.js + relativeTime + locales -->
   <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/plugin/relativeTime.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/locale/ru.js"></script>
@@ -26,18 +19,8 @@
     if (window.dayjs_plugin_relativeTime) dayjs.extend(dayjs_plugin_relativeTime);
     dayjs.locale('ru');
   </script>
-
-  <!-- NDK (relays, subscriptions, publishing) -->
   <script src="https://cdn.jsdelivr.net/npm/@nostr-dev-kit/ndk@2.10.0/dist/index.umd.js"></script>
-
-  <!-- nostr-tools (key generation, signing) -->
   <script src="https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/lib/index.umd.js"></script>
-
-  <!-- Workbox (for Service Worker) -->
-  <script type="module">
-    import { Workbox } from 'https://storage.googleapis.com/workbox-cdn/releases/7.1.0/workbox-window.prod.mjs';
-    window.Workbox = Workbox;
-  </script>
 
   <style>
     [x-cloak] { display: none !important; }
@@ -46,7 +29,6 @@
 </head>
 <body class="bg-base-100 min-h-screen">
 
-  <!-- Loading screen (shown before bootstrap finishes) -->
   <div id="boot-screen" class="min-h-screen flex items-center justify-center">
     <div class="text-center">
       <div class="loading loading-spinner loading-lg text-primary"></div>
@@ -56,7 +38,6 @@
 
   <div id="app" x-data x-cloak>
 
-    <!-- HEADER -->
     <div x-show="$store.app.initialized" class="navbar bg-base-200 shadow-lg sticky top-0 z-40">
       <div class="flex-1">
         <span class="text-xl font-bold px-4">NOO<span class="text-primary">.</span>mium</span>
@@ -88,10 +69,8 @@
       </div>
     </div>
 
-    <!-- MAIN -->
     <main class="container mx-auto p-4 max-w-4xl" x-show="$store.app.initialized">
 
-      <!-- EDITOR -->
       <div x-data="editorComponent()" class="mb-6">
         <div class="card bg-base-200 shadow-xl">
           <div class="card-body">
@@ -131,7 +110,6 @@
         </div>
       </div>
 
-      <!-- TABS -->
       <div role="tablist" class="tabs tabs-lifted mb-4">
         <a role="tab" class="tab" :class="{ 'tab-active': $store.app.activeTab === 'stream' }"
            @click="$store.app.activeTab = 'stream'" x-text="$store.i18n.t('tab.stream')"></a>
@@ -141,7 +119,6 @@
            @click="$store.app.activeTab = 'base'" x-text="$store.i18n.t('tab.base')"></a>
       </div>
 
-      <!-- STREAM TAB -->
       <div x-show="$store.app.activeTab === 'stream'">
         <div class="grid gap-4">
           <section x-show="$store.search.results.my.length > 0">
@@ -205,7 +182,6 @@
         </div>
       </div>
 
-      <!-- FEED TAB -->
       <div x-show="$store.app.activeTab === 'feed'">
         <div x-show="$store.nostr.publicThoughts.length === 0" class="text-center py-12 opacity-60">
           <p x-text="$store.i18n.t('feed.empty')"></p>
@@ -226,7 +202,6 @@
         </div>
       </div>
 
-      <!-- BASE TAB -->
       <div x-show="$store.app.activeTab === 'base'" x-data x-init="$store.base.recalcStats()">
         <div class="mb-4">
           <input type="text" x-model="$store.base.query"
@@ -385,154 +360,116 @@
 
   <script>
     // ============================================================
-    // ВСЕ STORES РЕГИСТРИРУЮТСЯ ДО ПЕРВОГО РЕНДЕРИНГА ALPINE
+    // ИСПРАВЛЕНИЕ: Используем alpine:init для регистрации stores
+    // Bootstrap вызывается СРАЗУ после регистрации всех stores
     // ============================================================
     document.addEventListener('alpine:init', () => {
 
-      // ---------- config ----------
       Alpine.store('config', {
         dbName: 'noomium_v2',
-        storeName: 'notes',
         relays: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band'],
         ai: { model: 'Xenova/multilingual-e5-small', dim: 384, cacheLimit: 300, embedTimeout: 15000 },
         search: { threshold: 0.30, serendipity: 0.15, debounceMs: 800, echoThreshold: 0.80 },
         crypto: { iterations: 100000, saltLen: 16, ivLen: 12 },
-        nostr: { kindThought: 20202, kindReply: 20202, subWindowSec: 300 }
+        nostr: { kindThought: 20202, subWindowSec: 300 }
       });
 
-      // ---------- i18n ----------
       Alpine.store('i18n', {
         dicts: {
           ru: {
-            'editor.placeholder': 'О чём думаешь?',
-            'mode.private': 'Себе', 'mode.world': 'Миру',
-            'btn.send': 'Отправить', 'editor.chars': '{n} симв.',
-            'tab.stream': 'Поток', 'tab.feed': 'Лента', 'tab.base': 'База',
+            'editor.placeholder': 'О чём думаешь?', 'mode.private': 'Себе', 'mode.world': 'Миру',
+            'btn.send': 'Отправить', 'tab.stream': 'Поток', 'tab.feed': 'Лента', 'tab.base': 'База',
             'stream.my': 'Моё', 'stream.world': 'Мир', 'stream.insights': 'Озарения',
             'btn.edit': 'Развить', 'btn.share': 'Открыть', 'btn.hide': 'Скрыть',
-            'btn.delete': 'Удалить', 'btn.reply': 'Ответить',
-            'btn.save': 'Сохранить', 'btn.cancel': 'Отмена', 'btn.close': 'Закрыть',
-            'btn.gotIt': 'Понятно', 'btn.login': 'Войти', 'btn.clearAll': 'Очистить всё',
-            'base.search': 'Поиск по заметкам…',
-            'base.total': 'всего', 'base.shared': 'открыто', 'base.private': 'лично',
-            'tag.shared': 'открыто', 'tag.private': 'лично',
+            'btn.delete': 'Удалить', 'btn.reply': 'Ответить', 'btn.save': 'Сохранить',
+            'btn.cancel': 'Отмена', 'btn.close': 'Закрыть', 'btn.gotIt': 'Понятно',
+            'btn.login': 'Войти', 'btn.clearAll': 'Очистить всё',
+            'base.search': 'Поиск по заметкам…', 'base.total': 'всего', 'base.shared': 'открыто',
+            'base.private': 'лично', 'tag.shared': 'открыто', 'tag.private': 'лично',
             'feed.empty': 'Публичных мыслей пока нет',
             'notifications.title': 'Уведомления', 'notifications.empty': 'Пока ничего',
-            'notifications.echo': 'Эхо: кто-то думает так же',
-            'notifications.reply': 'Ответ на вашу мысль',
+            'notifications.echo': 'Эхо: кто-то думает так же', 'notifications.reply': 'Ответ на вашу мысль',
             'menu.title': 'Настройки', 'menu.darkMode': 'Тёмная тема', 'menu.language': 'Язык',
-            'menu.export': 'Экспорт заметок', 'menu.import': 'Импорт заметок',
             'menu.danger': 'Опасная зона', 'menu.wipe': 'Стереть все данные',
             'menu.wipeConfirm': 'Удалить все заметки и настройки безвозвратно?',
             'onboarding.title': 'Как устроен NOOmium',
-            'onboarding.intro': 'Твой блокнот с антисоцсетью. Мысли превращаются в смысловые векторы — и ищут резонанс.',
-            'onboarding.local': 'Моё', 'onboarding.localDesc': 'Сильные совпадения в твоей собственной базе.',
-            'onboarding.world': 'Мир', 'onboarding.worldDesc': 'Открытые мысли других людей, созвучные твоим.',
-            'onboarding.insights': 'Озарения', 'onboarding.insightsDesc': 'Близкие, но неожиданные — источник вдохновения.',
+            'onboarding.intro': 'Твой блокнот с антисоцсетью.',
+            'onboarding.local': 'Моё', 'onboarding.localDesc': 'Сильные совпадения в твоей базе.',
+            'onboarding.world': 'Мир', 'onboarding.worldDesc': 'Открытые мысли других людей.',
+            'onboarding.insights': 'Озарения', 'onboarding.insightsDesc': 'Близкие, но неожиданные.',
             'password.create': 'Придумай пароль', 'password.enter': 'Введи пароль',
             'password.label': 'Пароль', 'password.confirm': 'Подтверди пароль',
             'password.forgot': 'Забыл пароль? Сбросить хранилище',
             'password.mismatch': 'Пароли не совпадают', 'password.wrong': 'Неверный пароль',
-            'password.empty': 'Пароль не может быть пустым',
-            'ai.loading': 'Загружаем модель ИИ…',
-            'toast.saved': 'Сохранено', 'toast.published': 'Опубликовано в Мир',
-            'toast.deleted': 'Удалено', 'toast.error': 'Что-то пошло не так'
+            'password.empty': 'Пароль не может быть пустым'
           },
           en: {
-            'editor.placeholder': 'What are you thinking?',
-            'mode.private': 'Private', 'mode.world': 'World',
-            'btn.send': 'Send', 'editor.chars': '{n} chars',
-            'tab.stream': 'Stream', 'tab.feed': 'Feed', 'tab.base': 'Base',
+            'editor.placeholder': 'What are you thinking?', 'mode.private': 'Private', 'mode.world': 'World',
+            'btn.send': 'Send', 'tab.stream': 'Stream', 'tab.feed': 'Feed', 'tab.base': 'Base',
             'stream.my': 'Mine', 'stream.world': 'World', 'stream.insights': 'Insights',
             'btn.edit': 'Develop', 'btn.share': 'Share', 'btn.hide': 'Hide',
-            'btn.delete': 'Delete', 'btn.reply': 'Reply',
-            'btn.save': 'Save', 'btn.cancel': 'Cancel', 'btn.close': 'Close',
-            'btn.gotIt': 'Got it', 'btn.login': 'Log in', 'btn.clearAll': 'Clear all',
-            'base.search': 'Search notes…',
-            'base.total': 'total', 'base.shared': 'shared', 'base.private': 'private',
-            'tag.shared': 'shared', 'tag.private': 'private',
+            'btn.delete': 'Delete', 'btn.reply': 'Reply', 'btn.save': 'Save',
+            'btn.cancel': 'Cancel', 'btn.close': 'Close', 'btn.gotIt': 'Got it',
+            'btn.login': 'Log in', 'btn.clearAll': 'Clear all',
+            'base.search': 'Search notes…', 'base.total': 'total', 'base.shared': 'shared',
+            'base.private': 'private', 'tag.shared': 'shared', 'tag.private': 'private',
             'feed.empty': 'No public thoughts yet',
             'notifications.title': 'Notifications', 'notifications.empty': 'Nothing here',
-            'notifications.echo': 'Echo: someone thinks alike',
-            'notifications.reply': 'Reply to your thought',
+            'notifications.echo': 'Echo: someone thinks alike', 'notifications.reply': 'Reply to your thought',
             'menu.title': 'Settings', 'menu.darkMode': 'Dark mode', 'menu.language': 'Language',
-            'menu.export': 'Export notes', 'menu.import': 'Import notes',
             'menu.danger': 'Danger zone', 'menu.wipe': 'Wipe all data',
             'menu.wipeConfirm': 'Delete all notes and settings permanently?',
             'onboarding.title': 'How NOOmium works',
-            'onboarding.intro': 'Your notepad with an anti-social network. Thoughts turn into semantic vectors — and find resonance.',
-            'onboarding.local': 'Mine', 'onboarding.localDesc': 'Strong matches in your own base.',
-            'onboarding.world': 'World', 'onboarding.worldDesc': 'Open thoughts from others, resonating with yours.',
-            'onboarding.insights': 'Insights', 'onboarding.insightsDesc': 'Close but unexpected — a source of inspiration.',
+            'onboarding.intro': 'Your notepad with an anti-social network.',
+            'onboarding.local': 'Mine', 'onboarding.localDesc': 'Strong matches in your base.',
+            'onboarding.world': 'World', 'onboarding.worldDesc': 'Open thoughts from others.',
+            'onboarding.insights': 'Insights', 'onboarding.insightsDesc': 'Close but unexpected.',
             'password.create': 'Create a password', 'password.enter': 'Enter password',
             'password.label': 'Password', 'password.confirm': 'Confirm password',
             'password.forgot': 'Forgot password? Reset storage',
             'password.mismatch': 'Passwords do not match', 'password.wrong': 'Wrong password',
-            'password.empty': 'Password cannot be empty',
-            'ai.loading': 'Loading AI model…',
-            'toast.saved': 'Saved', 'toast.published': 'Published to World',
-            'toast.deleted': 'Deleted', 'toast.error': 'Something went wrong'
+            'password.empty': 'Password cannot be empty'
           }
         },
         lang: 'ru',
-        _storageKey: 'noomium:lang',
         init() {
           try {
-            const saved = localStorage.getItem(this._storageKey);
+            const saved = localStorage.getItem('noomium:lang');
             if (saved === 'ru' || saved === 'en') this.lang = saved;
-            else {
-              const nav = (navigator.language || 'ru').toLowerCase();
-              this.lang = nav.startsWith('ru') ? 'ru' : 'en';
-            }
+            else this.lang = (navigator.language || 'ru').toLowerCase().startsWith('ru') ? 'ru' : 'en';
           } catch (_) { this.lang = 'ru'; }
           document.documentElement.setAttribute('lang', this.lang);
           if (window.dayjs) dayjs.locale(this.lang);
         },
-        t(key, params = {}) {
-          const dict = this.dicts[this.lang] || this.dicts['en'] || {};
-          const fallback = this.dicts['en'] || {};
-          let text = dict[key] !== undefined ? dict[key] : fallback[key];
-          if (text === undefined) return key;
-          return String(text).replace(/\{(\w+)\}/g, (m, k) =>
-            params[k] !== undefined ? String(params[k]) : m
-          );
-        },
+        t(key) { return (this.dicts[this.lang] || this.dicts['en'] || {})[key] || key; },
         setLang(lang) {
           if (lang !== 'ru' && lang !== 'en') return;
           this.lang = lang;
           document.documentElement.setAttribute('lang', lang);
           if (window.dayjs) dayjs.locale(lang);
-          try { localStorage.setItem(this._storageKey, lang); } catch (_) {}
+          try { localStorage.setItem('noomium:lang', lang); } catch (_) {}
         }
       });
 
-      // ---------- settings ----------
       Alpine.store('settings', {
-        theme: 'dark',
-        onboarded: false,
-        _keys: { theme: 'noomium:theme', onboarded: 'noomium:onboarded' },
+        theme: 'dark', onboarded: false,
         init() {
           try {
-            const savedTheme = localStorage.getItem(this._keys.theme);
-            if (savedTheme === 'dark' || savedTheme === 'light') this.theme = savedTheme;
-            else this.theme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-          } catch (_) { this.theme = 'dark'; }
+            const t = localStorage.getItem('noomium:theme');
+            this.theme = (t === 'dark' || t === 'light') ? t : (window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+            this.onboarded = localStorage.getItem('noomium:onboarded') === '1';
+          } catch (_) {}
           this._applyTheme();
-          try { this.onboarded = localStorage.getItem(this._keys.onboarded) === '1'; }
-          catch (_) { this.onboarded = false; }
         },
         setTheme(theme) {
-          if (theme !== 'dark' && theme !== 'light') return;
           this.theme = theme;
           this._applyTheme();
-          try { localStorage.setItem(this._keys.theme, theme); } catch (_) {}
-          const meta = document.querySelector('meta[name="theme-color"]');
-          if (meta) meta.setAttribute('content', theme === 'dark' ? '#1d232a' : '#ffffff');
+          try { localStorage.setItem('noomium:theme', theme); } catch (_) {}
         },
         toggleTheme() { this.setTheme(this.theme === 'dark' ? 'light' : 'dark'); },
         markOnboarded() {
           this.onboarded = true;
-          try { localStorage.setItem(this._keys.onboarded, '1'); } catch (_) {}
+          try { localStorage.setItem('noomium:onboarded', '1'); } catch (_) {}
         },
         _applyTheme() {
           document.documentElement.setAttribute('data-theme', this.theme);
@@ -540,259 +477,105 @@
         }
       });
 
-      // ---------- crypto ----------
       Alpine.store('crypto', {
-        randomBytes(len) {
-          if (!Number.isInteger(len) || len <= 0) throw new Error('crypto.randomBytes: invalid length');
-          return crypto.getRandomValues(new Uint8Array(len));
-        },
+        randomBytes(len) { return crypto.getRandomValues(new Uint8Array(len)); },
         async deriveKey(password, salt) {
-          if (!password || typeof password !== 'string') throw new Error('crypto.deriveKey: password required');
-          if (!(salt instanceof Uint8Array) || salt.length === 0) throw new Error('crypto.deriveKey: salt required');
           const cfg = Alpine.store('config').crypto;
           const enc = new TextEncoder();
           const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveKey']);
           return await crypto.subtle.deriveKey(
-            { name: 'PBKDF2', salt: salt, iterations: cfg.iterations, hash: 'SHA-256' },
-            keyMaterial,
-            { name: 'AES-GCM', length: 256 },
-            false,
-            ['encrypt', 'decrypt']
+            { name: 'PBKDF2', salt, iterations: cfg.iterations, hash: 'SHA-256' },
+            keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
           );
         },
         async encryptKey(hexKey, password) {
-          if (typeof hexKey !== 'string' || !/^[0-9a-f]+$/i.test(hexKey)) throw new Error('crypto.encryptKey: hexKey must be a hex string');
           const cfg = Alpine.store('config').crypto;
-          const salt = this.randomBytes(cfg.saltLen);
-          const iv = this.randomBytes(cfg.ivLen);
+          const salt = this.randomBytes(cfg.saltLen), iv = this.randomBytes(cfg.ivLen);
           const key = await this.deriveKey(password, salt);
-          const enc = new TextEncoder();
-          const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(hexKey));
-          const ctBytes = new Uint8Array(ciphertext);
-          const combined = new Uint8Array(salt.length + iv.length + ctBytes.length);
-          combined.set(salt, 0);
-          combined.set(iv, salt.length);
-          combined.set(ctBytes, salt.length + iv.length);
-          return this._bytesToBase64(combined);
+          const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(hexKey));
+          const combined = new Uint8Array(salt.length + iv.length + ct.byteLength);
+          combined.set(salt, 0); combined.set(iv, salt.length); combined.set(new Uint8Array(ct), salt.length + iv.length);
+          return btoa(String.fromCharCode(...combined));
         },
         async decryptKey(base64, password) {
-          if (typeof base64 !== 'string' || base64.length === 0) throw new Error('crypto.decryptKey: base64 required');
           const cfg = Alpine.store('config').crypto;
-          const combined = this._base64ToBytes(base64);
-          const saltLen = cfg.saltLen, ivLen = cfg.ivLen;
-          if (combined.length <= saltLen + ivLen) throw new Error('crypto.decryptKey: malformed payload');
-          const salt = combined.slice(0, saltLen);
-          const iv = combined.slice(saltLen, saltLen + ivLen);
-          const ciphertext = combined.slice(saltLen + ivLen);
+          const combined = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+          const salt = combined.slice(0, cfg.saltLen), iv = combined.slice(cfg.saltLen, cfg.saltLen + cfg.ivLen);
+          const ct = combined.slice(cfg.saltLen + cfg.ivLen);
           const key = await this.deriveKey(password, salt);
-          const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext);
-          return new TextDecoder().decode(decrypted);
-        },
-        _bytesToBase64(bytes) {
-          let binary = '';
-          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-          return btoa(binary);
-        },
-        _base64ToBytes(base64) {
-          const binary = atob(base64);
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-          return bytes;
+          return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct));
         }
       });
 
-      // ---------- db ----------
       Alpine.store('db', {
-        _dexie: null,
-        _cache: [],
-        _listeners: [],
+        _dexie: null, _cache: [],
         async init() {
-          if (typeof Dexie === 'undefined') throw new Error('Dexie.js is not loaded');
-          const dbName = Alpine.store('config').dbName;
-          try {
-            this._dexie = new Dexie(dbName);
-            this._dexie.version(1).stores({ notes: 'id, shared, createdAt, replyTo, parentId' });
-            await this._dexie.open();
-            this._cache = await this._dexie.notes.toArray();
-            this._emitChange();
-          } catch (err) {
-            console.error('db.init failed:', err);
-            this._dexie = null;
-            this._cache = [];
-            throw err;
-          }
+          this._dexie = new Dexie(Alpine.store('config').dbName);
+          this._dexie.version(1).stores({ notes: 'id, shared, createdAt, replyTo' });
+          await this._dexie.open();
+          this._cache = await this._dexie.notes.toArray();
         },
         async put(note) {
-          if (!note || typeof note.id !== 'string' || !note.id) throw new Error('db.put: note with id required');
-          if (!this._dexie) throw new Error('db.put: db not initialized');
-          const normalized = {
-            id: note.id,
-            text: typeof note.text === 'string' ? note.text : '',
-            vector: Array.isArray(note.vector) ? note.vector : null,
-            shared: !!note.shared,
-            createdAt: typeof note.createdAt === 'number' ? note.createdAt : Date.now(),
-            replyTo: typeof note.replyTo === 'string' ? note.replyTo : null,
-            parentId: typeof note.parentId === 'string' ? note.parentId : null
-          };
-          await this._dexie.notes.put(normalized);
-          this._syncCache(normalized);
-          this._emitChange();
-          return normalized.id;
+          const n = { id: note.id, text: note.text || '', vector: note.vector || null, shared: !!note.shared, createdAt: note.createdAt || Date.now(), replyTo: note.replyTo || null };
+          await this._dexie.notes.put(n);
+          const idx = this._cache.findIndex(x => x.id === n.id);
+          if (idx >= 0) this._cache[idx] = n; else this._cache.push(n);
         },
-        async get(id) {
-          if (typeof id !== 'string' || !id) return null;
-          const cached = this._cache.find(n => n.id === id);
-          if (cached) return cached;
-          if (!this._dexie) return null;
-          try {
-            const fromDb = await this._dexie.notes.get(id);
-            if (fromDb) { this._syncCache(fromDb); return fromDb; }
-            return null;
-          } catch (err) { console.warn('db.get failed:', err); return null; }
-        },
+        async get(id) { return this._cache.find(n => n.id === id) || await this._dexie.notes.get(id); },
         async delete(id) {
-          if (typeof id !== 'string' || !id) return;
-          if (!this._dexie) return;
-          try {
-            await this._dexie.notes.delete(id);
-            this._cache = this._cache.filter(n => n.id !== id);
-            this._emitChange();
-          } catch (err) { console.warn('db.delete failed:', err); }
+          await this._dexie.notes.delete(id);
+          this._cache = this._cache.filter(n => n.id !== id);
         },
         async toggleShared(id) {
-          if (typeof id !== 'string' || !id) return;
-          if (!this._dexie) return;
           const note = await this.get(id);
-          if (!note) return;
-          const updated = { ...note, shared: !note.shared };
-          await this._dexie.notes.put(updated);
-          this._syncCache(updated);
-          this._emitChange();
+          if (note) { note.shared = !note.shared; await this.put(note); }
         },
         all() { return this._cache; },
-        async bulkPut(notes) {
-          if (!Array.isArray(notes) || notes.length === 0) return;
-          if (!this._dexie) throw new Error('db.bulkPut: db not initialized');
-          const normalized = notes.map(note => ({
-            id: String(note.id),
-            text: typeof note.text === 'string' ? note.text : '',
-            vector: Array.isArray(note.vector) ? note.vector : null,
-            shared: !!note.shared,
-            createdAt: typeof note.createdAt === 'number' ? note.createdAt : Date.now(),
-            replyTo: typeof note.replyTo === 'string' ? note.replyTo : null,
-            parentId: typeof note.parentId === 'string' ? note.parentId : null
-          }));
-          await this._dexie.notes.bulkPut(normalized);
-          this._cache = await this._dexie.notes.toArray();
-          this._emitChange();
-        },
         async reset() {
-          const dbName = Alpine.store('config').dbName;
-          try {
-            if (this._dexie) { try { this._dexie.close(); } catch (_) {} this._dexie = null; }
-            await Dexie.delete(dbName);
-            this._cache = [];
-            this._emitChange();
-          } catch (err) { console.warn('db.reset failed:', err); this._cache = []; }
-        },
-        onChange(fn) { if (typeof fn === 'function') this._listeners.push(fn); },
-        _emitChange() { for (const fn of this._listeners) { try { fn(); } catch (_) {} } },
-        _syncCache(note) {
-          const idx = this._cache.findIndex(n => n.id === note.id);
-          if (idx >= 0) this._cache[idx] = note;
-          else this._cache.push(note);
+          if (this._dexie) { this._dexie.close(); this._dexie = null; }
+          await Dexie.delete(Alpine.store('config').dbName);
+          this._cache = [];
         }
       });
 
-      // ---------- ai ----------
       Alpine.store('ai', {
-        mode: 'loading',
-        progress: 0,
-        _extractor: null,
-        _cache: new Map(),
-        _loadPromise: null,
+        mode: 'loading', progress: 0, _extractor: null, _cache: new Map(),
         get ready() { return this.mode !== 'loading'; },
-        get statusDotClass() {
-          return this.mode === 'model' ? 'bg-success'
-               : this.mode === 'hash'  ? 'bg-warning'
-               : 'bg-info animate-pulse';
-        },
-        get statusText() {
-          if (this.mode === 'model') return 'AI';
-          if (this.mode === 'hash')  return 'AI/hash';
-          return `AI ${Math.round(this.progress)}%`;
-        },
+        get statusDotClass() { return this.mode === 'model' ? 'bg-success' : this.mode === 'hash' ? 'bg-warning' : 'bg-info animate-pulse'; },
+        get statusText() { return this.mode === 'model' ? 'AI' : this.mode === 'hash' ? 'AI/hash' : `AI ${Math.round(this.progress)}%`; },
         async load() {
           if (this._extractor || this.mode === 'hash') return;
-          if (this._loadPromise) return this._loadPromise;
-          this._loadPromise = this._doLoad().finally(() => { this._loadPromise = null; });
-          return this._loadPromise;
-        },
-        async _doLoad() {
-          const model = Alpine.store('config').ai.model;
           try {
             const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
-            const { pipeline, env } = mod;
-            if (typeof pipeline !== 'function') throw new Error('transformers: pipeline is not a function');
-            env.allowLocalModels = false;
-            env.useBrowserCache = true;
-            this._extractor = await pipeline('feature-extraction', model, {
+            mod.env.allowLocalModels = false; mod.env.useBrowserCache = true;
+            this._extractor = await mod.pipeline('feature-extraction', Alpine.store('config').ai.model, {
               quantized: true,
-              progress_callback: (p) => {
-                if (p && p.status === 'progress' && typeof p.total === 'number' && p.total > 0) {
-                  this.progress = Math.min(100, (p.loaded / p.total) * 100);
-                }
-              }
+              progress_callback: (p) => { if (p.status === 'progress' && p.total > 0) this.progress = Math.min(100, (p.loaded / p.total) * 100); }
             });
-            this.mode = 'model';
-            this.progress = 100;
-          } catch (err) {
-            console.warn('ai.load failed, fallback to hash:', err && err.message || err);
-            this.mode = 'hash';
-            this._extractor = null;
-            this.progress = 0;
-          }
+            this.mode = 'model'; this.progress = 100;
+          } catch (e) { console.warn('AI load failed:', e); this.mode = 'hash'; }
         },
         async embed(text) {
-          const t = typeof text === 'string' ? text.trim() : '';
-          if (!t) return null;
-          if (this._cache.has(t)) {
-            const cached = this._cache.get(t);
-            this._cache.delete(t);
-            this._cache.set(t, cached);
-            return cached;
-          }
+          if (!text?.trim()) return null;
+          if (this._cache.has(text)) return this._cache.get(text);
           let vec;
-          if (this.mode === 'model' && this._extractor) vec = await this._embedWithModel(t);
-          if (!vec) vec = this._hashEmbed(t);
-          this._cache.set(t, vec);
-          const limit = Alpine.store('config').ai.cacheLimit;
-          if (this._cache.size > limit) {
-            const oldestKey = this._cache.keys().next().value;
-            this._cache.delete(oldestKey);
-          }
+          if (this.mode === 'model' && this._extractor) {
+            try {
+              const result = await Promise.race([
+                this._extractor(text, { pooling: 'mean', normalize: true }),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), Alpine.store('config').ai.embedTimeout))
+              ]);
+              vec = Array.from(result.data);
+            } catch (e) { vec = this._hashEmbed(text); }
+          } else vec = this._hashEmbed(text);
+          this._cache.set(text, vec);
+          if (this._cache.size > Alpine.store('config').ai.cacheLimit) this._cache.delete(this._cache.keys().next().value);
           return vec;
         },
-        async _embedWithModel(text) {
-          const timeoutMs = Alpine.store('config').ai.embedTimeout;
-          try {
-            const result = await Promise.race([
-              this._extractor(text, { pooling: 'mean', normalize: true }),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('embed timeout')), timeoutMs))
-            ]);
-            if (result && result.data) return Array.from(result.data);
-            return null;
-          } catch (err) {
-            console.warn('ai._embedWithModel failed:', err && err.message || err);
-            return null;
-          }
-        },
         _hashEmbed(text) {
-          const DIM = Alpine.store('config').ai.dim;
-          const vec = new Float32Array(DIM);
-          const tokens = (text || '').toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
-          for (let t = 0; t < tokens.length; t++) {
-            const tok = tokens[t];
+          const DIM = Alpine.store('config').ai.dim, vec = new Float32Array(DIM);
+          const tokens = text.toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
+          for (const tok of tokens) {
             let h = 2166136261;
             for (let i = 0; i < tok.length; i++) { h ^= tok.charCodeAt(i); h = Math.imul(h, 16777619); }
             vec[Math.abs(h) % DIM] += 1;
@@ -806,596 +589,255 @@
           return Array.from(vec);
         },
         cosine(a, b) {
-          if (!Array.isArray(a) || !Array.isArray(b)) return 0;
-          if (a.length === 0 || b.length === 0) return 0;
-          if (a.length !== b.length) return 0;
+          if (!a || !b || a.length !== b.length) return 0;
           let sum = 0, normA = 0, normB = 0;
-          for (let i = 0; i < a.length; i++) {
-            sum += a[i] * b[i];
-            normA += a[i] * a[i];
-            normB += b[i] * b[i];
-          }
+          for (let i = 0; i < a.length; i++) { sum += a[i] * b[i]; normA += a[i] * a[i]; normB += b[i] * b[i]; }
           const denom = Math.sqrt(normA) * Math.sqrt(normB);
-          if (denom < 1e-10) return 0;
-          const score = sum / denom;
-          return Number.isFinite(score) ? score : 0;
+          return denom < 1e-10 ? 0 : sum / denom;
         }
       });
 
-      // ---------- nostr ----------
       Alpine.store('nostr', {
-        status: 'disconnected',
-        publicKey: null,
-        _secretKey: null,
-        _ndk: null,
-        _subscription: null,
-        publicThoughts: [],
-        peers: new Map(),
-        _myEventIds: new Set(),
-        _storageKeys: { sk: 'noomium:sk', myEventIds: 'noomium:myEventIds' },
-        _MAX_PUBLIC_THOUGHTS: 500,
-        _MAX_MY_EVENT_IDS: 1000,
-        get statusDotClass() {
-          return this.status === 'connected'  ? 'bg-success'
-               : this.status === 'connecting' ? 'bg-info animate-pulse'
-               : this.status === 'failed'     ? 'bg-error'
-               : 'bg-warning';
-        },
-        get statusText() {
-          if (this.status === 'connected') return `online · ${this.peers.size}`;
-          return this.status;
-        },
+        status: 'disconnected', publicKey: null, _secretKey: null, _ndk: null, _subscription: null,
+        publicThoughts: [], peers: new Map(), _myEventIds: new Set(),
+        get statusDotClass() { return this.status === 'connected' ? 'bg-success' : this.status === 'connecting' ? 'bg-info animate-pulse' : this.status === 'failed' ? 'bg-error' : 'bg-warning'; },
+        get statusText() { return this.status === 'connected' ? `online · ${this.peers.size}` : this.status; },
         async init(password) {
-          if (!password || typeof password !== 'string') throw new Error('nostr.init: password required');
           this.status = 'connecting';
           try {
             let skHex;
-            let stored = null;
-            try { stored = localStorage.getItem(this._storageKeys.sk); } catch (_) {}
+            const stored = localStorage.getItem('noomium:sk');
             if (stored) {
               try { skHex = await Alpine.store('crypto').decryptKey(stored, password); }
-              catch (e) {
-                const err = new Error('WRONG_PASSWORD');
-                err.cause = e;
-                throw err;
-              }
+              catch (e) { throw new Error('WRONG_PASSWORD'); }
             } else {
-              const nt = this._getNostrTools();
-              const skBytes = nt.generateSecretKey();
-              skHex = Array.from(skBytes).map(b => b.toString(16).padStart(2, '0')).join('');
-              const encrypted = await Alpine.store('crypto').encryptKey(skHex, password);
-              try { localStorage.setItem(this._storageKeys.sk, encrypted); } catch (_) {}
+              const nt = window.nostrTools || window.NostrTools;
+              skHex = Array.from(nt.generateSecretKey()).map(b => b.toString(16).padStart(2, '0')).join('');
+              localStorage.setItem('noomium:sk', await Alpine.store('crypto').encryptKey(skHex, password));
             }
             this._secretKey = skHex;
-            const nt = this._getNostrTools();
+            const nt = window.nostrTools || window.NostrTools;
             this.publicKey = nt.getPublicKey(skHex);
-            try {
-              const raw = localStorage.getItem(this._storageKeys.myEventIds);
-              const arr = raw ? JSON.parse(raw) : [];
-              this._myEventIds = new Set(Array.isArray(arr) ? arr : []);
-            } catch (_) { this._myEventIds = new Set(); }
-
-            if (typeof NDK === 'undefined') throw new Error('NDK is not loaded');
+            this._myEventIds = new Set(JSON.parse(localStorage.getItem('noomium:myEventIds') || '[]'));
+            
             const SignerClass = window.NDKPrivateKeySigner;
-            const signer = SignerClass ? new SignerClass(skHex) : null;
-            this._ndk = new NDK({ explicitRelayUrls: Alpine.store('config').relays, signer });
+            this._ndk = new NDK({ explicitRelayUrls: Alpine.store('config').relays, signer: SignerClass ? new SignerClass(skHex) : null });
             await this._ndk.connect();
+            
             const cfgNostr = Alpine.store('config').nostr;
-            const filter = {
-              kinds: [cfgNostr.kindThought],
-              '#t': ['noomium-main'],
+            this._subscription = this._ndk.subscribe({
+              kinds: [cfgNostr.kindThought], '#t': ['noomium-main'],
               since: Math.floor(Date.now() / 1000) - cfgNostr.subWindowSec
-            };
-            this._subscription = this._ndk.subscribe(filter);
-            if (this._subscription && typeof this._subscription.on === 'function') {
-              this._subscription.on('event', (e) => this._onEvent(e));
-            }
+            });
+            this._subscription.on('event', (e) => this._onEvent(e));
             this.status = 'connected';
-          } catch (err) {
-            this.status = 'failed';
-            throw err;
-          }
-        },
-        _getNostrTools() {
-          const nt = window.nostrTools || window.NostrTools || window.Nostr || window.nostr_tools;
-          if (!nt || typeof nt.generateSecretKey !== 'function' || typeof nt.getPublicKey !== 'function') {
-            throw new Error('nostr-tools is not available');
-          }
-          return nt;
-        },
-        _getNDKEventClass() {
-          const cls = window.NDKEvent || (this._ndk && this._ndk.NDKEvent);
-          if (!cls) throw new Error('NDKEvent class is not available');
-          return cls;
+          } catch (err) { this.status = 'failed'; throw err; }
         },
         async publishThought(text, vector, isShared) {
-          if (!this._ndk || !this._secretKey) throw new Error('nostr.publishThought: not initialized');
-          if (typeof text !== 'string' || !text.trim()) throw new Error('nostr.publishThought: text required');
-          if (!Array.isArray(vector)) throw new Error('nostr.publishThought: vector required');
-          const NDKEventClass = this._getNDKEventClass();
+          const NDKEventClass = window.NDKEvent || this._ndk.NDKEvent;
           const event = new NDKEventClass(this._ndk, {
-            kind: Alpine.store('config').nostr.kindThought,
-            created_at: Math.floor(Date.now() / 1000),
-            content: JSON.stringify({ text, vector }),
-            tags: [['t', 'noomium-main']]
+            kind: Alpine.store('config').nostr.kindThought, created_at: Math.floor(Date.now() / 1000),
+            content: JSON.stringify({ text, vector }), tags: [['t', 'noomium-main']]
           });
-          await event.sign();
-          await event.publish();
-          if (event.id) { this._myEventIds.add(event.id); this._persistMyEventIds(); }
-          if (isShared) {
-            this._addThought({
-              id: event.id, text, vector,
-              author: this.publicKey,
-              createdAt: event.created_at * 1000,
-              replyTo: null, own: true
-            });
-          }
+          await event.sign(); await event.publish();
+          if (event.id) { this._myEventIds.add(event.id); localStorage.setItem('noomium:myEventIds', JSON.stringify(Array.from(this._myEventIds))); }
+          if (isShared) this._addThought({ id: event.id, text, vector, author: this.publicKey, createdAt: event.created_at * 1000, replyTo: null });
           return event.id;
         },
         async reply(text, vector, replyToId) {
-          if (!this._ndk || !this._secretKey) throw new Error('nostr.reply: not initialized');
-          if (typeof text !== 'string' || !text.trim()) throw new Error('nostr.reply: text required');
-          if (!Array.isArray(vector)) throw new Error('nostr.reply: vector required');
-          if (typeof replyToId !== 'string' || !replyToId) throw new Error('nostr.reply: replyToId required');
-          const NDKEventClass = this._getNDKEventClass();
+          const NDKEventClass = window.NDKEvent || this._ndk.NDKEvent;
           const event = new NDKEventClass(this._ndk, {
-            kind: Alpine.store('config').nostr.kindThought,
-            created_at: Math.floor(Date.now() / 1000),
-            content: JSON.stringify({ text, vector }),
-            tags: [['t', 'noomium-main'], ['e', replyToId]]
+            kind: Alpine.store('config').nostr.kindThought, created_at: Math.floor(Date.now() / 1000),
+            content: JSON.stringify({ text, vector }), tags: [['t', 'noomium-main'], ['e', replyToId]]
           });
-          await event.sign();
-          await event.publish();
-          if (event.id) { this._myEventIds.add(event.id); this._persistMyEventIds(); }
-          this._addThought({
-            id: event.id, text, vector,
-            author: this.publicKey,
-            createdAt: event.created_at * 1000,
-            replyTo: replyToId, own: true
-          });
+          await event.sign(); await event.publish();
+          if (event.id) { this._myEventIds.add(event.id); localStorage.setItem('noomium:myEventIds', JSON.stringify(Array.from(this._myEventIds))); }
+          this._addThought({ id: event.id, text, vector, author: this.publicKey, createdAt: event.created_at * 1000, replyTo: replyToId });
           return event.id;
         },
         _onEvent(event) {
-          try {
-            if (!event || typeof event !== 'object') return;
-            if (typeof event.pubkey !== 'string') return;
-            if (event.pubkey === this.publicKey) return;
-            if (event.kind !== Alpine.store('config').nostr.kindThought) return;
-            const tags = Array.isArray(event.tags) ? event.tags : [];
-            const hasRoomTag = tags.some(t => Array.isArray(t) && t[0] === 't' && t[1] === 'noomium-main');
-            if (!hasRoomTag) return;
-            let content;
-            try { content = JSON.parse(event.content || '{}'); } catch (_) { return; }
-            if (!content || typeof content !== 'object') return;
-            if (typeof content.text !== 'string' || !content.text) return;
-            if (!Array.isArray(content.vector)) return;
-            for (let i = 0; i < content.vector.length; i++) {
-              if (typeof content.vector[i] !== 'number') return;
-            }
-            let replyTo = null;
-            for (const tag of tags) {
-              if (Array.isArray(tag) && tag[0] === 'e' && typeof tag[1] === 'string') { replyTo = tag[1]; break; }
-            }
-            const thought = {
-              id: event.id, text: content.text, vector: content.vector,
-              author: event.pubkey,
-              createdAt: (typeof event.created_at === 'number' ? event.created_at : 0) * 1000,
-              replyTo, own: false
-            };
-            this._addThought(thought);
-            this.peers.set(event.pubkey, Date.now());
-            if (replyTo && this._myEventIds.has(replyTo)) {
-              try {
-                Alpine.store('notifications').add('reply', {
-                  thoughtId: event.id, text: content.text, pubkey: event.pubkey
-                });
-              } catch (e) { console.warn('nostr: notifications.add failed', e); }
-            }
-            const echo = Alpine.store('echo');
-            if (echo && typeof echo.check === 'function') {
-              try { echo.check(thought); } catch (e) { console.warn('nostr: echo.check failed', e); }
-            }
-          } catch (err) { console.warn('nostr._onEvent error:', err); }
+          if (event.pubkey === this.publicKey || event.kind !== Alpine.store('config').nostr.kindThought) return;
+          const tags = event.tags || [];
+          if (!tags.some(t => t[0] === 't' && t[1] === 'noomium-main')) return;
+          let content;
+          try { content = JSON.parse(event.content); } catch (_) { return; }
+          if (!content.text || !Array.isArray(content.vector)) return;
+          const replyTo = tags.find(t => t[0] === 'e')?.[1] || null;
+          const thought = { id: event.id, text: content.text, vector: content.vector, author: event.pubkey, createdAt: event.created_at * 1000, replyTo };
+          this._addThought(thought);
+          this.peers.set(event.pubkey, Date.now());
+          if (replyTo && this._myEventIds.has(replyTo)) {
+            Alpine.store('notifications').add('reply', { thoughtId: event.id, text: content.text, pubkey: event.pubkey });
+          }
+          Alpine.store('echo').check(thought);
         },
         _addThought(thought) {
-          if (!thought || !thought.id) return;
           if (this.publicThoughts.some(t => t.id === thought.id)) return;
-          this.publicThoughts = [thought, ...this.publicThoughts];
-          if (this.publicThoughts.length > this._MAX_PUBLIC_THOUGHTS) {
-            this.publicThoughts = this.publicThoughts.slice(0, this._MAX_PUBLIC_THOUGHTS);
-          }
+          this.publicThoughts = [thought, ...this.publicThoughts].slice(0, 500);
         },
-        _persistMyEventIds() {
-          try {
-            const arr = Array.from(this._myEventIds);
-            const toSave = arr.length > this._MAX_MY_EVENT_IDS
-              ? arr.slice(arr.length - this._MAX_MY_EVENT_IDS) : arr;
-            localStorage.setItem(this._storageKeys.myEventIds, JSON.stringify(toSave));
-          } catch (e) { console.warn('nostr._persistMyEventIds failed:', e); }
-        },
-        stop() {
-          if (this._subscription) {
-            try {
-              if (typeof this._subscription.stop === 'function') this._subscription.stop();
-              else if (typeof this._subscription.unsub === 'function') this._subscription.unsub();
-            } catch (_) {}
-            this._subscription = null;
-          }
-          if (this._ndk) {
-            try { if (this._ndk.pool && typeof this._ndk.pool.disconnect === 'function') this._ndk.pool.disconnect(); } catch (_) {}
-            this._ndk = null;
-          }
-          this.publicThoughts = [];
-          this.peers.clear();
-          this.status = 'disconnected';
-        },
-        formatDate(ts) {
-          if (!ts) return '';
-          try {
-            if (typeof dayjs === 'undefined') return '';
-            if (typeof dayjs().fromNow === 'function') return dayjs(ts).fromNow();
-            return dayjs(ts).format('DD.MM.YY HH:mm');
-          } catch (_) { return ''; }
-        }
+        formatDate(ts) { return ts && window.dayjs ? (dayjs().fromNow ? dayjs(ts).fromNow() : dayjs(ts).format('DD.MM.YY HH:mm')) : ''; }
       });
 
-      // ---------- search ----------
       Alpine.store('search', {
-        results: { my: [], world: [], insights: [] },
-        _lastQueryVec: null,
-        _debounceTimer: null,
+        results: { my: [], world: [], insights: [] }, _debounceTimer: null,
         async run(queryText) {
-          const text = typeof queryText === 'string' ? queryText.trim() : '';
-          if (!text) { this.clear(); return; }
+          if (!queryText?.trim()) { this.clear(); return; }
           const ai = Alpine.store('ai');
-          if (!ai || !ai.ready) return;
-          const vec = await ai.embed(text);
+          if (!ai.ready) return;
+          const vec = await ai.embed(queryText);
           if (!vec) { this.clear(); return; }
           const cfg = Alpine.store('config').search;
-          const threshold = cfg.threshold;
-          const insightFloor = threshold - cfg.serendipity;
-          const db = Alpine.store('db');
-          const localNotes = Array.isArray(db.all) ? db.all() : [];
+          const threshold = cfg.threshold, insightFloor = threshold - cfg.serendipity;
+          const localNotes = Alpine.store('db').all();
           const my = [], insightsLocal = [];
-          for (let i = 0; i < localNotes.length; i++) {
-            const note = localNotes[i];
-            if (!note || !Array.isArray(note.vector)) continue;
+          for (const note of localNotes) {
+            if (!note.vector) continue;
             const score = ai.cosine(vec, note.vector);
-            if (score >= threshold) {
-              my.push({ id: note.id, text: note.text, score, shared: !!note.shared, createdAt: note.createdAt, own: true });
-            } else if (score >= insightFloor && score < threshold) {
-              insightsLocal.push({ id: note.id, text: note.text, score, shared: !!note.shared, createdAt: note.createdAt, own: true });
-            }
+            if (score >= threshold) my.push({ ...note, score });
+            else if (score >= insightFloor) insightsLocal.push({ ...note, score });
           }
-          const nostr = Alpine.store('nostr');
-          const publicThoughts = Array.isArray(nostr.publicThoughts) ? nostr.publicThoughts : [];
-          const myPk = nostr.publicKey;
+          const publicThoughts = Alpine.store('nostr').publicThoughts;
+          const myPk = Alpine.store('nostr').publicKey;
           const world = [], insightsWorld = [];
-          for (let i = 0; i < publicThoughts.length; i++) {
-            const note = publicThoughts[i];
-            if (!note || !Array.isArray(note.vector)) continue;
-            if (myPk && note.author === myPk) continue;
+          for (const note of publicThoughts) {
+            if (!note.vector || note.author === myPk) continue;
             const score = ai.cosine(vec, note.vector);
-            const peerShort = note.author ? String(note.author).slice(0, 8) : '';
-            if (score >= threshold) {
-              world.push({ id: note.id, text: note.text, score, peer: peerShort, fullPubkey: note.author, createdAt: note.createdAt, replyTo: note.replyTo || null, own: false });
-            } else if (score >= insightFloor && score < threshold) {
-              insightsWorld.push({ id: note.id, text: note.text, score, peer: peerShort, fullPubkey: note.author, createdAt: note.createdAt, replyTo: note.replyTo || null, own: false });
-            }
+            const item = { ...note, score, peer: note.author?.slice(0, 8) };
+            if (score >= threshold) world.push(item);
+            else if (score >= insightFloor) insightsWorld.push(item);
           }
           my.sort((a, b) => b.score - a.score);
           world.sort((a, b) => b.score - a.score);
-          const insights = [...insightsLocal, ...insightsWorld].sort((a, b) => b.score - a.score);
-          this.results = { my, world, insights };
-          this._lastQueryVec = vec;
+          this.results = { my, world, insights: [...insightsLocal, ...insightsWorld].sort((a, b) => b.score - a.score) };
         },
         schedule(queryText) {
-          if (this._debounceTimer) { clearTimeout(this._debounceTimer); this._debounceTimer = null; }
-          const delay = Alpine.store('config').search.debounceMs;
-          this._debounceTimer = setTimeout(() => {
-            this._debounceTimer = null;
-            this.run(queryText).catch(err => console.warn('search.run failed:', err));
-          }, delay);
+          if (this._debounceTimer) clearTimeout(this._debounceTimer);
+          this._debounceTimer = setTimeout(() => this.run(queryText), Alpine.store('config').search.debounceMs);
         },
-        clear() {
-          this.results = { my: [], world: [], insights: [] };
-          this._lastQueryVec = null;
-          if (this._debounceTimer) { clearTimeout(this._debounceTimer); this._debounceTimer = null; }
-        }
+        clear() { this.results = { my: [], world: [], insights: [] }; }
       });
 
-      // ---------- echo ----------
       Alpine.store('echo', {
-        _localVectors: [],
         _processedIds: new Set(),
-        _MAX_PROCESSED: 1000,
-        init() { this._refreshLocalVectors(); },
-        _refreshLocalVectors() {
-          try {
-            const db = Alpine.store('db');
-            const notes = typeof db.all === 'function' ? db.all() : [];
-            this._localVectors = notes
-              .filter(n => n && Array.isArray(n.vector) && n.vector.length > 0)
-              .map(n => ({ id: n.id, vector: n.vector }));
-          } catch (e) { console.warn('echo._refreshLocalVectors failed:', e); this._localVectors = []; }
-        },
         async check(remoteNote) {
-          if (!remoteNote || typeof remoteNote !== 'object') return;
-          if (typeof remoteNote.id !== 'string' || !remoteNote.id) return;
-          if (!Array.isArray(remoteNote.vector) || remoteNote.vector.length === 0) return;
-          if (typeof remoteNote.text !== 'string' || !remoteNote.text.trim()) return;
-          if (this._processedIds.has(remoteNote.id)) return;
+          if (!remoteNote?.id || !remoteNote.vector || this._processedIds.has(remoteNote.id)) return;
           this._processedIds.add(remoteNote.id);
-          if (this._processedIds.size > this._MAX_PROCESSED) {
-            const arr = Array.from(this._processedIds);
-            const keep = Math.floor(this._MAX_PROCESSED / 2);
-            this._processedIds = new Set(arr.slice(arr.length - keep));
-          }
-          this._refreshLocalVectors();
-          if (this._localVectors.length === 0) return;
-          const threshold = Alpine.store('config').search.echoThreshold;
-          let maxScore = 0;
+          if (this._processedIds.size > 1000) this._processedIds = new Set(Array.from(this._processedIds).slice(-500));
+          const localNotes = Alpine.store('db').all();
           const ai = Alpine.store('ai');
-          for (let i = 0; i < this._localVectors.length; i++) {
-            const local = this._localVectors[i];
-            try {
-              const score = ai.cosine(remoteNote.vector, local.vector);
-              if (score > maxScore) maxScore = score;
-            } catch (_) {}
+          let maxScore = 0;
+          for (const note of localNotes) {
+            if (!note.vector) continue;
+            const score = ai.cosine(remoteNote.vector, note.vector);
+            if (score > maxScore) maxScore = score;
           }
-          if (maxScore >= threshold) {
-            try {
-              Alpine.store('notifications').add('echo', {
-                thoughtId: remoteNote.id,
-                text: remoteNote.text,
-                pubkey: remoteNote.author || remoteNote.pubkey || null
-              });
-            } catch (e) { console.warn('echo.check: notifications.add failed', e); }
+          if (maxScore >= Alpine.store('config').search.echoThreshold) {
+            Alpine.store('notifications').add('echo', { thoughtId: remoteNote.id, text: remoteNote.text, pubkey: remoteNote.author });
           }
         }
       });
 
-      // ---------- notifications ----------
       Alpine.store('notifications', {
-        showModal: false,
-        list: [],
-        _storageKey: 'noomium:notifications',
-        _MAX_NOTIFICATIONS: 100,
+        showModal: false, list: [],
         get unreadCount() { return this.list.filter(n => !n.read).length; },
-        init() {
-          try {
-            const raw = localStorage.getItem(this._storageKey);
-            if (raw) { const parsed = JSON.parse(raw); this.list = Array.isArray(parsed) ? parsed : []; }
-            else this.list = [];
-          } catch (e) { console.warn('notifications.init: load failed', e); this.list = []; }
-        },
+        init() { try { this.list = JSON.parse(localStorage.getItem('noomium:notifications') || '[]'); } catch (_) {} },
         add(type, payload) {
-          if (type !== 'echo' && type !== 'reply') return;
-          if (!payload || typeof payload !== 'object') return;
-          const notif = {
-            id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
-            type,
-            text: typeof payload.text === 'string' ? payload.text : '',
-            thoughtId: typeof payload.thoughtId === 'string' ? payload.thoughtId : null,
-            pubkey: typeof payload.pubkey === 'string' ? payload.pubkey : null,
-            timestamp: Date.now(),
-            read: false
-          };
-          this.list.unshift(notif);
+          this.list.unshift({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), type, text: payload.text, thoughtId: payload.thoughtId, pubkey: payload.pubkey, timestamp: Date.now(), read: false });
           this._persist();
         },
-        markRead(id) {
-          if (typeof id !== 'string' || !id) return;
-          const notif = this.list.find(n => n.id === id);
-          if (notif) { notif.read = true; this._persist(); }
-        },
+        markRead(id) { const n = this.list.find(x => x.id === id); if (n) { n.read = true; this._persist(); } },
         clearAll() { this.list = []; this._persist(); },
-        _persist() {
-          try {
-            const toSave = this.list.slice(0, this._MAX_NOTIFICATIONS);
-            localStorage.setItem(this._storageKey, JSON.stringify(toSave));
-          } catch (e) { console.warn('notifications._persist failed:', e); }
-        }
+        _persist() { try { localStorage.setItem('noomium:notifications', JSON.stringify(this.list.slice(0, 100))); } catch (_) {} }
       });
 
-      // ---------- editor ----------
       Alpine.store('editor', {
-        text: '',
-        mode: 'private',
-        replyTo: null,
+        text: '', mode: 'private', replyTo: null,
         get charCountText() { return `${this.text.length} chars`; },
         get canSend() { return this.text.trim().length > 0 && Alpine.store('ai').ready; },
         setMode(mode) { this.mode = mode; },
         onInput() { Alpine.store('search').schedule(this.text); },
         async send() {
           if (!this.canSend) return;
-          const text = this.text.trim();
-          const ai = Alpine.store('ai');
-          const db = Alpine.store('db');
-          const nostr = Alpine.store('nostr');
-          const i18n = Alpine.store('i18n');
+          const text = this.text.trim(), ai = Alpine.store('ai'), db = Alpine.store('db'), nostr = Alpine.store('nostr');
           const id = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
           try {
             const vector = await ai.embed(text);
             const isWorld = this.mode === 'world';
-            const note = {
-              id, text, vector,
-              shared: isWorld,
-              createdAt: Date.now(),
-              replyTo: this.replyTo?.id || null,
-              parentId: null
-            };
-            await db.put(note);
+            await db.put({ id, text, vector, shared: isWorld, createdAt: Date.now(), replyTo: this.replyTo?.id || null });
             if (isWorld && nostr.status === 'connected') {
               try {
                 if (this.replyTo?.id) await nostr.reply(text, vector, this.replyTo.id);
                 else await nostr.publishThought(text, vector, true);
-              } catch (e) { console.warn('editor.send: publish failed', e); }
+              } catch (e) { console.warn('publish failed:', e); }
             }
-            this.text = '';
-            this.replyTo = null;
+            this.text = ''; this.replyTo = null;
             Alpine.store('search').run(text);
             Alpine.store('base').recalcStats();
-          } catch (err) {
-            console.error('editor.send failed:', err);
-            alert(i18n.t('toast.error'));
-          }
+          } catch (err) { console.error('send failed:', err); }
         },
-        edit(note) {
-          this.text = note.text;
-          this.mode = note.shared ? 'world' : 'private';
-          this.replyTo = null;
-          setTimeout(() => { const ta = document.getElementById('main-editor'); if (ta) ta.focus(); }, 50);
-        },
-        replyTo(note) {
-          this.replyTo = note;
-          this.text = '';
-          this.mode = 'world';
-          setTimeout(() => { const ta = document.getElementById('main-editor'); if (ta) ta.focus(); }, 50);
-        }
+        edit(note) { this.text = note.text; this.mode = note.shared ? 'world' : 'private'; this.replyTo = null; setTimeout(() => document.getElementById('main-editor')?.focus(), 50); },
+        replyTo(note) { this.replyTo = { ...note }; this.text = ''; this.mode = 'world'; setTimeout(() => document.getElementById('main-editor')?.focus(), 50); }
       });
 
-      // ---------- base ----------
       Alpine.store('base', {
-        query: '',
-        stats: { total: 0, shared: 0, private: 0 },
+        query: '', stats: { total: 0, shared: 0, private: 0 },
         get visibleNotes() {
-          const db = Alpine.store('db');
-          const notes = typeof db.all === 'function' ? db.all() : [];
+          const notes = Alpine.store('db').all().slice();
           const q = this.query.trim().toLowerCase();
-          let list = notes.slice();
-          if (q) list = list.filter(n => n && n.text && n.text.toLowerCase().includes(q));
-          list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-          return list;
+          if (q) return notes.filter(n => n.text?.toLowerCase().includes(q)).sort((a, b) => b.createdAt - a.createdAt);
+          return notes.sort((a, b) => b.createdAt - a.createdAt);
         },
-        onQueryChange() { /* reactivity через getter */ },
         recalcStats() {
-          const db = Alpine.store('db');
-          const notes = typeof db.all === 'function' ? db.all() : [];
+          const notes = Alpine.store('db').all();
           let shared = 0;
-          for (const n of notes) if (n && n.shared) shared++;
+          for (const n of notes) if (n.shared) shared++;
           this.stats = { total: notes.length, shared, private: notes.length - shared };
         },
-        openNote(note) {
-          Alpine.store('editor').edit(note);
-          Alpine.store('app').activeTab = 'stream';
-        },
-        formatDate(ts) {
-          if (!ts) return '';
-          try {
-            if (typeof dayjs === 'undefined') return '';
-            if (typeof dayjs().fromNow === 'function') return dayjs(ts).fromNow();
-            return dayjs(ts).format('DD.MM.YY HH:mm');
-          } catch (_) { return ''; }
-        }
+        openNote(note) { Alpine.store('editor').edit(note); Alpine.store('app').activeTab = 'stream'; },
+        formatDate(ts) { return ts && window.dayjs ? (dayjs().fromNow ? dayjs(ts).fromNow() : dayjs(ts).format('DD.MM.YY')) : ''; }
       });
 
-      // ---------- app ----------
       Alpine.store('app', {
-        initialized: false,
-        showMenu: false,
-        showOnboarding: false,
-        showPassword: false,
-        activeTab: 'stream',
-        isNewUser: false,
-        password: '',
-        passwordConfirm: '',
-        passwordError: '',
-        _pendingBootstrapPassword: null,
+        initialized: false, showMenu: false, showOnboarding: false, showPassword: false,
+        activeTab: 'stream', isNewUser: false, password: '', passwordConfirm: '', passwordError: '',
         async bootstrap() {
           try {
             Alpine.store('i18n').init();
             Alpine.store('settings').init();
             Alpine.store('notifications').init();
             await Alpine.store('db').init();
-            Alpine.store('echo').init();
             this.isNewUser = !localStorage.getItem('noomium:sk');
             Alpine.store('ai').load();
-            Alpine.store('db').onChange(() => { Alpine.store('base').recalcStats(); });
-            Alpine.store('base').recalcStats();
             this.showPassword = true;
             if (!Alpine.store('settings').onboarded) this.showOnboarding = true;
-            // Скрываем boot-screen
-            const bs = document.getElementById('boot-screen');
-            if (bs) bs.style.display = 'none';
+            document.getElementById('boot-screen').style.display = 'none';
             this.initialized = true;
           } catch (err) {
             console.error('Bootstrap failed:', err);
-            const bs = document.getElementById('boot-screen');
-            if (bs) bs.innerHTML = `<div class="alert alert-error"><span>Bootstrap failed: ${err.message}</span></div>`;
+            document.getElementById('boot-screen').innerHTML = `<div class="alert alert-error"><span>Bootstrap failed: ${err.message}</span></div>`;
           }
         },
         async submitPassword() {
           this.passwordError = '';
           const i18n = Alpine.store('i18n');
           if (!this.password) { this.passwordError = i18n.t('password.empty'); return; }
-          if (this.isNewUser) {
-            if (this.password !== this.passwordConfirm) {
-              this.passwordError = i18n.t('password.mismatch');
-              return;
-            }
-          }
+          if (this.isNewUser && this.password !== this.passwordConfirm) { this.passwordError = i18n.t('password.mismatch'); return; }
           try {
             await Alpine.store('nostr').init(this.password);
-            this.showPassword = false;
-            this.password = '';
-            this.passwordConfirm = '';
+            this.showPassword = false; this.password = ''; this.passwordConfirm = '';
           } catch (err) {
-            if (err && err.message === 'WRONG_PASSWORD') {
-              this.passwordError = i18n.t('password.wrong');
-              this.password = '';
-            } else {
-              console.error('nostr.init failed:', err);
-              this.passwordError = err.message || 'Init failed';
-            }
+            if (err.message === 'WRONG_PASSWORD') { this.passwordError = i18n.t('password.wrong'); this.password = ''; }
+            else { this.passwordError = err.message || 'Init failed'; }
           }
         }
       });
 
-    }); // end alpine:init
-
-    // ============================================================
-    // ПОСЛЕ ПОЛНОЙ ИНИЦИАЛИЗАЦИИ ALPINE ЗАПУСКАЕМ BOOTSTRAP
-    // ============================================================
-    document.addEventListener('alpine:initialized', () => {
+      // Вызываем bootstrap СРАЗУ после регистрации всех stores
       Alpine.store('app').bootstrap();
+
     });
 
-    // ============================================================
-    // Component stubs
-    // ============================================================
     function editorComponent() { return {}; }
-
-    // ============================================================
-    // Service Worker (Workbox)
-    // ============================================================
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        try {
-          // Минимальный inline SW через blob
-          const swCode = `
-            const CACHE = 'noomium-v1';
-            self.addEventListener('install', e => { self.skipWaiting(); });
-            self.addEventListener('activate', e => { e.waitUntil(self.clients.claim()); });
-            self.addEventListener('fetch', e => {
-              if (e.request.method !== 'GET') return;
-              e.respondWith(
-                caches.match(e.request).then(r => r || fetch(e.request).then(res => {
-                  if (res.status === 200) {
-                    const clone = res.clone();
-                    caches.open(CACHE).then(c => c.put(e.request, clone));
-                  }
-                  return res;
-                }).catch(() => caches.match(e.request)))
-              );
-            });
-          `;
-          const blob = new Blob([swCode], { type: 'application/javascript' });
-          const swUrl = URL.createObjectURL(blob);
-          navigator.serviceWorker.register(swUrl).catch(() => {});
-        } catch (_) {}
-      });
-    }
   </script>
 </body>
 </html>
