@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.3">
+<meta name="app-version" content="1.1.25">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -498,12 +498,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (set) { set.delete(fn); if (set.size === 0) map.delete(event); }
       },
       emit: function(event, payload) {
-        const set = map.get(event);
-        if (!set) return;
-        const listeners = Array.from(set);
-        for (let i = 0; i < listeners.length; i++) {
-          try { listeners[i](payload); } catch (err) { console.error(err); }
-        }
+        const set = map.get(event) || [];
+        for (const fn of set) { try { fn(payload); } catch (err) { console.error(err); } }
       }
     };
   }, []);
@@ -647,7 +643,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
 <!-- NOOMIUM_MODULE_START DB -->
   DI.register('DB', function(cfg, log, bus) {
-    let db = null;
+    var db = null, mem = null;
 
     function dbName() { return cfg.get('dbName', 'noomium_v8'); }
     function storeName() { return cfg.get('storeName', 'notes'); }
@@ -659,39 +655,23 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     function open() {
       return new Promise(function(resolve, reject) {
         if (db) return resolve(db);
-        if (!window.indexedDB) {
-          const err = new Error('IndexedDB not supported');
-          if (log) log.warn('IDB unsupported', err.message);
-          return reject(err);
-        }
+        if (!window.indexedDB) { mem = new Map(); return resolve(null); }
         try {
-          const req = indexedDB.open(dbName(), 2);
+          var req = indexedDB.open(dbName(), 1);
           req.onupgradeneeded = function(e) {
-            const d = e.target.result;
-            const s = storeName();
-            let store;
-            if (!d.objectStoreNames.contains(s)) {
-              store = d.createObjectStore(s, { keyPath: 'id' });
-            } else {
-              store = e.target.transaction.objectStore(s);
-            }
-            if (!store.indexNames.contains('by_created')) {
-              store.createIndex('by_created', 'createdAt', { unique: false });
-            }
+            var d = e.target.result;
+            var s = storeName();
+            if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' });
           };
           req.onsuccess = function(e) { db = e.target.result; resolve(db); };
           req.onerror = function() {
-            const err = req.error || new Error('IDB open error');
-            if (log) log.warn('IDB open error', String(err));
-            reject(err);
+            if (log) log.warn('IDB open error', String(req.error));
+            mem = new Map(); resolve(null);
           };
-          req.onblocked = function() {
-            const err = new Error('IDB blocked');
-            reject(err);
-          };
+          req.onblocked = function() { mem = new Map(); resolve(null); };
         } catch (err) {
-          if (log) log.warn('IDB exception', String(err));
-          reject(err);
+          if (log) log.warn('IDB unsupported', String(err));
+          mem = new Map(); resolve(null);
         }
       });
     }
@@ -700,9 +680,43 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       return open().then(function(d) {
         return new Promise(function(resolve, reject) {
           try {
-            const transaction = d.transaction(storeName(), mode);
-            const store = transaction.objectStore(storeName());
-            const r = fn(store);
+            if (!d) {
+              var mockStore = {
+                get: function(k) {
+                  return { result: mem.get(k) };
+                },
+                put: function(v) {
+                  mem.set(v.id, v);
+                  return {};
+                },
+                delete: function(k) {
+                  mem.delete(k);
+                  return {};
+                },
+                getAll: function() {
+                  return { result: Array.from(mem.values()) };
+                }
+              };
+              var req = { result: null, onsuccess: null, onerror: null };
+              try {
+                var r = fn(mockStore);
+                if (!r || typeof r.onsuccess !== 'function') {
+                  resolve(r && r.result !== undefined ? r.result : r);
+                  return;
+                }
+                req.result = r.result !== undefined ? r.result : r;
+                req.onsuccess = function() { resolve(req.result); };
+                req.onerror = function(e) { reject(e); };
+                setTimeout(function() { if (req.onsuccess) req.onsuccess(); }, 0);
+              } catch (e) {
+                req.onerror = function() { reject(e); };
+                setTimeout(function() { if (req.onerror) req.onerror(); }, 0);
+              }
+              return;
+            }
+            var transaction = d.transaction(storeName(), mode);
+            var store = transaction.objectStore(storeName());
+            var r = fn(store);
             r.onsuccess = function() { resolve(r.result); };
             r.onerror = function() {
               if (log) log.warn('DB op error', String(r.error));
@@ -725,63 +739,22 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return tx('readwrite', function(s) { return s.delete(id); }).then(function(res) { emitChange(); return res; }); 
       },
       all: function() { return tx('readonly', function(s) { return s.getAll(); }); },
-      getAllSorted: function({ offset, limit, direction, filterText }) {
-        return open().then(function(d) {
-          return new Promise(function(resolve, reject) {
-            try {
-              const transaction = d.transaction(storeName(), 'readonly');
-              const store = transaction.objectStore(storeName());
-              const index = store.index('by_created');
-              const cursorDirection = direction === 'next' ? 'next' : 'prev';
-              const request = index.openCursor(null, cursorDirection);
-              const result = [];
-              let advanced = false;
-              
-              request.onsuccess = function(event) {
-                const cursor = event.target.result;
-                if (!cursor) {
-                  resolve(result);
-                  return;
-                }
-                if (!advanced && offset > 0) {
-                  advanced = true;
-                  try {
-                    cursor.advance(offset);
-                  } catch (e) {
-                    resolve(result);
-                  }
-                  return;
-                }
-                result.push(cursor.value);
-                if (result.length >= limit) {
-                  resolve(result);
-                  return;
-                }
-                cursor.continue();
-              };
-              
-              request.onerror = function() {
-                if (log) log.warn('DB cursor error', String(request.error));
-                reject(request.error);
-              };
-            } catch (err) {
-              if (log) log.warn('DB getAllSorted error', String(err));
-              reject(err);
-            }
-          });
-        });
-      },
       getAllPaginated: function(offset, limit) {
         return open().then(function(d) {
           return new Promise(function(resolve, reject) {
-            const transaction = d.transaction(storeName(), 'readonly');
-            const store = transaction.objectStore(storeName());
-            const request = store.openCursor();
-            const result = [];
-            let advanced = false;
+            if (!d) {
+              var all = mem ? Array.from(mem.values()) : [];
+              resolve(all.slice(offset, offset + limit));
+              return;
+            }
+            var transaction = d.transaction(storeName(), 'readonly');
+            var store = transaction.objectStore(storeName());
+            var request = store.openCursor();
+            var result = [];
+            var advanced = false;
             
             request.onsuccess = function(event) {
-              const cursor = event.target.result;
+              var cursor = event.target.result;
               if (!cursor) {
                 resolve(result);
                 return;
@@ -814,9 +787,14 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return open().then(function(d) {
           return new Promise(function(resolve, reject) {
             try {
-              const transaction = d.transaction(storeName(), 'readwrite');
-              const store = transaction.objectStore(storeName());
-              for (let i = 0; i < notes.length; i++) store.put(notes[i]);
+              if (!d) {
+                for (var i = 0; i < notes.length; i++) mem.set(notes[i].id, notes[i]);
+                emitChange();
+                return resolve(notes.length);
+              }
+              var transaction = d.transaction(storeName(), 'readwrite');
+              var store = transaction.objectStore(storeName());
+              for (var i = 0; i < notes.length; i++) store.put(notes[i]);
               transaction.oncomplete = function() { emitChange(); resolve(notes.length); };
               transaction.onerror = function() { reject(transaction.error); };
             } catch (err) { reject(err); }
@@ -825,9 +803,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       },
       reset: function() {
         if (db) { try { db.close(); } catch (_) { /* ignore */ } db = null; }
+        if (mem) mem.clear();
         return new Promise(function(resolve) {
           try {
-            const req = indexedDB.deleteDatabase(dbName());
+            var req = indexedDB.deleteDatabase(dbName());
             req.onsuccess = req.onerror = req.onblocked = function() { emitChange(); resolve(); };
           } catch (_) { emitChange(); resolve(); }
         });
@@ -835,244 +814,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'Logger', 'Bus']);
 <!-- NOOMIUM_MODULE_END DB -->
-
-<!-- NOOMIUM_MODULE_START BaseUI -->
-  DI.register('BaseUI', function(Config, DB, Utils, I18n, Toast, Logger) {
-    let containerEl = null;
-    let listEl = null;
-    let searchEl = null;
-    let sortEl = null;
-    let statsEl = null;
-
-    let offset = 0;
-    let isLoading = false;
-    let hasMore = true;
-    let currentSort = 'new';
-    let currentSearch = '';
-    
-    let allNotesCache = null;
-    let allNotesCacheTime = 0;
-    const ALL_NOTES_TTL = 30000;
-
-    let scrollHandler = null;
-    let searchHandler = null;
-    let sortHandler = null;
-    let searchTimer = null;
-
-    function getAllNotes() {
-      const now = Date.now();
-      if (allNotesCache && (now - allNotesCacheTime < ALL_NOTES_TTL)) {
-        return Promise.resolve(allNotesCache);
-      }
-      return DB.all().then(function(notes) {
-        allNotesCache = notes || [];
-        allNotesCacheTime = now;
-        return allNotesCache;
-      });
-    }
-
-    function buildStatCard(value, label) {
-      return '<div class="stat"><div class="stat-v">' + Utils.esc(String(value)) + '</div>' +
-             '<div class="stat-l">' + Utils.esc(label) + '</div></div>';
-    }
-
-    function buildBaseMarkup() {
-      return '<div class="base-h"><div class="base-stats" id="base-stats"></div>' +
-      '<div class="base-ctrls"><input type="text" class="base-search" id="base-q" placeholder="' + Utils.esc(I18n.t('base.search')) + '" />' +
-      '<select class="base-sort" id="base-sort"><option value="new">' + I18n.t('base.sort.new') + '</option><option value="old">' + I18n.t('base.sort.old') + '</option><option value="az">' + I18n.t('base.sort.az') + '</option></select></div></div>' +
-      '<div class="base-list" id="base-list"></div>';
-    }
-
-    function updateStats() {
-      if (!statsEl) return;
-      getAllNotes().then(function(allNotes) {
-        let sharedCount = 0;
-        for (let i = 0; i < allNotes.length; i++) {
-          if (allNotes[i] && allNotes[i].shared) sharedCount++;
-        }
-        statsEl.innerHTML =
-          buildStatCard(allNotes.length, I18n.t('base.stat.total')) +
-          buildStatCard(sharedCount, I18n.t('base.stat.open')) +
-          buildStatCard(allNotes.length - sharedCount, I18n.t('base.stat.priv'));
-      }).catch(function(err) {
-        if (Logger) Logger.warn('updateStats error', String(err));
-      });
-    }
-
-    function renderChunk(chunk) {
-      if (!listEl || !chunk || chunk.length === 0) return;
-      const fragment = document.createDocumentFragment();
-      for (let i = 0; i < chunk.length; i++) {
-        const note = chunk[i];
-        const div = document.createElement('div');
-        const dateStr = Utils.fmtDate(note.createdAt, I18n.getLang());
-        const escapedText = Utils.esc(note.text);
-        const isLongText = escapedText.length > Config.get('truncateTextLength', 120);
-        div.className = 'bi ' + (note.shared ? 'shared' : '');
-        div.setAttribute('data-id', note.id);
-        div.innerHTML = '<div class="bi-t' + (isLongText ? ' truncated' : '') + '">' + escapedText + '</div>' +
-          '<div class="bi-f"><div class="bi-meta">' +
-            '<span class="bi-tag">' + Utils.esc(note.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private')) + '</span>' +
-            '<span class="bi-date">' + Utils.esc(dateStr) + '</span>' +
-          '</div></div>';
-        fragment.appendChild(div);
-      }
-      listEl.appendChild(fragment);
-    }
-
-    function renderEmpty() {
-      if (!listEl) return;
-      const emptyTitle = I18n.t('empty.base.t');
-      const emptyDesc = I18n.t('empty.base.d');
-      listEl.innerHTML = '<div class="feed-empty"><div class="feed-empty-ic">▤</div>' +
-        '<div class="feed-empty-t">' + Utils.esc(emptyTitle) + '</div>' +
-        '<div class="feed-empty-d">' + Utils.esc(emptyDesc) + '</div></div>';
-    }
-
-    function loadChunk() {
-      if (isLoading || !hasMore || !listEl) return;
-      isLoading = true;
-      const limit = Config.get('baseChunkSize', 20);
-      
-      if (currentSort === 'az' || currentSearch) {
-        getAllNotes().then(function(allNotes) {
-          let filtered = allNotes;
-          if (currentSearch) {
-            filtered = filtered.filter(function(n) { 
-              return n.text && n.text.toLowerCase().indexOf(currentSearch) >= 0; 
-            });
-          }
-          if (currentSort === 'az') {
-            filtered.sort(function(a, b) { 
-              return (a.text || '').localeCompare(b.text || '', I18n.getLang() === 'en' ? 'en' : 'ru'); 
-            });
-          } else if (currentSort === 'old') {
-            filtered.sort(function(a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
-          } else {
-            filtered.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
-          }
-          
-          const chunk = filtered.slice(offset, offset + limit);
-          renderChunk(chunk);
-          offset += chunk.length;
-          hasMore = offset < filtered.length;
-          isLoading = false;
-          
-          if (chunk.length === 0 && offset === 0) renderEmpty();
-        }).catch(function(err) {
-          isLoading = false;
-          if (Toast) Toast.show('err', String(err && err.message || err) || 'Chunk load failed');
-          if (Logger) Logger.warn('loadChunk allNotes error', String(err));
-        });
-      } else {
-        const direction = currentSort === 'old' ? 'next' : 'prev';
-        DB.getAllSorted({ offset: offset, limit: limit, direction: direction }).then(function(chunk) {
-          if (!chunk || chunk.length === 0) {
-            hasMore = false;
-            isLoading = false;
-            if (offset === 0) renderEmpty();
-            return;
-          }
-          renderChunk(chunk);
-          offset += chunk.length;
-          if (chunk.length < limit) hasMore = false;
-          isLoading = false;
-        }).catch(function(err) {
-          isLoading = false;
-          if (Toast) Toast.show('err', String(err && err.message || err) || 'Chunk load failed');
-          if (Logger) Logger.warn('loadChunk sorted error', String(err));
-        });
-      }
-    }
-
-    function bindEvents() {
-      scrollHandler = function(e) {
-        const el = e.target;
-        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
-          loadChunk();
-        }
-      };
-      listEl.addEventListener('scroll', scrollHandler);
-      
-      searchHandler = function() {
-        if (searchTimer) clearTimeout(searchTimer);
-        searchTimer = setTimeout(function() {
-          currentSearch = searchEl.value.trim().toLowerCase();
-          refresh();
-        }, Config.get('baseSearchDebounce', 200));
-      };
-      searchEl.addEventListener('input', searchHandler);
-      
-      sortHandler = function() {
-        currentSort = sortEl.value;
-        refresh();
-      };
-      sortEl.addEventListener('change', sortHandler);
-      
-      listEl.addEventListener('click', function(e) {
-        const bi = e.target.closest('.bi');
-        if (bi) {
-          const id = bi.getAttribute('data-id');
-          if (id) {
-            try {
-              if (typeof openNoteView === 'function') {
-                openNoteView(id);
-              }
-            } catch (err) {
-              if (Logger) Logger.warn('openNoteView error', String(err));
-            }
-          }
-        }
-      });
-    }
-
-    function refresh() {
-      offset = 0;
-      allNotesCache = null;
-      allNotesCacheTime = 0;
-      hasMore = true;
-      isLoading = false;
-      if (listEl) listEl.innerHTML = '';
-      updateStats();
-      loadChunk();
-    }
-
-    return {
-      mount: function(container) {
-        containerEl = container;
-        containerEl.innerHTML = buildBaseMarkup();
-        listEl = containerEl.querySelector('#base-list');
-        searchEl = containerEl.querySelector('#base-q');
-        sortEl = containerEl.querySelector('#base-sort');
-        statsEl = containerEl.querySelector('#base-stats');
-        
-        currentSort = sortEl.value;
-        currentSearch = searchEl.value.trim().toLowerCase();
-        
-        bindEvents();
-        refresh();
-      },
-      refresh: refresh,
-      destroy: function() {
-        if (listEl && scrollHandler) {
-          listEl.removeEventListener('scroll', scrollHandler);
-        }
-        if (searchEl && searchHandler) {
-          searchEl.removeEventListener('input', searchHandler);
-        }
-        if (sortEl && sortHandler) {
-          sortEl.removeEventListener('change', sortHandler);
-        }
-        if (searchTimer) clearTimeout(searchTimer);
-        containerEl = null;
-        listEl = null;
-        searchEl = null;
-        sortEl = null;
-        statsEl = null;
-      }
-    };
-  }, ['Config', 'DB', 'Utils', 'I18n', 'Toast', 'Logger']);
-<!-- NOOMIUM_MODULE_END BaseUI -->
 
 <!-- NOOMIUM_MODULE_START AI -->
   DI.register('AI', function(cfg, log, bus) {
@@ -1198,31 +939,29 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
 <!-- NOOMIUM_MODULE_START Net -->
   DI.register('Net', function(cfg, DB, AI, log, bus) {
-    let pool = null, sk = null, pk = null;
-    const peers = new Map();
-    const answers = [];
-    let onUpdate = null, hbTimer = null, flushTimer = null, lastQueryTime = 0;
-    let nostr = null, subscription = null;
-    const peerListeners = [];
-    let started = false, reconnecting = false;
-    const seen = new Set();
-    const rateLimitedUntil = new Map();
-    let connAttempts = 0;
-    let netStatus = 'disconnected';
-    const activeQueries = new Map();
+    var pool = null, sk = null, pk = null, queryId = null;
+    var peers = new Map();
+    var answers = [];
+    var onUpdate = null, hbTimer = null, flushTimer = null, lastQueryTime = 0;
+    var nostr = null, subscription = null;
+    var peerListeners = [];
+    var started = false, reconnecting = false;
+    var seen = new Set();
+    var rateLimitedUntil = new Map();
+    var connAttempts = 0;
+    var netStatus = 'disconnected';
 
-    let sharedCache = [];
-    let sharedCacheOffset = 0;
-    let sharedCacheComplete = false;
-    let sharedCacheTime = 0;
-    let sharedCachePromise = null;
-    const CACHE_TTL = cfg.get('sharedCacheTTL', 60000);
+    var sharedCache = [];
+    var sharedCacheOffset = 0;
+    var sharedCacheComplete = false;
+    var sharedCacheTime = 0;
+    var CACHE_TTL = cfg.get('sharedCacheTTL', 60000);
 
-    const outbox = [];
-    const relayErrors = new Map();
+    var outbox = [];
+    var relayErrors = new Map();
 
     function deriveKey(password, salt) {
-      const enc = new TextEncoder();
+      var enc = new TextEncoder();
       return crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']).then(function(keyMaterial) {
         return crypto.subtle.deriveKey(
           { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
@@ -1235,12 +974,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function encryptKey(hexKey, password) {
-      const salt = crypto.getRandomValues(new Uint8Array(16));
-      const iv = crypto.getRandomValues(new Uint8Array(12));
+      var salt = crypto.getRandomValues(new Uint8Array(16));
+      var iv = crypto.getRandomValues(new Uint8Array(12));
       return deriveKey(password, salt).then(function(key) {
-        const enc = new TextEncoder();
+        var enc = new TextEncoder();
         return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(hexKey)).then(function(ciphertext) {
-          const combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
+          var combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
           combined.set(salt, 0);
           combined.set(iv, salt.length);
           combined.set(new Uint8Array(ciphertext), salt.length + iv.length);
@@ -1250,10 +989,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function decryptKey(base64Str, password) {
-      const combined = Uint8Array.from(atob(base64Str), function(c) { return c.charCodeAt(0); });
-      const salt = combined.slice(0, 16);
-      const iv = combined.slice(16, 28);
-      const ciphertext = combined.slice(28);
+      var combined = Uint8Array.from(atob(base64Str), function(c) { return c.charCodeAt(0); });
+      var salt = combined.slice(0, 16);
+      var iv = combined.slice(16, 28);
+      var ciphertext = combined.slice(28);
       return deriveKey(password, salt).then(function(key) {
         return crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext).then(function(dec) {
           return new TextDecoder().decode(dec);
@@ -1262,7 +1001,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function setStatus(s) {
-      const wasDisconnected = (netStatus !== 'connected');
+      var wasDisconnected = (netStatus !== 'connected');
       netStatus = s;
       if (bus && bus.emit) { try { bus.emit('net:status', { status: s }); } catch (_) { /* ignore */ } }
       if (s === 'connected' && wasDisconnected) {
@@ -1271,8 +1010,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function notifyPeers() {
-      const count = peers.size;
-      for (let i = 0; i < peerListeners.length; i++) {
+      var count = peers.size;
+      for (var i = 0; i < peerListeners.length; i++) {
         try { peerListeners[i](count); } catch (_) { /* ignore */ }
       }
       if (bus && bus.emit) { try { bus.emit('net:peers', { count: count }); } catch (_) { /* ignore */ } }
@@ -1292,15 +1031,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (seen.has(ev.id)) return true;
       seen.add(ev.id);
       if (seen.size > cfg.get('seenMaxSize', 1000)) {
-        const arr = Array.from(seen);
+        var arr = Array.from(seen);
         seen.clear();
-        for (let i = arr.length - cfg.get('seenKeepSize', 500); i < arr.length; i++) seen.add(arr[i]);
+        for (var i = arr.length - cfg.get('seenKeepSize', 500); i < arr.length; i++) seen.add(arr[i]);
       }
       return false;
     }
 
     function getSharedVectors() {
-      const now = Date.now();
+      var now = Date.now();
       if (sharedCacheComplete && (now - sharedCacheTime < CACHE_TTL)) {
         return Promise.resolve(sharedCache);
       }
@@ -1309,26 +1048,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         sharedCacheOffset = 0;
         sharedCacheComplete = false;
       }
-      
-      if (sharedCachePromise) {
-        return sharedCachePromise;
-      }
-      
-      sharedCachePromise = loadSharedVectorsAsync().finally(function() {
-        sharedCachePromise = null;
-      });
-      
-      return sharedCachePromise;
-    }
-
-    function loadSharedVectorsAsync() {
-      const chunkSize = cfg.get('baseChunkSize', 20);
+      var chunkSize = cfg.get('baseChunkSize', 20);
       return DB.getAllPaginated(sharedCacheOffset, chunkSize).then(function(chunk) {
         if (!chunk || chunk.length === 0) {
           sharedCacheComplete = true;
         } else {
-          for (let i = 0; i < chunk.length; i++) {
-            const n = chunk[i];
+          for (var i = 0; i < chunk.length; i++) {
+            var n = chunk[i];
             if (n && n.shared && n.vector) {
               sharedCache.push({ id: n.id, text: n.text, vector: n.vector });
             }
@@ -1344,19 +1070,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function invalidateSharedCache() {
-      if (sharedCachePromise) {
-        sharedCachePromise.then(function() {
-          sharedCache = [];
-          sharedCacheOffset = 0;
-          sharedCacheComplete = false;
-          sharedCacheTime = 0;
-        });
-      } else {
-        sharedCache = [];
-        sharedCacheOffset = 0;
-        sharedCacheComplete = false;
-        sharedCacheTime = 0;
-      }
+      sharedCache = [];
+      sharedCacheOffset = 0;
+      sharedCacheComplete = false;
+      sharedCacheTime = 0;
     }
 
     if (bus && bus.on) {
@@ -1375,18 +1092,18 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     function flushOutbox() {
       if (outbox.length === 0 || !pool) return;
-      const limit = Math.min(cfg.get('outboxBatchSize', 2), outbox.length);
-      const toSend = outbox.splice(0, limit);
+      var limit = Math.min(cfg.get('outboxBatchSize', 2), outbox.length);
+      var toSend = outbox.splice(0, limit);
       toSend.forEach(function(ev) { safePublish(ev); });
       if (bus && bus.emit) { try { bus.emit('net:outbox', { count: outbox.length }); } catch(_) {} }
     }
 
     function safePublish(ev) {
-      const relays = cfg.get('relays', []);
-      const now = Date.now();
-      const goodRelays = [];
-      for (let i = 0; i < relays.length; i++) {
-        const until = rateLimitedUntil.get(relays[i]) || 0;
+      var relays = cfg.get('relays', []);
+      var now = Date.now();
+      var goodRelays = [];
+      for (var i = 0; i < relays.length; i++) {
+        var until = rateLimitedUntil.get(relays[i]) || 0;
         if (until <= now) goodRelays.push(relays[i]);
       }
       if (goodRelays.length === 0) {
@@ -1395,19 +1112,19 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return Promise.resolve();
       }
       try {
-        const pubs = pool.publish(goodRelays, ev);
-        for (let i = 0; i < goodRelays.length; i++) {
-          const relay = goodRelays[i];
-          const p = (pubs && typeof pubs.get === 'function') ? pubs.get(relay) : (Array.isArray(pubs) ? pubs[i] : null);
+        var pubs = pool.publish(goodRelays, ev);
+        for (var i = 0; i < goodRelays.length; i++) {
+          var relay = goodRelays[i];
+          var p = (pubs && typeof pubs.get === 'function') ? pubs.get(relay) : (Array.isArray(pubs) ? pubs[i] : null);
           if (p && p.then) {
             (function(promise, relayUrl) {
               promise.then(function() {
-                const idx = outbox.indexOf(ev);
+                var idx = outbox.indexOf(ev);
                 if (idx > -1) outbox.splice(idx, 1);
                 relayErrors.delete(relayUrl);
                 if (bus && bus.emit) { try { bus.emit('net:outbox', { count: outbox.length }); } catch(_) {} }
               }).catch(function(err) {
-                const count = (relayErrors.get(relayUrl) || 0) + 1;
+                var count = (relayErrors.get(relayUrl) || 0) + 1;
                 relayErrors.set(relayUrl, count);
                 
                 if (count >= cfg.get('relayErrorThreshold', 5)) {
@@ -1415,7 +1132,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                   relayErrors.set(relayUrl, 0);
                   if (log) log.warn('Relay ' + relayUrl + ' circuit broken, 2m backoff');
                 } else {
-                  const backoff = count === 1 ? cfg.get('relayBackoff1', 15000) : cfg.get('relayBackoff2', 30000);
+                  var backoff = count === 1 ? cfg.get('relayBackoff1', 15000) : cfg.get('relayBackoff2', 30000);
                   rateLimitedUntil.set(relayUrl, Date.now() + backoff);
                   if (log) log.warn('Relay ' + relayUrl + ' error ' + count + ', ' + (backoff / 1000) + 's backoff');
                 }
@@ -1441,20 +1158,20 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (isDuplicate(ev)) return;
         if (pk && ev.pubkey === pk) return;
 
-        const had = peers.has(ev.pubkey);
+        var had = peers.has(ev.pubkey);
         peers.set(ev.pubkey, Date.now());
         if (!had) notifyPeers();
         setStatus('connected');
         connAttempts = 0;
         flushOutbox();
 
-        const KQ = cfg.get('kQuery', 21000);
-        const KA = cfg.get('kAnswer', 21001);
-        const room = cfg.get('room', 'noomium-main');
+        var KQ = cfg.get('kQuery', 21000);
+        var KA = cfg.get('kAnswer', 21001);
+        var room = cfg.get('room', 'noomium-main');
 
         if (ev.kind === KQ) {
           if (!sk) return;
-          let q;
+          var q;
           try { q = JSON.parse(ev.content); } catch (_) { return; }
           
           if (!q || typeof q !== 'object' || Array.isArray(q)) {
@@ -1462,7 +1179,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             return;
           }
           
-          const qKeys = Object.keys(q);
+          var qKeys = Object.keys(q);
           if (qKeys.length !== 1 || qKeys[0] !== 'vector') {
             if (log) log.warn('Invalid query format: extra fields');
             return;
@@ -1473,8 +1190,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             return;
           }
           
-          let isValidVector = true;
-          for (let i = 0; i < q.vector.length; i++) {
+          var isValidVector = true;
+          for (var i = 0; i < q.vector.length; i++) {
             if (typeof q.vector[i] !== 'number') {
               isValidVector = false;
               break;
@@ -1486,27 +1203,27 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           }
           
           getSharedVectors().then(function(sharedNotes) {
-            const checkRelays = cfg.get('relays', []);
-            const nowCheck = Date.now();
-            let hasActiveRelay = false;
-            for (let r = 0; r < checkRelays.length; r++) {
-              const until = rateLimitedUntil.get(checkRelays[r]) || 0;
+            var checkRelays = cfg.get('relays', []);
+            var nowCheck = Date.now();
+            var hasActiveRelay = false;
+            for (var r = 0; r < checkRelays.length; r++) {
+              var until = rateLimitedUntil.get(checkRelays[r]) || 0;
               if (until <= nowCheck) { hasActiveRelay = true; break; }
             }
             if (!hasActiveRelay) return;
 
-            const floor = cfg.get('threshold', 0.30) - cfg.get('serendipity', 0.15);
-            const toSend = [];
-            for (let i = 0; i < sharedNotes.length; i++) {
-              const n = sharedNotes[i];
+            var floor = cfg.get('threshold', 0.30) - cfg.get('serendipity', 0.15);
+            var toSend = [];
+            for (var i = 0; i < sharedNotes.length; i++) {
+              var n = sharedNotes[i];
               if (AI.cosine(q.vector, n.vector) >= floor) toSend.push(n);
             }
             toSend.sort(function(a, b) { return AI.cosine(q.vector, b.vector) - AI.cosine(q.vector, a.vector); });
-            const maxAnswers = cfg.get('maxAnswersPerQuery', 5);
-            const limited = toSend.slice(0, maxAnswers);
-            for (let j = 0; j < limited.length; j++) {
+            var maxAnswers = cfg.get('maxAnswersPerQuery', 5);
+            var limited = toSend.slice(0, maxAnswers);
+            for (var j = 0; j < limited.length; j++) {
               try {
-                const ans = nostr.finalizeEvent({
+                var ans = nostr.finalizeEvent({
                   kind: KA,
                   created_at: Math.floor(Date.now() / 1000),
                   tags: [['t', room], ['e', ev.id]],
@@ -1521,26 +1238,26 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         }
 
         if (ev.kind === KA) {
-          let eTag = null;
-          for (let i = 0; i < ev.tags.length; i++) {
-            const tag = ev.tags[i];
+          var eTag = null;
+          for (var i = 0; i < ev.tags.length; i++) {
+            var tag = ev.tags[i];
             if (Array.isArray(tag) && tag[0] === 'e') { eTag = tag[1]; break; }
           }
-          if (eTag && activeQueries.has(eTag)) {
-            let data;
+          if (eTag && eTag === queryId) {
+            var data;
             try { data = JSON.parse(ev.content); } catch (_) { return; }
             
             if (!data || typeof data !== 'object' || Array.isArray(data)) {
               return;
             }
             
-            const dKeys = Object.keys(data);
+            var dKeys = Object.keys(data);
             if (dKeys.length !== 2) {
               return;
             }
             
-            let hasText = false, hasVector = false;
-            for (let i = 0; i < dKeys.length; i++) {
+            var hasText = false, hasVector = false;
+            for (var i = 0; i < dKeys.length; i++) {
               if (dKeys[i] === 'text') hasText = true;
               else if (dKeys[i] === 'vector') hasVector = true;
               else { return; }
@@ -1566,8 +1283,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               return;
             }
             
-            let isValidAnsVector = true;
-            for (let i = 0; i < data.vector.length; i++) {
+            var isValidAnsVector = true;
+            for (var i = 0; i < data.vector.length; i++) {
               if (typeof data.vector[i] !== 'number') {
                 isValidAnsVector = false;
                 break;
@@ -1577,8 +1294,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               return;
             }
 
-            let isDupAnswer = false;
-            for (let j = 0; j < answers.length; j++) {
+            var isDupAnswer = false;
+            for (var j = 0; j < answers.length; j++) {
               if (answers[j].id === ev.id) { isDupAnswer = true; break; }
             }
             if (!isDupAnswer) {
@@ -1598,41 +1315,23 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     function startHeartbeat() {
       if (hbTimer) clearInterval(hbTimer);
-      const hbInterval = cfg.get('heartbeat', 30000);
-      const ttl = cfg.get('peerTTL', 60000);
+      var hbInterval = cfg.get('heartbeat', 30000);
+      var ttl = cfg.get('peerTTL', 60000);
       hbTimer = setInterval(function() {
-        const now = Date.now();
-        const peersToRemove = [];
+        var now = Date.now();
+        var removed = 0;
         peers.forEach(function(ts, pubkey) {
-          if (now - ts > ttl) { peersToRemove.push(pubkey); }
+          if (now - ts > ttl) { peers.delete(pubkey); removed++; }
         });
-        for (let i = 0; i < peersToRemove.length; i++) {
-          peers.delete(peersToRemove[i]);
-        }
-        if (peersToRemove.length > 0) {
+        if (removed > 0) {
           notifyPeers();
           if (typeof onUpdate === 'function') { try { onUpdate(); } catch (_) { /* ignore */ } }
         }
-        
-        const answersToRemove = [];
-        const cutoff = now - cfg.get('answersTTL', 300000);
-        for (let i = 0; i < answers.length; i++) {
+        var cutoff = now - cfg.get('answersTTL', 300000);
+        for (var i = answers.length - 1; i >= 0; i--) {
           if (!peers.has(answers[i].fullPubkey) || answers[i].createdAt < cutoff) {
-            answersToRemove.push(i);
+            answers.splice(i, 1);
           }
-        }
-        for (let i = answersToRemove.length - 1; i >= 0; i--) {
-          answers.splice(answersToRemove[i], 1);
-        }
-        
-        const queriesToRemove = [];
-        activeQueries.forEach(function(timestamp, queryId) {
-          if (now - timestamp > 60000) {
-            queriesToRemove.push(queryId);
-          }
-        });
-        for (let i = 0; i < queriesToRemove.length; i++) {
-          activeQueries.delete(queriesToRemove[i]);
         }
       }, hbInterval);
 
@@ -1652,7 +1351,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return;
       }
       reconnecting = true;
-      const delay = Math.min(cfg.get('reconnectMaxDelay', 60000), cfg.get('reconnectBaseDelay', 1000) * Math.pow(2, connAttempts));
+      var delay = Math.min(cfg.get('reconnectMaxDelay', 60000), cfg.get('reconnectBaseDelay', 1000) * Math.pow(2, connAttempts));
       connAttempts++;
       if (log) log.info('Reconnect attempt ' + connAttempts + ' in ' + delay + 'ms');
       setStatus('reconnecting');
@@ -1662,11 +1361,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             try { subscription.close(); } catch (_) { /* ignore */ }
           }
           subscription = null;
-          const room = cfg.get('room', 'noomium-main');
-          const KQ = cfg.get('kQuery', 21000);
-          const KA = cfg.get('kAnswer', 21001);
-          const subWindow = cfg.get('subWindow', 300);
-          const nowSec = Math.floor(Date.now() / 1000);
+          var room = cfg.get('room', 'noomium-main');
+          var KQ = cfg.get('kQuery', 21000);
+          var KA = cfg.get('kAnswer', 21001);
+          var subWindow = cfg.get('subWindow', 300);
+          var nowSec = Math.floor(Date.now() / 1000);
           if (pool) {
             subscription = pool.subscribeMany(cfg.get('relays', []),
               [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
@@ -1693,9 +1392,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       onUpdate = callback;
       connAttempts = 0;
       
-      const loadAndDecrypt = function() {
-          const p = import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm').then(function(mod) {
-              const tools = (mod && mod.default && typeof mod.default.generateSecretKey === 'function') 
+      var loadAndDecrypt = function() {
+          var p = import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm').then(function(mod) {
+              var tools = (mod && mod.default && typeof mod.default.generateSecretKey === 'function') 
                 ? mod.default 
                 : (typeof mod.generateSecretKey === 'function' ? mod : null);
               if (!tools || !tools.SimplePool) throw new Error('nostr-tools: incompatible module structure');
@@ -1708,11 +1407,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           }
 
           return p.then(function(tools) {
-              const KEY = 'noomium:sk';
-              const stored = localStorage.getItem(KEY);
+              var KEY = 'noomium:sk';
+              var stored = localStorage.getItem(KEY);
               if (stored) {
                 if (/^[0-9a-f]{64}$/i.test(stored)) {
-                   const keyHex = stored;
+                   var keyHex = stored;
                    return encryptKey(keyHex, password).then(function(encrypted) {
                        localStorage.setItem(KEY, encrypted);
                        return keyHex;
@@ -1724,8 +1423,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                 }
               }
               
-              const raw = tools.generateSecretKey();
-              const keyHex = Array.from(raw).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+              var raw = tools.generateSecretKey();
+              var keyHex = Array.from(raw).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
               return encryptKey(keyHex, password).then(function(encrypted) {
                   try { localStorage.setItem(KEY, encrypted); } catch (_) { /* ignore */ }
                   return keyHex;
@@ -1741,16 +1440,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           if (!pool && nostr) {
               pool = new nostr.SimplePool();
           }
-          const nowSec = Math.floor(Date.now() / 1000);
-          const room = cfg.get('room', 'noomium-main');
-          const KQ = cfg.get('kQuery', 21000);
-          const KA = cfg.get('kAnswer', 21001);
-          const subWindow = cfg.get('subWindow', 300);
-          
-          if (subscription && typeof subscription.close === 'function') {
-            try { subscription.close(); } catch (_) { /* ignore */ }
-          }
-          subscription = null;
+          var nowSec = Math.floor(Date.now() / 1000);
+          var room = cfg.get('room', 'noomium-main');
+          var KQ = cfg.get('kQuery', 21000);
+          var KA = cfg.get('kAnswer', 21001);
+          var subWindow = cfg.get('subWindow', 300);
           
           started = true;
           try {
@@ -1775,7 +1469,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return {
       onPeers: function(fn) { if (typeof fn === 'function') peerListeners.push(fn); },
       offPeers: function(fn) {
-        const idx = peerListeners.indexOf(fn);
+        var idx = peerListeners.indexOf(fn);
         if (idx > -1) peerListeners.splice(idx, 1);
       },
       getStatus: function() { return netStatus; },
@@ -1783,7 +1477,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       hasKey: function() { return sk !== null; },
       isKeyEncrypted: function() {
         try {
-          const stored = localStorage.getItem('noomium:sk');
+          var stored = localStorage.getItem('noomium:sk');
           return !!(stored && !/^[0-9a-f]{64}$/i.test(stored));
         } catch (e) {
           return false;
@@ -1792,26 +1486,26 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       init: init,
       send: function(vector) {
         if (!pool || !nostr || !sk || AI.getMode() === 'demo') return;
-        const now = Date.now();
-        const rate = cfg.get('queryRateLimit', 3000);
+        var now = Date.now();
+        var rate = cfg.get('queryRateLimit', 3000);
         if (now - lastQueryTime < rate) return;
         lastQueryTime = now;
         answers.length = 0;
         try {
-          const ev = nostr.finalizeEvent({
+          var ev = nostr.finalizeEvent({
             kind: cfg.get('kQuery', 21000),
             created_at: Math.floor(Date.now() / 1000),
             tags: [['t', cfg.get('room', 'noomium-main')]],
             content: JSON.stringify({ vector: vector })
           }, sk);
-          activeQueries.set(ev.id, now);
+          queryId = ev.id;
           safePublish(ev);
           if (typeof onUpdate === 'function') { try { onUpdate(); } catch (_) { /* ignore */ } }
         } catch (e) { if (log) log.warn('pub fail', String(e)); }
       },
       activeAnswers: function() {
-        const out = [];
-        for (let i = 0; i < answers.length; i++) {
+        var out = [];
+        for (var i = 0; i < answers.length; i++) {
           if (peers.has(answers[i].fullPubkey)) out.push(answers[i]);
         }
         return out;
@@ -1838,7 +1532,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         outbox.length = 0;
         relayErrors.clear();
         rateLimitedUntil.clear();
-        activeQueries.clear();
         reconnecting = false;
         setStatus('disconnected');
         if (bus && bus.emit) { try { bus.emit('net:outbox', { count: 0 }); } catch(_) {} }
@@ -2105,6 +1798,22 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     progressHandler: null
   };
 
+  var allNotesCache = null;
+  var allNotesCacheTime = 0;
+  var ALL_NOTES_TTL = 5 * 60 * 1000;
+
+  function getAllNotesCached() {
+    var now = Date.now();
+    if (allNotesCache && (now - allNotesCacheTime < ALL_NOTES_TTL)) {
+      return Promise.resolve(allNotesCache);
+    }
+    return DB.all().then(function(notes) {
+      allNotesCache = notes;
+      allNotesCacheTime = now;
+      return notes;
+    });
+  }
+
   var cachedQuery = null;
   var cachedRegex = null;
 
@@ -2189,7 +1898,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   }
 
   function buildBaseMarkup() {
-    return '<div class="ws base" id="ws-base" style="display:none"></div>';
+    return '<div class="ws base" id="ws-base" style="display:none">' +
+      '<div class="base-h"><div class="base-stats" id="base-stats"></div>' +
+      '<div class="base-ctrls"><input type="text" class="base-search" id="base-q" placeholder="' + Utils.esc(translate('base.search')) + '" />' +
+      '<select class="base-sort" id="base-sort"><option value="new">' + translate('base.sort.new') + '</option><option value="old">' + translate('base.sort.old') + '</option><option value="az">' + translate('base.sort.az') + '</option></select></div></div>' +
+      '<div class="base-list" id="base-list"></div>' +
+    '</div>';
   }
 
   function buildBottomTabMarkup() {
@@ -2215,12 +1929,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     var baseEl = document.getElementById('ws-base');
     if (streamEl) streamEl.style.display = viewName === 'stream' ? 'flex' : 'none';
     if (baseEl) baseEl.style.display = viewName === 'base' ? 'flex' : 'none';
-    if (viewName === 'base') {
-      var baseUI = DI.resolve('BaseUI');
-      if (baseUI && typeof baseUI.mount === 'function') {
-        baseUI.mount(document.getElementById('ws-base'));
-      }
-    }
+    if (viewName === 'base') renderBase();
   }
 
   function setSegment(segKey) {
@@ -2440,10 +2149,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           uiState.activeIdx[appState.seg] = Math.max(0, appState.lists[appState.seg].length - 1);
         }
         renderCarousel();
-        if (appState.view === 'base') {
-          var baseUI = DI.resolve('BaseUI');
-          if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
-        }
+        if (appState.view === 'base') renderBase();
       }).catch(function(err) {
         toast(String(err && err.message || err) || 'Delete failed', 'err');
       });
@@ -2457,10 +2163,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return DB.put(record).then(function() {
           toast(record.shared ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
           executeSearch();
-          if (appState.view === 'base') {
-            var baseUI = DI.resolve('BaseUI');
-            if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
-          }
+          if (appState.view === 'base') renderBase();
         });
       }).catch(function(err) {
         toast(String(err && err.message || err) || 'Toggle failed', 'err');
@@ -2493,155 +2196,132 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   }
 <!-- NOOMIUM_MODULE_END UI.Carousel -->
 
-<!-- NOOMIUM_MODULE_START App.Logic -->
-  function updateCounter() {
-    var value = getEditorValue();
-    var counter = document.getElementById('ed-cnt');
-    if (counter) counter.textContent = Utils.word('symbols', value.length, I18n.getLang());
+<!-- NOOMIUM_MODULE_START UI.Base -->
+  var baseOffset = 0;
+  var baseIsLoading = false;
+  var baseHasMore = true;
+  var baseTotalNotes = 0;
+
+  function onBaseScroll(e) {
+    var el = e.target;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
+      loadBaseNotesChunked();
+    }
   }
 
-  function handleToggleMode(newMode) {
-    if (newMode === appState.sendMode) return;
-    appState.sendMode = newMode;
-    var toggleEl = document.getElementById('mode-toggle');
-    if (!toggleEl) return;
-    toggleEl.setAttribute('data-mode', appState.sendMode);
-    toggleEl.querySelectorAll('.tog-sw-opt').forEach(function(opt) {
-      opt.classList.toggle('on', opt.getAttribute('data-v') === appState.sendMode);
+  function loadBaseNotesChunked() {
+    if (baseIsLoading || !baseHasMore) return;
+    baseIsLoading = true;
+    
+    var chunkSize = Config.get('baseChunkSize', 20);
+    var container = document.getElementById('base-list');
+    var queryInput = document.getElementById('base-q');
+    var sortSelect = document.getElementById('base-sort');
+    var queryValue = queryInput ? queryInput.value.trim().toLowerCase() : '';
+    var sortValue = sortSelect ? sortSelect.value : 'new';
+    
+    DB.getAllPaginated(baseOffset, chunkSize).then(function(chunk) {
+      baseIsLoading = false;
+      if (!chunk || chunk.length === 0) {
+        baseHasMore = false;
+        if (baseOffset === 0 && container) {
+          var emptyTitle = translate('empty.base.t');
+          var emptyDesc = baseTotalNotes === 0 ? translate('empty.base.d') : translate('empty.base.empty');
+          container.innerHTML = '<div class="feed-empty"><div class="feed-empty-ic">▤</div>' +
+            '<div class="feed-empty-t">' + Utils.esc(emptyTitle) + '</div>' +
+            '<div class="feed-empty-d">' + Utils.esc(emptyDesc) + '</div></div>';
+        }
+        return;
+      }
+      
+      if (chunk.length < chunkSize) {
+        baseHasMore = false;
+      }
+      
+      var filtered = chunk;
+      if (queryValue) {
+        filtered = filtered.filter(function(n) { return n.text && n.text.toLowerCase().indexOf(queryValue) >= 0; });
+      }
+      if (sortValue === 'old') {
+        filtered.sort(function(a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+      } else if (sortValue === 'az') {
+        filtered.sort(function(a, b) { return (a.text || '').localeCompare(b.text || '', I18n.getLang() === 'en' ? 'en' : 'ru'); });
+      } else {
+        filtered.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+      }
+      
+      var fragment = document.createDocumentFragment();
+      for (var i = 0; i < filtered.length; i++) {
+        var note = filtered[i];
+        var div = document.createElement('div');
+        var dateStr = Utils.fmtDate(note.createdAt, I18n.getLang());
+        var escapedText = Utils.esc(note.text);
+        var isLongText = escapedText.length > Config.get('truncateTextLength', 120);
+        div.className = 'bi ' + (note.shared ? 'shared' : '');
+        div.setAttribute('data-id', note.id);
+        div.innerHTML = '<div class="bi-t' + (isLongText ? ' truncated' : '') + '">' + escapedText + '</div>' +
+          '<div class="bi-f"><div class="bi-meta">' +
+            '<span class="bi-tag">' + Utils.esc(note.shared ? translate('base.tag.shared') : translate('base.tag.private')) + '</span>' +
+            '<span class="bi-date">' + Utils.esc(dateStr) + '</span>' +
+          '</div></div>';
+        fragment.appendChild(div);
+      }
+      if (container) container.appendChild(fragment);
+      
+      baseOffset += chunk.length;
+      
+      if (filtered.length === 0 && baseHasMore) {
+        loadBaseNotesChunked();
+      }
+      
+    }).catch(function(err) {
+      baseIsLoading = false;
+      toast(String(err && err.message || err) || 'Chunk load failed', 'err');
     });
   }
 
-  function handleSend() {
-    if (appState.sendLock) return;
-    var text = getEditorValue().trim();
-    if (!text) { toast(translate('toast.empty'), 'warn'); return; }
-    if (!AI.ready()) { toast(translate('toast.ai.notready'), 'err'); return; }
-
-    if (appState.sendMode === 'world' && !appState.netAuthorized) {
-      appState.requestNetworkAuth(handleSend);
-      return;
-    }
-
-    var isWorld = appState.sendMode === 'world';
-    var btn = document.getElementById('btn-send');
-    appState.sendLock = true;
-
-    if (btn) {
-      btn.classList.add('sending');
-      btn.disabled = true;
-      btn.innerHTML = SPINNER_SVG;
-    }
-
-    AI.embed(text)
-      .then(function(vector) {
-        return DB.put({
-          id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-          text: text,
-          vector: vector,
-          shared: !!isWorld,
-          createdAt: Date.now()
-        });
-      })
-      .then(function() {
-        setEditorValue('');
-        updateCounter();
-        appState.lastVec = null;
-        toast(isWorld ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
-        executeSearch();
-        if (appState.view === 'base') {
-          var baseUI = DI.resolve('BaseUI');
-          if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
-        }
-      })
-      .catch(function(err) {
-        toast(String(err && err.message || err) || 'Send failed', 'err');
-      })
-      .finally(function() {
-        appState.sendLock = false;
-        if (btn) {
-          btn.classList.remove('sending');
-          btn.disabled = false;
-          btn.innerHTML = PAPER_PLANE_SVG;
-        }
-      });
+  function updateCounts() {
+    ['local', 'world', 'seren'].forEach(function(key) {
+      var el = document.getElementById('c-' + key);
+      if (el) el.textContent = appState.lists[key].length;
+    });
   }
 
-  function executeSearch(force) {
-    var text = getEditorValue();
-    if (!text || !AI.ready()) {
-      appState.lists = { local: [], world: [], seren: [] };
-      updateCounts();
-      renderCarousel();
-      return Promise.resolve();
-    }
+  function buildStatCard(value, label) {
+    return '<div class="stat"><div class="stat-v">' + Utils.esc(String(value)) + '</div>' +
+           '<div class="stat-l">' + Utils.esc(label) + '</div></div>';
+  }
 
-    if (uiState.searchAbortController) {
-      uiState.searchAbortController.abort();
+  function renderBase() {
+    var container = document.getElementById('base-list');
+    if (container) {
+      container.innerHTML = '';
+      container.removeEventListener('scroll', onBaseScroll);
+      container.addEventListener('scroll', onBaseScroll);
     }
-    var controller = new AbortController();
-    uiState.searchAbortController = controller;
-    var signal = controller.signal;
+    
+    baseOffset = 0;
+    baseHasMore = true;
+    baseIsLoading = false;
 
-    return AI.embed(text).then(function(vec) {
-      if (signal.aborted) return;
-      if (!vec) return;
-      if (!appState.lastVec || AI.cosine(vec, appState.lastVec) < Config.get('vectorSimilarityThreshold', 0.98) || force) {
-        appState.lastVec = vec;
-        appState.lastQuery = Date.now();
-        if (AI.getMode() === 'model' && appState.netAuthorized && Net && typeof Net.send === 'function') {
-          Net.send(vec);
+    getAllNotesCached().then(function(allNotes) {
+      var statsEl = document.getElementById('base-stats');
+      if (statsEl) {
+        var sharedCount = 0;
+        for (var i = 0; i < allNotes.length; i++) {
+          if (allNotes[i] && allNotes[i].shared) sharedCount++;
         }
+        statsEl.innerHTML =
+          buildStatCard(allNotes.length, translate('base.stat.total')) +
+          buildStatCard(sharedCount, translate('base.stat.open')) +
+          buildStatCard(allNotes.length - sharedCount, translate('base.stat.priv'));
       }
-      return DB.all().then(function(notes) {
-        if (signal.aborted) return;
-        var localScored = [];
-        for (var i = 0; i < notes.length; i++) {
-          var note = notes[i];
-          if (note && note.vector) {
-            localScored.push({ 
-              id: note.id, 
-              text: note.text, 
-              vector: note.vector, 
-              score: AI.cosine(vec, note.vector), 
-              shared: note.shared, 
-              peer: note.peer, 
-              createdAt: note.createdAt 
-            });
-          }
-        }
-        var worldAnswers = appState.netAuthorized ? Net.activeAnswers() : [];
-        var worldScored = [];
-        for (var i = 0; i < worldAnswers.length; i++) {
-          worldScored.push({ 
-            id: worldAnswers[i].id, 
-            text: worldAnswers[i].text, 
-            vector: worldAnswers[i].vector, 
-            score: AI.cosine(vec, worldAnswers[i].vector), 
-            shared: worldAnswers[i].shared, 
-            peer: worldAnswers[i].peer, 
-            createdAt: worldAnswers[i].createdAt 
-          });
-        }
-        var threshold = Config.get('threshold', 0.30);
-        var serendipityDelta = Config.get('serendipity', 0.15);
-
-        appState.lists.local = localScored.filter(function(n) { return n.score >= threshold; })
-          .sort(function(a, b) { return b.score - a.score; });
-        appState.lists.world = worldScored.filter(function(n) { return n.score >= threshold; })
-          .sort(function(a, b) { return b.score - a.score; });
-        appState.lists.seren = localScored.concat(worldScored)
-          .filter(function(n) { return n.score >= (threshold - serendipityDelta) && n.score < threshold; })
-          .sort(function(a, b) { return b.score - a.score; });
-
-        updateCounts();
-        renderCarousel();
-      });
+      
+      baseTotalNotes = allNotes.length;
+      loadBaseNotesChunked();
     }).catch(function(err) {
-      if (signal.aborted) return;
-      toast(String(err && err.message || err) || 'Search failed', 'err');
-      if (Logger) Logger.warn('executeSearch error', String(err && err.message || err));
-    }).finally(function() {
-      uiState.searchAbortController = null;
+      toast(String(err && err.message || err) || 'Base load failed', 'err');
+      if (Logger) Logger.warn('renderBase error', String(err && err.message || err));
     });
   }
 
@@ -2722,8 +2402,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               toast(translate('toast.edit.saved'), 'ok');
               isEditing = false;
               renderNoteView();
-              var baseUI = DI.resolve('BaseUI');
-              if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
+              renderBase();
               executeSearch();
             }).catch(function(err) {
               toast(String(err && err.message || err) || 'Edit failed', 'err');
@@ -2740,8 +2419,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             DB.del(id).then(function() {
               toast(translate('toast.deleted'), 'ok');
               closeNoteView();
-              var baseUI = DI.resolve('BaseUI');
-              if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
+              renderBase();
               executeSearch();
             }).catch(function(err) {
               toast(String(err && err.message || err) || 'Delete failed', 'err');
@@ -2755,8 +2433,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             DB.put(record).then(function() {
               toast(record.shared ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
               renderNoteView();
-              var baseUI = DI.resolve('BaseUI');
-              if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
+              renderBase();
               executeSearch();
             }).catch(function(err) {
               toast(String(err && err.message || err) || 'Toggle failed', 'err');
@@ -2844,10 +2521,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           }
           DB.bulkPut(clean).then(function() {
             toast('✓ ' + clean.length, 'ok');
-            if (appState.view === 'base') {
-              var baseUI = DI.resolve('BaseUI');
-              if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
-            }
+            if (appState.view === 'base') renderBase();
             executeSearch();
           }).catch(function(err) {
             toast(String(err && err.message || err) || 'Import failed', 'err');
@@ -2859,6 +2533,156 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       reader.readAsText(file);
     };
     input.click();
+  }
+<!-- NOOMIUM_MODULE_END UI.Base -->
+  
+<!-- NOOMIUM_MODULE_START App.Logic -->
+  function updateCounter() {
+    var value = getEditorValue();
+    var counter = document.getElementById('ed-cnt');
+    if (counter) counter.textContent = Utils.word('symbols', value.length, I18n.getLang());
+  }
+
+  function handleToggleMode(newMode) {
+    if (newMode === appState.sendMode) return;
+    appState.sendMode = newMode;
+    var toggleEl = document.getElementById('mode-toggle');
+    if (!toggleEl) return;
+    toggleEl.setAttribute('data-mode', appState.sendMode);
+    toggleEl.querySelectorAll('.tog-sw-opt').forEach(function(opt) {
+      opt.classList.toggle('on', opt.getAttribute('data-v') === appState.sendMode);
+    });
+  }
+
+  function handleSend() {
+    if (appState.sendLock) return;
+    var text = getEditorValue().trim();
+    if (!text) { toast(translate('toast.empty'), 'warn'); return; }
+    if (!AI.ready()) { toast(translate('toast.ai.notready'), 'err'); return; }
+
+    if (appState.sendMode === 'world' && !appState.netAuthorized) {
+      appState.requestNetworkAuth(handleSend);
+      return;
+    }
+
+    var isWorld = appState.sendMode === 'world';
+    var btn = document.getElementById('btn-send');
+    appState.sendLock = true;
+
+    if (btn) {
+      btn.classList.add('sending');
+      btn.disabled = true;
+      btn.innerHTML = SPINNER_SVG;
+    }
+
+    AI.embed(text)
+      .then(function(vector) {
+        return DB.put({
+          id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          text: text,
+          vector: vector,
+          shared: !!isWorld,
+          createdAt: Date.now()
+        });
+      })
+      .then(function() {
+        setEditorValue('');
+        updateCounter();
+        appState.lastVec = null;
+        toast(isWorld ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
+        executeSearch();
+        if (appState.view === 'base') renderBase();
+      })
+      .catch(function(err) {
+        toast(String(err && err.message || err) || 'Send failed', 'err');
+      })
+      .finally(function() {
+        appState.sendLock = false;
+        if (btn) {
+          btn.classList.remove('sending');
+          btn.disabled = false;
+          btn.innerHTML = PAPER_PLANE_SVG;
+        }
+      });
+  }
+
+  function executeSearch(force) {
+    var text = getEditorValue();
+    if (!text || !AI.ready()) {
+      appState.lists = { local: [], world: [], seren: [] };
+      updateCounts();
+      renderCarousel();
+      return Promise.resolve();
+    }
+
+    if (uiState.searchAbortController) {
+      uiState.searchAbortController.abort();
+    }
+    var controller = new AbortController();
+    uiState.searchAbortController = controller;
+    var signal = controller.signal;
+
+    return AI.embed(text).then(function(vec) {
+      if (signal.aborted) return;
+      if (!vec) return;
+      if (!appState.lastVec || AI.cosine(vec, appState.lastVec) < Config.get('vectorSimilarityThreshold', 0.98) || force) {
+        appState.lastVec = vec;
+        appState.lastQuery = Date.now();
+        if (AI.getMode() === 'model' && appState.netAuthorized && Net && typeof Net.send === 'function') {
+          Net.send(vec);
+        }
+      }
+      return getAllNotesCached().then(function(notes) {
+        if (signal.aborted) return;
+        var localScored = [];
+        for (var i = 0; i < notes.length; i++) {
+          var note = notes[i];
+          if (note && note.vector) {
+            localScored.push({ 
+              id: note.id, 
+              text: note.text, 
+              vector: note.vector, 
+              score: AI.cosine(vec, note.vector), 
+              shared: note.shared, 
+              peer: note.peer, 
+              createdAt: note.createdAt 
+            });
+          }
+        }
+        var worldAnswers = appState.netAuthorized ? Net.activeAnswers() : [];
+        var worldScored = [];
+        for (var i = 0; i < worldAnswers.length; i++) {
+          worldScored.push({ 
+            id: worldAnswers[i].id, 
+            text: worldAnswers[i].text, 
+            vector: worldAnswers[i].vector, 
+            score: AI.cosine(vec, worldAnswers[i].vector), 
+            shared: worldAnswers[i].shared, 
+            peer: worldAnswers[i].peer, 
+            createdAt: worldAnswers[i].createdAt 
+          });
+        }
+        var threshold = Config.get('threshold', 0.30);
+        var serendipityDelta = Config.get('serendipity', 0.15);
+
+        appState.lists.local = localScored.filter(function(n) { return n.score >= threshold; })
+          .sort(function(a, b) { return b.score - a.score; });
+        appState.lists.world = worldScored.filter(function(n) { return n.score >= threshold; })
+          .sort(function(a, b) { return b.score - a.score; });
+        appState.lists.seren = localScored.concat(worldScored)
+          .filter(function(n) { return n.score >= (threshold - serendipityDelta) && n.score < threshold; })
+          .sort(function(a, b) { return b.score - a.score; });
+
+        updateCounts();
+        renderCarousel();
+      });
+    }).catch(function(err) {
+      if (signal.aborted) return;
+      toast(String(err && err.message || err) || 'Search failed', 'err');
+      if (Logger) Logger.warn('executeSearch error', String(err && err.message || err));
+    }).finally(function() {
+      uiState.searchAbortController = null;
+    });
   }
 <!-- NOOMIUM_MODULE_END App.Logic -->
 
@@ -3169,13 +2993,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
   }
 
-  function updateCounts() {
-    ['local', 'world', 'seren'].forEach(function(key) {
-      var el = document.getElementById('c-' + key);
-      if (el) el.textContent = appState.lists[key].length;
-    });
-  }
-
   function bindEvents() {
     var editor = document.getElementById('ed-ta');
     if (editor) {
@@ -3214,6 +3031,28 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (el) handleItemAction(el.getAttribute('data-act'), el);
       });
     }
+
+    var baseContainer = document.getElementById('ws-base');
+    if (baseContainer) {
+      baseContainer.addEventListener('click', function(e) {
+        var bi = e.target.closest('.bi');
+        if (bi) {
+          var id = bi.getAttribute('data-id');
+          if (id) openNoteView(id);
+        }
+      });
+    }
+
+    var baseSearchInput = document.getElementById('base-q');
+    if (baseSearchInput) {
+      baseSearchInput.addEventListener('input', function() {
+        if (uiState.baseSearchTimer) clearTimeout(uiState.baseSearchTimer);
+        uiState.baseSearchTimer = setTimeout(renderBase, Config.get('baseSearchDebounce', 200));
+      });
+    }
+
+    var baseSortSelect = document.getElementById('base-sort');
+    if (baseSortSelect) baseSortSelect.onchange = renderBase;
 
     var menuBtn = document.getElementById('btn-menu');
     if (menuBtn) menuBtn.onclick = openMenu;
@@ -3261,10 +3100,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     Bus.on('net:status', netStatusHandler);
     busHandlers.push({event: 'net:status', fn: netStatusHandler});
     
-    var dbChangeHandler = function() { 
-      var baseUI = DI.resolve('BaseUI');
-      if (baseUI && typeof baseUI.refresh === 'function') baseUI.refresh();
-    };
+    var dbChangeHandler = function() { allNotesCache = null; };
     Bus.on('db:change', dbChangeHandler);
     busHandlers.push({event: 'db:change', fn: dbChangeHandler});
 
@@ -3323,11 +3159,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   }
 
   function cleanup() {
-    try {
-      var baseUI = DI.resolve('BaseUI');
-      if (baseUI && typeof baseUI.destroy === 'function') baseUI.destroy();
-    } catch (_) { }
-
     if (uiState.carouselObserver) {
       try { uiState.carouselObserver.disconnect(); } catch (_) {}
       uiState.carouselObserver = null;
@@ -3796,14 +3627,14 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
 <!-- NOOMIUM_MODULE_START SW -->
   if ('serviceWorker' in navigator) {
-    const appVersionMeta = document.querySelector('meta[name="app-version"]');
-    const appVersion = appVersionMeta ? appVersionMeta.getAttribute('content') : '0';
+    var appVersionMeta = document.querySelector('meta[name="app-version"]');
+    var appVersion = appVersionMeta ? appVersionMeta.getAttribute('content') : '0';
     
-    let storedVersion = null;
+    var storedVersion = null;
     try { storedVersion = localStorage.getItem('noomium:appVersion'); } catch(e) {}
     
     if (storedVersion !== appVersion) {
-      const doReload = function() {
+      var doReload = function() {
         try { localStorage.setItem('noomium:appVersion', appVersion); } catch(e) {}
         location.reload(true);
       };
@@ -3816,7 +3647,64 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         doReload();
       }
     } else {
-      navigator.serviceWorker.register('/sw.js').catch(function() { /* ignore */ });
+      const swCode = `
+        const CACHE = 'noomium-v' + ` + JSON.stringify(appVersion) + `;
+        self.addEventListener('install', e => { self.skipWaiting(); });
+        self.addEventListener('activate', e => { 
+          e.waitUntil(
+            caches.keys().then(cacheNames => {
+              return Promise.all(
+                cacheNames.filter(cacheName => cacheName !== CACHE).map(cacheName => caches.delete(cacheName))
+              );
+            }).then(() => self.clients.claim())
+          );
+        });
+        self.addEventListener('message', function(event) { if (event.data && event.data.type === 'SKIP_WAITING') { self.skipWaiting(); } });
+        self.addEventListener('fetch', e => {
+          if (e.request.method !== 'GET') return;
+          if (e.request.mode === 'navigate') {
+            e.respondWith(
+              fetch(e.request).then(res => {
+                if (res && res.status === 200) {
+                  const clone = res.clone();
+                  caches.open(CACHE).then(c => c.put(e.request, clone));
+                }
+                return res;
+              }).catch(() => caches.match(e.request).then(r => r || caches.match('/')))
+            );
+            return;
+          }
+          e.respondWith(
+            caches.match(e.request).then(r => r || fetch(e.request).then(res => {
+              if (res.status === 200 && (e.request.url.startsWith(self.location.origin) || e.request.url.includes('jsdelivr'))) {
+                const clone = res.clone();
+                caches.open(CACHE).then(c => c.put(e.request, clone));
+              }
+              return res;
+            }).catch(() => caches.match('/')))
+          );
+        });
+      `;
+      try {
+        const blob = new Blob([swCode], { type: 'application/javascript' });
+        const swUrl = URL.createObjectURL(blob);
+        navigator.serviceWorker.register(swUrl).then(function(reg) {
+          if (reg.waiting) {
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          }
+          reg.onupdatefound = function() {
+            const installing = reg.installing;
+            if (installing) {
+              installing.onstatechange = function() {
+                if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+                  installing.postMessage({ type: 'SKIP_WAITING' });
+                  window.location.reload();
+                }
+              };
+            }
+          };
+        }).catch(function() { /* ignore SW errors */ });
+      } catch(e) { /* ignore */ }
     }
   }
 <!-- NOOMIUM_MODULE_END SW -->
