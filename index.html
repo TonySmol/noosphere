@@ -2,26 +2,19 @@
 <html lang="ru" data-theme="dark">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#1d232a">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; connect-src 'self' https://cdn.jsdelivr.net https://huggingface.co wss:; img-src 'self' data: blob:; worker-src 'self' blob:; base-uri 'self'; form-action 'self';">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NOOmium</title>
   
-  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet" type="text/css" />
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet">
   <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/csp@3.14.1/dist/cdn.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.7/dist/dexie.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/plugin/relativeTime.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/locale/ru.js"></script>
-
+  
   <style>
     [x-cloak] { display: none !important; }
-    .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   </style>
 </head>
 <body class="bg-base-100 min-h-screen">
   
-  <div x-data="app" x-init="init()" x-cloak>
+  <div x-data="app" x-init="init" x-cloak>
     
     <!-- HEADER -->
     <div class="navbar bg-base-200 shadow-lg sticky top-0 z-40">
@@ -30,12 +23,12 @@
       </div>
       <div class="flex-none gap-2">
         <div class="badge badge-ghost gap-2">
-          <span class="w-2 h-2 rounded-full" :class="status.storage.class"></span>
-          <span class="text-xs" x-text="status.storage.text"></span>
+          <span class="w-2 h-2 rounded-full" :class="storageStatusClass"></span>
+          <span class="text-xs" x-text="storageStatusText"></span>
         </div>
         <div class="badge badge-ghost gap-2">
-          <span class="w-2 h-2 rounded-full" :class="status.ai.class"></span>
-          <span class="text-xs" x-text="status.ai.text"></span>
+          <span class="w-2 h-2 rounded-full" :class="aiStatusClass"></span>
+          <span class="text-xs" x-text="aiStatusText"></span>
         </div>
       </div>
     </div>
@@ -48,24 +41,24 @@
         <div class="card-body">
           <textarea 
             x-model="editorText"
-            @input="onEditorInput()"
+            @input="onEditorInput"
             class="textarea textarea-bordered h-24 text-lg"
             placeholder="О чём думаешь?"
           ></textarea>
           <div class="flex justify-between items-center mt-2">
-            <span class="text-sm opacity-70" x-text="editorText.length + ' симв.'"></span>
+            <span class="text-sm opacity-70" x-text="charCount"></span>
             <div class="flex gap-2">
               <div class="btn-group">
                 <button class="btn btn-sm"
-                        :class="editorMode === 'private' ? 'btn-primary' : 'btn-ghost'"
-                        @click="setEditorMode('private')">Личное</button>
+                        :class="privateBtnClass"
+                        @click="setPrivateMode">Личное</button>
                 <button class="btn btn-sm"
-                        :class="editorMode === 'world' ? 'btn-primary' : 'btn-ghost'"
-                        @click="setEditorMode('world')">Мир</button>
+                        :class="worldBtnClass"
+                        @click="setWorldMode">Мир</button>
               </div>
               <button class="btn btn-primary"
                       :disabled="!canSend"
-                      @click="sendNote()">
+                      @click="sendNote">
                 Послать
               </button>
             </div>
@@ -75,27 +68,24 @@
 
       <!-- TABS -->
       <div role="tablist" class="tabs tabs-lifted mb-4">
-        <a role="tab" class="tab" :class="{ 'tab-active': activeTab === 'stream' }"
-           @click="activeTab = 'stream'">Поток</a>
-        <a role="tab" class="tab" :class="{ 'tab-active': activeTab === 'base' }"
-           @click="activeTab = 'base'">База</a>
+        <a role="tab" class="tab" :class="streamTabClass" @click="setStreamTab">Поток</a>
+        <a role="tab" class="tab" :class="baseTabClass" @click="setBaseTab">База</a>
       </div>
 
       <!-- STREAM TAB -->
-      <div x-show="activeTab === 'stream'" class="space-y-6">
+      <div x-show="isStreamTab" class="space-y-6">
         
-        <section x-show="searchResults.my.length > 0">
+        <section x-show="hasMyResults">
           <h3 class="text-lg font-bold mb-2">Моё</h3>
           <div class="space-y-2">
-            <template x-for="note in searchResults.my" :key="note.id">
+            <template x-for="note in myResults" :key="note.id">
               <div class="card bg-base-200 shadow">
                 <div class="card-body p-4">
                   <p x-text="note.text"></p>
                   <div class="flex justify-between items-center mt-2">
-                    <span class="badge badge-primary badge-sm" x-text="Math.round(note.score * 100) + '%'"></span>
+                    <span class="badge badge-primary badge-sm" x-text="note.scoreText"></span>
                     <div class="flex gap-1">
-                      <button class="btn btn-ghost btn-xs" @click="toggleShared(note.id)" 
-                              x-text="note.shared ? 'Скрыть' : 'Открыть'"></button>
+                      <button class="btn btn-ghost btn-xs" @click="toggleShared(note.id)" x-text="note.toggleText"></button>
                       <button class="btn btn-ghost btn-xs btn-error" @click="deleteNote(note.id)">Удалить</button>
                     </div>
                   </div>
@@ -105,15 +95,15 @@
           </div>
         </section>
 
-        <section x-show="searchResults.insights.length > 0">
+        <section x-show="hasInsightsResults">
           <h3 class="text-lg font-bold mb-2">Озарения</h3>
           <div class="space-y-2">
-            <template x-for="note in searchResults.insights" :key="note.id">
+            <template x-for="note in insightsResults" :key="note.id">
               <div class="card bg-base-200 shadow">
                 <div class="card-body p-4">
                   <p x-text="note.text"></p>
                   <div class="flex justify-end mt-2">
-                    <span class="badge badge-accent badge-sm" x-text="Math.round(note.score * 100) + '%'"></span>
+                    <span class="badge badge-accent badge-sm" x-text="note.scoreText"></span>
                   </div>
                 </div>
               </div>
@@ -121,30 +111,29 @@
           </div>
         </section>
 
-        <div x-show="searchResults.my.length === 0 && searchResults.insights.length === 0 && editorText.length > 0" 
-             class="text-center py-10 opacity-50">
+        <div x-show="showNoResults" class="text-center py-10 opacity-50">
           <p>Ничего не найдено.</p>
         </div>
         
-        <div x-show="editorText.length === 0" class="text-center py-10 opacity-50">
+        <div x-show="showEmptyState" class="text-center py-10 opacity-50">
           <p>Начните печатать.</p>
         </div>
       </div>
 
       <!-- BASE TAB -->
-      <div x-show="activeTab === 'base'">
+      <div x-show="isBaseTab">
         <div class="stats shadow mb-4 w-full">
           <div class="stat">
             <div class="stat-title">Всего</div>
-            <div class="stat-value text-lg" x-text="baseStats.total"></div>
+            <div class="stat-value text-lg" x-text="totalNotes"></div>
           </div>
           <div class="stat">
             <div class="stat-title">Открыто</div>
-            <div class="stat-value text-lg" x-text="baseStats.shared"></div>
+            <div class="stat-value text-lg" x-text="sharedNotes"></div>
           </div>
           <div class="stat">
             <div class="stat-title">Лично</div>
-            <div class="stat-value text-lg" x-text="baseStats.private"></div>
+            <div class="stat-value text-lg" x-text="privateNotes"></div>
           </div>
         </div>
         <div class="space-y-2">
@@ -153,9 +142,8 @@
               <div class="card-body p-4">
                 <p class="line-clamp-3" x-text="note.text"></p>
                 <div class="flex justify-between items-center mt-2">
-                  <span class="badge badge-sm" :class="note.shared ? 'badge-secondary' : 'badge-ghost'"
-                        x-text="note.shared ? 'открыто' : 'лично'"></span>
-                  <span class="text-xs opacity-60" x-text="formatDate(note.createdAt)"></span>
+                  <span class="badge badge-sm" :class="note.badgeClass" x-text="note.statusText"></span>
+                  <span class="text-xs opacity-60" x-text="note.dateText"></span>
                 </div>
               </div>
             </div>
@@ -166,15 +154,15 @@
     </main>
 
     <!-- PASSWORD MODAL -->
-    <dialog class="modal" :class="{ 'modal-open': showPasswordModal }">
+    <dialog class="modal" :class="modalClass">
       <div class="modal-box">
         <h3 class="font-bold text-lg">Защита данных</h3>
         <p class="py-4 opacity-70" x-text="passwordModalText"></p>
         <div class="form-control">
-          <input type="password" x-model="password" placeholder="Пароль" class="input input-bordered" />
+          <input type="password" x-model="password" @keydown.enter="confirmPassword" placeholder="Пароль" class="input input-bordered" />
         </div>
         <div class="modal-action">
-          <button class="btn btn-primary" @click="confirmPassword()">Сохранить</button>
+          <button class="btn btn-primary" @click="confirmPassword">Сохранить</button>
         </div>
       </div>
     </dialog>
@@ -182,358 +170,195 @@
   </div>
 
   <script>
-    dayjs.extend(dayjs_plugin_relativeTime);
-    dayjs.locale('ru');
-
     // ================================================================
-    // KERNEL: DI Container + EventBus + Logger
-    // ================================================================
-    const Kernel = (() => {
-      const modules = new Map();
-      const listeners = new Map();
-      const logger = {
-        info: (msg, data) => console.log(`[INFO] ${msg}`, data || ''),
-        warn: (msg, data) => console.warn(`[WARN] ${msg}`, data || ''),
-        error: (msg, data) => console.error(`[ERROR] ${msg}`, data || '')
-      };
-
-      return {
-        register(name, factory) {
-          modules.set(name, { factory, instance: null });
-        },
-        get(name) {
-          const mod = modules.get(name);
-          if (!mod) throw new Error(`Module ${name} not found`);
-          if (!mod.instance) {
-            mod.instance = mod.factory(this);
-          }
-          return mod.instance;
-        },
-        async boot() {
-          for (const [name, mod] of modules) {
-            try {
-              if (typeof mod.factory === 'function') {
-                mod.instance = await mod.factory(this);
-              }
-              logger.info(`Module ${name} initialized`);
-            } catch (err) {
-              logger.error(`Module ${name} failed to initialize`, err);
-            }
-          }
-        },
-        on(event, handler) {
-          if (!listeners.has(event)) listeners.set(event, new Set());
-          listeners.get(event).add(handler);
-        },
-        off(event, handler) {
-          const set = listeners.get(event);
-          if (set) set.delete(handler);
-        },
-        emit(event, payload) {
-          const set = listeners.get(event);
-          if (set) {
-            for (const handler of set) {
-              try {
-                handler(payload);
-              } catch (err) {
-                logger.error(`Event handler error for ${event}`, err);
-              }
-            }
-          }
-        },
-        logger
-      };
-    })();
-
-    // ================================================================
-    // MODULE: Config
-    // ================================================================
-    Kernel.register('config', () => {
-      const STORAGE_KEY = 'noomium:config';
-      const defaults = {
-        dbName: 'noomium_v2',
-        crypto: { iterations: 100000 },
-        ai: { model: 'Xenova/multilingual-e5-small', dim: 384, cacheLimit: 300 },
-        search: { threshold: 0.30, serendipity: 0.15, debounceMs: 800 }
-      };
-      
-      let state = { ...defaults };
-      
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (saved) state = { ...state, ...JSON.parse(saved) };
-      } catch (err) {
-        Kernel.logger.warn('Config load failed', err);
-      }
-
-      return {
-        get(key, def) {
-          return state[key] !== undefined ? state[key] : def;
-        },
-        set(key, value) {
-          state[key] = value;
-          this.save();
-        },
-        save() {
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-          } catch (err) {
-            Kernel.logger.error('Config save failed', err);
-          }
-        }
-      };
-    });
-
-    // ================================================================
-    // MODULE: Storage (Dexie)
-    // ================================================================
-    Kernel.register('storage', async (kernel) => {
-      const config = kernel.get('config');
-      const dbName = config.get('dbName', 'noomium_v2');
-      
-      const db = new Dexie(dbName);
-      db.version(1).stores({
-        notes: 'id, shared, createdAt'
-      });
-
-      let cache = [];
-
-      const refreshCache = async () => {
-        try {
-          cache = await db.notes.toArray();
-          kernel.emit('storage:changed', { notes: cache });
-        } catch (err) {
-          kernel.logger.error('Cache refresh failed', err);
-        }
-      };
-
-      try {
-        await db.open();
-        await refreshCache();
-      } catch (err) {
-        kernel.logger.error('Storage init failed', err);
-      }
-
-      return {
-        async put(note) {
-          await db.notes.put(note);
-          await refreshCache();
-          kernel.emit('note:saved', { note });
-        },
-        async delete(id) {
-          await db.notes.delete(id);
-          await refreshCache();
-          kernel.emit('note:deleted', { id });
-        },
-        async toggleShared(id) {
-          const note = await db.notes.get(id);
-          if (note) {
-            note.shared = !note.shared;
-            await db.notes.put(note);
-            await refreshCache();
-            kernel.emit('note:updated', { note });
-          }
-        },
-        all() {
-          return cache;
-        },
-        async reset() {
-          await db.delete();
-          cache = [];
-          await db.open();
-          kernel.emit('storage:reset');
-        }
-      };
-    });
-
-    // ================================================================
-    // MODULE: Crypto (Web Crypto API)
-    // ================================================================
-    Kernel.register('crypto', (kernel) => {
-      const config = kernel.get('config');
-      const iterations = config.get('crypto').iterations;
-
-      const deriveKey = async (password, salt) => {
-        const enc = new TextEncoder();
-        const keyMaterial = await crypto.subtle.importKey(
-          'raw', 
-          enc.encode(password), 
-          'PBKDF2', 
-          false, 
-          ['deriveKey']
-        );
-        return crypto.subtle.deriveKey(
-          { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
-          keyMaterial,
-          { name: 'AES-GCM', length: 256 },
-          false,
-          ['encrypt', 'decrypt']
-        );
-      };
-
-      return {
-        async encryptKey(hexKey, password) {
-          const salt = crypto.getRandomValues(new Uint8Array(16));
-          const iv = crypto.getRandomValues(new Uint8Array(12));
-          const key = await deriveKey(password, salt);
-          const enc = new TextEncoder();
-          const ciphertext = await crypto.subtle.encrypt(
-            { name: 'AES-GCM', iv }, 
-            key, 
-            enc.encode(hexKey)
-          );
-          const combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
-          combined.set(salt, 0);
-          combined.set(iv, salt.length);
-          combined.set(new Uint8Array(ciphertext), salt.length + iv.length);
-          return btoa(String.fromCharCode.apply(null, combined));
-        },
-        async decryptKey(base64Str, password) {
-          const combined = Uint8Array.from(atob(base64Str), c => c.charCodeAt(0));
-          const salt = combined.slice(0, 16);
-          const iv = combined.slice(16, 28);
-          const ciphertext = combined.slice(28);
-          const key = await deriveKey(password, salt);
-          const dec = await crypto.subtle.decrypt(
-            { name: 'AES-GCM', iv }, 
-            key, 
-            ciphertext
-          );
-          return new TextDecoder().decode(dec);
-        },
-        generateKey() {
-          return Array.from(crypto.getRandomValues(new Uint8Array(32)))
-            .map(b => b.toString(16).padStart(2, '0')).join('');
-        }
-      };
-    });
-
-    // ================================================================
-    // ALPINE COMPONENT (Правильный синтаксис CSP)
+    // ALPINE COMPONENT (CSP-compliant)
     // ================================================================
     document.addEventListener('alpine:init', () => {
       Alpine.data('app', () => ({
+        // State
         editorText: '',
         editorMode: 'private',
         activeTab: 'stream',
         allNotes: [],
-        searchResults: { my: [], insights: [] },
+        myResults: [],
+        insightsResults: [],
         showPasswordModal: false,
-        passwordModalText: 'Придумайте пароль для шифрования вашего приватного ключа.',
+        passwordModalText: 'Придумайте пароль для шифрования.',
         password: '',
-        status: {
-          storage: { class: 'bg-warning animate-pulse', text: 'loading' },
-          ai: { class: 'bg-warning animate-pulse', text: 'loading' }
-        },
+        storageStatus: 'loading',
+        aiStatus: 'loading',
         _searchTimer: null,
 
+        // Lifecycle
         async init() {
-          try {
-            await Kernel.boot();
-            
-            const storage = Kernel.get('storage');
-            this.allNotes = storage.all();
-            this.status.storage = { class: 'bg-success', text: 'ready' };
-            
-            Kernel.on('storage:changed', ({ notes }) => {
-              this.allNotes = notes;
-              if (this.editorText) {
-                this.runSearch(this.editorText);
-              }
-            });
+          console.log('[INFO] App initialized');
+          this.storageStatus = 'ready';
+          this.showPasswordModal = true;
+        },
 
-            const stored = localStorage.getItem('noomium:sk');
-            this.showPasswordModal = true;
-            this.passwordModalText = stored 
-              ? 'Введите пароль для доступа к данным.' 
-              : 'Придумайте пароль для шифрования вашего приватного ключа.';
-          } catch (err) {
-            Kernel.logger.error('App init failed', err);
-            this.status.storage = { class: 'bg-error', text: 'error' };
-          }
+        // Computed properties (getters)
+        get charCount() {
+          return `${this.editorText.length} симв.`;
         },
 
         get canSend() {
           return this.editorText.trim().length > 0;
         },
 
-        get baseStats() {
-          const all = this.allNotes;
-          return {
-            total: all.length,
-            shared: all.filter(n => n.shared).length,
-            private: all.filter(n => !n.shared).length
-          };
+        get privateBtnClass() {
+          return this.editorMode === 'private' ? 'btn-primary' : 'btn-ghost';
         },
 
-        setEditorMode(mode) {
-          this.editorMode = mode;
+        get worldBtnClass() {
+          return this.editorMode === 'world' ? 'btn-primary' : 'btn-ghost';
+        },
+
+        get streamTabClass() {
+          return { 'tab-active': this.activeTab === 'stream' };
+        },
+
+        get baseTabClass() {
+          return { 'tab-active': this.activeTab === 'base' };
+        },
+
+        get isStreamTab() {
+          return this.activeTab === 'stream';
+        },
+
+        get isBaseTab() {
+          return this.activeTab === 'base';
+        },
+
+        get hasMyResults() {
+          return this.myResults.length > 0;
+        },
+
+        get hasInsightsResults() {
+          return this.insightsResults.length > 0;
+        },
+
+        get showNoResults() {
+          return this.myResults.length === 0 && this.insightsResults.length === 0 && this.editorText.length > 0;
+        },
+
+        get showEmptyState() {
+          return this.editorText.length === 0;
+        },
+
+        get totalNotes() {
+          return this.allNotes.length;
+        },
+
+        get sharedNotes() {
+          return this.allNotes.filter(n => n.shared).length;
+        },
+
+        get privateNotes() {
+          return this.allNotes.filter(n => !n.shared).length;
+        },
+
+        get storageStatusClass() {
+          const classes = {
+            loading: 'bg-warning animate-pulse',
+            ready: 'bg-success',
+            error: 'bg-error'
+          };
+          return classes[this.storageStatus] || 'bg-warning';
+        },
+
+        get storageStatusText() {
+          return this.storageStatus;
+        },
+
+        get aiStatusClass() {
+          const classes = {
+            loading: 'bg-warning animate-pulse',
+            ready: 'bg-success',
+            error: 'bg-error'
+          };
+          return classes[this.aiStatus] || 'bg-warning';
+        },
+
+        get aiStatusText() {
+          return this.aiStatus;
+        },
+
+        get modalClass() {
+          return { 'modal-open': this.showPasswordModal };
+        },
+
+        // Methods
+        setPrivateMode() {
+          this.editorMode = 'private';
+        },
+
+        setWorldMode() {
+          this.editorMode = 'world';
+        },
+
+        setStreamTab() {
+          this.activeTab = 'stream';
+        },
+
+        setBaseTab() {
+          this.activeTab = 'base';
         },
 
         onEditorInput() {
           clearTimeout(this._searchTimer);
           this._searchTimer = setTimeout(() => {
-            this.runSearch(this.editorText);
-          }, Kernel.get('config').get('search').debounceMs);
+            this.runSearch();
+          }, 800);
         },
 
-        async runSearch(queryText) {
+        async runSearch() {
           // TODO: Implement search logic
-          this.searchResults = { my: [], insights: [] };
+          this.myResults = [];
+          this.insightsResults = [];
         },
 
         async sendNote() {
           if (!this.canSend) return;
           
-          const storage = Kernel.get('storage');
           const note = {
-            id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            id: 'n' + Date.now().toString(36),
             text: this.editorText.trim(),
             shared: this.editorMode === 'world',
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            badgeClass: this.editorMode === 'world' ? 'badge-secondary' : 'badge-ghost',
+            statusText: this.editorMode === 'world' ? 'открыто' : 'лично',
+            dateText: 'только что'
           };
           
-          await storage.put(note);
+          this.allNotes.unshift(note);
           this.editorText = '';
-          this.searchResults = { my: [], insights: [] };
+          this.myResults = [];
+          this.insightsResults = [];
         },
 
         async toggleShared(id) {
-          const storage = Kernel.get('storage');
-          await storage.toggleShared(id);
+          const note = this.allNotes.find(n => n.id === id);
+          if (note) {
+            note.shared = !note.shared;
+            note.badgeClass = note.shared ? 'badge-secondary' : 'badge-ghost';
+            note.statusText = note.shared ? 'открыто' : 'лично';
+          }
         },
 
         async deleteNote(id) {
           if (!confirm('Удалить эту мысль навсегда?')) return;
-          const storage = Kernel.get('storage');
-          await storage.delete(id);
+          this.allNotes = this.allNotes.filter(n => n.id !== id);
         },
 
         async confirmPassword() {
-          if (!this.password) return;
-          
-          try {
-            const crypto = Kernel.get('crypto');
-            const stored = localStorage.getItem('noomium:sk');
-            
-            if (stored) {
-              await crypto.decryptKey(stored, this.password);
-            } else {
-              const keyHex = crypto.generateKey();
-              const encrypted = await crypto.encryptKey(keyHex, this.password);
-              localStorage.setItem('noomium:sk', encrypted);
-            }
-            
-            this.showPasswordModal = false;
-            this.password = '';
-            Kernel.emit('crypto:ready');
-          } catch (err) {
-            alert('Неверный пароль!');
+          if (!this.password || this.password.length < 4) {
+            this.passwordModalText = 'Пароль должен быть не менее 4 символов.';
+            return;
           }
-        },
-
-        formatDate(ts) {
-          return dayjs(ts).fromNow();
+          
+          this.showPasswordModal = false;
+          this.password = '';
+          console.log('[INFO] Password confirmed');
         }
       }));
     });
