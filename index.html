@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.4">
+<meta name="app-version" content="1.2.3">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -645,119 +645,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   }, ['Store', 'Logger']);
 <!-- NOOMIUM_MODULE_END Config -->
 
-<!-- NOOMIUM_MODULE_START Crypto -->
-  DI.register('Crypto', function(cfg, log) {
-    let nostrTools = null;
-    let nostrLoadPromise = null;
-
-    function loadNostrTools() {
-      if (nostrTools) return Promise.resolve(nostrTools);
-      if (nostrLoadPromise) return nostrLoadPromise;
-      
-      nostrLoadPromise = import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm').then(function(mod) {
-        const tools = (mod && mod.default && typeof mod.default.generateSecretKey === 'function') 
-          ? mod.default 
-          : (typeof mod.generateSecretKey === 'function' ? mod : null);
-        if (!tools) throw new Error('nostr-tools: incompatible module structure');
-        nostrTools = tools;
-        return tools;
-      }).catch(function(err) {
-        nostrLoadPromise = null;
-        throw err;
-      });
-      
-      return nostrLoadPromise;
-    }
-
-    function deriveKey(password, salt) {
-      const enc = new TextEncoder();
-      return crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']).then(function(keyMaterial) {
-        return crypto.subtle.deriveKey(
-          { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
-          keyMaterial,
-          { name: 'AES-GCM', length: 256 },
-          false,
-          ['encrypt', 'decrypt']
-        );
-      });
-    }
-
-    function encryptKey(hexKey, password) {
-      const salt = crypto.getRandomValues(new Uint8Array(16));
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-      return deriveKey(password, salt).then(function(key) {
-        const enc = new TextEncoder();
-        return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(hexKey)).then(function(ciphertext) {
-          const combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
-          combined.set(salt, 0);
-          combined.set(iv, salt.length);
-          combined.set(new Uint8Array(ciphertext), salt.length + iv.length);
-          let binary = '';
-          for (let i = 0; i < combined.length; i++) {
-            binary += String.fromCharCode(combined[i]);
-          }
-          return btoa(binary);
-        });
-      });
-    }
-
-    function decryptKey(base64Str, password) {
-      let combined;
-      try {
-        const binary = atob(base64Str);
-        combined = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-          combined[i] = binary.charCodeAt(i);
-        }
-      } catch (e) {
-        return Promise.reject(new Error('WRONG_PASSWORD'));
-      }
-      
-      const salt = combined.slice(0, 16);
-      const iv = combined.slice(16, 28);
-      const ciphertext = combined.slice(28);
-      
-      return deriveKey(password, salt).then(function(key) {
-        return crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext).then(function(dec) {
-          return new TextDecoder().decode(dec);
-        }).catch(function() {
-          throw new Error('WRONG_PASSWORD');
-        });
-      }).catch(function(err) {
-        if (err.message === 'WRONG_PASSWORD') throw err;
-        throw new Error('WRONG_PASSWORD');
-      });
-    }
-
-    function generateKeypair() {
-      return loadNostrTools().then(function(tools) {
-        const skBytes = tools.generateSecretKey();
-        const skHex = Array.from(skBytes).map(function(b) { 
-          return b.toString(16).padStart(2, '0'); 
-        }).join('');
-        const pkHex = tools.getPublicKey(skBytes);
-        return { sk: skHex, pk: pkHex };
-      });
-    }
-
-    function signEvent(event, skHex) {
-      return loadNostrTools().then(function(tools) {
-        const skBytes = new Uint8Array(skHex.match(/.{1,2}/g).map(function(b) { 
-          return parseInt(b, 16); 
-        }));
-        return tools.finalizeEvent(event, skBytes);
-      });
-    }
-
-    return {
-      encryptKey: encryptKey,
-      decryptKey: decryptKey,
-      generateKeypair: generateKeypair,
-      signEvent: signEvent
-    };
-  }, ['Config', 'Logger']);
-<!-- NOOMIUM_MODULE_END Crypto -->
-  
 <!-- NOOMIUM_MODULE_START DB -->
   DI.register('DB', function(cfg, log, bus) {
     let db = null;
@@ -1187,272 +1074,130 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
   }, ['Config', 'DB', 'Utils', 'I18n', 'Toast', 'Logger']);
 <!-- NOOMIUM_MODULE_END BaseUI -->
 
-<!-- NOOMIUM_MODULE_START AIWorker -->
-  DI.register('AIWorker', function(cfg, log, bus) {
-    let worker = null;
-    let ready = false;
-    let loadPromise = null;
-    let requestId = 0;
-    const pendingRequests = new Map();
-    const progressHandlers = [];
-
-    function initWorker() {
-      if (worker) return worker;
-      
-      try {
-        worker = new Worker('/ai-worker.js');
-        
-        worker.onmessage = function(e) {
-          const msg = e.data;
-          if (!msg || !msg.type) return;
-          
-          if (msg.type === 'progress') {
-            const pct = msg.pct || 0;
-            for (let i = 0; i < progressHandlers.length; i++) {
-              try { progressHandlers[i](pct); } catch (_) {}
-            }
-            if (bus && bus.emit) {
-              try { bus.emit('ai:progress', { pct: pct }); } catch (_) {}
-            }
-          } else if (msg.type === 'ready') {
-            ready = true;
-            if (loadPromise) {
-              loadPromise.resolve();
-              loadPromise = null;
-            }
-          } else if (msg.type === 'embed_result') {
-            const req = pendingRequests.get(msg.requestId);
-            if (req) {
-              pendingRequests.delete(msg.requestId);
-              clearTimeout(req.timeout);
-              req.resolve(msg.vector);
-            }
-          } else if (msg.type === 'error') {
-            if (msg.requestId) {
-              const req = pendingRequests.get(msg.requestId);
-              if (req) {
-                pendingRequests.delete(msg.requestId);
-                clearTimeout(req.timeout);
-                req.reject(new Error(msg.message || 'Worker error'));
-              }
-            } else {
-              if (log) log.error('AIWorker error', msg.message);
-              if (loadPromise) {
-                loadPromise.reject(new Error(msg.message || 'Worker load failed'));
-                loadPromise = null;
-              }
-            }
-          }
-        };
-        
-        worker.onerror = function(err) {
-          if (log) log.error('AIWorker onerror', String(err && err.message || err));
-          if (loadPromise) {
-            loadPromise.reject(new Error('Worker initialization failed'));
-            loadPromise = null;
-          }
-        };
-        
-        return worker;
-      } catch (err) {
-        if (log) log.error('AIWorker init failed', String(err && err.message || err));
-        throw err;
-      }
-    }
-
-    function load(onProgress) {
-      if (ready) return Promise.resolve();
-      if (loadPromise) return loadPromise.promise;
-      
-      const promise = new Promise(function(resolve, reject) {
-        loadPromise = { resolve: resolve, reject: reject };
-      });
-      
-      if (typeof onProgress === 'function') {
-        progressHandlers.push(onProgress);
-      }
-      
-      try {
-        const w = initWorker();
-        const model = cfg.get('model', 'Xenova/multilingual-e5-small');
-        w.postMessage({ type: 'load', model: model });
-      } catch (err) {
-        if (loadPromise) {
-          loadPromise.reject(err);
-          loadPromise = null;
-        }
-      }
-      
-      return promise;
-    }
-
-    function embed(text) {
-      if (!worker) {
-        return Promise.reject(new Error('Worker not initialized'));
-      }
-      
-      const id = ++requestId;
-      const timeout = cfg.get('aiEmbedTimeout', 15000);
-      
-      return new Promise(function(resolve, reject) {
-        const timer = setTimeout(function() {
-          pendingRequests.delete(id);
-          reject(new Error('embed timeout'));
-        }, timeout);
-        
-        pendingRequests.set(id, { resolve: resolve, reject: reject, timeout: timer });
-        
-        try {
-          worker.postMessage({ type: 'embed', text: text, requestId: id });
-        } catch (err) {
-          pendingRequests.delete(id);
-          clearTimeout(timer);
-          reject(err);
-        }
-      });
-    }
-
-    function onProgress(fn) {
-      if (typeof fn === 'function') progressHandlers.push(fn);
-    }
-
-    function offProgress(fn) {
-      const idx = progressHandlers.indexOf(fn);
-      if (idx > -1) progressHandlers.splice(idx, 1);
-    }
-
-    function isReady() {
-      return ready;
-    }
-
-    function getMode() {
-      return ready ? 'model' : 'loading';
-    }
-
-    return {
-      load: load,
-      embed: embed,
-      ready: isReady,
-      getMode: getMode,
-      onProgress: onProgress,
-      offProgress: offProgress
-    };
-  }, ['Config', 'Logger', 'Bus']);
-<!-- NOOMIUM_MODULE_END AIWorker -->  
-
 <!-- NOOMIUM_MODULE_START AI -->
-  DI.register('AI', function(cfg, log, bus, aiWorker) {
-    const cache = new Map();
-    const cacheLimit = cfg.get('aiCacheLimit', 300);
+  DI.register('AI', function(cfg, log, bus) {
+    var extractor = null, mode = 'loading';
+    var cache = new Map(); 
+    var cacheLimit = cfg.get('aiCacheLimit', 300);
+    var progressFns = [];
+    var loadPromise = null;
 
     function hashEmbed(text) {
-      const DIM = cfg.get('dim', 384);
-      const vec = new Float32Array(DIM);
-      const tokens = (text || '').toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
-      for (let t = 0; t < tokens.length; t++) {
-        const tok = tokens[t];
-        let h = 2166136261;
-        for (let i = 0; i < tok.length; i++) { 
-          h ^= tok.charCodeAt(i); 
-          h = Math.imul(h, 16777619); 
-        }
+      var DIM = cfg.get('dim', 384);
+      var vec = new Float32Array(DIM);
+      var tokens = (text || '').toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
+      for (var t = 0; t < tokens.length; t++) {
+        var tok = tokens[t];
+        var h = 2166136261;
+        for (var i = 0; i < tok.length; i++) { h ^= tok.charCodeAt(i); h = Math.imul(h, 16777619); }
         vec[Math.abs(h) % DIM] += 1;
-        const h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
+        var h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
         vec[Math.abs(h2) % DIM] += 0.5;
       }
-      let norm = 0;
-      for (let i = 0; i < DIM; i++) norm += vec[i] * vec[i];
+      var norm = 0;
+      for (var i = 0; i < DIM; i++) norm += vec[i] * vec[i];
       norm = Math.sqrt(norm) || 1;
-      for (let i = 0; i < DIM; i++) vec[i] /= norm;
+      for (var i = 0; i < DIM; i++) vec[i] /= norm;
       return Array.from(vec);
     }
 
-    function ready() {
-      return aiWorker && aiWorker.ready();
-    }
-
-    function getMode() {
-      if (!aiWorker) return 'demo';
-      const mode = aiWorker.getMode();
-      return mode === 'model' ? 'model' : 'demo';
-    }
-
-    function onProgress(fn) {
-      if (aiWorker && aiWorker.onProgress) aiWorker.onProgress(fn);
-    }
-
-    function offProgress(fn) {
-      if (aiWorker && aiWorker.offProgress) aiWorker.offProgress(fn);
-    }
-
-    function load(onProgress) {
-      if (!aiWorker) return Promise.resolve();
-      return aiWorker.load(onProgress).catch(function(err) {
-        if (log) log.warn('AI load failed', String(err && err.message || err));
-      });
-    }
-
-    function embed(text) {
-      const t = (text || '').trim();
-      if (!t) return Promise.resolve(null);
-      
-      if (cache.has(t)) {
-        const val = cache.get(t);
-        cache.delete(t);
-        cache.set(t, val);
-        return Promise.resolve(val);
-      }
-      
-      if (!aiWorker || !aiWorker.ready()) {
-        const hashVec = hashEmbed(t);
-        cache.set(t, hashVec);
-        if (cache.size > cacheLimit) {
-          const oldestKey = cache.keys().next().value;
-          cache.delete(oldestKey);
-        }
-        return Promise.resolve(hashVec);
-      }
-      
-      return aiWorker.embed(t).then(function(vec) {
-        cache.set(t, vec);
-        if (cache.size > cacheLimit) {
-          const oldestKey = cache.keys().next().value;
-          cache.delete(oldestKey);
-        }
-        return vec;
+    function doLoad(onProgress, attempt) {
+      attempt = attempt || 0;
+      var MODEL = cfg.get('model', 'Xenova/multilingual-e5-small');
+      return import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2').then(function(mod) {
+        var pipelineFn = (mod.pipeline || (mod.default && mod.default.pipeline));
+        if (!pipelineFn) throw new Error('transformers: pipeline not found');
+        if (mod.env) { mod.env.allowLocalModels = false; mod.env.useBrowserCache = true; }
+        return pipelineFn('feature-extraction', MODEL, {
+          quantized: true,
+          progress_callback: function(p) {
+            if (p.status === 'progress' && p.total > 0) {
+              var pct = p.loaded / p.total * 100;
+              if (typeof onProgress === 'function') onProgress(pct);
+              for (var i = 0; i < progressFns.length; i++) {
+                try { progressFns[i](pct); } catch (_) { /* ignore */ }
+              }
+              if (bus && bus.emit) bus.emit('ai:progress', { pct: pct });
+            }
+          }
+        });
+      }).then(function(pipe) {
+        extractor = pipe;
+        mode = 'model';
+        if (log) log.info('AI loaded: ' + MODEL);
       }).catch(function(err) {
-        if (log) log.warn('embed fail, hash', String(err && err.message || err));
-        const hashVec = hashEmbed(t);
-        cache.set(t, hashVec);
-        if (cache.size > cacheLimit) {
-          const oldestKey = cache.keys().next().value;
-          cache.delete(oldestKey);
+        if (attempt < cfg.get('aiLoadRetries', 2)) {
+          var delay = Math.min(cfg.get('aiLoadMaxBackoff', 30000), 2000 * Math.pow(2, attempt));
+          if (log) log.warn('AI load fail, retry ' + (attempt + 1) + ' in ' + delay + 'ms', String(err && err.message || err));
+          return new Promise(function(r) { setTimeout(r, delay); }).then(function() { return doLoad(onProgress, attempt + 1); });
         }
-        return hashVec;
+        if (log) log.warn('AI load failed, hash mode', String(err && err.message || err));
+        mode = 'demo';
       });
-    }
-
-    function cosine(a, b) {
-      if (!a || !b || a.length !== b.length) return 0;
-      let sum = 0;
-      for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
-      return Math.abs(sum) < 1e-8 ? 0 : sum;
     }
 
     return {
-      ready: ready,
-      getMode: getMode,
-      onProgress: onProgress,
-      offProgress: offProgress,
-      load: load,
-      embed: embed,
-      cosine: cosine
+      ready: function() { return extractor !== null || mode === 'demo'; },
+      getMode: function() { return mode; },
+      onProgress: function(fn) { if (typeof fn === 'function') progressFns.push(fn); },
+      offProgress: function(fn) {
+        var idx = progressFns.indexOf(fn);
+        if (idx > -1) progressFns.splice(idx, 1);
+      },
+      load: function(onProgress) {
+        if (extractor || mode === 'demo') return Promise.resolve();
+        if (loadPromise) return loadPromise;
+        loadPromise = doLoad(onProgress).catch(function() { mode = 'demo'; loadPromise = null; return Promise.resolve(); });
+        return loadPromise;
+      },
+      embed: function(text) {
+        var t = (text || '').trim();
+        if (!t) return Promise.resolve(null);
+        
+        if (cache.has(t)) {
+          var val = cache.get(t);
+          cache.delete(t);
+          cache.set(t, val);
+          return Promise.resolve(val);
+        }
+        
+        var promise;
+        if (extractor) {
+          promise = Promise.resolve().then(function() {
+            return Promise.race([
+              extractor(t, { pooling: 'mean', normalize: true }),
+              new Promise(function(_, reject) { setTimeout(function() { reject(new Error('embed timeout')); }, cfg.get('aiEmbedTimeout', 15000)); })
+            ]);
+          }).then(function(out) {
+            return Array.from(out.data);
+          }).catch(function(err) {
+            if (log) log.warn('embed fail, hash', String(err && err.message || err));
+            return hashEmbed(t);
+          });
+        } else {
+          promise = Promise.resolve(hashEmbed(t));
+        }
+        return promise.then(function(v) { 
+          cache.set(t, v);
+          if (cache.size > cacheLimit) {
+            var oldestKey = cache.keys().next().value;
+            cache.delete(oldestKey);
+          }
+          return v; 
+        });
+      },
+      cosine: function(a, b) {
+        if (!a || !b || a.length !== b.length) return 0;
+        var sum = 0;
+        for (var i = 0; i < a.length; i++) sum += a[i] * b[i];
+        return Math.abs(sum) < 1e-8 ? 0 : sum;
+      }
     };
-  }, ['Config', 'Logger', 'Bus', 'AIWorker']);
+  }, ['Config', 'Logger', 'Bus']);
 <!-- NOOMIUM_MODULE_END AI -->
 
 <!-- NOOMIUM_MODULE_START Net -->
-  DI.register('Net', function(cfg, DB, AI, log, bus, crypto) {
+  DI.register('Net', function(cfg, DB, AI, log, bus) {
     let pool = null, sk = null, pk = null;
     const peers = new Map();
     const answers = [];
@@ -1475,6 +1220,46 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     const outbox = [];
     const relayErrors = new Map();
+
+    function deriveKey(password, salt) {
+      const enc = new TextEncoder();
+      return crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']).then(function(keyMaterial) {
+        return crypto.subtle.deriveKey(
+          { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
+          keyMaterial,
+          { name: 'AES-GCM', length: 256 },
+          false,
+          ['encrypt', 'decrypt']
+        );
+      });
+    }
+
+    function encryptKey(hexKey, password) {
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      return deriveKey(password, salt).then(function(key) {
+        const enc = new TextEncoder();
+        return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(hexKey)).then(function(ciphertext) {
+          const combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
+          combined.set(salt, 0);
+          combined.set(iv, salt.length);
+          combined.set(new Uint8Array(ciphertext), salt.length + iv.length);
+          return btoa(String.fromCharCode.apply(null, combined));
+        });
+      });
+    }
+
+    function decryptKey(base64Str, password) {
+      const combined = Uint8Array.from(atob(base64Str), function(c) { return c.charCodeAt(0); });
+      const salt = combined.slice(0, 16);
+      const iv = combined.slice(16, 28);
+      const ciphertext = combined.slice(28);
+      return deriveKey(password, salt).then(function(key) {
+        return crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext).then(function(dec) {
+          return new TextDecoder().decode(dec);
+        });
+      });
+    }
 
     function setStatus(s) {
       const wasDisconnected = (netStatus !== 'connected');
@@ -1720,18 +1505,17 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             const maxAnswers = cfg.get('maxAnswersPerQuery', 5);
             const limited = toSend.slice(0, maxAnswers);
             for (let j = 0; j < limited.length; j++) {
-              crypto.signEvent({
-                kind: KA,
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [['t', room], ['e', ev.id]],
-                content: JSON.stringify({ text: limited[j].text, vector: limited[j].vector })
-              }, sk).then(function(ans) {
+              try {
+                const ans = nostr.finalizeEvent({
+                  kind: KA,
+                  created_at: Math.floor(Date.now() / 1000),
+                  tags: [['t', room], ['e', ev.id]],
+                  content: JSON.stringify({ text: limited[j].text, vector: limited[j].vector })
+                }, sk);
                 (function(answer, delay) {
                   setTimeout(function() { safePublish(answer); }, delay);
                 })(ans, j * cfg.get('answerStaggerDelay', 500));
-              }).catch(function(e) { 
-                if (log) log.warn('answer sign fail', String(e)); 
-              });
+              } catch (e) { if (log) log.warn('answer finalize fail', String(e)); }
             }
           }).catch(function(e) { if (log) log.warn('getSharedVectors fail', String(e)); });
         }
@@ -1909,79 +1693,78 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       onUpdate = callback;
       connAttempts = 0;
       
-      const loadNostrAndInit = function() {
-        const p = import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm').then(function(mod) {
-          const tools = (mod && mod.default && typeof mod.default.SimplePool === 'function') 
-            ? mod.default 
-            : (typeof mod.SimplePool === 'function' ? mod : null);
-          if (!tools || !tools.SimplePool) throw new Error('nostr-tools: incompatible module structure');
-          nostr = tools;
-          return tools;
-        });
-
-        if (sk) {
-          return p.then(function() { return true; });
-        }
-
-        return p.then(function() {
-          const KEY = 'noomium:sk';
-          const stored = localStorage.getItem(KEY);
-          if (stored) {
-            if (/^[0-9a-f]{64}$/i.test(stored)) {
-              const keyHex = stored;
-              return crypto.encryptKey(keyHex, password).then(function(encrypted) {
-                localStorage.setItem(KEY, encrypted);
-                return keyHex;
-              });
-            } else {
-              return crypto.decryptKey(stored, password).catch(function() {
-                throw new Error('WRONG_PASSWORD');
-              });
-            }
-          }
-          
-          return crypto.generateKeypair().then(function(keypair) {
-            return crypto.encryptKey(keypair.sk, password).then(function(encrypted) {
-              try { localStorage.setItem(KEY, encrypted); } catch (_) { /* ignore */ }
-              return keypair.sk;
-            });
+      const loadAndDecrypt = function() {
+          const p = import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm').then(function(mod) {
+              const tools = (mod && mod.default && typeof mod.default.generateSecretKey === 'function') 
+                ? mod.default 
+                : (typeof mod.generateSecretKey === 'function' ? mod : null);
+              if (!tools || !tools.SimplePool) throw new Error('nostr-tools: incompatible module structure');
+              nostr = tools;
+              return tools;
           });
-        }).then(function(hex) {
-          sk = hex;
-          const skBytes = new Uint8Array(hex.match(/.{1,2}/g).map(function(b) { return parseInt(b, 16); }));
-          pk = nostr.getPublicKey(skBytes);
-          return true;
-        });
+
+          if (sk) {
+              return p.then(function() { return true; });
+          }
+
+          return p.then(function(tools) {
+              const KEY = 'noomium:sk';
+              const stored = localStorage.getItem(KEY);
+              if (stored) {
+                if (/^[0-9a-f]{64}$/i.test(stored)) {
+                   const keyHex = stored;
+                   return encryptKey(keyHex, password).then(function(encrypted) {
+                       localStorage.setItem(KEY, encrypted);
+                       return keyHex;
+                   });
+                } else {
+                   return decryptKey(stored, password).catch(function() {
+                       throw new Error('WRONG_PASSWORD');
+                   });
+                }
+              }
+              
+              const raw = tools.generateSecretKey();
+              const keyHex = Array.from(raw).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+              return encryptKey(keyHex, password).then(function(encrypted) {
+                  try { localStorage.setItem(KEY, encrypted); } catch (_) { /* ignore */ }
+                  return keyHex;
+              });
+          }).then(function(hex) {
+              sk = new Uint8Array(hex.match(/.{1,2}/g).map(function(b) { return parseInt(b, 16); }));
+              pk = nostr.getPublicKey(sk);
+              return true;
+          });
       };
       
-      return loadNostrAndInit().then(function() {
-        if (!pool && nostr) {
-          pool = new nostr.SimplePool();
-        }
-        const nowSec = Math.floor(Date.now() / 1000);
-        const room = cfg.get('room', 'noomium-main');
-        const KQ = cfg.get('kQuery', 21000);
-        const KA = cfg.get('kAnswer', 21001);
-        const subWindow = cfg.get('subWindow', 300);
-        
-        if (subscription && typeof subscription.close === 'function') {
-          try { subscription.close(); } catch (_) { /* ignore */ }
-        }
-        subscription = null;
-        
-        started = true;
-        try {
-          subscription = pool.subscribeMany(cfg.get('relays', []),
-            [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
-            { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
-          startHeartbeat();
-        } catch (e) {
-          if (log) log.warn('sub fail', String(e));
-          scheduleReconnect();
-        }
-        notifyPeers();
-        setStatus('connected');
-        if (log) log.info('net started, room=' + room);
+      return loadAndDecrypt().then(function() {
+          if (!pool && nostr) {
+              pool = new nostr.SimplePool();
+          }
+          const nowSec = Math.floor(Date.now() / 1000);
+          const room = cfg.get('room', 'noomium-main');
+          const KQ = cfg.get('kQuery', 21000);
+          const KA = cfg.get('kAnswer', 21001);
+          const subWindow = cfg.get('subWindow', 300);
+          
+          if (subscription && typeof subscription.close === 'function') {
+            try { subscription.close(); } catch (_) { /* ignore */ }
+          }
+          subscription = null;
+          
+          started = true;
+          try {
+            subscription = pool.subscribeMany(cfg.get('relays', []),
+              [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
+              { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
+            startHeartbeat();
+          } catch (e) {
+            if (log) log.warn('sub fail', String(e));
+            scheduleReconnect();
+          }
+          notifyPeers();
+          setStatus('connected');
+          if (log) log.info('net started, room=' + room);
       }).catch(function(err) {
         if (log && err.message !== 'WRONG_PASSWORD') log.error('nostr load fail', String(err && err.message || err));
         if (err.message !== 'WRONG_PASSWORD') setStatus('failed');
@@ -2014,19 +1797,17 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (now - lastQueryTime < rate) return;
         lastQueryTime = now;
         answers.length = 0;
-        
-        crypto.signEvent({
-          kind: cfg.get('kQuery', 21000),
-          created_at: Math.floor(Date.now() / 1000),
-          tags: [['t', cfg.get('room', 'noomium-main')]],
-          content: JSON.stringify({ vector: vector })
-        }, sk).then(function(ev) {
+        try {
+          const ev = nostr.finalizeEvent({
+            kind: cfg.get('kQuery', 21000),
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [['t', cfg.get('room', 'noomium-main')]],
+            content: JSON.stringify({ vector: vector })
+          }, sk);
           activeQueries.set(ev.id, now);
           safePublish(ev);
           if (typeof onUpdate === 'function') { try { onUpdate(); } catch (_) { /* ignore */ } }
-        }).catch(function(e) { 
-          if (log) log.warn('pub fail', String(e)); 
-        });
+        } catch (e) { if (log) log.warn('pub fail', String(e)); }
       },
       activeAnswers: function() {
         const out = [];
@@ -2067,7 +1848,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return this.init(callback, password);
       }
     };
-  }, ['Config', 'DB', 'AI', 'Logger', 'Bus', 'Crypto']);
+  }, ['Config', 'DB', 'AI', 'Logger', 'Bus']);
 <!-- NOOMIUM_MODULE_END Net -->
   
 <!-- NOOMIUM_MODULE_START Modal -->
@@ -4014,39 +3795,30 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END Bootstrap -->
 
 <!-- NOOMIUM_MODULE_START SW -->
-if ('serviceWorker' in navigator) {
-  const appVersionMeta = document.querySelector('meta[name="app-version"]');
-  const appVersion = appVersionMeta ? appVersionMeta.getAttribute('content') : '0';
-  
-  let storedVersion = null;
-  try { storedVersion = localStorage.getItem('noomium:appVersion'); } catch(e) {}
-  
-  if (storedVersion !== appVersion) {
-    const doReload = function() {
-      try { localStorage.setItem('noomium:appVersion', appVersion); } catch(e) {}
-      location.reload(true);
-    };
+  if ('serviceWorker' in navigator) {
+    const appVersionMeta = document.querySelector('meta[name="app-version"]');
+    const appVersion = appVersionMeta ? appVersionMeta.getAttribute('content') : '0';
     
-    const unregisterAllSW = function() {
-      return navigator.serviceWorker.getRegistrations().then(function(registrations) {
-        return Promise.all(registrations.map(function(r) { return r.unregister(); }));
-      });
-    };
+    let storedVersion = null;
+    try { storedVersion = localStorage.getItem('noomium:appVersion'); } catch(e) {}
     
-    unregisterAllSW()
-      .then(function() {
-        if (window.caches) {
-          return caches.keys().then(function(keys) {
-            return Promise.all(keys.map(function(key) { return caches.delete(key); }));
-          });
-        }
-      })
-      .then(doReload)
-      .catch(doReload);
-  } else {
-    navigator.serviceWorker.register('/sw.js').catch(function() { /* ignore */ });
+    if (storedVersion !== appVersion) {
+      const doReload = function() {
+        try { localStorage.setItem('noomium:appVersion', appVersion); } catch(e) {}
+        location.reload(true);
+      };
+      
+      if (window.caches) {
+        caches.keys().then(function(keys) {
+          return Promise.all(keys.map(function(key) { return caches.delete(key); }));
+        }).then(doReload).catch(doReload);
+      } else {
+        doReload();
+      }
+    } else {
+      navigator.serviceWorker.register('/sw.js').catch(function() { /* ignore */ });
+    }
   }
-}
 <!-- NOOMIUM_MODULE_END SW -->
 })();
 </script>
