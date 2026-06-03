@@ -1590,41 +1590,190 @@ Alpine.store('search', {
     }
   }
 });
-    // ============================================================
-    // STORE: echo (semantic resonance detection)
-    // ============================================================
-    Alpine.store('echo', {
-      async check(remoteNote) {
-        // TODO: compare remoteNote.vector against all local notes
-        //       if cosine >= $store.config.search.echoThreshold -> $store.notifications.add('echo', ...)
+    
+// ============================================================
+// STORE: echo (semantic resonance detection)
+// ============================================================
+Alpine.store('echo', {
+  _localVectors: [],           // [{id, vector}] — кеш локальных векторов
+  _processedIds: new Set(),    // Set уже проверенных чужих мыслей
+  _MAX_PROCESSED: 1000,
+
+  /**
+   * Инициализация: загрузка локальных векторов.
+   * Можно вызвать при старте приложения.
+   */
+  init() {
+    this._refreshLocalVectors();
+  },
+
+  /**
+   * Обновить кеш локальных векторов из DB.
+   * @private
+   */
+  _refreshLocalVectors() {
+    try {
+      const notes = typeof $store.db.all === 'function' ? $store.db.all() : [];
+      this._localVectors = notes
+        .filter(n => n && Array.isArray(n.vector) && n.vector.length > 0)
+        .map(n => ({ id: n.id, vector: n.vector }));
+    } catch (e) {
+      console.warn('echo._refreshLocalVectors failed:', e);
+      this._localVectors = [];
+    }
+  },
+
+  /**
+   * Проверить чужую мысль на смысловое эхо с локальными заметками.
+   * @param {Object} remoteNote — мысль из Nostr с полями id, text, vector, author
+   */
+  async check(remoteNote) {
+    // Валидация входных данных
+    if (!remoteNote || typeof remoteNote !== 'object') return;
+    if (typeof remoteNote.id !== 'string' || !remoteNote.id) return;
+    if (!Array.isArray(remoteNote.vector) || remoteNote.vector.length === 0) return;
+    if (typeof remoteNote.text !== 'string' || !remoteNote.text.trim()) return;
+
+    // Проверка на дублирование
+    if (this._processedIds.has(remoteNote.id)) return;
+    this._processedIds.add(remoteNote.id);
+
+    // Лимит processedIds: при переполнении оставляем только последние 50%
+    if (this._processedIds.size > this._MAX_PROCESSED) {
+      const arr = Array.from(this._processedIds);
+      const keep = Math.floor(this._MAX_PROCESSED / 2);
+      this._processedIds = new Set(arr.slice(arr.length - keep));
+    }
+
+    // Обновляем локальные векторы (можно оптимизировать через подписку на db-changed)
+    this._refreshLocalVectors();
+
+    if (this._localVectors.length === 0) return;
+
+    // Ищем максимальное косинусное сходство
+    const threshold = $store.config.search.echoThreshold;
+    let maxScore = 0;
+
+    for (let i = 0; i < this._localVectors.length; i++) {
+      const local = this._localVectors[i];
+      try {
+        const score = $store.ai.cosine(remoteNote.vector, local.vector);
+        if (score > maxScore) {
+          maxScore = score;
+        }
+      } catch (e) {
+        // Игнорируем ошибки cosine
       }
-    });
+    }
 
-    // ============================================================
-    // STORE: notifications
-    // ============================================================
-    Alpine.store('notifications', {
-      showModal: false,
-      list: [],
+    // Если найдено эхо — создаём уведомление
+    if (maxScore >= threshold) {
+      try {
+        $store.notifications.add('echo', {
+          thoughtId: remoteNote.id,
+          text: remoteNote.text,
+          pubkey: remoteNote.author || remoteNote.pubkey || null
+        });
+      } catch (e) {
+        console.warn('echo.check: notifications.add failed', e);
+      }
+    }
+  }
+});
+    
+// ============================================================
+// STORE: notifications
+// ============================================================
+Alpine.store('notifications', {
+  showModal: false,
+  list: [],
+  _storageKey: 'noomium:notifications',
+  _MAX_NOTIFICATIONS: 100,
 
-      get unreadCount() {
-        return this.list.filter(n => !n.read).length;
-      },
-      
-      init() {
-        // TODO: load from localStorage
-      },
-      add(type, payload) {
-        // TODO: push new notification, persist
-      },
-      markRead(id) {
-        // TODO: mark + persist
-      },
-      clearAll() {
+  /**
+   * Количество непрочитанных уведомлений.
+   */
+  get unreadCount() {
+    return this.list.filter(n => !n.read).length;
+  },
+
+  /**
+   * Инициализация: загрузка уведомлений из localStorage.
+   */
+  init() {
+    try {
+      const raw = localStorage.getItem(this._storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        this.list = Array.isArray(parsed) ? parsed : [];
+      } else {
         this.list = [];
-        // TODO: persist
       }
-    });
+    } catch (e) {
+      console.warn('notifications.init: load failed', e);
+      this.list = [];
+    }
+  },
+
+  /**
+   * Добавить новое уведомление.
+   * @param {'echo' | 'reply'} type
+   * @param {Object} payload — { thoughtId, text, pubkey }
+   */
+  add(type, payload) {
+    if (type !== 'echo' && type !== 'reply') return;
+    if (!payload || typeof payload !== 'object') return;
+
+    const notif = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+      type,
+      text: typeof payload.text === 'string' ? payload.text : '',
+      thoughtId: typeof payload.thoughtId === 'string' ? payload.thoughtId : null,
+      pubkey: typeof payload.pubkey === 'string' ? payload.pubkey : null,
+      timestamp: Date.now(),
+      read: false
+    };
+
+    // Добавляем в начало списка
+    this.list.unshift(notif);
+    this._persist();
+  },
+
+  /**
+   * Отметить уведомление как прочитанное.
+   * @param {string} id
+   */
+  markRead(id) {
+    if (typeof id !== 'string' || !id) return;
+    const notif = this.list.find(n => n.id === id);
+    if (notif) {
+      notif.read = true;
+      this._persist();
+    }
+  },
+
+  /**
+   * Очистить все уведомления.
+   */
+  clearAll() {
+    this.list = [];
+    this._persist();
+  },
+
+  /**
+   * Сохранить список в localStorage.
+   * @private
+   */
+  _persist() {
+    try {
+      // Лимит: сохраняем только последние N уведомлений
+      const toSave = this.list.slice(0, this._MAX_NOTIFICATIONS);
+      localStorage.setItem(this._storageKey, JSON.stringify(toSave));
+    } catch (e) {
+      console.warn('notifications._persist failed:', e);
+    }
+  }
+});
 
     // ============================================================
     // STORE: editor (UI state of the input field)
