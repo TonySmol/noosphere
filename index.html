@@ -40,13 +40,11 @@
     </div>
     <div class="flex-none gap-2">
       <div class="flex items-center gap-2 text-sm">
-        <span class="badge" :class="netStatus === 'connected' ? 'badge-success' : 'badge-warning'">
-          <span class="loading loading-spinner loading-xs" x-show="netStatus !== 'connected'"></span>
-          <span x-text="netStatus === 'connected' ? 'онлайн' : 'сеть'"></span>
+        <span class="badge" :class="$store.ndk.status === 'connected' ? 'badge-success' : 'badge-warning'">
+          <span x-text="$store.ndk.status === 'connected' ? 'онлайн' : 'сеть'"></span>
         </span>
-        <span class="badge" :class="aiStatus === 'ready' ? 'badge-success' : 'badge-info'">
-          <span class="loading loading-spinner loading-xs" x-show="aiStatus === 'loading'"></span>
-          <span x-text="aiStatus === 'ready' ? 'ии' : 'модель'"></span>
+        <span class="badge" :class="$store.ai.ready ? 'badge-success' : 'badge-info'">
+          <span x-text="$store.ai.ready ? 'ии' : 'модель'"></span>
         </span>
       </div>
       <button class="btn btn-ghost btn-circle" @click="showNotifications = true">
@@ -54,7 +52,7 @@
           <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
           </svg>
-          <span class="badge badge-xs badge-primary indicator-item" x-show="unreadCount > 0" x-text="unreadCount"></span>
+          <span class="badge badge-xs badge-primary indicator-item" x-show="$store.notifications.getUnreadCount() > 0" x-text="$store.notifications.getUnreadCount()"></span>
         </div>
       </button>
       <button class="btn btn-ghost btn-circle" @click="showMenu = true">
@@ -68,9 +66,8 @@
   <!-- Main Content -->
   <main class="container mx-auto px-4 pb-20">
     
-    <!-- Stream View (Editor + Carousel) -->
+    <!-- Stream View -->
     <div x-show="currentView === 'stream'" x-transition>
-      <!-- Editor Component -->
       <div x-data="editor()" class="card bg-base-200 shadow-xl mt-4">
         <div class="card-body">
           <textarea 
@@ -106,98 +103,28 @@
         </div>
       </div>
 
-      <!-- Segments -->
-      <div class="tabs tabs-boxed mt-4">
-        <button 
-          class="tab" 
-          :class="segment === 'local' ? 'tab-active' : ''"
-          @click="segment = 'local'"
-        >Моё <span class="badge badge-sm ml-1" x-text="localCount"></span></button>
-        <button 
-          class="tab" 
-          :class="segment === 'world' ? 'tab-active' : ''"
-          @click="segment = 'world'"
-        >Мир <span class="badge badge-sm ml-1" x-text="worldCount"></span></button>
-        <button 
-          class="tab" 
-          :class="segment === 'seren' ? 'tab-active' : ''"
-          @click="segment = 'seren'"
-        >Озарения <span class="badge badge-sm ml-1" x-text="serenCount"></span></button>
-      </div>
-
-      <!-- Carousel -->
-      <div class="mt-4">
-        <div x-show="currentList.length === 0" class="text-center py-12 opacity-50">
+      <div x-data="carousel()" class="mt-4">
+        <div class="text-center py-12 opacity-50">
           <div class="text-6xl mb-4">◇</div>
-          <p>Пока нет мыслей</p>
-        </div>
-        <div x-show="currentList.length > 0" class="carousel carousel-center w-full space-x-4 rounded-box">
-          <template x-for="(item, idx) in currentList" :key="item.id">
-            <div class="carousel-item w-80">
-              <div class="card bg-base-200 shadow-xl w-full">
-                <div class="card-body">
-                  <div class="flex justify-between items-start">
-                    <span class="badge" :class="item.shared ? 'badge-info' : 'badge-primary'" x-text="item.shared ? 'открыто' : 'лично'"></span>
-                    <span class="text-xs opacity-50" x-text="Math.round(item.score * 100) + '% похожа'"></span>
-                  </div>
-                  <p class="mt-2 whitespace-pre-wrap" x-text="item.text"></p>
-                  <div class="card-actions justify-end mt-4">
-                    <button class="btn btn-ghost btn-xs" @click="editNote(item)">Развить</button>
-                    <button class="btn btn-ghost btn-xs" @click="toggleShare(item)" x-text="item.shared ? 'Скрыть' : 'Открыть'"></button>
-                    <button class="btn btn-error btn-xs" @click="deleteNote(item.id)">Удалить</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </template>
+          <p>Здесь будет карусель мыслей</p>
         </div>
       </div>
     </div>
 
     <!-- Feed View -->
-    <div x-show="currentView === 'feed'" x-transition>
+    <div x-data="feed()" x-show="currentView === 'feed'" x-transition>
       <h2 class="text-2xl font-bold mt-4 mb-4">Лента</h2>
-      <div x-show="publicThoughts.length === 0" class="text-center py-12 opacity-50">
+      <div class="text-center py-12 opacity-50">
         <div class="text-6xl mb-4">◇</div>
-        <p>Никто не думает вслух</p>
-      </div>
-      <div class="space-y-4">
-        <template x-for="thought in publicThoughts" :key="thought.id">
-          <div class="card bg-base-200 shadow-xl">
-            <div class="card-body">
-              <div class="flex justify-between items-start">
-                <span class="badge badge-ghost" x-text="thought.pubkey.slice(0, 8)"></span>
-                <span class="text-xs opacity-50" x-text="formatDate(thought.createdAt)"></span>
-              </div>
-              <p class="mt-2 whitespace-pre-wrap" x-text="thought.text"></p>
-              <div class="card-actions justify-end mt-4">
-                <button class="btn btn-primary btn-sm" @click="replyTo(thought)">Ответить</button>
-              </div>
-            </div>
-          </div>
-        </template>
+        <p>Здесь будет лента публичных мыслей</p>
       </div>
     </div>
 
     <!-- Base View -->
-    <div x-show="currentView === 'base'" x-transition>
+    <div x-data="base()" x-show="currentView === 'base'" x-transition x-init="init()">
       <h2 class="text-2xl font-bold mt-4 mb-4">База</h2>
-      <div class="stats stats-vertical lg:stats-horizontal shadow w-full mb-4">
-        <div class="stat">
-          <div class="stat-title">Всего</div>
-          <div class="stat-value text-primary" x-text="allNotes.length"></div>
-        </div>
-        <div class="stat">
-          <div class="stat-title">Открыто</div>
-          <div class="stat-value text-info" x-text="sharedCount"></div>
-        </div>
-        <div class="stat">
-          <div class="stat-title">Лично</div>
-          <div class="stat-value" x-text="privateCount"></div>
-        </div>
-      </div>
       <div class="form-control mb-4">
-        <input type="text" placeholder="Поиск..." class="input input-bordered" x-model="searchQuery" @input="searchNotes()">
+        <input type="text" placeholder="Поиск..." class="input input-bordered" x-model="searchQuery" @input="updateSearch()">
       </div>
       <div class="space-y-2">
         <template x-for="note in filteredNotes" :key="note.id">
@@ -211,6 +138,9 @@
             </div>
           </div>
         </template>
+        <div x-show="filteredNotes.length === 0" class="text-center py-12 opacity-50">
+          <p>Нет заметок</p>
+        </div>
       </div>
     </div>
 
@@ -248,25 +178,25 @@
   </nav>
 
   <!-- Notifications Modal -->
-  <div x-show="showNotifications" x-transition class="modal modal-open">
+  <div x-data="notifications()" x-show="showNotifications" x-transition class="modal modal-open">
     <div class="modal-box">
       <h3 class="font-bold text-lg">Уведомления</h3>
       <div class="py-4 space-y-2">
-        <template x-for="(notif, idx) in notifications" :key="notif.id">
+        <template x-for="(notif, idx) in $store.notifications.items" :key="notif.id">
           <div class="alert" :class="notif.read ? 'alert-info' : 'alert-warning'">
             <div>
-              <span class="badge badge-sm" x-text="notif.type === 'echo' ? 'Эхо' : 'Ответ'"></span>
+              <span class="badge badge-sm" x-text="notif.type"></span>
               <p class="text-sm mt-1" x-text="notif.text"></p>
             </div>
             <button class="btn btn-sm btn-ghost" @click="markRead(idx)">✓</button>
           </div>
         </template>
-        <div x-show="notifications.length === 0" class="text-center opacity-50 py-8">
+        <div x-show="$store.notifications.items.length === 0" class="text-center opacity-50 py-8">
           Нет уведомлений
         </div>
       </div>
       <div class="modal-action">
-        <button class="btn btn-ghost btn-sm" @click="clearNotifications()">Очистить все</button>
+        <button class="btn btn-ghost btn-sm" @click="$store.notifications.clear()">Очистить все</button>
         <button class="btn btn-primary btn-sm" @click="showNotifications = false">Закрыть</button>
       </div>
     </div>
@@ -280,11 +210,9 @@
         <div class="form-control">
           <label class="label cursor-pointer">
             <span class="label-text">Тёмная тема</span>
-            <input type="checkbox" class="toggle toggle-primary" x-model="darkTheme" @change="toggleTheme()">
+            <input type="checkbox" class="toggle toggle-primary" x-model="$store.config.darkTheme" @change="$store.config.toggleTheme()">
           </label>
         </div>
-        <button class="btn btn-outline btn-block" @click="exportData()">Экспорт данных</button>
-        <button class="btn btn-outline btn-block" @click="importData()">Импорт данных</button>
         <div class="divider">Опасная зона</div>
         <button class="btn btn-error btn-outline btn-block" @click="wipeData()">Стереть всё</button>
       </div>
@@ -295,7 +223,7 @@
   </div>
 
   <!-- Password Modal -->
-  <div x-show="showPasswordModal" x-transition class="modal modal-open">
+  <div x-data="passwordModal()" x-show="showPasswordModal" x-transition class="modal modal-open">
     <div class="modal-box">
       <h3 class="font-bold text-lg" x-text="isNewUser ? 'Создать пароль' : 'Введите пароль'"></h3>
       <div class="py-4 space-y-4">
@@ -312,87 +240,331 @@
 </div>
 
 <script>
-// Alpine.js Store
+// ============================================================================
+// СЕРВИСНЫЙ СЛОЙ (Alpine Stores)
+// ============================================================================
+
 document.addEventListener('alpine:init', () => {
-  Alpine.store('app', {
-    ndk: null,
-    db: null,
-    ai: null,
-    sk: null,
-    pk: null,
+  
+  // $store.config — конфигурация
+  Alpine.store('config', {
+    darkTheme: true,
+    echoThreshold: 0.8,
+    
+    init() {
+      const saved = localStorage.getItem('noomium:config');
+      if (saved) {
+        try {
+          Object.assign(this, JSON.parse(saved));
+        } catch (e) {}
+      }
+      document.documentElement.setAttribute('data-theme', this.darkTheme ? 'dark' : 'light');
+    },
+    
+    save() {
+      localStorage.setItem('noomium:config', JSON.stringify({
+        darkTheme: this.darkTheme,
+        echoThreshold: this.echoThreshold
+      }));
+    },
+    
+    toggleTheme() {
+      document.documentElement.setAttribute('data-theme', this.darkTheme ? 'dark' : 'light');
+      this.save();
+    }
   });
+
+  // $store.db — база данных
+  Alpine.store('db', {
+    db: null,
+    ready: false,
+    
+    async init() {
+      this.db = new Dexie('noomium');
+      this.db.version(1).stores({
+        notes: 'id, text, shared, createdAt, replyTo, parentId'
+      });
+      await this.db.open();
+      this.ready = true;
+    },
+    
+    async put(note) {
+      await this.db.notes.put(note);
+    },
+    
+    async get(id) {
+      return await this.db.notes.get(id);
+    },
+    
+    async del(id) {
+      await this.db.notes.delete(id);
+    },
+    
+    async all() {
+      return await this.db.notes.toArray();
+    },
+    
+    async filtered(query) {
+      const all = await this.all();
+      if (!query) return all;
+      const q = query.toLowerCase();
+      return all.filter(n => n.text.toLowerCase().includes(q));
+    }
+  });
+
+  // $store.ai — векторизация (ЗАГЛУШКА)
+  Alpine.store('ai', {
+    ready: false,
+    
+    async init() {
+      // TODO: реализовать загрузку Transformers.js модели
+      // Пока просто устанавливаем ready = true
+      this.ready = true;
+      console.log('AI store initialized (stub)');
+    },
+    
+    async embed(text) {
+      // TODO: реализовать реальную векторизацию через Transformers.js
+      // Пока возвращаем хеш-вектор
+      console.log('embed (stub):', text);
+      const vector = new Array(384).fill(0).map(() => Math.random());
+      return vector;
+    },
+    
+    cosine(a, b) {
+      // TODO: реализовать реальное косинусное сходство
+      console.log('cosine (stub)');
+      return 0.5;
+    }
+  });
+
+  // $store.ndk — Nostr сеть (ЗАГЛУШКА)
+  Alpine.store('ndk', {
+    status: 'disconnected',
+    sk: null,
+    pk: '0'.repeat(64),
+    
+    async init(password) {
+      // TODO: реализовать реальную инициализацию NDK
+      // TODO: реализовать шифрование/дешифрование ключа (PBKDF2 + AES-GCM)
+      // TODO: реализовать подключение к relay
+      // TODO: реализовать подписку на kind 20202
+      
+      console.log('NDK init (stub) with password');
+      
+      // Имитация подключения
+      setTimeout(() => {
+        this.status = 'connected';
+      }, 1000);
+    },
+    
+    async publishThought(text, vector, replyToEventId = null) {
+      // TODO: реализовать реальную публикацию через NDK
+      console.log('publishThought (stub):', { text, vector, replyToEventId });
+    },
+    
+    stop() {
+      // TODO: реализовать отключение NDK
+      console.log('NDK stop (stub)');
+      this.status = 'disconnected';
+    }
+  });
+
+  // $store.notifications — уведомления
+  Alpine.store('notifications', {
+    items: [],
+    
+    init() {
+      const saved = localStorage.getItem('noomium:notifications');
+      if (saved) {
+        try {
+          this.items = JSON.parse(saved);
+        } catch (e) {}
+      }
+    },
+    
+    add(notification) {
+      const notif = {
+        id: notification.id || (Date.now() + '_' + Math.random()),
+        type: notification.type || 'info',
+        text: notification.text || '',
+        timestamp: notification.timestamp || Date.now(),
+        read: false
+      };
+      this.items.unshift(notif);
+      this.save();
+    },
+    
+    getAll() {
+      return [...this.items];
+    },
+    
+    markRead(index) {
+      if (this.items[index]) {
+        this.items[index].read = true;
+        this.save();
+      }
+    },
+    
+    clear() {
+      this.items = [];
+      this.save();
+    },
+    
+    getUnreadCount() {
+      return this.items.filter(n => !n.read).length;
+    },
+    
+    save() {
+      localStorage.setItem('noomium:notifications', JSON.stringify(this.items));
+    }
+  });
+
+  // $store.echo — детектор эха (ЗАГЛУШКА)
+  Alpine.store('echo', {
+    init() {
+      // TODO: реализовать детектор смыслового эха
+      console.log('Echo store initialized (stub)');
+    }
+  });
+
 });
 
-// Main App Component
+// ============================================================================
+// UI КОМПОНЕНТЫ (Alpine x-data)
+// ============================================================================
+
 function app() {
   return {
-    // State
     currentView: 'stream',
-    segment: 'local',
-    netStatus: 'disconnected',
-    aiStatus: 'loading',
     showNotifications: false,
     showMenu: false,
     showPasswordModal: false,
-    isNewUser: false,
+    
+    async init() {
+      Alpine.store('config').init();
+      await Alpine.store('db').init();
+      await Alpine.store('ai').init();
+      
+      // Показать модалку пароля
+      this.showPasswordModal = true;
+    },
+    
+    async completeInit(password) {
+      try {
+        await Alpine.store('ndk').init(password);
+        Alpine.store('notifications').init();
+        Alpine.store('echo').init();
+        this.showPasswordModal = false;
+      } catch (err) {
+        console.error('Init failed:', err);
+        alert('Ошибка инициализации: ' + err.message);
+      }
+    },
+    
+    async wipeData() {
+      if (!confirm('Удалить ВСЕ данные навсегда?')) return;
+      await Alpine.store('db').db.notes.clear();
+      localStorage.clear();
+      location.reload();
+    }
+  };
+}
+
+function editor() {
+  return {
+    text: '',
+    mode: 'private',
+    sending: false,
+    
+    async send() {
+      if (!this.text.trim()) return;
+      
+      this.sending = true;
+      
+      try {
+        const vector = await Alpine.store('ai').embed(this.text);
+        
+        const note = {
+          id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
+          text: this.text,
+          vector: vector,
+          shared: this.mode === 'world',
+          createdAt: Date.now(),
+          replyTo: null,
+          parentId: null
+        };
+        
+        await Alpine.store('db').put(note);
+        
+        if (this.mode === 'world') {
+          await Alpine.store('ndk').publishThought(this.text, vector, null);
+        }
+        
+        this.text = '';
+        alert('Заметка сохранена');
+      } catch (err) {
+        console.error('Send failed:', err);
+        alert('Ошибка отправки: ' + err.message);
+      } finally {
+        this.sending = false;
+      }
+    }
+  };
+}
+
+function carousel() {
+  return {
+    // TODO: реализовать карусель мыслей
+    // Данные будут браться из $store после поиска по вектору
+  };
+}
+
+function feed() {
+  return {
+    // TODO: реализовать ленту публичных мыслей
+    // Данные будут браться из $store.ndk.publicThoughts
+  };
+}
+
+function base() {
+  return {
+    filteredNotes: [],
+    searchQuery: '',
+    
+    async init() {
+      await this.updateSearch();
+    },
+    
+    async updateSearch() {
+      this.filteredNotes = await Alpine.store('db').filtered(this.searchQuery);
+    },
+    
+    formatDate(ts) {
+      return new Date(ts).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
+    },
+    
+    openNote(id) {
+      // TODO: реализовать просмотр заметки
+      console.log('Open note:', id);
+    }
+  };
+}
+
+function notifications() {
+  return {
+    markRead(idx) {
+      Alpine.store('notifications').markRead(idx);
+    }
+  };
+}
+
+function passwordModal() {
+  return {
+    isNewUser: !localStorage.getItem('noomium:sk'),
     password: '',
     passwordConfirm: '',
     passwordError: '',
-    darkTheme: true,
-    
-    // Data
-    allNotes: [],
-    publicThoughts: [],
-    notifications: [],
-    localList: [],
-    worldList: [],
-    serenList: [],
-    searchQuery: '',
-    filteredNotes: [],
-    
-    // Computed
-    get localCount() { return this.localList.length; },
-    get worldCount() { return this.worldList.length; },
-    get serenCount() { return this.serenList.length; },
-    get sharedCount() { return this.allNotes.filter(n => n.shared).length; },
-    get privateCount() { return this.allNotes.length - this.sharedCount; },
-    get unreadCount() { return this.notifications.filter(n => !n.read).length; },
-    get currentList() {
-      if (this.segment === 'local') return this.localList;
-      if (this.segment === 'world') return this.worldList;
-      return this.serenList;
-    },
-    
-    // Init
-    async init() {
-      await this.initDB();
-      await this.loadNotes();
-      await this.checkAuth();
-      this.subscribeToPublicThoughts();
-    },
-    
-    async initDB() {
-      const db = new Dexie('noomium');
-      db.version(1).stores({
-        notes: 'id, text, shared, createdAt, replyTo, parentId'
-      });
-      this.$store.app.db = db;
-    },
-    
-    async loadNotes() {
-      this.allNotes = await this.$store.app.db.notes.toArray();
-      this.updateSearch();
-    },
-    
-    async checkAuth() {
-      const stored = localStorage.getItem('noomium:sk');
-      if (!stored) {
-        this.isNewUser = true;
-        this.showPasswordModal = true;
-      } else {
-        this.showPasswordModal = true;
-      }
-    },
     
     async submitPassword() {
       if (this.isNewUser && this.password !== this.passwordConfirm) {
@@ -405,176 +577,67 @@ function app() {
       }
       
       try {
-        await this.initNostr(this.password);
-        await this.initAI();
-        this.showPasswordModal = false;
+        await this.$root.completeInit(this.password);
         this.passwordError = '';
       } catch (err) {
         this.passwordError = 'Ошибка: ' + err.message;
       }
-    },
-    
-    async initNostr(password) {
-      // TODO: Implement NDK initialization with PBKDF2 + AES-GCM encryption
-      this.netStatus = 'connected';
-    },
-    
-    async initAI() {
-      // TODO: Implement Transformers.js initialization
-      this.aiStatus = 'ready';
-    },
-    
-    subscribeToPublicThoughts() {
-      // TODO: Subscribe to kind 20202 via NDK
-    },
-    
-    // Methods
-    toggleTheme() {
-      document.documentElement.setAttribute('data-theme', this.darkTheme ? 'dark' : 'light');
-    },
-    
-    formatDate(ts) {
-      return new Date(ts).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
-    },
-    
-    updateSearch() {
-      if (!this.searchQuery) {
-        this.filteredNotes = this.allNotes;
-      } else {
-        const q = this.searchQuery.toLowerCase();
-        this.filteredNotes = this.allNotes.filter(n => n.text.toLowerCase().includes(q));
-      }
-    },
-    
-    searchNotes() {
-      this.updateSearch();
-    },
-    
-    openNote(id) {
-      // TODO: Open note in modal
-    },
-    
-    editNote(item) {
-      // TODO: Set editor to edit mode with note text
-    },
-    
-    async toggleShare(item) {
-      item.shared = !item.shared;
-      await this.$store.app.db.notes.put(item);
-      await this.loadNotes();
-    },
-    
-    async deleteNote(id) {
-      if (!confirm('Удалить навсегда?')) return;
-      await this.$store.app.db.notes.delete(id);
-      await this.loadNotes();
-    },
-    
-    replyTo(thought) {
-      // TODO: Switch to stream view and set reply mode
-      this.currentView = 'stream';
-    },
-    
-    markRead(idx) {
-      this.notifications[idx].read = true;
-    },
-    
-    clearNotifications() {
-      this.notifications = [];
-    },
-    
-    async exportData() {
-      const data = await this.$store.app.db.notes.toArray();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'noomium-export.json';
-      a.click();
-    },
-    
-    async importData() {
-      // TODO: File input and import logic
-    },
-    
-    async wipeData() {
-      if (!confirm('Удалить ВСЕ данные навсегда?')) return;
-      await this.$store.app.db.notes.clear();
-      localStorage.clear();
-      location.reload();
     }
   };
 }
 
-// Editor Component
-function editor() {
-  return {
-    text: '',
-    mode: 'private',
-    sending: false,
-    
-    async send() {
-      if (!this.text.trim()) return;
-      this.sending = true;
-      
-      try {
-        // TODO: Vectorize text via AI
-        const vector = []; // Placeholder
-        
-        const note = {
-          id: 'n' + Date.now(),
-          text: this.text,
-          vector: vector,
-          shared: this.mode === 'world',
-          createdAt: Date.now(),
-          replyTo: null,
-          parentId: null
-        };
-        
-        await this.$store.app.db.notes.put(note);
-        await this.$parent.loadNotes();
-        
-        if (this.mode === 'world') {
-          // TODO: Publish to Nostr via NDK
-        }
-        
-        this.text = '';
-      } catch (err) {
-        console.error('Send failed:', err);
-      } finally {
-        this.sending = false;
-      }
-    }
-  };
-}
+// ============================================================================
+// SERVICE WORKER & MANIFEST
+// ============================================================================
 
-// Service Worker Registration
 if ('serviceWorker' in navigator) {
   const swCode = `
     const CACHE = 'noomium-v1';
+    
     self.addEventListener('install', e => {
-      e.waitUntil(caches.open(CACHE).then(c => c.addAll(['/'])));
+      self.skipWaiting();
     });
+    
+    self.addEventListener('activate', e => {
+      e.waitUntil(clients.claim());
+    });
+    
     self.addEventListener('fetch', e => {
       if (e.request.method !== 'GET') return;
+      
+      // Network first strategy
       e.respondWith(
-        fetch(e.request).then(r => {
-          const clone = r.clone();
-          caches.open(CACHE).then(c => c.put(e.request, clone));
-          return r;
-        }).catch(() => caches.match(e.request))
+        fetch(e.request)
+          .then(response => {
+            // Кешируем успешные ответы
+            if (response.status === 200) {
+              const responseClone = response.clone();
+              caches.open(CACHE).then(cache => {
+                cache.put(e.request, responseClone);
+              });
+            }
+            return response;
+          })
+          .catch(() => {
+            // Если сеть недоступна, пытаемся достать из кеша
+            return caches.match(e.request).then(response => {
+              return response || new Response('Offline', { status: 503 });
+            });
+          })
       );
     });
   `;
   const blob = new Blob([swCode], { type: 'application/javascript' });
   const swUrl = URL.createObjectURL(blob);
-  navigator.serviceWorker.register(swUrl).catch(() => {});
+  navigator.serviceWorker.register(swUrl).catch(err => {
+    console.warn('SW registration failed:', err);
+  });
 }
 
-// Manifest Registration
 const manifest = {
   name: 'NOOmium',
   short_name: 'NOOmium',
+  description: 'Блокнот с антисоцсетью',
   start_url: '.',
   display: 'standalone',
   background_color: '#0b0b10',
@@ -591,6 +654,7 @@ const link = document.createElement('link');
 link.rel = 'manifest';
 link.href = manifestUrl;
 document.head.appendChild(link);
+
 </script>
 
 </body>
