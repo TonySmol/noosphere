@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.1.25">
+<meta name="app-version" content="1.2.0">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -498,8 +498,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (set) { set.delete(fn); if (set.size === 0) map.delete(event); }
       },
       emit: function(event, payload) {
-        const set = map.get(event) || [];
-        for (const fn of set) { try { fn(payload); } catch (err) { console.error(err); } }
+        const set = map.get(event);
+        if (!set) return;
+        const listeners = Array.from(set);
+        for (let i = 0; i < listeners.length; i++) {
+          try { listeners[i](payload); } catch (err) { console.error(err); }
+        }
       }
     };
   }, []);
@@ -643,7 +647,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
 <!-- NOOMIUM_MODULE_START DB -->
   DI.register('DB', function(cfg, log, bus) {
-    var db = null, mem = null;
+    let db = null;
 
     function dbName() { return cfg.get('dbName', 'noomium_v8'); }
     function storeName() { return cfg.get('storeName', 'notes'); }
@@ -655,23 +659,31 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     function open() {
       return new Promise(function(resolve, reject) {
         if (db) return resolve(db);
-        if (!window.indexedDB) { mem = new Map(); return resolve(null); }
+        if (!window.indexedDB) {
+          const err = new Error('IndexedDB not supported');
+          if (log) log.warn('IDB unsupported', err.message);
+          return reject(err);
+        }
         try {
-          var req = indexedDB.open(dbName(), 1);
+          const req = indexedDB.open(dbName(), 1);
           req.onupgradeneeded = function(e) {
-            var d = e.target.result;
-            var s = storeName();
+            const d = e.target.result;
+            const s = storeName();
             if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' });
           };
           req.onsuccess = function(e) { db = e.target.result; resolve(db); };
           req.onerror = function() {
-            if (log) log.warn('IDB open error', String(req.error));
-            mem = new Map(); resolve(null);
+            const err = req.error || new Error('IDB open error');
+            if (log) log.warn('IDB open error', String(err));
+            reject(err);
           };
-          req.onblocked = function() { mem = new Map(); resolve(null); };
+          req.onblocked = function() {
+            const err = new Error('IDB blocked');
+            reject(err);
+          };
         } catch (err) {
-          if (log) log.warn('IDB unsupported', String(err));
-          mem = new Map(); resolve(null);
+          if (log) log.warn('IDB exception', String(err));
+          reject(err);
         }
       });
     }
@@ -680,43 +692,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       return open().then(function(d) {
         return new Promise(function(resolve, reject) {
           try {
-            if (!d) {
-              var mockStore = {
-                get: function(k) {
-                  return { result: mem.get(k) };
-                },
-                put: function(v) {
-                  mem.set(v.id, v);
-                  return {};
-                },
-                delete: function(k) {
-                  mem.delete(k);
-                  return {};
-                },
-                getAll: function() {
-                  return { result: Array.from(mem.values()) };
-                }
-              };
-              var req = { result: null, onsuccess: null, onerror: null };
-              try {
-                var r = fn(mockStore);
-                if (!r || typeof r.onsuccess !== 'function') {
-                  resolve(r && r.result !== undefined ? r.result : r);
-                  return;
-                }
-                req.result = r.result !== undefined ? r.result : r;
-                req.onsuccess = function() { resolve(req.result); };
-                req.onerror = function(e) { reject(e); };
-                setTimeout(function() { if (req.onsuccess) req.onsuccess(); }, 0);
-              } catch (e) {
-                req.onerror = function() { reject(e); };
-                setTimeout(function() { if (req.onerror) req.onerror(); }, 0);
-              }
-              return;
-            }
-            var transaction = d.transaction(storeName(), mode);
-            var store = transaction.objectStore(storeName());
-            var r = fn(store);
+            const transaction = d.transaction(storeName(), mode);
+            const store = transaction.objectStore(storeName());
+            const r = fn(store);
             r.onsuccess = function() { resolve(r.result); };
             r.onerror = function() {
               if (log) log.warn('DB op error', String(r.error));
@@ -742,19 +720,14 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       getAllPaginated: function(offset, limit) {
         return open().then(function(d) {
           return new Promise(function(resolve, reject) {
-            if (!d) {
-              var all = mem ? Array.from(mem.values()) : [];
-              resolve(all.slice(offset, offset + limit));
-              return;
-            }
-            var transaction = d.transaction(storeName(), 'readonly');
-            var store = transaction.objectStore(storeName());
-            var request = store.openCursor();
-            var result = [];
-            var advanced = false;
+            const transaction = d.transaction(storeName(), 'readonly');
+            const store = transaction.objectStore(storeName());
+            const request = store.openCursor();
+            const result = [];
+            let advanced = false;
             
             request.onsuccess = function(event) {
-              var cursor = event.target.result;
+              const cursor = event.target.result;
               if (!cursor) {
                 resolve(result);
                 return;
@@ -787,14 +760,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return open().then(function(d) {
           return new Promise(function(resolve, reject) {
             try {
-              if (!d) {
-                for (var i = 0; i < notes.length; i++) mem.set(notes[i].id, notes[i]);
-                emitChange();
-                return resolve(notes.length);
-              }
-              var transaction = d.transaction(storeName(), 'readwrite');
-              var store = transaction.objectStore(storeName());
-              for (var i = 0; i < notes.length; i++) store.put(notes[i]);
+              const transaction = d.transaction(storeName(), 'readwrite');
+              const store = transaction.objectStore(storeName());
+              for (let i = 0; i < notes.length; i++) store.put(notes[i]);
               transaction.oncomplete = function() { emitChange(); resolve(notes.length); };
               transaction.onerror = function() { reject(transaction.error); };
             } catch (err) { reject(err); }
@@ -803,10 +771,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       },
       reset: function() {
         if (db) { try { db.close(); } catch (_) { /* ignore */ } db = null; }
-        if (mem) mem.clear();
         return new Promise(function(resolve) {
           try {
-            var req = indexedDB.deleteDatabase(dbName());
+            const req = indexedDB.deleteDatabase(dbName());
             req.onsuccess = req.onerror = req.onblocked = function() { emitChange(); resolve(); };
           } catch (_) { emitChange(); resolve(); }
         });
@@ -939,29 +906,31 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
 <!-- NOOMIUM_MODULE_START Net -->
   DI.register('Net', function(cfg, DB, AI, log, bus) {
-    var pool = null, sk = null, pk = null, queryId = null;
-    var peers = new Map();
-    var answers = [];
-    var onUpdate = null, hbTimer = null, flushTimer = null, lastQueryTime = 0;
-    var nostr = null, subscription = null;
-    var peerListeners = [];
-    var started = false, reconnecting = false;
-    var seen = new Set();
-    var rateLimitedUntil = new Map();
-    var connAttempts = 0;
-    var netStatus = 'disconnected';
+    let pool = null, sk = null, pk = null;
+    const peers = new Map();
+    const answers = [];
+    let onUpdate = null, hbTimer = null, flushTimer = null, lastQueryTime = 0;
+    let nostr = null, subscription = null;
+    const peerListeners = [];
+    let started = false, reconnecting = false;
+    const seen = new Set();
+    const rateLimitedUntil = new Map();
+    let connAttempts = 0;
+    let netStatus = 'disconnected';
+    const activeQueries = new Map();
 
-    var sharedCache = [];
-    var sharedCacheOffset = 0;
-    var sharedCacheComplete = false;
-    var sharedCacheTime = 0;
-    var CACHE_TTL = cfg.get('sharedCacheTTL', 60000);
+    let sharedCache = [];
+    let sharedCacheOffset = 0;
+    let sharedCacheComplete = false;
+    let sharedCacheTime = 0;
+    let sharedCachePromise = null;
+    const CACHE_TTL = cfg.get('sharedCacheTTL', 60000);
 
-    var outbox = [];
-    var relayErrors = new Map();
+    const outbox = [];
+    const relayErrors = new Map();
 
     function deriveKey(password, salt) {
-      var enc = new TextEncoder();
+      const enc = new TextEncoder();
       return crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']).then(function(keyMaterial) {
         return crypto.subtle.deriveKey(
           { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
@@ -974,12 +943,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function encryptKey(hexKey, password) {
-      var salt = crypto.getRandomValues(new Uint8Array(16));
-      var iv = crypto.getRandomValues(new Uint8Array(12));
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      const iv = crypto.getRandomValues(new Uint8Array(12));
       return deriveKey(password, salt).then(function(key) {
-        var enc = new TextEncoder();
+        const enc = new TextEncoder();
         return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(hexKey)).then(function(ciphertext) {
-          var combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
+          const combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
           combined.set(salt, 0);
           combined.set(iv, salt.length);
           combined.set(new Uint8Array(ciphertext), salt.length + iv.length);
@@ -989,10 +958,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function decryptKey(base64Str, password) {
-      var combined = Uint8Array.from(atob(base64Str), function(c) { return c.charCodeAt(0); });
-      var salt = combined.slice(0, 16);
-      var iv = combined.slice(16, 28);
-      var ciphertext = combined.slice(28);
+      const combined = Uint8Array.from(atob(base64Str), function(c) { return c.charCodeAt(0); });
+      const salt = combined.slice(0, 16);
+      const iv = combined.slice(16, 28);
+      const ciphertext = combined.slice(28);
       return deriveKey(password, salt).then(function(key) {
         return crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext).then(function(dec) {
           return new TextDecoder().decode(dec);
@@ -1001,7 +970,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function setStatus(s) {
-      var wasDisconnected = (netStatus !== 'connected');
+      const wasDisconnected = (netStatus !== 'connected');
       netStatus = s;
       if (bus && bus.emit) { try { bus.emit('net:status', { status: s }); } catch (_) { /* ignore */ } }
       if (s === 'connected' && wasDisconnected) {
@@ -1010,8 +979,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function notifyPeers() {
-      var count = peers.size;
-      for (var i = 0; i < peerListeners.length; i++) {
+      const count = peers.size;
+      for (let i = 0; i < peerListeners.length; i++) {
         try { peerListeners[i](count); } catch (_) { /* ignore */ }
       }
       if (bus && bus.emit) { try { bus.emit('net:peers', { count: count }); } catch (_) { /* ignore */ } }
@@ -1031,15 +1000,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (seen.has(ev.id)) return true;
       seen.add(ev.id);
       if (seen.size > cfg.get('seenMaxSize', 1000)) {
-        var arr = Array.from(seen);
+        const arr = Array.from(seen);
         seen.clear();
-        for (var i = arr.length - cfg.get('seenKeepSize', 500); i < arr.length; i++) seen.add(arr[i]);
+        for (let i = arr.length - cfg.get('seenKeepSize', 500); i < arr.length; i++) seen.add(arr[i]);
       }
       return false;
     }
 
     function getSharedVectors() {
-      var now = Date.now();
+      const now = Date.now();
       if (sharedCacheComplete && (now - sharedCacheTime < CACHE_TTL)) {
         return Promise.resolve(sharedCache);
       }
@@ -1048,13 +1017,26 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         sharedCacheOffset = 0;
         sharedCacheComplete = false;
       }
-      var chunkSize = cfg.get('baseChunkSize', 20);
+      
+      if (sharedCachePromise) {
+        return sharedCachePromise;
+      }
+      
+      sharedCachePromise = loadSharedVectorsAsync().finally(function() {
+        sharedCachePromise = null;
+      });
+      
+      return sharedCachePromise;
+    }
+
+    function loadSharedVectorsAsync() {
+      const chunkSize = cfg.get('baseChunkSize', 20);
       return DB.getAllPaginated(sharedCacheOffset, chunkSize).then(function(chunk) {
         if (!chunk || chunk.length === 0) {
           sharedCacheComplete = true;
         } else {
-          for (var i = 0; i < chunk.length; i++) {
-            var n = chunk[i];
+          for (let i = 0; i < chunk.length; i++) {
+            const n = chunk[i];
             if (n && n.shared && n.vector) {
               sharedCache.push({ id: n.id, text: n.text, vector: n.vector });
             }
@@ -1070,10 +1052,19 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     function invalidateSharedCache() {
-      sharedCache = [];
-      sharedCacheOffset = 0;
-      sharedCacheComplete = false;
-      sharedCacheTime = 0;
+      if (sharedCachePromise) {
+        sharedCachePromise.then(function() {
+          sharedCache = [];
+          sharedCacheOffset = 0;
+          sharedCacheComplete = false;
+          sharedCacheTime = 0;
+        });
+      } else {
+        sharedCache = [];
+        sharedCacheOffset = 0;
+        sharedCacheComplete = false;
+        sharedCacheTime = 0;
+      }
     }
 
     if (bus && bus.on) {
@@ -1092,18 +1083,18 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     function flushOutbox() {
       if (outbox.length === 0 || !pool) return;
-      var limit = Math.min(cfg.get('outboxBatchSize', 2), outbox.length);
-      var toSend = outbox.splice(0, limit);
+      const limit = Math.min(cfg.get('outboxBatchSize', 2), outbox.length);
+      const toSend = outbox.splice(0, limit);
       toSend.forEach(function(ev) { safePublish(ev); });
       if (bus && bus.emit) { try { bus.emit('net:outbox', { count: outbox.length }); } catch(_) {} }
     }
 
     function safePublish(ev) {
-      var relays = cfg.get('relays', []);
-      var now = Date.now();
-      var goodRelays = [];
-      for (var i = 0; i < relays.length; i++) {
-        var until = rateLimitedUntil.get(relays[i]) || 0;
+      const relays = cfg.get('relays', []);
+      const now = Date.now();
+      const goodRelays = [];
+      for (let i = 0; i < relays.length; i++) {
+        const until = rateLimitedUntil.get(relays[i]) || 0;
         if (until <= now) goodRelays.push(relays[i]);
       }
       if (goodRelays.length === 0) {
@@ -1112,19 +1103,19 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return Promise.resolve();
       }
       try {
-        var pubs = pool.publish(goodRelays, ev);
-        for (var i = 0; i < goodRelays.length; i++) {
-          var relay = goodRelays[i];
-          var p = (pubs && typeof pubs.get === 'function') ? pubs.get(relay) : (Array.isArray(pubs) ? pubs[i] : null);
+        const pubs = pool.publish(goodRelays, ev);
+        for (let i = 0; i < goodRelays.length; i++) {
+          const relay = goodRelays[i];
+          const p = (pubs && typeof pubs.get === 'function') ? pubs.get(relay) : (Array.isArray(pubs) ? pubs[i] : null);
           if (p && p.then) {
             (function(promise, relayUrl) {
               promise.then(function() {
-                var idx = outbox.indexOf(ev);
+                const idx = outbox.indexOf(ev);
                 if (idx > -1) outbox.splice(idx, 1);
                 relayErrors.delete(relayUrl);
                 if (bus && bus.emit) { try { bus.emit('net:outbox', { count: outbox.length }); } catch(_) {} }
               }).catch(function(err) {
-                var count = (relayErrors.get(relayUrl) || 0) + 1;
+                const count = (relayErrors.get(relayUrl) || 0) + 1;
                 relayErrors.set(relayUrl, count);
                 
                 if (count >= cfg.get('relayErrorThreshold', 5)) {
@@ -1132,7 +1123,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                   relayErrors.set(relayUrl, 0);
                   if (log) log.warn('Relay ' + relayUrl + ' circuit broken, 2m backoff');
                 } else {
-                  var backoff = count === 1 ? cfg.get('relayBackoff1', 15000) : cfg.get('relayBackoff2', 30000);
+                  const backoff = count === 1 ? cfg.get('relayBackoff1', 15000) : cfg.get('relayBackoff2', 30000);
                   rateLimitedUntil.set(relayUrl, Date.now() + backoff);
                   if (log) log.warn('Relay ' + relayUrl + ' error ' + count + ', ' + (backoff / 1000) + 's backoff');
                 }
@@ -1158,20 +1149,20 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (isDuplicate(ev)) return;
         if (pk && ev.pubkey === pk) return;
 
-        var had = peers.has(ev.pubkey);
+        const had = peers.has(ev.pubkey);
         peers.set(ev.pubkey, Date.now());
         if (!had) notifyPeers();
         setStatus('connected');
         connAttempts = 0;
         flushOutbox();
 
-        var KQ = cfg.get('kQuery', 21000);
-        var KA = cfg.get('kAnswer', 21001);
-        var room = cfg.get('room', 'noomium-main');
+        const KQ = cfg.get('kQuery', 21000);
+        const KA = cfg.get('kAnswer', 21001);
+        const room = cfg.get('room', 'noomium-main');
 
         if (ev.kind === KQ) {
           if (!sk) return;
-          var q;
+          let q;
           try { q = JSON.parse(ev.content); } catch (_) { return; }
           
           if (!q || typeof q !== 'object' || Array.isArray(q)) {
@@ -1179,7 +1170,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             return;
           }
           
-          var qKeys = Object.keys(q);
+          const qKeys = Object.keys(q);
           if (qKeys.length !== 1 || qKeys[0] !== 'vector') {
             if (log) log.warn('Invalid query format: extra fields');
             return;
@@ -1190,8 +1181,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             return;
           }
           
-          var isValidVector = true;
-          for (var i = 0; i < q.vector.length; i++) {
+          let isValidVector = true;
+          for (let i = 0; i < q.vector.length; i++) {
             if (typeof q.vector[i] !== 'number') {
               isValidVector = false;
               break;
@@ -1203,27 +1194,27 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           }
           
           getSharedVectors().then(function(sharedNotes) {
-            var checkRelays = cfg.get('relays', []);
-            var nowCheck = Date.now();
-            var hasActiveRelay = false;
-            for (var r = 0; r < checkRelays.length; r++) {
-              var until = rateLimitedUntil.get(checkRelays[r]) || 0;
+            const checkRelays = cfg.get('relays', []);
+            const nowCheck = Date.now();
+            let hasActiveRelay = false;
+            for (let r = 0; r < checkRelays.length; r++) {
+              const until = rateLimitedUntil.get(checkRelays[r]) || 0;
               if (until <= nowCheck) { hasActiveRelay = true; break; }
             }
             if (!hasActiveRelay) return;
 
-            var floor = cfg.get('threshold', 0.30) - cfg.get('serendipity', 0.15);
-            var toSend = [];
-            for (var i = 0; i < sharedNotes.length; i++) {
-              var n = sharedNotes[i];
+            const floor = cfg.get('threshold', 0.30) - cfg.get('serendipity', 0.15);
+            const toSend = [];
+            for (let i = 0; i < sharedNotes.length; i++) {
+              const n = sharedNotes[i];
               if (AI.cosine(q.vector, n.vector) >= floor) toSend.push(n);
             }
             toSend.sort(function(a, b) { return AI.cosine(q.vector, b.vector) - AI.cosine(q.vector, a.vector); });
-            var maxAnswers = cfg.get('maxAnswersPerQuery', 5);
-            var limited = toSend.slice(0, maxAnswers);
-            for (var j = 0; j < limited.length; j++) {
+            const maxAnswers = cfg.get('maxAnswersPerQuery', 5);
+            const limited = toSend.slice(0, maxAnswers);
+            for (let j = 0; j < limited.length; j++) {
               try {
-                var ans = nostr.finalizeEvent({
+                const ans = nostr.finalizeEvent({
                   kind: KA,
                   created_at: Math.floor(Date.now() / 1000),
                   tags: [['t', room], ['e', ev.id]],
@@ -1238,26 +1229,26 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         }
 
         if (ev.kind === KA) {
-          var eTag = null;
-          for (var i = 0; i < ev.tags.length; i++) {
-            var tag = ev.tags[i];
+          let eTag = null;
+          for (let i = 0; i < ev.tags.length; i++) {
+            const tag = ev.tags[i];
             if (Array.isArray(tag) && tag[0] === 'e') { eTag = tag[1]; break; }
           }
-          if (eTag && eTag === queryId) {
-            var data;
+          if (eTag && activeQueries.has(eTag)) {
+            let data;
             try { data = JSON.parse(ev.content); } catch (_) { return; }
             
             if (!data || typeof data !== 'object' || Array.isArray(data)) {
               return;
             }
             
-            var dKeys = Object.keys(data);
+            const dKeys = Object.keys(data);
             if (dKeys.length !== 2) {
               return;
             }
             
-            var hasText = false, hasVector = false;
-            for (var i = 0; i < dKeys.length; i++) {
+            let hasText = false, hasVector = false;
+            for (let i = 0; i < dKeys.length; i++) {
               if (dKeys[i] === 'text') hasText = true;
               else if (dKeys[i] === 'vector') hasVector = true;
               else { return; }
@@ -1283,8 +1274,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               return;
             }
             
-            var isValidAnsVector = true;
-            for (var i = 0; i < data.vector.length; i++) {
+            let isValidAnsVector = true;
+            for (let i = 0; i < data.vector.length; i++) {
               if (typeof data.vector[i] !== 'number') {
                 isValidAnsVector = false;
                 break;
@@ -1294,8 +1285,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               return;
             }
 
-            var isDupAnswer = false;
-            for (var j = 0; j < answers.length; j++) {
+            let isDupAnswer = false;
+            for (let j = 0; j < answers.length; j++) {
               if (answers[j].id === ev.id) { isDupAnswer = true; break; }
             }
             if (!isDupAnswer) {
@@ -1315,23 +1306,41 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     function startHeartbeat() {
       if (hbTimer) clearInterval(hbTimer);
-      var hbInterval = cfg.get('heartbeat', 30000);
-      var ttl = cfg.get('peerTTL', 60000);
+      const hbInterval = cfg.get('heartbeat', 30000);
+      const ttl = cfg.get('peerTTL', 60000);
       hbTimer = setInterval(function() {
-        var now = Date.now();
-        var removed = 0;
+        const now = Date.now();
+        const peersToRemove = [];
         peers.forEach(function(ts, pubkey) {
-          if (now - ts > ttl) { peers.delete(pubkey); removed++; }
+          if (now - ts > ttl) { peersToRemove.push(pubkey); }
         });
-        if (removed > 0) {
+        for (let i = 0; i < peersToRemove.length; i++) {
+          peers.delete(peersToRemove[i]);
+        }
+        if (peersToRemove.length > 0) {
           notifyPeers();
           if (typeof onUpdate === 'function') { try { onUpdate(); } catch (_) { /* ignore */ } }
         }
-        var cutoff = now - cfg.get('answersTTL', 300000);
-        for (var i = answers.length - 1; i >= 0; i--) {
+        
+        const answersToRemove = [];
+        const cutoff = now - cfg.get('answersTTL', 300000);
+        for (let i = 0; i < answers.length; i++) {
           if (!peers.has(answers[i].fullPubkey) || answers[i].createdAt < cutoff) {
-            answers.splice(i, 1);
+            answersToRemove.push(i);
           }
+        }
+        for (let i = answersToRemove.length - 1; i >= 0; i--) {
+          answers.splice(answersToRemove[i], 1);
+        }
+        
+        const queriesToRemove = [];
+        activeQueries.forEach(function(timestamp, queryId) {
+          if (now - timestamp > 60000) {
+            queriesToRemove.push(queryId);
+          }
+        });
+        for (let i = 0; i < queriesToRemove.length; i++) {
+          activeQueries.delete(queriesToRemove[i]);
         }
       }, hbInterval);
 
@@ -1351,7 +1360,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return;
       }
       reconnecting = true;
-      var delay = Math.min(cfg.get('reconnectMaxDelay', 60000), cfg.get('reconnectBaseDelay', 1000) * Math.pow(2, connAttempts));
+      const delay = Math.min(cfg.get('reconnectMaxDelay', 60000), cfg.get('reconnectBaseDelay', 1000) * Math.pow(2, connAttempts));
       connAttempts++;
       if (log) log.info('Reconnect attempt ' + connAttempts + ' in ' + delay + 'ms');
       setStatus('reconnecting');
@@ -1361,11 +1370,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             try { subscription.close(); } catch (_) { /* ignore */ }
           }
           subscription = null;
-          var room = cfg.get('room', 'noomium-main');
-          var KQ = cfg.get('kQuery', 21000);
-          var KA = cfg.get('kAnswer', 21001);
-          var subWindow = cfg.get('subWindow', 300);
-          var nowSec = Math.floor(Date.now() / 1000);
+          const room = cfg.get('room', 'noomium-main');
+          const KQ = cfg.get('kQuery', 21000);
+          const KA = cfg.get('kAnswer', 21001);
+          const subWindow = cfg.get('subWindow', 300);
+          const nowSec = Math.floor(Date.now() / 1000);
           if (pool) {
             subscription = pool.subscribeMany(cfg.get('relays', []),
               [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
@@ -1392,9 +1401,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       onUpdate = callback;
       connAttempts = 0;
       
-      var loadAndDecrypt = function() {
-          var p = import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm').then(function(mod) {
-              var tools = (mod && mod.default && typeof mod.default.generateSecretKey === 'function') 
+      const loadAndDecrypt = function() {
+          const p = import('https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm').then(function(mod) {
+              const tools = (mod && mod.default && typeof mod.default.generateSecretKey === 'function') 
                 ? mod.default 
                 : (typeof mod.generateSecretKey === 'function' ? mod : null);
               if (!tools || !tools.SimplePool) throw new Error('nostr-tools: incompatible module structure');
@@ -1407,11 +1416,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           }
 
           return p.then(function(tools) {
-              var KEY = 'noomium:sk';
-              var stored = localStorage.getItem(KEY);
+              const KEY = 'noomium:sk';
+              const stored = localStorage.getItem(KEY);
               if (stored) {
                 if (/^[0-9a-f]{64}$/i.test(stored)) {
-                   var keyHex = stored;
+                   const keyHex = stored;
                    return encryptKey(keyHex, password).then(function(encrypted) {
                        localStorage.setItem(KEY, encrypted);
                        return keyHex;
@@ -1423,8 +1432,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                 }
               }
               
-              var raw = tools.generateSecretKey();
-              var keyHex = Array.from(raw).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+              const raw = tools.generateSecretKey();
+              const keyHex = Array.from(raw).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
               return encryptKey(keyHex, password).then(function(encrypted) {
                   try { localStorage.setItem(KEY, encrypted); } catch (_) { /* ignore */ }
                   return keyHex;
@@ -1440,11 +1449,16 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           if (!pool && nostr) {
               pool = new nostr.SimplePool();
           }
-          var nowSec = Math.floor(Date.now() / 1000);
-          var room = cfg.get('room', 'noomium-main');
-          var KQ = cfg.get('kQuery', 21000);
-          var KA = cfg.get('kAnswer', 21001);
-          var subWindow = cfg.get('subWindow', 300);
+          const nowSec = Math.floor(Date.now() / 1000);
+          const room = cfg.get('room', 'noomium-main');
+          const KQ = cfg.get('kQuery', 21000);
+          const KA = cfg.get('kAnswer', 21001);
+          const subWindow = cfg.get('subWindow', 300);
+          
+          if (subscription && typeof subscription.close === 'function') {
+            try { subscription.close(); } catch (_) { /* ignore */ }
+          }
+          subscription = null;
           
           started = true;
           try {
@@ -1469,7 +1483,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     return {
       onPeers: function(fn) { if (typeof fn === 'function') peerListeners.push(fn); },
       offPeers: function(fn) {
-        var idx = peerListeners.indexOf(fn);
+        const idx = peerListeners.indexOf(fn);
         if (idx > -1) peerListeners.splice(idx, 1);
       },
       getStatus: function() { return netStatus; },
@@ -1477,7 +1491,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       hasKey: function() { return sk !== null; },
       isKeyEncrypted: function() {
         try {
-          var stored = localStorage.getItem('noomium:sk');
+          const stored = localStorage.getItem('noomium:sk');
           return !!(stored && !/^[0-9a-f]{64}$/i.test(stored));
         } catch (e) {
           return false;
@@ -1486,26 +1500,26 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       init: init,
       send: function(vector) {
         if (!pool || !nostr || !sk || AI.getMode() === 'demo') return;
-        var now = Date.now();
-        var rate = cfg.get('queryRateLimit', 3000);
+        const now = Date.now();
+        const rate = cfg.get('queryRateLimit', 3000);
         if (now - lastQueryTime < rate) return;
         lastQueryTime = now;
         answers.length = 0;
         try {
-          var ev = nostr.finalizeEvent({
+          const ev = nostr.finalizeEvent({
             kind: cfg.get('kQuery', 21000),
             created_at: Math.floor(Date.now() / 1000),
             tags: [['t', cfg.get('room', 'noomium-main')]],
             content: JSON.stringify({ vector: vector })
           }, sk);
-          queryId = ev.id;
+          activeQueries.set(ev.id, now);
           safePublish(ev);
           if (typeof onUpdate === 'function') { try { onUpdate(); } catch (_) { /* ignore */ } }
         } catch (e) { if (log) log.warn('pub fail', String(e)); }
       },
       activeAnswers: function() {
-        var out = [];
-        for (var i = 0; i < answers.length; i++) {
+        const out = [];
+        for (let i = 0; i < answers.length; i++) {
           if (peers.has(answers[i].fullPubkey)) out.push(answers[i]);
         }
         return out;
@@ -1532,6 +1546,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         outbox.length = 0;
         relayErrors.clear();
         rateLimitedUntil.clear();
+        activeQueries.clear();
         reconnecting = false;
         setStatus('disconnected');
         if (bus && bus.emit) { try { bus.emit('net:outbox', { count: 0 }); } catch(_) {} }
@@ -3627,14 +3642,14 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
 <!-- NOOMIUM_MODULE_START SW -->
   if ('serviceWorker' in navigator) {
-    var appVersionMeta = document.querySelector('meta[name="app-version"]');
-    var appVersion = appVersionMeta ? appVersionMeta.getAttribute('content') : '0';
+    const appVersionMeta = document.querySelector('meta[name="app-version"]');
+    const appVersion = appVersionMeta ? appVersionMeta.getAttribute('content') : '0';
     
-    var storedVersion = null;
+    let storedVersion = null;
     try { storedVersion = localStorage.getItem('noomium:appVersion'); } catch(e) {}
     
     if (storedVersion !== appVersion) {
-      var doReload = function() {
+      const doReload = function() {
         try { localStorage.setItem('noomium:appVersion', appVersion); } catch(e) {}
         location.reload(true);
       };
@@ -3647,64 +3662,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         doReload();
       }
     } else {
-      const swCode = `
-        const CACHE = 'noomium-v' + ` + JSON.stringify(appVersion) + `;
-        self.addEventListener('install', e => { self.skipWaiting(); });
-        self.addEventListener('activate', e => { 
-          e.waitUntil(
-            caches.keys().then(cacheNames => {
-              return Promise.all(
-                cacheNames.filter(cacheName => cacheName !== CACHE).map(cacheName => caches.delete(cacheName))
-              );
-            }).then(() => self.clients.claim())
-          );
-        });
-        self.addEventListener('message', function(event) { if (event.data && event.data.type === 'SKIP_WAITING') { self.skipWaiting(); } });
-        self.addEventListener('fetch', e => {
-          if (e.request.method !== 'GET') return;
-          if (e.request.mode === 'navigate') {
-            e.respondWith(
-              fetch(e.request).then(res => {
-                if (res && res.status === 200) {
-                  const clone = res.clone();
-                  caches.open(CACHE).then(c => c.put(e.request, clone));
-                }
-                return res;
-              }).catch(() => caches.match(e.request).then(r => r || caches.match('/')))
-            );
-            return;
-          }
-          e.respondWith(
-            caches.match(e.request).then(r => r || fetch(e.request).then(res => {
-              if (res.status === 200 && (e.request.url.startsWith(self.location.origin) || e.request.url.includes('jsdelivr'))) {
-                const clone = res.clone();
-                caches.open(CACHE).then(c => c.put(e.request, clone));
-              }
-              return res;
-            }).catch(() => caches.match('/')))
-          );
-        });
-      `;
-      try {
-        const blob = new Blob([swCode], { type: 'application/javascript' });
-        const swUrl = URL.createObjectURL(blob);
-        navigator.serviceWorker.register(swUrl).then(function(reg) {
-          if (reg.waiting) {
-            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
-          }
-          reg.onupdatefound = function() {
-            const installing = reg.installing;
-            if (installing) {
-              installing.onstatechange = function() {
-                if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-                  installing.postMessage({ type: 'SKIP_WAITING' });
-                  window.location.reload();
-                }
-              };
-            }
-          };
-        }).catch(function() { /* ignore SW errors */ });
-      } catch(e) { /* ignore */ }
+      navigator.serviceWorker.register('/sw.js').catch(function() { /* ignore */ });
     }
   }
 <!-- NOOMIUM_MODULE_END SW -->
