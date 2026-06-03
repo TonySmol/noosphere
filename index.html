@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.0">
+<meta name="app-version" content="1.2.1">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -665,11 +665,19 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           return reject(err);
         }
         try {
-          const req = indexedDB.open(dbName(), 1);
+          const req = indexedDB.open(dbName(), 2);
           req.onupgradeneeded = function(e) {
             const d = e.target.result;
             const s = storeName();
-            if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, { keyPath: 'id' });
+            let store;
+            if (!d.objectStoreNames.contains(s)) {
+              store = d.createObjectStore(s, { keyPath: 'id' });
+            } else {
+              store = e.target.transaction.objectStore(s);
+            }
+            if (!store.indexNames.contains('by_created')) {
+              store.createIndex('by_created', 'createdAt', { unique: false });
+            }
           };
           req.onsuccess = function(e) { db = e.target.result; resolve(db); };
           req.onerror = function() {
@@ -717,6 +725,52 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return tx('readwrite', function(s) { return s.delete(id); }).then(function(res) { emitChange(); return res; }); 
       },
       all: function() { return tx('readonly', function(s) { return s.getAll(); }); },
+      getAllSorted: function({ offset, limit, direction, filterText }) {
+        return open().then(function(d) {
+          return new Promise(function(resolve, reject) {
+            try {
+              const transaction = d.transaction(storeName(), 'readonly');
+              const store = transaction.objectStore(storeName());
+              const index = store.index('by_created');
+              const cursorDirection = direction === 'next' ? 'next' : 'prev';
+              const request = index.openCursor(null, cursorDirection);
+              const result = [];
+              let advanced = false;
+              
+              request.onsuccess = function(event) {
+                const cursor = event.target.result;
+                if (!cursor) {
+                  resolve(result);
+                  return;
+                }
+                if (!advanced && offset > 0) {
+                  advanced = true;
+                  try {
+                    cursor.advance(offset);
+                  } catch (e) {
+                    resolve(result);
+                  }
+                  return;
+                }
+                result.push(cursor.value);
+                if (result.length >= limit) {
+                  resolve(result);
+                  return;
+                }
+                cursor.continue();
+              };
+              
+              request.onerror = function() {
+                if (log) log.warn('DB cursor error', String(request.error));
+                reject(request.error);
+              };
+            } catch (err) {
+              if (log) log.warn('DB getAllSorted error', String(err));
+              reject(err);
+            }
+          });
+        });
+      },
       getAllPaginated: function(offset, limit) {
         return open().then(function(d) {
           return new Promise(function(resolve, reject) {
@@ -781,6 +835,244 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'Logger', 'Bus']);
 <!-- NOOMIUM_MODULE_END DB -->
+
+  <!-- NOOMIUM_MODULE_START BaseUI -->
+  DI.register('BaseUI', function(cfg, DB, Utils, I18n, Toast, Logger) {
+    let containerEl = null;
+    let listEl = null;
+    let searchEl = null;
+    let sortEl = null;
+    let statsEl = null;
+
+    let offset = 0;
+    let isLoading = false;
+    let hasMore = true;
+    let currentSort = 'new';
+    let currentSearch = '';
+    
+    let allNotesCache = null;
+    let allNotesCacheTime = 0;
+    const ALL_NOTES_TTL = 30000;
+
+    let scrollHandler = null;
+    let searchHandler = null;
+    let sortHandler = null;
+    let searchTimer = null;
+
+    function getAllNotes() {
+      const now = Date.now();
+      if (allNotesCache && (now - allNotesCacheTime < ALL_NOTES_TTL)) {
+        return Promise.resolve(allNotesCache);
+      }
+      return DB.all().then(function(notes) {
+        allNotesCache = notes || [];
+        allNotesCacheTime = now;
+        return allNotesCache;
+      });
+    }
+
+    function buildStatCard(value, label) {
+      return '<div class="stat"><div class="stat-v">' + Utils.esc(String(value)) + '</div>' +
+             '<div class="stat-l">' + Utils.esc(label) + '</div></div>';
+    }
+
+    function buildBaseMarkup() {
+      return '<div class="base-h"><div class="base-stats" id="base-stats"></div>' +
+      '<div class="base-ctrls"><input type="text" class="base-search" id="base-q" placeholder="' + Utils.esc(I18n.t('base.search')) + '" />' +
+      '<select class="base-sort" id="base-sort"><option value="new">' + I18n.t('base.sort.new') + '</option><option value="old">' + I18n.t('base.sort.old') + '</option><option value="az">' + I18n.t('base.sort.az') + '</option></select></div></div>' +
+      '<div class="base-list" id="base-list"></div>';
+    }
+
+    function updateStats() {
+      if (!statsEl) return;
+      getAllNotes().then(function(allNotes) {
+        let sharedCount = 0;
+        for (let i = 0; i < allNotes.length; i++) {
+          if (allNotes[i] && allNotes[i].shared) sharedCount++;
+        }
+        statsEl.innerHTML =
+          buildStatCard(allNotes.length, I18n.t('base.stat.total')) +
+          buildStatCard(sharedCount, I18n.t('base.stat.open')) +
+          buildStatCard(allNotes.length - sharedCount, I18n.t('base.stat.priv'));
+      }).catch(function(err) {
+        if (Logger) Logger.warn('updateStats error', String(err));
+      });
+    }
+
+    function renderChunk(chunk) {
+      if (!listEl || !chunk || chunk.length === 0) return;
+      const fragment = document.createDocumentFragment();
+      for (let i = 0; i < chunk.length; i++) {
+        const note = chunk[i];
+        const div = document.createElement('div');
+        const dateStr = Utils.fmtDate(note.createdAt, I18n.getLang());
+        const escapedText = Utils.esc(note.text);
+        const isLongText = escapedText.length > cfg.get('truncateTextLength', 120);
+        div.className = 'bi ' + (note.shared ? 'shared' : '');
+        div.setAttribute('data-id', note.id);
+        div.innerHTML = '<div class="bi-t' + (isLongText ? ' truncated' : '') + '">' + escapedText + '</div>' +
+          '<div class="bi-f"><div class="bi-meta">' +
+            '<span class="bi-tag">' + Utils.esc(note.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private')) + '</span>' +
+            '<span class="bi-date">' + Utils.esc(dateStr) + '</span>' +
+          '</div></div>';
+        fragment.appendChild(div);
+      }
+      listEl.appendChild(fragment);
+    }
+
+    function renderEmpty() {
+      if (!listEl) return;
+      const emptyTitle = I18n.t('empty.base.t');
+      const emptyDesc = I18n.t('empty.base.d');
+      listEl.innerHTML = '<div class="feed-empty"><div class="feed-empty-ic">▤</div>' +
+        '<div class="feed-empty-t">' + Utils.esc(emptyTitle) + '</div>' +
+        '<div class="feed-empty-d">' + Utils.esc(emptyDesc) + '</div></div>';
+    }
+
+    function loadChunk() {
+      if (isLoading || !hasMore || !listEl) return;
+      isLoading = true;
+      const limit = cfg.get('baseChunkSize', 20);
+      
+      if (currentSort === 'az' || currentSearch) {
+        getAllNotes().then(function(allNotes) {
+          let filtered = allNotes;
+          if (currentSearch) {
+            filtered = filtered.filter(function(n) { 
+              return n.text && n.text.toLowerCase().indexOf(currentSearch) >= 0; 
+            });
+          }
+          if (currentSort === 'az') {
+            filtered.sort(function(a, b) { 
+              return (a.text || '').localeCompare(b.text || '', I18n.getLang() === 'en' ? 'en' : 'ru'); 
+            });
+          } else if (currentSort === 'old') {
+            filtered.sort(function(a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+          } else {
+            filtered.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+          }
+          
+          const chunk = filtered.slice(offset, offset + limit);
+          renderChunk(chunk);
+          offset += chunk.length;
+          hasMore = offset < filtered.length;
+          isLoading = false;
+          
+          if (chunk.length === 0 && offset === 0) renderEmpty();
+        }).catch(function(err) {
+          isLoading = false;
+          if (Toast) Toast.show('err', String(err && err.message || err) || 'Chunk load failed');
+          if (Logger) Logger.warn('loadChunk allNotes error', String(err));
+        });
+      } else {
+        const direction = currentSort === 'old' ? 'next' : 'prev';
+        DB.getAllSorted({ offset: offset, limit: limit, direction: direction }).then(function(chunk) {
+          if (!chunk || chunk.length === 0) {
+            hasMore = false;
+            isLoading = false;
+            if (offset === 0) renderEmpty();
+            return;
+          }
+          renderChunk(chunk);
+          offset += chunk.length;
+          if (chunk.length < limit) hasMore = false;
+          isLoading = false;
+        }).catch(function(err) {
+          isLoading = false;
+          if (Toast) Toast.show('err', String(err && err.message || err) || 'Chunk load failed');
+          if (Logger) Logger.warn('loadChunk sorted error', String(err));
+        });
+      }
+    }
+
+    function bindEvents() {
+      scrollHandler = function(e) {
+        const el = e.target;
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
+          loadChunk();
+        }
+      };
+      listEl.addEventListener('scroll', scrollHandler);
+      
+      searchHandler = function() {
+        if (searchTimer) clearTimeout(searchTimer);
+        searchTimer = setTimeout(function() {
+          currentSearch = searchEl.value.trim().toLowerCase();
+          refresh();
+        }, cfg.get('baseSearchDebounce', 200));
+      };
+      searchEl.addEventListener('input', searchHandler);
+      
+      sortHandler = function() {
+        currentSort = sortEl.value;
+        refresh();
+      };
+      sortEl.addEventListener('change', sortHandler);
+      
+      listEl.addEventListener('click', function(e) {
+        const bi = e.target.closest('.bi');
+        if (bi) {
+          const id = bi.getAttribute('data-id');
+          if (id) {
+            try {
+              if (typeof openNoteView === 'function') {
+                openNoteView(id);
+              } else if (window.openNoteView) {
+                window.openNoteView(id);
+              }
+            } catch (err) {
+              if (Logger) Logger.warn('openNoteView error', String(err));
+            }
+          }
+        }
+      });
+    }
+
+    function refresh() {
+      offset = 0;
+      hasMore = true;
+      isLoading = false;
+      if (listEl) listEl.innerHTML = '';
+      updateStats();
+      loadChunk();
+    }
+
+    return {
+      mount: function(container) {
+        containerEl = container;
+        containerEl.innerHTML = buildBaseMarkup();
+        listEl = containerEl.querySelector('#base-list');
+        searchEl = containerEl.querySelector('#base-q');
+        sortEl = containerEl.querySelector('#base-sort');
+        statsEl = containerEl.querySelector('#base-stats');
+        
+        currentSort = sortEl.value;
+        currentSearch = searchEl.value.trim().toLowerCase();
+        
+        bindEvents();
+        refresh();
+      },
+      refresh: refresh,
+      destroy: function() {
+        if (listEl && scrollHandler) {
+          listEl.removeEventListener('scroll', scrollHandler);
+        }
+        if (searchEl && searchHandler) {
+          searchEl.removeEventListener('input', searchHandler);
+        }
+        if (sortEl && sortHandler) {
+          sortEl.removeEventListener('change', sortHandler);
+        }
+        if (searchTimer) clearTimeout(searchTimer);
+        containerEl = null;
+        listEl = null;
+        searchEl = null;
+        sortEl = null;
+        statsEl = null;
+      }
+    };
+  }, ['Config', 'DB', 'Utils', 'I18n', 'Toast', 'Logger']);
+<!-- NOOMIUM_MODULE_END BaseUI -->
 
 <!-- NOOMIUM_MODULE_START AI -->
   DI.register('AI', function(cfg, log, bus) {
