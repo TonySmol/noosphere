@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.1">
+<meta name="app-version" content="1.2.2">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2407,6 +2407,8 @@ DI.register('StateManager', function() {
 <!-- NOOMIUM_MODULE_END UI.Carousel -->
 
 <!-- NOOMIUM_MODULE_START UI.Base -->
+  var StateManager = DI.resolve('StateManager');
+  
   var baseOffset = 0;
   var baseIsLoading = false;
   var baseHasMore = true;
@@ -2417,6 +2419,58 @@ DI.register('StateManager', function() {
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
       loadBaseNotesChunked();
     }
+  }
+
+  /**
+   * Создать DOM-элемент карточки статистики
+   * @param {number|string} value - Значение
+   * @param {string} label - Подпись
+   * @returns {HTMLElement}
+   */
+  function buildStatCard(value, label) {
+    var card = document.createElement('div');
+    card.className = 'stat';
+    
+    var valueEl = document.createElement('div');
+    valueEl.className = 'stat-v';
+    valueEl.textContent = String(value);
+    card.appendChild(valueEl);
+    
+    var labelEl = document.createElement('div');
+    labelEl.className = 'stat-l';
+    labelEl.textContent = label;
+    card.appendChild(labelEl);
+    
+    return card;
+  }
+
+  /**
+   * Создать DOM-элемент пустого состояния
+   * @param {string} icon - Иконка
+   * @param {string} title - Заголовок
+   * @param {string} description - Описание
+   * @returns {HTMLElement}
+   */
+  function buildEmptyState(icon, title, description) {
+    var emptyDiv = document.createElement('div');
+    emptyDiv.className = 'feed-empty';
+    
+    var icEl = document.createElement('div');
+    icEl.className = 'feed-empty-ic';
+    icEl.textContent = icon;
+    emptyDiv.appendChild(icEl);
+    
+    var titleEl = document.createElement('div');
+    titleEl.className = 'feed-empty-t';
+    titleEl.textContent = title;
+    emptyDiv.appendChild(titleEl);
+    
+    var descEl = document.createElement('div');
+    descEl.className = 'feed-empty-d';
+    descEl.textContent = description;
+    emptyDiv.appendChild(descEl);
+    
+    return emptyDiv;
   }
 
   function loadBaseNotesChunked() {
@@ -2437,9 +2491,10 @@ DI.register('StateManager', function() {
         if (baseOffset === 0 && container) {
           var emptyTitle = translate('empty.base.t');
           var emptyDesc = baseTotalNotes === 0 ? translate('empty.base.d') : translate('empty.base.empty');
-          container.innerHTML = '<div class="feed-empty"><div class="feed-empty-ic">▤</div>' +
-            '<div class="feed-empty-t">' + Utils.esc(emptyTitle) + '</div>' +
-            '<div class="feed-empty-d">' + Utils.esc(emptyDesc) + '</div></div>';
+          while (container.firstChild) {
+            container.removeChild(container.firstChild);
+          }
+          container.appendChild(buildEmptyState('▤', emptyTitle, emptyDesc));
         }
         return;
       }
@@ -2461,21 +2516,40 @@ DI.register('StateManager', function() {
       }
       
       var fragment = document.createDocumentFragment();
+      var truncateLength = Config.get('truncateTextLength', 120);
+      
       for (var i = 0; i < filtered.length; i++) {
         var note = filtered[i];
         var div = document.createElement('div');
-        var dateStr = Utils.fmtDate(note.createdAt, I18n.getLang());
-        var escapedText = Utils.esc(note.text);
-        var isLongText = escapedText.length > Config.get('truncateTextLength', 120);
-        div.className = 'bi ' + (note.shared ? 'shared' : '');
+        div.className = 'bi' + (note.shared ? ' shared' : '');
         div.setAttribute('data-id', note.id);
-        div.innerHTML = '<div class="bi-t' + (isLongText ? ' truncated' : '') + '">' + escapedText + '</div>' +
-          '<div class="bi-f"><div class="bi-meta">' +
-            '<span class="bi-tag">' + Utils.esc(note.shared ? translate('base.tag.shared') : translate('base.tag.private')) + '</span>' +
-            '<span class="bi-date">' + Utils.esc(dateStr) + '</span>' +
-          '</div></div>';
+        
+        var textEl = document.createElement('div');
+        textEl.className = 'bi-t' + (note.text && note.text.length > truncateLength ? ' truncated' : '');
+        textEl.textContent = note.text || '';
+        div.appendChild(textEl);
+        
+        var foot = document.createElement('div');
+        foot.className = 'bi-f';
+        
+        var meta = document.createElement('div');
+        meta.className = 'bi-meta';
+        
+        var tagEl = document.createElement('span');
+        tagEl.className = 'bi-tag';
+        tagEl.textContent = note.shared ? translate('base.tag.shared') : translate('base.tag.private');
+        meta.appendChild(tagEl);
+        
+        var dateEl = document.createElement('span');
+        dateEl.className = 'bi-date';
+        dateEl.textContent = Utils.fmtDate(note.createdAt, I18n.getLang());
+        meta.appendChild(dateEl);
+        
+        foot.appendChild(meta);
+        div.appendChild(foot);
         fragment.appendChild(div);
       }
+      
       if (container) container.appendChild(fragment);
       
       baseOffset += chunk.length;
@@ -2491,23 +2565,23 @@ DI.register('StateManager', function() {
   }
 
   function updateCounts() {
+    var state = StateManager.getState();
     ['local', 'world', 'seren'].forEach(function(key) {
       var el = document.getElementById('c-' + key);
-      if (el) el.textContent = appState.lists[key].length;
+      if (el) el.textContent = state.lists[key].length;
     });
-  }
-
-  function buildStatCard(value, label) {
-    return '<div class="stat"><div class="stat-v">' + Utils.esc(String(value)) + '</div>' +
-           '<div class="stat-l">' + Utils.esc(label) + '</div></div>';
   }
 
   function renderBase() {
     var container = document.getElementById('base-list');
     if (container) {
-      container.innerHTML = '';
       container.removeEventListener('scroll', onBaseScroll);
       container.addEventListener('scroll', onBaseScroll);
+      
+      // Безопасная очистка контейнера
+      while (container.firstChild) {
+        container.removeChild(container.firstChild);
+      }
     }
     
     baseOffset = 0;
@@ -2517,14 +2591,19 @@ DI.register('StateManager', function() {
     getAllNotesCached().then(function(allNotes) {
       var statsEl = document.getElementById('base-stats');
       if (statsEl) {
+        // Очистка статистики
+        while (statsEl.firstChild) {
+          statsEl.removeChild(statsEl.firstChild);
+        }
+        
         var sharedCount = 0;
         for (var i = 0; i < allNotes.length; i++) {
           if (allNotes[i] && allNotes[i].shared) sharedCount++;
         }
-        statsEl.innerHTML =
-          buildStatCard(allNotes.length, translate('base.stat.total')) +
-          buildStatCard(sharedCount, translate('base.stat.open')) +
-          buildStatCard(allNotes.length - sharedCount, translate('base.stat.priv'));
+        
+        statsEl.appendChild(buildStatCard(allNotes.length, translate('base.stat.total')));
+        statsEl.appendChild(buildStatCard(sharedCount, translate('base.stat.open')));
+        statsEl.appendChild(buildStatCard(allNotes.length - sharedCount, translate('base.stat.priv')));
       }
       
       baseTotalNotes = allNotes.length;
@@ -2547,61 +2626,53 @@ DI.register('StateManager', function() {
         uiState.noteViewEscHandler = null;
       }
 
+      /**
+       * Построить содержимое модального окна просмотра/редактирования
+       */
       function renderNoteView() {
+        // Создание overlay при первом вызове
         if (!nvOverlay) {
           nvOverlay = document.createElement('div');
           nvOverlay.className = 'nv on';
           document.body.appendChild(nvOverlay);
         }
+        
+        // Очистка предыдущего содержимого
+        while (nvOverlay.firstChild) {
+          nvOverlay.removeChild(nvOverlay.firstChild);
+        }
 
         var dateStr = Utils.fmtDate(record.createdAt, I18n.getLang());
         var tagLabel = record.shared ? translate('base.tag.shared') : translate('base.tag.private');
 
-        var bodyContent = '';
-        var topFooter = '';
-        var bottomFooter = '';
-
         if (isEditing) {
-          bodyContent = '<textarea class="nv-ta" id="nv-ta">' + Utils.esc(record.text) + '</textarea>';
-          bottomFooter =
-            '<button class="nv-act" id="nv-cancel">' + Utils.esc(translate('btn.cancel')) + '</button>' +
-            '<button class="nv-act primary" id="nv-save">' + Utils.esc(translate('btn.save')) + '</button>';
-        } else {
-          bodyContent =
-            '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">' +
-              '<span class="bi-tag">' + Utils.esc(tagLabel) + '</span>' +
-              '<span style="font-size:11px;color:var(--text-3);font-family:var(--mono)">' + Utils.esc(dateStr) + '</span>' +
-            '</div>' +
-            '<div class="nv-text">' + Utils.esc(record.text) + '</div>';
-          topFooter =
-            '<button class="nv-act danger" id="nv-del" aria-label="' + Utils.esc(translate('btn.del')) + '">' + Utils.esc(translate('btn.del')) + '</button>' +
-            '<button class="nv-act" id="nv-copy" aria-label="' + Utils.esc(translate('btn.copy')) + '">' + Utils.esc(translate('btn.copy')) + '</button>' +
-            '<button class="nv-act" id="nv-toggle" aria-label="' + Utils.esc(record.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub')) + '">' + Utils.esc(record.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub')) + '</button>';
-          bottomFooter =
-            '<button class="nv-act" id="nv-cancel" aria-label="' + Utils.esc(translate('btn.cancel')) + '">' + Utils.esc(translate('btn.cancel')) + '</button>' +
-            '<button class="nv-act primary" id="nv-edit" aria-label="' + Utils.esc(translate('btn.edit')) + '">' + Utils.esc(translate('btn.edit')) + '</button>';
-        }
-
-        nvOverlay.innerHTML =
-          (topFooter ? '<div class="nv-f">' + topFooter + '</div>' : '') +
-          '<div class="nv-b">' + bodyContent + '</div>' +
-          '<div class="nv-f-bottom">' + bottomFooter + '</div>';
-
-        var cancelBtn = document.getElementById('nv-cancel');
-        if (cancelBtn) cancelBtn.onclick = function() {
-          if (isEditing) {
+          // Режим редактирования
+          var body = document.createElement('div');
+          body.className = 'nv-b';
+          
+          var ta = document.createElement('textarea');
+          ta.className = 'nv-ta';
+          ta.id = 'nv-ta';
+          ta.value = record.text || '';
+          body.appendChild(ta);
+          
+          var bottomFooter = document.createElement('div');
+          bottomFooter.className = 'nv-f-bottom';
+          
+          var cancelBtn = document.createElement('button');
+          cancelBtn.className = 'nv-act';
+          cancelBtn.id = 'nv-cancel';
+          cancelBtn.textContent = translate('btn.cancel');
+          cancelBtn.onclick = function() {
             isEditing = false;
             renderNoteView();
-          } else {
-            closeNoteView();
-          }
-        };
-
-        if (isEditing) {
-          var saveBtn = document.getElementById('nv-save');
-          if (saveBtn) saveBtn.onclick = function() {
-            var ta = document.getElementById('nv-ta');
-            if (!ta) return;
+          };
+          
+          var saveBtn = document.createElement('button');
+          saveBtn.className = 'nv-act primary';
+          saveBtn.id = 'nv-save';
+          saveBtn.textContent = translate('btn.save');
+          saveBtn.onclick = function() {
             var newText = ta.value.trim();
             if (!newText) { toast(translate('toast.empty'), 'err'); return; }
             record.text = newText;
@@ -2618,13 +2689,24 @@ DI.register('StateManager', function() {
               toast(String(err && err.message || err) || 'Edit failed', 'err');
             });
           };
+          
+          bottomFooter.appendChild(cancelBtn);
+          bottomFooter.appendChild(saveBtn);
+          
+          nvOverlay.appendChild(body);
+          nvOverlay.appendChild(bottomFooter);
+          
         } else {
-          var delBtn = document.getElementById('nv-del');
-          var copyBtn = document.getElementById('nv-copy');
-          var toggleBtn = document.getElementById('nv-toggle');
-          var editBtn = document.getElementById('nv-edit');
-
-          if (delBtn) delBtn.onclick = function() {
+          // Режим просмотра
+          var topFooter = document.createElement('div');
+          topFooter.className = 'nv-f';
+          
+          var delBtn = document.createElement('button');
+          delBtn.className = 'nv-act danger';
+          delBtn.id = 'nv-del';
+          delBtn.setAttribute('aria-label', translate('btn.del'));
+          delBtn.textContent = translate('btn.del');
+          delBtn.onclick = function() {
             if (!confirm(translate('nv.delete.confirm'))) return;
             DB.del(id).then(function() {
               toast(translate('toast.deleted'), 'ok');
@@ -2635,10 +2717,22 @@ DI.register('StateManager', function() {
               toast(String(err && err.message || err) || 'Delete failed', 'err');
             });
           };
-          if (copyBtn) copyBtn.onclick = function() {
+          
+          var copyBtn = document.createElement('button');
+          copyBtn.className = 'nv-act';
+          copyBtn.id = 'nv-copy';
+          copyBtn.setAttribute('aria-label', translate('btn.copy'));
+          copyBtn.textContent = translate('btn.copy');
+          copyBtn.onclick = function() {
             copyToClipboard(record.text);
           };
-          if (toggleBtn) toggleBtn.onclick = function() {
+          
+          var toggleBtn = document.createElement('button');
+          toggleBtn.className = 'nv-act';
+          toggleBtn.id = 'nv-toggle';
+          toggleBtn.setAttribute('aria-label', record.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub'));
+          toggleBtn.textContent = record.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub');
+          toggleBtn.onclick = function() {
             record.shared = !record.shared;
             DB.put(record).then(function() {
               toast(record.shared ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
@@ -2649,10 +2743,62 @@ DI.register('StateManager', function() {
               toast(String(err && err.message || err) || 'Toggle failed', 'err');
             });
           };
-          if (editBtn) editBtn.onclick = function() {
+          
+          topFooter.appendChild(delBtn);
+          topFooter.appendChild(copyBtn);
+          topFooter.appendChild(toggleBtn);
+          
+          var body = document.createElement('div');
+          body.className = 'nv-b';
+          
+          var infoRow = document.createElement('div');
+          infoRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:12px';
+          
+          var tagEl = document.createElement('span');
+          tagEl.className = 'bi-tag';
+          tagEl.textContent = tagLabel;
+          infoRow.appendChild(tagEl);
+          
+          var dateEl = document.createElement('span');
+          dateEl.style.cssText = 'font-size:11px;color:var(--text-3);font-family:var(--mono)';
+          dateEl.textContent = dateStr;
+          infoRow.appendChild(dateEl);
+          
+          body.appendChild(infoRow);
+          
+          var textDiv = document.createElement('div');
+          textDiv.className = 'nv-text';
+          textDiv.textContent = record.text || '';
+          body.appendChild(textDiv);
+          
+          var bottomFooter = document.createElement('div');
+          bottomFooter.className = 'nv-f-bottom';
+          
+          var cancelBtn = document.createElement('button');
+          cancelBtn.className = 'nv-act';
+          cancelBtn.id = 'nv-cancel';
+          cancelBtn.setAttribute('aria-label', translate('btn.cancel'));
+          cancelBtn.textContent = translate('btn.cancel');
+          cancelBtn.onclick = function() {
+            closeNoteView();
+          };
+          
+          var editBtn = document.createElement('button');
+          editBtn.className = 'nv-act primary';
+          editBtn.id = 'nv-edit';
+          editBtn.setAttribute('aria-label', translate('btn.edit'));
+          editBtn.textContent = translate('btn.edit');
+          editBtn.onclick = function() {
             isEditing = true;
             renderNoteView();
           };
+          
+          bottomFooter.appendChild(cancelBtn);
+          bottomFooter.appendChild(editBtn);
+          
+          nvOverlay.appendChild(topFooter);
+          nvOverlay.appendChild(body);
+          nvOverlay.appendChild(bottomFooter);
         }
       }
 
@@ -2731,7 +2877,8 @@ DI.register('StateManager', function() {
           }
           DB.bulkPut(clean).then(function() {
             toast('✓ ' + clean.length, 'ok');
-            if (appState.view === 'base') renderBase();
+            var state = StateManager.getState();
+            if (state.view === 'base') renderBase();
             executeSearch();
           }).catch(function(err) {
             toast(String(err && err.message || err) || 'Import failed', 'err');
