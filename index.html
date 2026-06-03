@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.0">
+<meta name="app-version" content="1.2.1">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2050,8 +2050,17 @@ DI.register('StateManager', function() {
 <!-- NOOMIUM_MODULE_END UI.Layout -->
 
 <!-- NOOMIUM_MODULE_START UI.Carousel -->
+  var StateManager = DI.resolve('StateManager');
+
   function highlightText(text, query) {
-    if (!query) return Utils.esc(text);
+    var fragment = document.createDocumentFragment();
+    if (!text) return fragment;
+    
+    if (!query) {
+      fragment.appendChild(document.createTextNode(String(text)));
+      return fragment;
+    }
+    
     if (query !== cachedQuery) {
       var words = query.toLowerCase().split(/\s+/).filter(function(w) { return w.length > 2; });
       if (words.length === 0) {
@@ -2062,138 +2071,263 @@ DI.register('StateManager', function() {
       }
       cachedQuery = query;
     }
-    if (!cachedRegex) return Utils.esc(text);
+    
+    if (!cachedRegex) {
+      fragment.appendChild(document.createTextNode(String(text)));
+      return fragment;
+    }
     
     var parts = String(text).split(cachedRegex);
-    var out = '';
     for (var i = 0; i < parts.length; i++) {
+      if (parts[i] === '') continue;
       if (i % 2 === 1) {
-        out += '<mark>' + Utils.esc(parts[i]) + '</mark>';
+        var mark = document.createElement('mark');
+        mark.textContent = parts[i];
+        fragment.appendChild(mark);
       } else {
-        out += Utils.esc(parts[i]);
+        fragment.appendChild(document.createTextNode(parts[i]));
       }
     }
-    return out;
+    
+    return fragment;
   }
 
   function isOwnItem(item) { return !item.peer; }
 
   function renderItemHTML(item) {
-    if (!item) return '';
+    if (!item) return document.createElement('div');
+    
+    var state = StateManager.getState();
+    var seg = state.seg;
     var own = isOwnItem(item);
+    
+    var card = document.createElement('div');
+    card.className = 'fi t-' + seg;
+    card.setAttribute('data-id', item.id);
+    
+    // Header
+    var header = document.createElement('div');
+    header.className = 'fi-h';
+    
+    var badge = document.createElement('span');
+    badge.className = 'fi-badge';
     var typeLabel = own
       ? (item.shared ? translate('base.tag.shared') : translate('base.tag.private'))
       : ('· ' + item.peer);
+    badge.textContent = typeLabel;
+    header.appendChild(badge);
+    
     var scoreNum = typeof item.score === 'number' ? Math.round(item.score * 100) : null;
-    var scoreHTML = scoreNum !== null
-      ? '<span class="fi-score-label">' + Utils.esc(translate('sim.score')) + '</span>' +
-        '<span class="fi-score-value">' + Utils.esc(String(scoreNum)) + '%</span>'
-      : '';
-    var queryText = getEditorValue();
-    var actions = '';
-
-    if (own) {
-      actions =
-        '<button class="fi-act primary" data-act="edit" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(translate('btn.edit')) + '">' + translate('btn.edit') + '</button>' +
-        '<button class="fi-act" data-act="toggle" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(item.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub')) + '">' +
-          (item.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub')) +
-        '</button>' +
-        '<button class="fi-act" data-act="copy" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(translate('btn.copy')) + '">' + translate('btn.copy') + '</button>' +
-        '<button class="fi-act danger" data-act="del" data-id="' + Utils.esc(item.id) + '" aria-label="' + Utils.esc(translate('btn.del')) + '">' + translate('btn.del') + '</button>';
-    } else {
-      actions = '';
+    if (scoreNum !== null) {
+      var scoreWrap = document.createElement('span');
+      scoreWrap.className = 'fi-score';
+      
+      var scoreLabel = document.createElement('span');
+      scoreLabel.className = 'fi-score-label';
+      scoreLabel.textContent = translate('sim.score');
+      scoreWrap.appendChild(scoreLabel);
+      
+      var scoreValue = document.createElement('span');
+      scoreValue.className = 'fi-score-value';
+      scoreValue.textContent = String(scoreNum);
+      scoreWrap.appendChild(scoreValue);
+      
+      header.appendChild(scoreWrap);
     }
-
-    return '<div class="fi t-' + appState.seg + '" data-id="' + Utils.esc(item.id) + '">' +
-      '<div class="fi-h"><span class="fi-badge">' + Utils.esc(typeLabel) + '</span><span class="fi-score">' + scoreHTML + '</span></div>' +
-      '<div class="fi-body">' + highlightText(item.text, queryText) + '</div>' +
-      '<div class="fi-foot">' + actions + '</div></div>';
+    
+    card.appendChild(header);
+    
+    // Body
+    var body = document.createElement('div');
+    body.className = 'fi-body';
+    var queryText = getEditorValue();
+    body.appendChild(highlightText(item.text, queryText));
+    card.appendChild(body);
+    
+    // Footer
+    var footer = document.createElement('div');
+    footer.className = 'fi-foot';
+    
+    if (own) {
+      var btnEdit = document.createElement('button');
+      btnEdit.className = 'fi-act primary';
+      btnEdit.setAttribute('data-act', 'edit');
+      btnEdit.setAttribute('data-id', item.id);
+      btnEdit.setAttribute('aria-label', translate('btn.edit'));
+      btnEdit.textContent = translate('btn.edit');
+      footer.appendChild(btnEdit);
+      
+      var btnToggle = document.createElement('button');
+      btnToggle.className = 'fi-act';
+      btnToggle.setAttribute('data-act', 'toggle');
+      btnToggle.setAttribute('data-id', item.id);
+      btnToggle.setAttribute('aria-label', item.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub'));
+      btnToggle.textContent = item.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub');
+      footer.appendChild(btnToggle);
+      
+      var btnCopy = document.createElement('button');
+      btnCopy.className = 'fi-act';
+      btnCopy.setAttribute('data-act', 'copy');
+      btnCopy.setAttribute('data-id', item.id);
+      btnCopy.setAttribute('aria-label', translate('btn.copy'));
+      btnCopy.textContent = translate('btn.copy');
+      footer.appendChild(btnCopy);
+      
+      var btnDel = document.createElement('button');
+      btnDel.className = 'fi-act danger';
+      btnDel.setAttribute('data-act', 'del');
+      btnDel.setAttribute('data-id', item.id);
+      btnDel.setAttribute('aria-label', translate('btn.del'));
+      btnDel.textContent = translate('btn.del');
+      footer.appendChild(btnDel);
+    }
+    
+    card.appendChild(footer);
+    
+    return card;
   }
 
   function renderCarousel() {
     var wrap = document.getElementById('carousel-wrap');
     if (!wrap) return;
-
+    
     if (uiState.carouselObserver) {
       try { uiState.carouselObserver.disconnect(); } catch (_) { /* ignore */ }
       uiState.carouselObserver = null;
     }
-
-    var list = appState.lists[appState.seg];
+    
+    var state = StateManager.getState();
+    var list = state.lists[state.seg];
+    
+    // Очищаем wrap безопасно
+    while (wrap.firstChild) {
+      wrap.removeChild(wrap.firstChild);
+    }
+    
     if (!list || list.length === 0) {
       var emptyMessages = {
         local: { t: translate('empty.local.t'), d: translate('empty.local.d') },
         world: { t: translate('empty.world.t'), d: translate('empty.world.d') },
         seren: { t: translate('empty.seren.t'), d: translate('empty.seren.d') }
       };
-      var msg = emptyMessages[appState.seg];
-      wrap.innerHTML = '<div class="feed-empty"><div class="feed-empty-ic">◇</div>' +
-        '<div class="feed-empty-t">' + Utils.esc(msg.t) + '</div>' +
-        '<div class="feed-empty-d">' + Utils.esc(msg.d) + '</div></div>';
+      var msg = emptyMessages[state.seg];
+      
+      var emptyDiv = document.createElement('div');
+      emptyDiv.className = 'feed-empty';
+      
+      var emptyIc = document.createElement('div');
+      emptyIc.className = 'feed-empty-ic';
+      emptyIc.textContent = '◇';
+      emptyDiv.appendChild(emptyIc);
+      
+      var emptyT = document.createElement('div');
+      emptyT.className = 'feed-empty-t';
+      emptyT.textContent = msg.t;
+      emptyDiv.appendChild(emptyT);
+      
+      var emptyD = document.createElement('div');
+      emptyD.className = 'feed-empty-d';
+      emptyD.textContent = msg.d;
+      emptyDiv.appendChild(emptyD);
+      
+      wrap.appendChild(emptyDiv);
       return;
     }
-
-    var html = '<div class="carousel" id="carousel" tabindex="0">';
+    
+    // Создаём карусель
+    var carousel = document.createElement('div');
+    carousel.className = 'carousel';
+    carousel.id = 'carousel';
+    carousel.setAttribute('tabindex', '0');
+    
     for (var i = 0; i < list.length; i++) {
-      html += '<div class="carousel-item" data-idx="' + i + '">' + renderItemHTML(list[i]) + '</div>';
+      var item = document.createElement('div');
+      item.className = 'carousel-item';
+      item.setAttribute('data-idx', String(i));
+      item.appendChild(renderItemHTML(list[i]));
+      carousel.appendChild(item);
     }
-    html += '</div>';
-    html += '<div class="carousel-dots" id="carousel-dots">';
+    
+    wrap.appendChild(carousel);
+    
+    // Создаём точки и счётчик
+    var dotsWrap = document.createElement('div');
+    dotsWrap.className = 'carousel-dots';
+    dotsWrap.id = 'carousel-dots';
+    
     for (var j = 0; j < list.length; j++) {
-      html += '<span class="carousel-dot' + (j === 0 ? ' active' : '') + '" data-i="' + j + '"></span>';
+      var dot = document.createElement('span');
+      dot.className = 'carousel-dot' + (j === 0 ? ' active' : '');
+      dot.setAttribute('data-i', String(j));
+      dotsWrap.appendChild(dot);
     }
-    html += '<span class="carousel-counter" id="carousel-counter">1 / ' + list.length + '</span>';
-    html += '</div>';
-    wrap.innerHTML = html;
-
-    var carousel = document.getElementById('carousel');
-    if (carousel && 'IntersectionObserver' in window) {
+    
+    var counter = document.createElement('span');
+    counter.className = 'carousel-counter';
+    counter.id = 'carousel-counter';
+    counter.textContent = '1 / ' + list.length;
+    dotsWrap.appendChild(counter);
+    
+    wrap.appendChild(dotsWrap);
+    
+    // IntersectionObserver
+    if ('IntersectionObserver' in window) {
       uiState.carouselObserver = new IntersectionObserver(function(entries) {
         entries.forEach(function(entry) {
           if (entry.isIntersecting && entry.intersectionRatio >= Config.get('carouselIntersectionThreshold', 0.55)) {
             var idx = parseInt(entry.target.getAttribute('data-idx') || '0', 10);
-            uiState.activeIdx[appState.seg] = idx;
+            var currentState = StateManager.getState();
+            uiState.activeIdx[currentState.seg] = idx;
             updateCarouselDots(idx, list.length);
-            carousel.querySelectorAll('.fi').forEach(function(fi) { fi.classList.remove('active'); });
+            var allFi = carousel.querySelectorAll('.fi');
+            for (var k = 0; k < allFi.length; k++) {
+              allFi[k].classList.remove('active');
+            }
             var fi = entry.target.querySelector('.fi');
             if (fi) fi.classList.add('active');
           }
         });
       }, { root: carousel, threshold: [Config.get('carouselIntersectionThreshold', 0.55)] });
-      carousel.querySelectorAll('.carousel-item').forEach(function(item) {
-        uiState.carouselObserver.observe(item);
-      });
-    }
-
-    if (carousel) {
-      carousel.addEventListener('keydown', function(e) {
-        if (e.key === 'ArrowRight') {
-          e.preventDefault();
-          if (uiState.activeIdx[appState.seg] < list.length - 1) {
-            uiState.activeIdx[appState.seg]++;
-            var target = carousel.querySelector('[data-idx="' + uiState.activeIdx[appState.seg] + '"]');
-            if (target) target.scrollIntoView({behavior: 'smooth', inline: 'center'});
-            updateCarouselDots(uiState.activeIdx[appState.seg], list.length);
-          }
-        } else if (e.key === 'ArrowLeft') {
-          e.preventDefault();
-          if (uiState.activeIdx[appState.seg] > 0) {
-            uiState.activeIdx[appState.seg]--;
-            var target = carousel.querySelector('[data-idx="' + uiState.activeIdx[appState.seg] + '"]');
-            if (target) target.scrollIntoView({behavior: 'smooth', inline: 'center'});
-            updateCarouselDots(uiState.activeIdx[appState.seg], list.length);
-          }
-        }
-      });
       
-      carousel.scrollLeft = 0;
+      var items = carousel.querySelectorAll('.carousel-item');
+      for (var m = 0; m < items.length; m++) {
+        uiState.carouselObserver.observe(items[m]);
+      }
     }
-    uiState.activeIdx[appState.seg] = 0;
+    
+    // Keyboard navigation
+    carousel.addEventListener('keydown', function(e) {
+      var currentState = StateManager.getState();
+      var currentList = currentState.lists[currentState.seg];
+      
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        if (uiState.activeIdx[currentState.seg] < currentList.length - 1) {
+          uiState.activeIdx[currentState.seg]++;
+          var target = carousel.querySelector('[data-idx="' + uiState.activeIdx[currentState.seg] + '"]');
+          if (target) target.scrollIntoView({behavior: 'smooth', inline: 'center'});
+          updateCarouselDots(uiState.activeIdx[currentState.seg], currentList.length);
+        }
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        if (uiState.activeIdx[currentState.seg] > 0) {
+          uiState.activeIdx[currentState.seg]--;
+          var target = carousel.querySelector('[data-idx="' + uiState.activeIdx[currentState.seg] + '"]');
+          if (target) target.scrollIntoView({behavior: 'smooth', inline: 'center'});
+          updateCarouselDots(uiState.activeIdx[currentState.seg], currentList.length);
+        }
+      }
+    });
+    
+    carousel.scrollLeft = 0;
+    uiState.activeIdx[state.seg] = 0;
   }
 
   function updateCarouselDots(idx, total) {
     var dots = document.querySelectorAll('#carousel-dots .carousel-dot');
-    dots.forEach(function(d, i) { d.classList.toggle('active', i === idx); });
+    for (var i = 0; i < dots.length; i++) {
+      dots[i].classList.toggle('active', i === idx);
+    }
     var counter = document.getElementById('carousel-counter');
     if (counter) counter.textContent = (idx + 1) + ' / ' + total;
   }
@@ -2201,34 +2335,36 @@ DI.register('StateManager', function() {
   function handleItemAction(action, element) {
     if (!element) return;
     var id = element.getAttribute('data-id');
-
+    var state = StateManager.getState();
+    
     if (action === 'edit') {
       openNoteView(id);
       return;
     }
-
+    
     if (action === 'copy') {
-      var item = findItemById(id, appState.lists[appState.seg]);
+      var item = findItemById(id, state.lists[state.seg]);
       if (item) copyToClipboard(item.text);
       return;
     }
-
+    
     if (action === 'del') {
       if (!confirm(translate('del.confirm'))) return;
       DB.del(id).then(function() {
         toast(translate('toast.deleted'), 'ok');
-        appState.lists[appState.seg] = appState.lists[appState.seg].filter(function(n) { return n.id !== id; });
-        if (uiState.activeIdx[appState.seg] >= appState.lists[appState.seg].length) {
-          uiState.activeIdx[appState.seg] = Math.max(0, appState.lists[appState.seg].length - 1);
+        var currentList = state.lists[state.seg];
+        state.lists[state.seg] = currentList.filter(function(n) { return n.id !== id; });
+        if (uiState.activeIdx[state.seg] >= state.lists[state.seg].length) {
+          uiState.activeIdx[state.seg] = Math.max(0, state.lists[state.seg].length - 1);
         }
         renderCarousel();
-        if (appState.view === 'base') renderBase();
+        if (state.view === 'base') renderBase();
       }).catch(function(err) {
         toast(String(err && err.message || err) || 'Delete failed', 'err');
       });
       return;
     }
-
+    
     if (action === 'toggle') {
       DB.get(id).then(function(record) {
         if (!record) return;
@@ -2236,7 +2372,8 @@ DI.register('StateManager', function() {
         return DB.put(record).then(function() {
           toast(record.shared ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
           executeSearch();
-          if (appState.view === 'base') renderBase();
+          var currentState = StateManager.getState();
+          if (currentState.view === 'base') renderBase();
         });
       }).catch(function(err) {
         toast(String(err && err.message || err) || 'Toggle failed', 'err');
