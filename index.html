@@ -1039,72 +1039,557 @@ Alpine.store('ai', {
   }
 });
 
-    // ============================================================
-    // STORE: nostr (NDK + nostr-tools for keys)
-    // ============================================================
-    Alpine.store('nostr', {
-      status: 'disconnected',  // 'disconnected' | 'connecting' | 'connected' | 'failed'
-      publicKey: null,
-      _secretKey: null,
-      _ndk: null,
-      _subscription: null,
-      publicThoughts: [],
-      peers: new Map(),
+// ============================================================
+// STORE: nostr (NDK + nostr-tools for keys)
+// ============================================================
+Alpine.store('nostr', {
+  status: 'disconnected',      // 'disconnected' | 'connecting' | 'connected' | 'failed'
+  publicKey: null,
+  _secretKey: null,            // hex-строка (приватное)
+  _ndk: null,
+  _subscription: null,
+  publicThoughts: [],
+  peers: new Map(),
+  _myEventIds: new Set(),
 
-      get statusDotClass() {
-        return this.status === 'connected'    ? 'bg-success'
-             : this.status === 'connecting'   ? 'bg-info animate-pulse'
-             : this.status === 'failed'       ? 'bg-error'
-             : 'bg-warning';
-      },
-      get statusText() {
-        if (this.status === 'connected') return `online · ${this.peers.size}`;
-        return this.status;
-      },
+  _storageKeys: {
+    sk: 'noomium:sk',
+    myEventIds: 'noomium:myEventIds'
+  },
 
-      async init(password) {
-        // TODO: 1) load/decrypt sk via $store.crypto
-        //       2) compute pk via nostr-tools.getPublicKey
-        //       3) create NDK instance, connect relays
-        //       4) subscribe to kind 20202
-      },
-      async publishThought(text, vector, isShared) {
-        // TODO: NDK publish with proper tags
-      },
-      async reply(text, vector, replyToId) {
-        // TODO: publish with 'e' tag
-      },
-      _onEvent(event) {
-        // TODO: validate, dedupe, push to publicThoughts, check echo via $store.echo
-      },
-      stop() {
-        // TODO: unsubscribe, disconnect
-      },
-      formatDate(ts) {
-        return dayjs(ts * 1000).fromNow();
+  _MAX_PUBLIC_THOUGHTS: 500,
+  _MAX_MY_EVENT_IDS: 1000,
+
+  get statusDotClass() {
+    return this.status === 'connected'   ? 'bg-success'
+         : this.status === 'connecting'  ? 'bg-info animate-pulse'
+         : this.status === 'failed'      ? 'bg-error'
+         : 'bg-warning';
+  },
+
+  get statusText() {
+    if (this.status === 'connected') {
+      return `online · ${this.peers.size}`;
+    }
+    return this.status;
+  },
+
+  /**
+   * Основная инициализация: ключи → NDK → подписка.
+   * @param {string} password
+   */
+  async init(password) {
+    if (!password || typeof password !== 'string') {
+      throw new Error('nostr.init: password required');
+    }
+    this.status = 'connecting';
+
+    try {
+      // 1. Загрузка/генерация секретного ключа
+      let skHex;
+      let stored = null;
+      try { stored = localStorage.getItem(this._storageKeys.sk); } catch (_) {}
+
+      if (stored) {
+        try {
+          skHex = await $store.crypto.decryptKey(stored, password);
+        } catch (e) {
+          // Пароль неверный
+          const err = new Error('WRONG_PASSWORD');
+          err.cause = e;
+          throw err;
+        }
+      } else {
+        const nt = this._getNostrTools();
+        const skBytes = nt.generateSecretKey();
+        skHex = Array.from(skBytes)
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('');
+        const encrypted = await $store.crypto.encryptKey(skHex, password);
+        try { localStorage.setItem(this._storageKeys.sk, encrypted); } catch (_) {}
       }
+      this._secretKey = skHex;
+
+      // 2. Публичный ключ
+      const nt = this._getNostrTools();
+      this.publicKey = nt.getPublicKey(skHex);
+
+      // 3. Загрузка своих eventId
+      try {
+        const raw = localStorage.getItem(this._storageKeys.myEventIds);
+        const arr = raw ? JSON.parse(raw) : [];
+        this._myEventIds = new Set(Array.isArray(arr) ? arr : []);
+      } catch (_) {
+        this._myEventIds = new Set();
+      }
+
+      // 4. NDK
+      if (typeof NDK === 'undefined') {
+        throw new Error('NDK is not loaded');
+      }
+      const SignerClass = window.NDKPrivateKeySigner;
+      const signer = SignerClass ? new SignerClass(skHex) : null;
+
+      this._ndk = new NDK({
+        explicitRelayUrls: $store.config.relays,
+        signer
+      });
+
+      await this._ndk.connect();
+
+      // 5. Подписка на публичные мысли
+      const filter = {
+        kinds: [$store.config.nostr.kindThought],
+        '#t': ['noomium-main'],
+        since: Math.floor(Date.now() / 1000) - $store.config.nostr.subWindowSec
+      };
+      this._subscription = this._ndk.subscribe(filter);
+
+      // NDK v2: subscription.on('event', handler)
+      if (this._subscription && typeof this._subscription.on === 'function') {
+        this._subscription.on('event', (e) => this._onEvent(e));
+      }
+
+      this.status = 'connected';
+    } catch (err) {
+      this.status = 'failed';
+      throw err;
+    }
+  },
+
+  /**
+   * Получить глобальный объект nostr-tools.
+   * @private
+   */
+  _getNostrTools() {
+    const nt = window.nostrTools || window.NostrTools || window.Nostr;
+    if (!nt || typeof nt.generateSecretKey !== 'function' || typeof nt.getPublicKey !== 'function') {
+      throw new Error('nostr-tools is not available');
+    }
+    return nt;
+  },
+
+  /**
+   * Получить класс NDKEvent.
+   * @private
+   */
+  _getNDKEventClass() {
+    const cls = window.NDKEvent || (this._ndk && this._ndk.NDKEvent);
+    if (!cls) throw new Error('NDKEvent class is not available');
+    return cls;
+  },
+
+  /**
+   * Опубликовать свою мысль в Nostr.
+   * @param {string} text
+   * @param {number[]} vector
+   * @param {boolean} isShared
+   * @returns {Promise<string>} eventId
+   */
+  async publishThought(text, vector, isShared) {
+    if (!this._ndk || !this._secretKey) {
+      throw new Error('nostr.publishThought: not initialized');
+    }
+    if (typeof text !== 'string' || !text.trim()) {
+      throw new Error('nostr.publishThought: text required');
+    }
+    if (!Array.isArray(vector)) {
+      throw new Error('nostr.publishThought: vector required');
+    }
+
+    const NDKEventClass = this._getNDKEventClass();
+    const event = new NDKEventClass(this._ndk, {
+      kind: $store.config.nostr.kindThought,
+      created_at: Math.floor(Date.now() / 1000),
+      content: JSON.stringify({ text, vector }),
+      tags: [['t', 'noomium-main']]
     });
 
-    // ============================================================
-    // STORE: search (semantic search orchestration)
-    // ============================================================
-    Alpine.store('search', {
-      results: { my: [], world: [], insights: [] },
-      _lastQueryVec: null,
-      _debounceTimer: null,
+    // sign() использует signer из NDK, если он был передан при создании
+    await event.sign();
+    await event.publish();
 
-      async run(queryText) {
-        // TODO: embed query, compare with $store.db.all() and $store.nostr.publicThoughts
-        //       populate results.my / world / insights by threshold
-      },
-      schedule(queryText) {
-        // TODO: debounce wrapper around run()
-      },
-      clear() {
-        this.results = { my: [], world: [], insights: [] };
-      }
+    // Сохраняем свой eventId
+    if (event.id) {
+      this._myEventIds.add(event.id);
+      this._persistMyEventIds();
+    }
+
+    // Если shared — показываем свою мысль в ленте
+    if (isShared) {
+      this._addThought({
+        id: event.id,
+        text,
+        vector,
+        author: this.publicKey,
+        createdAt: event.created_at * 1000,
+        replyTo: null,
+        own: true
+      });
+    }
+
+    return event.id;
+  },
+
+  /**
+   * Опубликовать ответ на чужую/свою мысль.
+   * @param {string} text
+   * @param {number[]} vector
+   * @param {string} replyToId
+   * @returns {Promise<string>} eventId
+   */
+  async reply(text, vector, replyToId) {
+    if (!this._ndk || !this._secretKey) {
+      throw new Error('nostr.reply: not initialized');
+    }
+    if (typeof text !== 'string' || !text.trim()) {
+      throw new Error('nostr.reply: text required');
+    }
+    if (!Array.isArray(vector)) {
+      throw new Error('nostr.reply: vector required');
+    }
+    if (typeof replyToId !== 'string' || !replyToId) {
+      throw new Error('nostr.reply: replyToId required');
+    }
+
+    const NDKEventClass = this._getNDKEventClass();
+    const event = new NDKEventClass(this._ndk, {
+      kind: $store.config.nostr.kindThought,
+      created_at: Math.floor(Date.now() / 1000),
+      content: JSON.stringify({ text, vector }),
+      tags: [
+        ['t', 'noomium-main'],
+        ['e', replyToId]
+      ]
     });
 
+    await event.sign();
+    await event.publish();
+
+    if (event.id) {
+      this._myEventIds.add(event.id);
+      this._persistMyEventIds();
+    }
+
+    this._addThought({
+      id: event.id,
+      text,
+      vector,
+      author: this.publicKey,
+      createdAt: event.created_at * 1000,
+      replyTo: replyToId,
+      own: true
+    });
+
+    return event.id;
+  },
+
+  /**
+   * Обработчик входящего события.
+   * @private
+   */
+  _onEvent(event) {
+    try {
+      if (!event || typeof event !== 'object') return;
+      if (typeof event.pubkey !== 'string') return;
+      if (event.pubkey === this.publicKey) return; // свои игнорируем
+      if (event.kind !== $store.config.nostr.kindThought) return;
+
+      // Проверка тега #t
+      const tags = Array.isArray(event.tags) ? event.tags : [];
+      const hasRoomTag = tags.some(
+        t => Array.isArray(t) && t[0] === 't' && t[1] === 'noomium-main'
+      );
+      if (!hasRoomTag) return;
+
+      // Парсим content
+      let content;
+      try {
+        content = JSON.parse(event.content || '{}');
+      } catch (_) {
+        return;
+      }
+      if (!content || typeof content !== 'object') return;
+      if (typeof content.text !== 'string' || !content.text) return;
+      if (!Array.isArray(content.vector)) return;
+      for (let i = 0; i < content.vector.length; i++) {
+        if (typeof content.vector[i] !== 'number') return;
+      }
+
+      // Ищем replyTo
+      let replyTo = null;
+      for (const tag of tags) {
+        if (Array.isArray(tag) && tag[0] === 'e' && typeof tag[1] === 'string') {
+          replyTo = tag[1];
+          break;
+        }
+      }
+
+      const thought = {
+        id: event.id,
+        text: content.text,
+        vector: content.vector,
+        author: event.pubkey,
+        createdAt: (typeof event.created_at === 'number' ? event.created_at : 0) * 1000,
+        replyTo,
+        own: false
+      };
+
+      this._addThought(thought);
+      this.peers.set(event.pubkey, Date.now());
+
+      // Ответ на нашу мысль?
+      if (replyTo && this._myEventIds.has(replyTo)) {
+        try {
+          $store.notifications.add('reply', {
+            thoughtId: event.id,
+            text: content.text,
+            pubkey: event.pubkey
+          });
+        } catch (e) {
+          console.warn('nostr: notifications.add failed', e);
+        }
+      }
+
+      // Эхо
+      if ($store.echo && typeof $store.echo.check === 'function') {
+        try {
+          $store.echo.check(thought);
+        } catch (e) {
+          console.warn('nostr: echo.check failed', e);
+        }
+      }
+    } catch (err) {
+      console.warn('nostr._onEvent error:', err);
+    }
+  },
+
+  /**
+   * Добавить мысль в publicThoughts с дедупликацией и лимитом.
+   * @private
+   */
+  _addThought(thought) {
+    if (!thought || !thought.id) return;
+    if (this.publicThoughts.some(t => t.id === thought.id)) return;
+
+    // Присваивание массива — реактивно для Alpine
+    this.publicThoughts = [thought, ...this.publicThoughts];
+
+    if (this.publicThoughts.length > this._MAX_PUBLIC_THOUGHTS) {
+      this.publicThoughts = this.publicThoughts.slice(0, this._MAX_PUBLIC_THOUGHTS);
+    }
+  },
+
+  /**
+   * Сохранить _myEventIds в localStorage.
+   * @private
+   */
+  _persistMyEventIds() {
+    try {
+      const arr = Array.from(this._myEventIds);
+      const toSave = arr.length > this._MAX_MY_EVENT_IDS
+        ? arr.slice(arr.length - this._MAX_MY_EVENT_IDS)
+        : arr;
+      localStorage.setItem(this._storageKeys.myEventIds, JSON.stringify(toSave));
+    } catch (e) {
+      console.warn('nostr._persistMyEventIds failed:', e);
+    }
+  },
+
+  /**
+   * Отключение от сети.
+   */
+  stop() {
+    if (this._subscription) {
+      try {
+        if (typeof this._subscription.stop === 'function') {
+          this._subscription.stop();
+        } else if (typeof this._subscription.unsub === 'function') {
+          this._subscription.unsub();
+        }
+      } catch (_) {}
+      this._subscription = null;
+    }
+    if (this._ndk) {
+      try {
+        if (this._ndk.pool && typeof this._ndk.pool.disconnect === 'function') {
+          this._ndk.pool.disconnect();
+        }
+      } catch (_) {}
+      this._ndk = null;
+    }
+    this.publicThoughts = [];
+    this.peers.clear();
+    this.status = 'disconnected';
+  },
+
+  /**
+   * Форматирование даты через Day.js (relative time).
+   * @param {number} ts — миллисекунды
+   * @returns {string}
+   */
+  formatDate(ts) {
+    if (!ts) return '';
+    try {
+      if (typeof dayjs === 'undefined') return '';
+      // Относительное время требует плагина relativeTime —
+      // если он не подключён, fallback на обычный формат
+      if (typeof dayjs().fromNow === 'function') {
+        return dayjs(ts).fromNow();
+      }
+      return dayjs(ts).format('DD.MM.YY HH:mm');
+    } catch (e) {
+      return '';
+    }
+  }
+});
+
+// ============================================================
+// STORE: search (semantic search orchestration)
+// ============================================================
+Alpine.store('search', {
+  results: { my: [], world: [], insights: [] },
+  _lastQueryVec: null,
+  _debounceTimer: null,
+
+  /**
+   * Выполнить поиск по тексту.
+   * @param {string} queryText
+   */
+  async run(queryText) {
+    const text = typeof queryText === 'string' ? queryText.trim() : '';
+    if (!text) {
+      this.clear();
+      return;
+    }
+    if (!$store.ai || !$store.ai.ready) {
+      return;
+    }
+
+    const vec = await $store.ai.embed(text);
+    if (!vec) {
+      this.clear();
+      return;
+    }
+
+    const threshold = $store.config.search.threshold;
+    const serendipity = $store.config.search.serendipity;
+    const insightFloor = threshold - serendipity;
+
+    // ---- 1. Локальные заметки (my + insightsLocal) ----
+    const localNotes = Array.isArray($store.db.all) ? $store.db.all() : [];
+    const my = [];
+    const insightsLocal = [];
+
+    for (let i = 0; i < localNotes.length; i++) {
+      const note = localNotes[i];
+      if (!note || !Array.isArray(note.vector)) continue;
+
+      const score = $store.ai.cosine(vec, note.vector);
+      if (score >= threshold) {
+        my.push({
+          id: note.id,
+          text: note.text,
+          score,
+          shared: !!note.shared,
+          createdAt: note.createdAt,
+          own: true
+        });
+      } else if (score >= insightFloor && score < threshold) {
+        insightsLocal.push({
+          id: note.id,
+          text: note.text,
+          score,
+          shared: !!note.shared,
+          createdAt: note.createdAt,
+          own: true
+        });
+      }
+    }
+
+    // ---- 2. Публичные мысли из Nostr (world + insightsWorld) ----
+    const publicThoughts = Array.isArray($store.nostr.publicThoughts)
+      ? $store.nostr.publicThoughts
+      : [];
+    const myPk = $store.nostr.publicKey;
+    const world = [];
+    const insightsWorld = [];
+
+    for (let i = 0; i < publicThoughts.length; i++) {
+      const note = publicThoughts[i];
+      if (!note || !Array.isArray(note.vector)) continue;
+      // Пропускаем свои, попавшие в publicThoughts
+      if (myPk && note.author === myPk) continue;
+
+      const score = $store.ai.cosine(vec, note.vector);
+      const peerShort = note.author ? String(note.author).slice(0, 8) : '';
+
+      if (score >= threshold) {
+        world.push({
+          id: note.id,
+          text: note.text,
+          score,
+          peer: peerShort,
+          fullPubkey: note.author,
+          createdAt: note.createdAt,
+          replyTo: note.replyTo || null,
+          own: false
+        });
+      } else if (score >= insightFloor && score < threshold) {
+        insightsWorld.push({
+          id: note.id,
+          text: note.text,
+          score,
+          peer: peerShort,
+          fullPubkey: note.author,
+          createdAt: note.createdAt,
+          replyTo: note.replyTo || null,
+          own: false
+        });
+      }
+    }
+
+    // ---- 3. Сортировка ----
+    my.sort((a, b) => b.score - a.score);
+    world.sort((a, b) => b.score - a.score);
+    const insights = [...insightsLocal, ...insightsWorld]
+      .sort((a, b) => b.score - a.score);
+
+    // ---- 4. Обновление реактивно ----
+    this.results = { my, world, insights };
+    this._lastQueryVec = vec;
+  },
+
+  /**
+   * Запустить run с дебаунсом.
+   * @param {string} queryText
+   */
+  schedule(queryText) {
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+    }
+    const delay = $store.config.search.debounceMs;
+    this._debounceTimer = setTimeout(() => {
+      this._debounceTimer = null;
+      this.run(queryText).catch(err => {
+        console.warn('search.run failed:', err);
+      });
+    }, delay);
+  },
+
+  /**
+   * Очистить результаты и отменить запланированный поиск.
+   */
+  clear() {
+    this.results = { my: [], world: [], insights: [] };
+    this._lastQueryVec = null;
+    if (this._debounceTimer) {
+      clearTimeout(this._debounceTimer);
+      this._debounceTimer = null;
+    }
+  }
+});
     // ============================================================
     // STORE: echo (semantic resonance detection)
     // ============================================================
