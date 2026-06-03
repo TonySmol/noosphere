@@ -6,41 +6,60 @@
   <meta name="theme-color" content="#1d232a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>NOOmium</title>
-  
+
   <!-- Tailwind CSS + DaisyUI -->
   <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet" type="text/css" />
   <script src="https://cdn.tailwindcss.com"></script>
-  
+
   <!-- Alpine.js -->
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
-  
-  <!-- Dexie.js -->
+
+  <!-- Dexie.js (IndexedDB wrapper) -->
   <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.7/dist/dexie.min.js"></script>
-  
-  <!-- Day.js -->
+
+  <!-- Day.js + relativeTime + locales -->
   <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/plugin/relativeTime.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/locale/ru.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/locale/en.js"></script>
-  
+  <script>
+    if (window.dayjs_plugin_relativeTime) dayjs.extend(dayjs_plugin_relativeTime);
+    dayjs.locale('ru');
+  </script>
+
   <!-- NDK (relays, subscriptions, publishing) -->
   <script src="https://cdn.jsdelivr.net/npm/@nostr-dev-kit/ndk@2.10.0/dist/index.umd.js"></script>
-  
-  <!-- nostr-tools (key generation, signing only) -->
+
+  <!-- nostr-tools (key generation, signing) -->
   <script src="https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/lib/index.umd.js"></script>
+
+  <!-- Workbox (for Service Worker) -->
+  <script type="module">
+    import { Workbox } from 'https://storage.googleapis.com/workbox-cdn/releases/7.1.0/workbox-window.prod.mjs';
+    window.Workbox = Workbox;
+  </script>
 
   <style>
     [x-cloak] { display: none !important; }
+    html, body { overscroll-behavior: none; }
   </style>
 </head>
 <body class="bg-base-100 min-h-screen">
-  
-  <div id="app" x-data x-init="$store.app.bootstrap()" x-cloak>
-    
+
+  <!-- Loading screen (shown before bootstrap finishes) -->
+  <div id="boot-screen" class="min-h-screen flex items-center justify-center">
+    <div class="text-center">
+      <div class="loading loading-spinner loading-lg text-primary"></div>
+      <p class="mt-4 opacity-70">NOOmium загружается…</p>
+    </div>
+  </div>
+
+  <div id="app" x-data x-cloak>
+
     <!-- HEADER -->
     <div x-show="$store.app.initialized" class="navbar bg-base-200 shadow-lg sticky top-0 z-40">
       <div class="flex-1">
-        <span class="text-xl font-bold px-4">NOOmium</span>
+        <span class="text-xl font-bold px-4">NOO<span class="text-primary">.</span>mium</span>
       </div>
       <div class="flex-none gap-2">
         <div class="badge badge-ghost gap-2">
@@ -56,7 +75,7 @@
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
             </svg>
-            <span x-show="$store.notifications.unreadCount > 0" 
+            <span x-show="$store.notifications.unreadCount > 0"
                   x-text="$store.notifications.unreadCount"
                   class="badge badge-sm badge-primary indicator-item"></span>
           </div>
@@ -71,12 +90,19 @@
 
     <!-- MAIN -->
     <main class="container mx-auto p-4 max-w-4xl" x-show="$store.app.initialized">
-      
+
       <!-- EDITOR -->
       <div x-data="editorComponent()" class="mb-6">
         <div class="card bg-base-200 shadow-xl">
           <div class="card-body">
-            <textarea 
+            <div x-show="$store.editor.replyTo" class="alert alert-info mb-2 py-2">
+              <span class="text-sm">
+                Ответ для <span class="font-mono" x-text="$store.editor.replyTo?.author?.slice(0,8) || '...'"></span>
+              </span>
+              <button class="btn btn-ghost btn-xs" @click="$store.editor.replyTo = null">✕</button>
+            </div>
+            <textarea
+              id="main-editor"
               x-model="$store.editor.text"
               @input="$store.editor.onInput()"
               class="textarea textarea-bordered h-24 text-lg"
@@ -129,7 +155,7 @@
                       <span class="badge badge-primary" x-text="Math.round(note.score * 100) + '%'"></span>
                       <div class="flex gap-1">
                         <button class="btn btn-ghost btn-xs" @click="$store.editor.edit(note)" x-text="$store.i18n.t('btn.edit')"></button>
-                        <button class="btn btn-ghost btn-xs" @click="$store.db.toggleShared(note.id)" 
+                        <button class="btn btn-ghost btn-xs" @click="$store.db.toggleShared(note.id)"
                                 x-text="note.shared ? $store.i18n.t('btn.hide') : $store.i18n.t('btn.share')"></button>
                         <button class="btn btn-ghost btn-xs btn-error" @click="$store.db.delete(note.id)" x-text="$store.i18n.t('btn.delete')"></button>
                       </div>
@@ -148,7 +174,7 @@
                   <div class="card-body p-4">
                     <p x-text="note.text"></p>
                     <div class="flex justify-between items-center mt-2">
-                      <span class="badge badge-secondary" x-text="Math.round(note.score * 100) + '%'"></span>
+                      <span class="badge badge-secondary" x-text="Math.round(note.score * 100) + '%' + (note.peer ? ' · ' + note.peer : '')"></span>
                       <button class="btn btn-ghost btn-xs" @click="$store.editor.replyTo(note)" x-text="$store.i18n.t('btn.reply')"></button>
                     </div>
                   </div>
@@ -161,25 +187,35 @@
             <h3 class="text-lg font-bold mb-2" x-text="$store.i18n.t('stream.insights')"></h3>
             <div class="space-y-2">
               <template x-for="note in $store.search.results.insights" :key="note.id">
-                <div class="card bg-base-200 shadow">
+                <div class="card bg-base-200 shadow opacity-80">
                   <div class="card-body p-4">
                     <p x-text="note.text"></p>
+                    <div class="flex justify-between items-center mt-2">
+                      <span class="badge badge-ghost" x-text="Math.round(note.score * 100) + '%'"></span>
+                    </div>
                   </div>
                 </div>
               </template>
             </div>
           </section>
+
+          <div x-show="$store.search.results.my.length === 0 && $store.search.results.world.length === 0 && $store.search.results.insights.length === 0 && $store.editor.text.trim() === ''" class="text-center py-12 opacity-60">
+            <p x-text="$store.i18n.t('editor.placeholder')"></p>
+          </div>
         </div>
       </div>
 
       <!-- FEED TAB -->
       <div x-show="$store.app.activeTab === 'feed'">
+        <div x-show="$store.nostr.publicThoughts.length === 0" class="text-center py-12 opacity-60">
+          <p x-text="$store.i18n.t('feed.empty')"></p>
+        </div>
         <div class="space-y-2">
           <template x-for="note in $store.nostr.publicThoughts" :key="note.id">
             <div class="card bg-base-200 shadow">
               <div class="card-body p-4">
                 <div class="flex justify-between items-start mb-2">
-                  <span class="badge badge-ghost" x-text="note.author.slice(0, 8)"></span>
+                  <span class="badge badge-ghost font-mono" x-text="(note.author || '').slice(0, 8)"></span>
                   <span class="text-xs opacity-60" x-text="$store.nostr.formatDate(note.createdAt)"></span>
                 </div>
                 <p x-text="note.text"></p>
@@ -191,9 +227,9 @@
       </div>
 
       <!-- BASE TAB -->
-      <div x-show="$store.app.activeTab === 'base'">
+      <div x-show="$store.app.activeTab === 'base'" x-data x-init="$store.base.recalcStats()">
         <div class="mb-4">
-          <input type="text" x-model="$store.base.query" @input="$store.base.onQueryChange()"
+          <input type="text" x-model="$store.base.query"
                  :placeholder="$store.i18n.t('base.search')" class="input input-bordered w-full" />
         </div>
         <div class="stats shadow mb-4 w-full">
@@ -209,6 +245,9 @@
             <div class="stat-title" x-text="$store.i18n.t('base.private')"></div>
             <div class="stat-value" x-text="$store.base.stats.private"></div>
           </div>
+        </div>
+        <div x-show="$store.base.visibleNotes.length === 0" class="text-center py-12 opacity-60">
+          <p x-text="$store.i18n.t('feed.empty')"></p>
         </div>
         <div class="space-y-2">
           <template x-for="note in $store.base.visibleNotes" :key="note.id">
@@ -228,1661 +267,1133 @@
 
     </main>
 
-    <!-- MODALS (Notifications, Menu, Onboarding, Password) -->
-    <!-- Разметка модалок остаётся как в предыдущем скелете, привязки идут к соответствующим stores -->
+    <!-- NOTIFICATIONS MODAL -->
+    <div class="modal" :class="{ 'modal-open': $store.notifications.showModal }">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg" x-text="$store.i18n.t('notifications.title')"></h3>
+        <div class="py-4 space-y-2 max-h-96 overflow-y-auto">
+          <div x-show="$store.notifications.list.length === 0" class="text-center opacity-60 py-8">
+            <p x-text="$store.i18n.t('notifications.empty')"></p>
+          </div>
+          <template x-for="notif in $store.notifications.list" :key="notif.id">
+            <div class="alert" :class="notif.read ? 'alert-info' : 'alert-warning'">
+              <div class="flex-1">
+                <span class="font-bold" x-text="notif.type === 'echo' ? '🔔 ' + $store.i18n.t('notifications.echo') : '💬 ' + $store.i18n.t('notifications.reply')"></span>
+                <p class="text-sm mt-1 line-clamp-2" x-text="notif.text"></p>
+                <p class="text-xs opacity-60 mt-1" x-text="dayjs(notif.timestamp).fromNow()"></p>
+              </div>
+              <button x-show="!notif.read" class="btn btn-sm btn-ghost" @click="$store.notifications.markRead(notif.id)">✓</button>
+            </div>
+          </template>
+        </div>
+        <div class="modal-action">
+          <button class="btn" @click="$store.notifications.clearAll()" x-text="$store.i18n.t('btn.clearAll')"></button>
+          <button class="btn btn-primary" @click="$store.notifications.showModal = false" x-text="$store.i18n.t('btn.close')"></button>
+        </div>
+      </div>
+      <div class="modal-backdrop" @click="$store.notifications.showModal = false"></div>
+    </div>
+
+    <!-- MENU MODAL -->
+    <div class="modal" :class="{ 'modal-open': $store.app.showMenu }">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg" x-text="$store.i18n.t('menu.title')"></h3>
+        <div class="py-4 space-y-4">
+          <div class="form-control">
+            <label class="label cursor-pointer">
+              <span class="label-text" x-text="$store.i18n.t('menu.darkMode')"></span>
+              <input type="checkbox" class="toggle"
+                     :checked="$store.settings.theme === 'dark'"
+                     @change="$store.settings.toggleTheme()" />
+            </label>
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text" x-text="$store.i18n.t('menu.language')"></span></label>
+            <select class="select select-bordered"
+                    :value="$store.i18n.lang"
+                    @change="$store.i18n.setLang($event.target.value)">
+              <option value="ru">Русский</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+          <div class="divider" x-text="$store.i18n.t('menu.danger')"></div>
+          <button class="btn btn-error w-full"
+                  @click="if (confirm($store.i18n.t('menu.wipeConfirm'))) { $store.db.reset().then(() => location.reload()); }"
+                  x-text="$store.i18n.t('menu.wipe')"></button>
+        </div>
+        <div class="modal-action">
+          <button class="btn btn-primary" @click="$store.app.showMenu = false" x-text="$store.i18n.t('btn.close')"></button>
+        </div>
+      </div>
+      <div class="modal-backdrop" @click="$store.app.showMenu = false"></div>
+    </div>
+
+    <!-- ONBOARDING MODAL -->
+    <div class="modal" :class="{ 'modal-open': $store.app.showOnboarding }">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg" x-text="$store.i18n.t('onboarding.title')"></h3>
+        <div class="py-4 space-y-4">
+          <p x-text="$store.i18n.t('onboarding.intro')"></p>
+          <div class="space-y-2">
+            <h4 class="font-bold" x-text="$store.i18n.t('onboarding.local')"></h4>
+            <p class="text-sm opacity-70" x-text="$store.i18n.t('onboarding.localDesc')"></p>
+            <h4 class="font-bold" x-text="$store.i18n.t('onboarding.world')"></h4>
+            <p class="text-sm opacity-70" x-text="$store.i18n.t('onboarding.worldDesc')"></p>
+            <h4 class="font-bold" x-text="$store.i18n.t('onboarding.insights')"></h4>
+            <p class="text-sm opacity-70" x-text="$store.i18n.t('onboarding.insightsDesc')"></p>
+          </div>
+        </div>
+        <div class="modal-action">
+          <button class="btn btn-primary"
+                  @click="$store.settings.markOnboarded(); $store.app.showOnboarding = false"
+                  x-text="$store.i18n.t('btn.gotIt')"></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PASSWORD MODAL -->
+    <div class="modal" :class="{ 'modal-open': $store.app.showPassword }">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg"
+            x-text="$store.app.isNewUser ? $store.i18n.t('password.create') : $store.i18n.t('password.enter')"></h3>
+        <div class="py-4 space-y-4">
+          <div class="form-control">
+            <label class="label"><span class="label-text" x-text="$store.i18n.t('password.label')"></span></label>
+            <input type="password" class="input input-bordered" x-model="$store.app.password" />
+          </div>
+          <div x-show="$store.app.isNewUser" class="form-control">
+            <label class="label"><span class="label-text" x-text="$store.i18n.t('password.confirm')"></span></label>
+            <input type="password" class="input input-bordered" x-model="$store.app.passwordConfirm" />
+          </div>
+          <div x-show="$store.app.passwordError" class="alert alert-error">
+            <span x-text="$store.app.passwordError"></span>
+          </div>
+        </div>
+        <div class="modal-action flex justify-between">
+          <button x-show="!$store.app.isNewUser" class="btn btn-ghost"
+                  @click="if (confirm($store.i18n.t('menu.wipeConfirm'))) { $store.db.reset().then(() => location.reload()); }"
+                  x-text="$store.i18n.t('password.forgot')"></button>
+          <div class="flex gap-2">
+            <button class="btn btn-primary" @click="$store.app.submitPassword()"
+                    x-text="$store.app.isNewUser ? $store.i18n.t('btn.save') : $store.i18n.t('btn.login')"></button>
+          </div>
+        </div>
+      </div>
+    </div>
 
   </div>
 
   <script>
     // ============================================================
-    // STORE: config (read-only constants, reactive settings)
+    // ВСЕ STORES РЕГИСТРИРУЮТСЯ ДО ПЕРВОГО РЕНДЕРИНГА ALPINE
     // ============================================================
-    Alpine.store('config', {
-      dbName: 'noomium_v2',
-      storeName: 'notes',
-      relays: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band'],
-      ai: { model: 'Xenova/multilingual-e5-small', dim: 384, cacheLimit: 300, embedTimeout: 15000 },
-      search: { threshold: 0.30, serendipity: 0.15, debounceMs: 800, echoThreshold: 0.80 },
-      crypto: { iterations: 100000, saltLen: 16, ivLen: 12 },
-      nostr: { kindThought: 20202, kindReply: 20202, subWindowSec: 300 }
-    });
+    document.addEventListener('alpine:init', () => {
 
-// ============================================================
-// STORE: i18n (translations)
-// ============================================================
-Alpine.store('i18n', {
-  dicts: {
-    ru: {
-      // Editor
-      'editor.placeholder': 'О чём думаешь?',
-      'mode.private': 'Себе',
-      'mode.world': 'Миру',
-      'btn.send': 'Отправить',
-      'editor.chars': '{n} симв.',
-
-      // Tabs
-      'tab.stream': 'Поток',
-      'tab.feed': 'Лента',
-      'tab.base': 'База',
-
-      // Stream sections
-      'stream.my': 'Моё',
-      'stream.world': 'Мир',
-      'stream.insights': 'Озарения',
-
-      // Buttons
-      'btn.edit': 'Развить',
-      'btn.share': 'Открыть',
-      'btn.hide': 'Скрыть',
-      'btn.delete': 'Удалить',
-      'btn.reply': 'Ответить',
-      'btn.save': 'Сохранить',
-      'btn.cancel': 'Отмена',
-      'btn.close': 'Закрыть',
-      'btn.gotIt': 'Понятно',
-      'btn.login': 'Войти',
-      'btn.clearAll': 'Очистить всё',
-
-      // Base tab
-      'base.search': 'Поиск по заметкам…',
-      'base.total': 'всего',
-      'base.shared': 'открыто',
-      'base.private': 'лично',
-      'tag.shared': 'открыто',
-      'tag.private': 'лично',
-
-      // Feed
-      'feed.empty': 'Публичных мыслей пока нет',
-
-      // Notifications
-      'notifications.title': 'Уведомления',
-      'notifications.empty': 'Пока ничего',
-      'notifications.echo': 'Эхо: кто-то думает так же',
-      'notifications.reply': 'Ответ на вашу мысль',
-
-      // Menu
-      'menu.title': 'Настройки',
-      'menu.darkMode': 'Тёмная тема',
-      'menu.language': 'Язык',
-      'menu.export': 'Экспорт заметок',
-      'menu.import': 'Импорт заметок',
-      'menu.danger': 'Опасная зона',
-      'menu.wipe': 'Стереть все данные',
-      'menu.wipeConfirm': 'Удалить все заметки и настройки безвозвратно?',
-
-      // Onboarding
-      'onboarding.title': 'Как устроен NOOmium',
-      'onboarding.intro': 'Твой блокнот с антисоцсетью. Мысли превращаются в смысловые векторы — и ищут резонанс.',
-      'onboarding.local': 'Моё',
-      'onboarding.localDesc': 'Сильные совпадения в твоей собственной базе.',
-      'onboarding.world': 'Мир',
-      'onboarding.worldDesc': 'Открытые мысли других людей, созвучные твоим.',
-      'onboarding.insights': 'Озарения',
-      'onboarding.insightsDesc': 'Близкие, но неожиданные — источник вдохновения.',
-
-      // Password
-      'password.create': 'Придумай пароль',
-      'password.enter': 'Введи пароль',
-      'password.label': 'Пароль',
-      'password.confirm': 'Подтверди пароль',
-      'password.forgot': 'Забыл пароль? Сбросить хранилище',
-      'password.mismatch': 'Пароли не совпадают',
-      'password.wrong': 'Неверный пароль',
-      'password.empty': 'Пароль не может быть пустым',
-
-      // AI
-      'ai.loading': 'Загружаем модель ИИ…',
-
-      // Toasts
-      'toast.saved': 'Сохранено',
-      'toast.published': 'Опубликовано в Mir',
-      'toast.deleted': 'Удалено',
-      'toast.error': 'Что-то пошло не так'
-    },
-    en: {
-      'editor.placeholder': 'What are you thinking?',
-      'mode.private': 'Private',
-      'mode.world': 'World',
-      'btn.send': 'Send',
-      'editor.chars': '{n} chars',
-
-      'tab.stream': 'Stream',
-      'tab.feed': 'Feed',
-      'tab.base': 'Base',
-
-      'stream.my': 'Mine',
-      'stream.world': 'World',
-      'stream.insights': 'Insights',
-
-      'btn.edit': 'Develop',
-      'btn.share': 'Share',
-      'btn.hide': 'Hide',
-      'btn.delete': 'Delete',
-      'btn.reply': 'Reply',
-      'btn.save': 'Save',
-      'btn.cancel': 'Cancel',
-      'btn.close': 'Close',
-      'btn.gotIt': 'Got it',
-      'btn.login': 'Log in',
-      'btn.clearAll': 'Clear all',
-
-      'base.search': 'Search notes…',
-      'base.total': 'total',
-      'base.shared': 'shared',
-      'base.private': 'private',
-      'tag.shared': 'shared',
-      'tag.private': 'private',
-
-      'feed.empty': 'No public thoughts yet',
-
-      'notifications.title': 'Notifications',
-      'notifications.empty': 'Nothing here',
-      'notifications.echo': 'Echo: someone thinks alike',
-      'notifications.reply': 'Reply to your thought',
-
-      'menu.title': 'Settings',
-      'menu.darkMode': 'Dark mode',
-      'menu.language': 'Language',
-      'menu.export': 'Export notes',
-      'menu.import': 'Import notes',
-      'menu.danger': 'Danger zone',
-      'menu.wipe': 'Wipe all data',
-      'menu.wipeConfirm': 'Delete all notes and settings permanently?',
-
-      'onboarding.title': 'How NOOmium works',
-      'onboarding.intro': 'Your notepad with an anti-social network. Thoughts turn into semantic vectors — and find resonance.',
-      'onboarding.local': 'Mine',
-      'onboarding.localDesc': 'Strong matches in your own base.',
-      'onboarding.world': 'World',
-      'onboarding.worldDesc': 'Open thoughts from others, resonating with yours.',
-      'onboarding.insights': 'Insights',
-      'onboarding.insightsDesc': 'Close but unexpected — a source of inspiration.',
-
-      'password.create': 'Create a password',
-      'password.enter': 'Enter password',
-      'password.label': 'Password',
-      'password.confirm': 'Confirm password',
-      'password.forgot': 'Forgot password? Reset storage',
-      'password.mismatch': 'Passwords do not match',
-      'password.wrong': 'Wrong password',
-      'password.empty': 'Password cannot be empty',
-
-      'ai.loading': 'Loading AI model…',
-
-      'toast.saved': 'Saved',
-      'toast.published': 'Published to World',
-      'toast.deleted': 'Deleted',
-      'toast.error': 'Something went wrong'
-    }
-  },
-
-  lang: 'ru',
-  _storageKey: 'noomium:lang',
-
-  init() {
-    try {
-      const saved = localStorage.getItem(this._storageKey);
-      if (saved && (saved === 'ru' || saved === 'en')) {
-        this.lang = saved;
-      } else {
-        const nav = (navigator.language || 'ru').toLowerCase();
-        this.lang = nav.startsWith('ru') ? 'ru' : 'en';
-      }
-    } catch (e) {
-      this.lang = 'ru';
-    }
-    document.documentElement.setAttribute('lang', this.lang);
-  },
-
-  t(key, params = {}) {
-    const dict = this.dicts[this.lang] || this.dicts['en'] || {};
-    const fallback = this.dicts['en'] || {};
-    let text = dict[key] !== undefined ? dict[key] : fallback[key];
-    if (text === undefined) return key; // ключ не найден — возвращаем как есть
-    // Простая интерполяция {n}, {name} и т.д.
-    return String(text).replace(/\{(\w+)\}/g, (m, k) =>
-      params[k] !== undefined ? String(params[k]) : m
-    );
-  },
-
-  setLang(lang) {
-    if (lang !== 'ru' && lang !== 'en') return;
-    this.lang = lang;
-    document.documentElement.setAttribute('lang', lang);
-    try {
-      localStorage.setItem(this._storageKey, lang);
-    } catch (e) {
-      console.warn('i18n: persist failed', e);
-    }
-  }
-});
-
-// ============================================================
-// STORE: settings (user preferences)
-// ============================================================
-Alpine.store('settings', {
-  theme: 'dark',
-  onboarded: false,
-
-  _keys: {
-    theme: 'noomium:theme',
-    onboarded: 'noomium:onboarded'
-  },
-
-  init() {
-    // Тема
-    try {
-      const savedTheme = localStorage.getItem(this._keys.theme);
-      if (savedTheme === 'dark' || savedTheme === 'light') {
-        this.theme = savedTheme;
-      } else {
-        // Автоопределение по системным настройкам
-        const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
-        this.theme = prefersDark ? 'dark' : 'light';
-      }
-    } catch (e) {
-      this.theme = 'dark';
-    }
-    this._applyTheme();
-
-    // Онбординг
-    try {
-      this.onboarded = localStorage.getItem(this._keys.onboarded) === '1';
-    } catch (e) {
-      this.onboarded = false;
-    }
-  },
-
-  setTheme(theme) {
-    if (theme !== 'dark' && theme !== 'light') return;
-    this.theme = theme;
-    this._applyTheme();
-    try {
-      localStorage.setItem(this._keys.theme, theme);
-    } catch (e) {
-      console.warn('settings: persist theme failed', e);
-    }
-    // Обновляем theme-color для мобильной браузерной рамки
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', theme === 'dark' ? '#1d232a' : '#ffffff');
-  },
-
-  toggleTheme() {
-    this.setTheme(this.theme === 'dark' ? 'light' : 'dark');
-  },
-
-  markOnboarded() {
-    this.onboarded = true;
-    try {
-      localStorage.setItem(this._keys.onboarded, '1');
-    } catch (e) {
-      console.warn('settings: persist onboarded failed', e);
-    }
-  },
-
-  _applyTheme() {
-    document.documentElement.setAttribute('data-theme', this.theme);
-    document.body?.setAttribute('data-theme', this.theme);
-  }
-});
-
-// ============================================================
-// STORE: crypto (Web Crypto API — key derivation, encrypt/decrypt)
-// ============================================================
-Alpine.store('crypto', {
-
-  /**
-   * Генерирует cryptographically secure случайные байты.
-   * @param {number} len — длина в байтах
-   * @returns {Uint8Array}
-   */
-  randomBytes(len) {
-    if (!Number.isInteger(len) || len <= 0) {
-      throw new Error('crypto.randomBytes: invalid length');
-    }
-    return crypto.getRandomValues(new Uint8Array(len));
-  },
-
-  /**
-   * PBKDF2 -> AES-GCM-256 key.
-   * @param {string} password
-   * @param {Uint8Array} salt
-   * @returns {Promise<CryptoKey>}
-   */
-  async deriveKey(password, salt) {
-    if (!password || typeof password !== 'string') {
-      throw new Error('crypto.deriveKey: password required');
-    }
-    if (!(salt instanceof Uint8Array) || salt.length === 0) {
-      throw new Error('crypto.deriveKey: salt required');
-    }
-    const enc = new TextEncoder();
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw',
-      enc.encode(password),
-      { name: 'PBKDF2' },
-      false,
-      ['deriveKey']
-    );
-    return await crypto.subtle.deriveKey(
-      {
-        name: 'PBKDF2',
-        salt: salt,
-        iterations: $store.config.crypto.iterations,
-        hash: 'SHA-256'
-      },
-      keyMaterial,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt', 'decrypt']
-    );
-  },
-
-  /**
-   * Шифрует hex-строку ключа паролем.
-   * Возвращает base64(salt[16] + iv[12] + ciphertext).
-   * @param {string} hexKey — 64 hex-символа (32 байта)
-   * @param {string} password
-   * @returns {Promise<string>}
-   */
-  async encryptKey(hexKey, password) {
-    if (typeof hexKey !== 'string' || !/^[0-9a-f]+$/i.test(hexKey)) {
-      throw new Error('crypto.encryptKey: hexKey must be a hex string');
-    }
-    const salt = this.randomBytes($store.config.crypto.saltLen);
-    const iv = this.randomBytes($store.config.crypto.ivLen);
-    const key = await this.deriveKey(password, salt);
-
-    const enc = new TextEncoder();
-    const ciphertext = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: iv },
-      key,
-      enc.encode(hexKey)
-    );
-
-    const ctBytes = new Uint8Array(ciphertext);
-    const combined = new Uint8Array(salt.length + iv.length + ctBytes.length);
-    combined.set(salt, 0);
-    combined.set(iv, salt.length);
-    combined.set(ctBytes, salt.length + iv.length);
-
-    return this._bytesToBase64(combined);
-  },
-
-  /**
-   * Расшифровывает base64(salt+iv+ciphertext) обратно в hex-строку ключа.
-   * @param {string} base64
-   * @param {string} password
-   * @returns {Promise<string>} hex-строка
-   * @throws если пароль неверный (decrypt выбросит ошибку)
-   */
-  async decryptKey(base64, password) {
-    if (typeof base64 !== 'string' || base64.length === 0) {
-      throw new Error('crypto.decryptKey: base64 required');
-    }
-    const combined = this._base64ToBytes(base64);
-    const saltLen = $store.config.crypto.saltLen;
-    const ivLen = $store.config.crypto.ivLen;
-
-    if (combined.length <= saltLen + ivLen) {
-      throw new Error('crypto.decryptKey: malformed payload');
-    }
-
-    const salt = combined.slice(0, saltLen);
-    const iv = combined.slice(saltLen, saltLen + ivLen);
-    const ciphertext = combined.slice(saltLen + ivLen);
-
-    const key = await this.deriveKey(password, salt);
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv: iv },
-      key,
-      ciphertext
-    );
-    return new TextDecoder().decode(decrypted);
-  },
-
-  // ---------- Приватные хелперы ----------
-
-  _bytesToBase64(bytes) {
-    // Быстрый безопасный способ: через reduce, чтобы не упереться в
-    // ограничение apply по длине массива на больших объёмах.
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-  },
-
-  _base64ToBytes(base64) {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return bytes;
-  }
-});
-
-// ============================================================
-// STORE: db (Dexie wrapper)
-// ============================================================
-Alpine.store('db', {
-  _dexie: null,
-  _cache: [],
-
-  /**
-   * Инициализация Dexie: создание схемы, открытие, загрузка кеша.
-   * Схема notes: id (primary key), индексы на shared, createdAt, replyTo, parentId.
-   * vector и text не индексируются (vector — массив, text — полнотекст не нужен).
-   */
-  async init() {
-    if (typeof Dexie === 'undefined') {
-      throw new Error('Dexie.js is not loaded');
-    }
-    const dbName = $store.config.dbName;
-
-    try {
-      this._dexie = new Dexie(dbName);
-      this._dexie.version(1).stores({
-        notes: 'id, shared, createdAt, replyTo, parentId'
+      // ---------- config ----------
+      Alpine.store('config', {
+        dbName: 'noomium_v2',
+        storeName: 'notes',
+        relays: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band'],
+        ai: { model: 'Xenova/multilingual-e5-small', dim: 384, cacheLimit: 300, embedTimeout: 15000 },
+        search: { threshold: 0.30, serendipity: 0.15, debounceMs: 800, echoThreshold: 0.80 },
+        crypto: { iterations: 100000, saltLen: 16, ivLen: 12 },
+        nostr: { kindThought: 20202, kindReply: 20202, subWindowSec: 300 }
       });
-      await this._dexie.open();
-      this._cache = await this._dexie.notes.toArray();
-    } catch (err) {
-      console.error('db.init failed:', err);
-      this._dexie = null;
-      this._cache = [];
-      throw err;
-    }
-  },
 
-  /**
-   * Сохранить или обновить заметку.
-   * @param {Object} note — объект с полем id и остальными полями
-   * @returns {Promise<string>} id сохранённой заметки
-   */
-  async put(note) {
-    if (!note || typeof note.id !== 'string' || !note.id) {
-      throw new Error('db.put: note with id required');
-    }
-    if (!this._dexie) throw new Error('db.put: db not initialized');
-
-    const normalized = {
-      id: note.id,
-      text: typeof note.text === 'string' ? note.text : '',
-      vector: Array.isArray(note.vector) ? note.vector : null,
-      shared: !!note.shared,
-      createdAt: typeof note.createdAt === 'number' ? note.createdAt : Date.now(),
-      replyTo: typeof note.replyTo === 'string' ? note.replyTo : null,
-      parentId: typeof note.parentId === 'string' ? note.parentId : null
-    };
-
-    await this._dexie.notes.put(normalized);
-    this._syncCache(normalized);
-    return normalized.id;
-  },
-
-  /**
-   * Получить заметку по id. Сначала в кеше, потом в БД.
-   * @param {string} id
-   * @returns {Promise<Object|null>}
-   */
-  async get(id) {
-    if (typeof id !== 'string' || !id) return null;
-
-    // Быстрый путь: кеш
-    const cached = this._cache.find(n => n.id === id);
-    if (cached) return cached;
-
-    if (!this._dexie) return null;
-
-    try {
-      const fromDb = await this._dexie.notes.get(id);
-      if (fromDb) {
-        this._syncCache(fromDb);
-        return fromDb;
-      }
-      return null;
-    } catch (err) {
-      console.warn('db.get failed:', err);
-      return null;
-    }
-  },
-
-  /**
-   * Удалить заметку по id.
-   * @param {string} id
-   */
-  async delete(id) {
-    if (typeof id !== 'string' || !id) return;
-    if (!this._dexie) return;
-
-    try {
-      await this._dexie.notes.delete(id);
-      this._cache = this._cache.filter(n => n.id !== id);
-    } catch (err) {
-      console.warn('db.delete failed:', err);
-    }
-  },
-
-  /**
-   * Переключить флаг shared у заметки.
-   * @param {string} id
-   */
-  async toggleShared(id) {
-    if (typeof id !== 'string' || !id) return;
-    if (!this._dexie) return;
-
-    const note = await this.get(id);
-    if (!note) return;
-
-    const updated = { ...note, shared: !note.shared };
-    await this._dexie.notes.put(updated);
-    this._syncCache(updated);
-  },
-
-  /**
-   * Возвращает актуальный кеш. Синхронный метод.
-   * @returns {Array<Object>}
-   */
-  all() {
-    return this._cache;
-  },
-
-  /**
-   * Массовая вставка/обновление.
-   * @param {Array<Object>} notes
-   */
-  async bulkPut(notes) {
-    if (!Array.isArray(notes) || notes.length === 0) return;
-    if (!this._dexie) throw new Error('db.bulkPut: db not initialized');
-
-    const normalized = notes.map(note => ({
-      id: String(note.id),
-      text: typeof note.text === 'string' ? note.text : '',
-      vector: Array.isArray(note.vector) ? note.vector : null,
-      shared: !!note.shared,
-      createdAt: typeof note.createdAt === 'number' ? note.createdAt : Date.now(),
-      replyTo: typeof note.replyTo === 'string' ? note.replyTo : null,
-      parentId: typeof note.parentId === 'string' ? note.parentId : null
-    }));
-
-    await this._dexie.notes.bulkPut(normalized);
-    // Перезагружаем кеш из БД, чтобы гарантировать консистентность
-    this._cache = await this._dexie.notes.toArray();
-  },
-
-  /**
-   * Полное удаление базы и очистка кеша.
-   */
-  async reset() {
-    const dbName = $store.config.dbName;
-    try {
-      if (this._dexie) {
-        try { this._dexie.close(); } catch (_) { /* ignore */ }
-        this._dexie = null;
-      }
-      await Dexie.delete(dbName);
-      this._cache = [];
-    } catch (err) {
-      console.warn('db.reset failed:', err);
-      this._cache = [];
-    }
-  },
-
-  // ---------- Приватные хелперы ----------
-
-  /**
-   * Обновить или добавить запись в _cache.
-   */
-  _syncCache(note) {
-    const idx = this._cache.findIndex(n => n.id === note.id);
-    if (idx >= 0) {
-      this._cache[idx] = note;
-    } else {
-      this._cache.push(note);
-    }
-  }
-});
-
-// ============================================================
-// STORE: ai (Transformers.js embeddings)
-// ============================================================
-Alpine.store('ai', {
-  mode: 'loading',          // 'loading' | 'model' | 'hash'
-  progress: 0,
-  _extractor: null,
-  _cache: new Map(),
-  _loadPromise: null,
-
-  get ready() {
-    return this.mode !== 'loading';
-  },
-
-  get statusDotClass() {
-    return this.mode === 'model' ? 'bg-success'
-         : this.mode === 'hash'  ? 'bg-warning'
-         : 'bg-info animate-pulse';
-  },
-
-  get statusText() {
-    if (this.mode === 'model') return 'AI';
-    if (this.mode === 'hash')  return 'AI/hash';
-    return `AI ${Math.round(this.progress)}%`;
-  },
-
-  /**
-   * Загрузка модели Transformers.js.
-   * Повторные вызовы возвращают тот же промис (singleton).
-   */
-  async load() {
-    if (this._extractor || this.mode === 'hash') return;
-    if (this._loadPromise) return this._loadPromise;
-
-    this._loadPromise = this._doLoad().finally(() => {
-      this._loadPromise = null;
-    });
-    return this._loadPromise;
-  },
-
-  async _doLoad() {
-    const model = $store.config.ai.model;
-    try {
-      const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
-      const { pipeline, env } = mod;
-
-      if (typeof pipeline !== 'function') {
-        throw new Error('transformers: pipeline is not a function');
-      }
-
-      env.allowLocalModels = false;
-      env.useBrowserCache = true;
-
-      this._extractor = await pipeline('feature-extraction', model, {
-        quantized: true,
-        progress_callback: (p) => {
-          if (p && p.status === 'progress' && typeof p.total === 'number' && p.total > 0) {
-            this.progress = Math.min(100, (p.loaded / p.total) * 100);
+      // ---------- i18n ----------
+      Alpine.store('i18n', {
+        dicts: {
+          ru: {
+            'editor.placeholder': 'О чём думаешь?',
+            'mode.private': 'Себе', 'mode.world': 'Миру',
+            'btn.send': 'Отправить', 'editor.chars': '{n} симв.',
+            'tab.stream': 'Поток', 'tab.feed': 'Лента', 'tab.base': 'База',
+            'stream.my': 'Моё', 'stream.world': 'Мир', 'stream.insights': 'Озарения',
+            'btn.edit': 'Развить', 'btn.share': 'Открыть', 'btn.hide': 'Скрыть',
+            'btn.delete': 'Удалить', 'btn.reply': 'Ответить',
+            'btn.save': 'Сохранить', 'btn.cancel': 'Отмена', 'btn.close': 'Закрыть',
+            'btn.gotIt': 'Понятно', 'btn.login': 'Войти', 'btn.clearAll': 'Очистить всё',
+            'base.search': 'Поиск по заметкам…',
+            'base.total': 'всего', 'base.shared': 'открыто', 'base.private': 'лично',
+            'tag.shared': 'открыто', 'tag.private': 'лично',
+            'feed.empty': 'Публичных мыслей пока нет',
+            'notifications.title': 'Уведомления', 'notifications.empty': 'Пока ничего',
+            'notifications.echo': 'Эхо: кто-то думает так же',
+            'notifications.reply': 'Ответ на вашу мысль',
+            'menu.title': 'Настройки', 'menu.darkMode': 'Тёмная тема', 'menu.language': 'Язык',
+            'menu.export': 'Экспорт заметок', 'menu.import': 'Импорт заметок',
+            'menu.danger': 'Опасная зона', 'menu.wipe': 'Стереть все данные',
+            'menu.wipeConfirm': 'Удалить все заметки и настройки безвозвратно?',
+            'onboarding.title': 'Как устроен NOOmium',
+            'onboarding.intro': 'Твой блокнот с антисоцсетью. Мысли превращаются в смысловые векторы — и ищут резонанс.',
+            'onboarding.local': 'Моё', 'onboarding.localDesc': 'Сильные совпадения в твоей собственной базе.',
+            'onboarding.world': 'Мир', 'onboarding.worldDesc': 'Открытые мысли других людей, созвучные твоим.',
+            'onboarding.insights': 'Озарения', 'onboarding.insightsDesc': 'Близкие, но неожиданные — источник вдохновения.',
+            'password.create': 'Придумай пароль', 'password.enter': 'Введи пароль',
+            'password.label': 'Пароль', 'password.confirm': 'Подтверди пароль',
+            'password.forgot': 'Забыл пароль? Сбросить хранилище',
+            'password.mismatch': 'Пароли не совпадают', 'password.wrong': 'Неверный пароль',
+            'password.empty': 'Пароль не может быть пустым',
+            'ai.loading': 'Загружаем модель ИИ…',
+            'toast.saved': 'Сохранено', 'toast.published': 'Опубликовано в Мир',
+            'toast.deleted': 'Удалено', 'toast.error': 'Что-то пошло не так'
+          },
+          en: {
+            'editor.placeholder': 'What are you thinking?',
+            'mode.private': 'Private', 'mode.world': 'World',
+            'btn.send': 'Send', 'editor.chars': '{n} chars',
+            'tab.stream': 'Stream', 'tab.feed': 'Feed', 'tab.base': 'Base',
+            'stream.my': 'Mine', 'stream.world': 'World', 'stream.insights': 'Insights',
+            'btn.edit': 'Develop', 'btn.share': 'Share', 'btn.hide': 'Hide',
+            'btn.delete': 'Delete', 'btn.reply': 'Reply',
+            'btn.save': 'Save', 'btn.cancel': 'Cancel', 'btn.close': 'Close',
+            'btn.gotIt': 'Got it', 'btn.login': 'Log in', 'btn.clearAll': 'Clear all',
+            'base.search': 'Search notes…',
+            'base.total': 'total', 'base.shared': 'shared', 'base.private': 'private',
+            'tag.shared': 'shared', 'tag.private': 'private',
+            'feed.empty': 'No public thoughts yet',
+            'notifications.title': 'Notifications', 'notifications.empty': 'Nothing here',
+            'notifications.echo': 'Echo: someone thinks alike',
+            'notifications.reply': 'Reply to your thought',
+            'menu.title': 'Settings', 'menu.darkMode': 'Dark mode', 'menu.language': 'Language',
+            'menu.export': 'Export notes', 'menu.import': 'Import notes',
+            'menu.danger': 'Danger zone', 'menu.wipe': 'Wipe all data',
+            'menu.wipeConfirm': 'Delete all notes and settings permanently?',
+            'onboarding.title': 'How NOOmium works',
+            'onboarding.intro': 'Your notepad with an anti-social network. Thoughts turn into semantic vectors — and find resonance.',
+            'onboarding.local': 'Mine', 'onboarding.localDesc': 'Strong matches in your own base.',
+            'onboarding.world': 'World', 'onboarding.worldDesc': 'Open thoughts from others, resonating with yours.',
+            'onboarding.insights': 'Insights', 'onboarding.insightsDesc': 'Close but unexpected — a source of inspiration.',
+            'password.create': 'Create a password', 'password.enter': 'Enter password',
+            'password.label': 'Password', 'password.confirm': 'Confirm password',
+            'password.forgot': 'Forgot password? Reset storage',
+            'password.mismatch': 'Passwords do not match', 'password.wrong': 'Wrong password',
+            'password.empty': 'Password cannot be empty',
+            'ai.loading': 'Loading AI model…',
+            'toast.saved': 'Saved', 'toast.published': 'Published to World',
+            'toast.deleted': 'Deleted', 'toast.error': 'Something went wrong'
           }
+        },
+        lang: 'ru',
+        _storageKey: 'noomium:lang',
+        init() {
+          try {
+            const saved = localStorage.getItem(this._storageKey);
+            if (saved === 'ru' || saved === 'en') this.lang = saved;
+            else {
+              const nav = (navigator.language || 'ru').toLowerCase();
+              this.lang = nav.startsWith('ru') ? 'ru' : 'en';
+            }
+          } catch (_) { this.lang = 'ru'; }
+          document.documentElement.setAttribute('lang', this.lang);
+          if (window.dayjs) dayjs.locale(this.lang);
+        },
+        t(key, params = {}) {
+          const dict = this.dicts[this.lang] || this.dicts['en'] || {};
+          const fallback = this.dicts['en'] || {};
+          let text = dict[key] !== undefined ? dict[key] : fallback[key];
+          if (text === undefined) return key;
+          return String(text).replace(/\{(\w+)\}/g, (m, k) =>
+            params[k] !== undefined ? String(params[k]) : m
+          );
+        },
+        setLang(lang) {
+          if (lang !== 'ru' && lang !== 'en') return;
+          this.lang = lang;
+          document.documentElement.setAttribute('lang', lang);
+          if (window.dayjs) dayjs.locale(lang);
+          try { localStorage.setItem(this._storageKey, lang); } catch (_) {}
         }
       });
 
-      this.mode = 'model';
-      this.progress = 100;
-    } catch (err) {
-      console.warn('ai.load failed, fallback to hash:', err && err.message || err);
-      this.mode = 'hash';
-      this._extractor = null;
-      this.progress = 0;
-    }
-  },
-
-  /**
-   * Получить векторное представление текста.
-   * @param {string} text
-   * @returns {Promise<number[]|null>}
-   */
-  async embed(text) {
-    const t = typeof text === 'string' ? text.trim() : '';
-    if (!t) return null;
-
-    // LRU-кеш: при доступе удаляем и добавляем в конец (Map сохраняет порядок)
-    if (this._cache.has(t)) {
-      const cached = this._cache.get(t);
-      this._cache.delete(t);
-      this._cache.set(t, cached);
-      return cached;
-    }
-
-    let vec;
-    if (this.mode === 'model' && this._extractor) {
-      vec = await this._embedWithModel(t);
-    }
-    // Если model не сработал или mode === 'hash'
-    if (!vec) {
-      vec = this._hashEmbed(t);
-    }
-
-    // Сохраняем в кеш с лимитом
-    this._cache.set(t, vec);
-    const limit = $store.config.ai.cacheLimit;
-    if (this._cache.size > limit) {
-      // Удаляем самую старую запись (первую в Map)
-      const oldestKey = this._cache.keys().next().value;
-      this._cache.delete(oldestKey);
-    }
-    return vec;
-  },
-
-  /**
-   * Эмбеддинг через модель с таймаутом.
-   * При ошибке возвращает null — вызывающий код использует _hashEmbed.
-   */
-  async _embedWithModel(text) {
-    const timeoutMs = $store.config.ai.embedTimeout;
-    try {
-      const result = await Promise.race([
-        this._extractor(text, { pooling: 'mean', normalize: true }),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('embed timeout')), timeoutMs)
-        )
-      ]);
-      if (result && result.data) {
-        return Array.from(result.data);
-      }
-      return null;
-    } catch (err) {
-      console.warn('ai._embedWithModel failed, will use hash:', err && err.message || err);
-      return null;
-    }
-  },
-
-  /**
-   * Детерминированный хеш-эмбеддинг (FNV-1a).
-   * Используется как fallback при недоступности модели.
-   * @param {string} text
-   * @returns {number[]} массив длины dim
-   */
-  _hashEmbed(text) {
-    const DIM = $store.config.ai.dim;
-    const vec = new Float32Array(DIM);
-    const tokens = (text || '').toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
-
-    for (let t = 0; t < tokens.length; t++) {
-      const tok = tokens[t];
-      // FNV-1a
-      let h = 2166136261;
-      for (let i = 0; i < tok.length; i++) {
-        h ^= tok.charCodeAt(i);
-        h = Math.imul(h, 16777619);
-      }
-      vec[Math.abs(h) % DIM] += 1;
-
-      // Дополнительная псевдо-хеш функция для распределения
-      const h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
-      vec[Math.abs(h2) % DIM] += 0.5;
-    }
-
-    // L2-нормализация
-    let norm = 0;
-    for (let i = 0; i < DIM; i++) norm += vec[i] * vec[i];
-    norm = Math.sqrt(norm) || 1;
-    for (let i = 0; i < DIM; i++) vec[i] /= norm;
-
-    return Array.from(vec);
-  },
-
-  /**
-   * Косинусное сходство двух векторов.
-   * @param {number[]} a
-   * @param {number[]} b
-   * @returns {number} значение в диапазоне [-1, 1], или 0 при ошибке
-   */
-  cosine(a, b) {
-    if (!Array.isArray(a) || !Array.isArray(b)) return 0;
-    if (a.length === 0 || b.length === 0) return 0;
-    if (a.length !== b.length) return 0;
-
-    let sum = 0;
-    let normA = 0;
-    let normB = 0;
-    for (let i = 0; i < a.length; i++) {
-      sum += a[i] * b[i];
-      normA += a[i] * a[i];
-      normB += b[i] * b[i];
-    }
-    const denom = Math.sqrt(normA) * Math.sqrt(normB);
-    if (denom < 1e-10) return 0;
-    const score = sum / denom;
-    // Защита от NaN/Infinity
-    return Number.isFinite(score) ? score : 0;
-  }
-});
-
-// ============================================================
-// STORE: nostr (NDK + nostr-tools for keys)
-// ============================================================
-Alpine.store('nostr', {
-  status: 'disconnected',      // 'disconnected' | 'connecting' | 'connected' | 'failed'
-  publicKey: null,
-  _secretKey: null,            // hex-строка (приватное)
-  _ndk: null,
-  _subscription: null,
-  publicThoughts: [],
-  peers: new Map(),
-  _myEventIds: new Set(),
-
-  _storageKeys: {
-    sk: 'noomium:sk',
-    myEventIds: 'noomium:myEventIds'
-  },
-
-  _MAX_PUBLIC_THOUGHTS: 500,
-  _MAX_MY_EVENT_IDS: 1000,
-
-  get statusDotClass() {
-    return this.status === 'connected'   ? 'bg-success'
-         : this.status === 'connecting'  ? 'bg-info animate-pulse'
-         : this.status === 'failed'      ? 'bg-error'
-         : 'bg-warning';
-  },
-
-  get statusText() {
-    if (this.status === 'connected') {
-      return `online · ${this.peers.size}`;
-    }
-    return this.status;
-  },
-
-  /**
-   * Основная инициализация: ключи → NDK → подписка.
-   * @param {string} password
-   */
-  async init(password) {
-    if (!password || typeof password !== 'string') {
-      throw new Error('nostr.init: password required');
-    }
-    this.status = 'connecting';
-
-    try {
-      // 1. Загрузка/генерация секретного ключа
-      let skHex;
-      let stored = null;
-      try { stored = localStorage.getItem(this._storageKeys.sk); } catch (_) {}
-
-      if (stored) {
-        try {
-          skHex = await $store.crypto.decryptKey(stored, password);
-        } catch (e) {
-          // Пароль неверный
-          const err = new Error('WRONG_PASSWORD');
-          err.cause = e;
-          throw err;
+      // ---------- settings ----------
+      Alpine.store('settings', {
+        theme: 'dark',
+        onboarded: false,
+        _keys: { theme: 'noomium:theme', onboarded: 'noomium:onboarded' },
+        init() {
+          try {
+            const savedTheme = localStorage.getItem(this._keys.theme);
+            if (savedTheme === 'dark' || savedTheme === 'light') this.theme = savedTheme;
+            else this.theme = window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          } catch (_) { this.theme = 'dark'; }
+          this._applyTheme();
+          try { this.onboarded = localStorage.getItem(this._keys.onboarded) === '1'; }
+          catch (_) { this.onboarded = false; }
+        },
+        setTheme(theme) {
+          if (theme !== 'dark' && theme !== 'light') return;
+          this.theme = theme;
+          this._applyTheme();
+          try { localStorage.setItem(this._keys.theme, theme); } catch (_) {}
+          const meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', theme === 'dark' ? '#1d232a' : '#ffffff');
+        },
+        toggleTheme() { this.setTheme(this.theme === 'dark' ? 'light' : 'dark'); },
+        markOnboarded() {
+          this.onboarded = true;
+          try { localStorage.setItem(this._keys.onboarded, '1'); } catch (_) {}
+        },
+        _applyTheme() {
+          document.documentElement.setAttribute('data-theme', this.theme);
+          document.body?.setAttribute('data-theme', this.theme);
         }
-      } else {
-        const nt = this._getNostrTools();
-        const skBytes = nt.generateSecretKey();
-        skHex = Array.from(skBytes)
-          .map(b => b.toString(16).padStart(2, '0'))
-          .join('');
-        const encrypted = await $store.crypto.encryptKey(skHex, password);
-        try { localStorage.setItem(this._storageKeys.sk, encrypted); } catch (_) {}
-      }
-      this._secretKey = skHex;
-
-      // 2. Публичный ключ
-      const nt = this._getNostrTools();
-      this.publicKey = nt.getPublicKey(skHex);
-
-      // 3. Загрузка своих eventId
-      try {
-        const raw = localStorage.getItem(this._storageKeys.myEventIds);
-        const arr = raw ? JSON.parse(raw) : [];
-        this._myEventIds = new Set(Array.isArray(arr) ? arr : []);
-      } catch (_) {
-        this._myEventIds = new Set();
-      }
-
-      // 4. NDK
-      if (typeof NDK === 'undefined') {
-        throw new Error('NDK is not loaded');
-      }
-      const SignerClass = window.NDKPrivateKeySigner;
-      const signer = SignerClass ? new SignerClass(skHex) : null;
-
-      this._ndk = new NDK({
-        explicitRelayUrls: $store.config.relays,
-        signer
       });
 
-      await this._ndk.connect();
-
-      // 5. Подписка на публичные мысли
-      const filter = {
-        kinds: [$store.config.nostr.kindThought],
-        '#t': ['noomium-main'],
-        since: Math.floor(Date.now() / 1000) - $store.config.nostr.subWindowSec
-      };
-      this._subscription = this._ndk.subscribe(filter);
-
-      // NDK v2: subscription.on('event', handler)
-      if (this._subscription && typeof this._subscription.on === 'function') {
-        this._subscription.on('event', (e) => this._onEvent(e));
-      }
-
-      this.status = 'connected';
-    } catch (err) {
-      this.status = 'failed';
-      throw err;
-    }
-  },
-
-  /**
-   * Получить глобальный объект nostr-tools.
-   * @private
-   */
-  _getNostrTools() {
-    const nt = window.nostrTools || window.NostrTools || window.Nostr;
-    if (!nt || typeof nt.generateSecretKey !== 'function' || typeof nt.getPublicKey !== 'function') {
-      throw new Error('nostr-tools is not available');
-    }
-    return nt;
-  },
-
-  /**
-   * Получить класс NDKEvent.
-   * @private
-   */
-  _getNDKEventClass() {
-    const cls = window.NDKEvent || (this._ndk && this._ndk.NDKEvent);
-    if (!cls) throw new Error('NDKEvent class is not available');
-    return cls;
-  },
-
-  /**
-   * Опубликовать свою мысль в Nostr.
-   * @param {string} text
-   * @param {number[]} vector
-   * @param {boolean} isShared
-   * @returns {Promise<string>} eventId
-   */
-  async publishThought(text, vector, isShared) {
-    if (!this._ndk || !this._secretKey) {
-      throw new Error('nostr.publishThought: not initialized');
-    }
-    if (typeof text !== 'string' || !text.trim()) {
-      throw new Error('nostr.publishThought: text required');
-    }
-    if (!Array.isArray(vector)) {
-      throw new Error('nostr.publishThought: vector required');
-    }
-
-    const NDKEventClass = this._getNDKEventClass();
-    const event = new NDKEventClass(this._ndk, {
-      kind: $store.config.nostr.kindThought,
-      created_at: Math.floor(Date.now() / 1000),
-      content: JSON.stringify({ text, vector }),
-      tags: [['t', 'noomium-main']]
-    });
-
-    // sign() использует signer из NDK, если он был передан при создании
-    await event.sign();
-    await event.publish();
-
-    // Сохраняем свой eventId
-    if (event.id) {
-      this._myEventIds.add(event.id);
-      this._persistMyEventIds();
-    }
-
-    // Если shared — показываем свою мысль в ленте
-    if (isShared) {
-      this._addThought({
-        id: event.id,
-        text,
-        vector,
-        author: this.publicKey,
-        createdAt: event.created_at * 1000,
-        replyTo: null,
-        own: true
-      });
-    }
-
-    return event.id;
-  },
-
-  /**
-   * Опубликовать ответ на чужую/свою мысль.
-   * @param {string} text
-   * @param {number[]} vector
-   * @param {string} replyToId
-   * @returns {Promise<string>} eventId
-   */
-  async reply(text, vector, replyToId) {
-    if (!this._ndk || !this._secretKey) {
-      throw new Error('nostr.reply: not initialized');
-    }
-    if (typeof text !== 'string' || !text.trim()) {
-      throw new Error('nostr.reply: text required');
-    }
-    if (!Array.isArray(vector)) {
-      throw new Error('nostr.reply: vector required');
-    }
-    if (typeof replyToId !== 'string' || !replyToId) {
-      throw new Error('nostr.reply: replyToId required');
-    }
-
-    const NDKEventClass = this._getNDKEventClass();
-    const event = new NDKEventClass(this._ndk, {
-      kind: $store.config.nostr.kindThought,
-      created_at: Math.floor(Date.now() / 1000),
-      content: JSON.stringify({ text, vector }),
-      tags: [
-        ['t', 'noomium-main'],
-        ['e', replyToId]
-      ]
-    });
-
-    await event.sign();
-    await event.publish();
-
-    if (event.id) {
-      this._myEventIds.add(event.id);
-      this._persistMyEventIds();
-    }
-
-    this._addThought({
-      id: event.id,
-      text,
-      vector,
-      author: this.publicKey,
-      createdAt: event.created_at * 1000,
-      replyTo: replyToId,
-      own: true
-    });
-
-    return event.id;
-  },
-
-  /**
-   * Обработчик входящего события.
-   * @private
-   */
-  _onEvent(event) {
-    try {
-      if (!event || typeof event !== 'object') return;
-      if (typeof event.pubkey !== 'string') return;
-      if (event.pubkey === this.publicKey) return; // свои игнорируем
-      if (event.kind !== $store.config.nostr.kindThought) return;
-
-      // Проверка тега #t
-      const tags = Array.isArray(event.tags) ? event.tags : [];
-      const hasRoomTag = tags.some(
-        t => Array.isArray(t) && t[0] === 't' && t[1] === 'noomium-main'
-      );
-      if (!hasRoomTag) return;
-
-      // Парсим content
-      let content;
-      try {
-        content = JSON.parse(event.content || '{}');
-      } catch (_) {
-        return;
-      }
-      if (!content || typeof content !== 'object') return;
-      if (typeof content.text !== 'string' || !content.text) return;
-      if (!Array.isArray(content.vector)) return;
-      for (let i = 0; i < content.vector.length; i++) {
-        if (typeof content.vector[i] !== 'number') return;
-      }
-
-      // Ищем replyTo
-      let replyTo = null;
-      for (const tag of tags) {
-        if (Array.isArray(tag) && tag[0] === 'e' && typeof tag[1] === 'string') {
-          replyTo = tag[1];
-          break;
+      // ---------- crypto ----------
+      Alpine.store('crypto', {
+        randomBytes(len) {
+          if (!Number.isInteger(len) || len <= 0) throw new Error('crypto.randomBytes: invalid length');
+          return crypto.getRandomValues(new Uint8Array(len));
+        },
+        async deriveKey(password, salt) {
+          if (!password || typeof password !== 'string') throw new Error('crypto.deriveKey: password required');
+          if (!(salt instanceof Uint8Array) || salt.length === 0) throw new Error('crypto.deriveKey: salt required');
+          const cfg = Alpine.store('config').crypto;
+          const enc = new TextEncoder();
+          const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), { name: 'PBKDF2' }, false, ['deriveKey']);
+          return await crypto.subtle.deriveKey(
+            { name: 'PBKDF2', salt: salt, iterations: cfg.iterations, hash: 'SHA-256' },
+            keyMaterial,
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['encrypt', 'decrypt']
+          );
+        },
+        async encryptKey(hexKey, password) {
+          if (typeof hexKey !== 'string' || !/^[0-9a-f]+$/i.test(hexKey)) throw new Error('crypto.encryptKey: hexKey must be a hex string');
+          const cfg = Alpine.store('config').crypto;
+          const salt = this.randomBytes(cfg.saltLen);
+          const iv = this.randomBytes(cfg.ivLen);
+          const key = await this.deriveKey(password, salt);
+          const enc = new TextEncoder();
+          const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(hexKey));
+          const ctBytes = new Uint8Array(ciphertext);
+          const combined = new Uint8Array(salt.length + iv.length + ctBytes.length);
+          combined.set(salt, 0);
+          combined.set(iv, salt.length);
+          combined.set(ctBytes, salt.length + iv.length);
+          return this._bytesToBase64(combined);
+        },
+        async decryptKey(base64, password) {
+          if (typeof base64 !== 'string' || base64.length === 0) throw new Error('crypto.decryptKey: base64 required');
+          const cfg = Alpine.store('config').crypto;
+          const combined = this._base64ToBytes(base64);
+          const saltLen = cfg.saltLen, ivLen = cfg.ivLen;
+          if (combined.length <= saltLen + ivLen) throw new Error('crypto.decryptKey: malformed payload');
+          const salt = combined.slice(0, saltLen);
+          const iv = combined.slice(saltLen, saltLen + ivLen);
+          const ciphertext = combined.slice(saltLen + ivLen);
+          const key = await this.deriveKey(password, salt);
+          const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext);
+          return new TextDecoder().decode(decrypted);
+        },
+        _bytesToBase64(bytes) {
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          return btoa(binary);
+        },
+        _base64ToBytes(base64) {
+          const binary = atob(base64);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          return bytes;
         }
-      }
+      });
 
-      const thought = {
-        id: event.id,
-        text: content.text,
-        vector: content.vector,
-        author: event.pubkey,
-        createdAt: (typeof event.created_at === 'number' ? event.created_at : 0) * 1000,
-        replyTo,
-        own: false
-      };
+      // ---------- db ----------
+      Alpine.store('db', {
+        _dexie: null,
+        _cache: [],
+        _listeners: [],
+        async init() {
+          if (typeof Dexie === 'undefined') throw new Error('Dexie.js is not loaded');
+          const dbName = Alpine.store('config').dbName;
+          try {
+            this._dexie = new Dexie(dbName);
+            this._dexie.version(1).stores({ notes: 'id, shared, createdAt, replyTo, parentId' });
+            await this._dexie.open();
+            this._cache = await this._dexie.notes.toArray();
+            this._emitChange();
+          } catch (err) {
+            console.error('db.init failed:', err);
+            this._dexie = null;
+            this._cache = [];
+            throw err;
+          }
+        },
+        async put(note) {
+          if (!note || typeof note.id !== 'string' || !note.id) throw new Error('db.put: note with id required');
+          if (!this._dexie) throw new Error('db.put: db not initialized');
+          const normalized = {
+            id: note.id,
+            text: typeof note.text === 'string' ? note.text : '',
+            vector: Array.isArray(note.vector) ? note.vector : null,
+            shared: !!note.shared,
+            createdAt: typeof note.createdAt === 'number' ? note.createdAt : Date.now(),
+            replyTo: typeof note.replyTo === 'string' ? note.replyTo : null,
+            parentId: typeof note.parentId === 'string' ? note.parentId : null
+          };
+          await this._dexie.notes.put(normalized);
+          this._syncCache(normalized);
+          this._emitChange();
+          return normalized.id;
+        },
+        async get(id) {
+          if (typeof id !== 'string' || !id) return null;
+          const cached = this._cache.find(n => n.id === id);
+          if (cached) return cached;
+          if (!this._dexie) return null;
+          try {
+            const fromDb = await this._dexie.notes.get(id);
+            if (fromDb) { this._syncCache(fromDb); return fromDb; }
+            return null;
+          } catch (err) { console.warn('db.get failed:', err); return null; }
+        },
+        async delete(id) {
+          if (typeof id !== 'string' || !id) return;
+          if (!this._dexie) return;
+          try {
+            await this._dexie.notes.delete(id);
+            this._cache = this._cache.filter(n => n.id !== id);
+            this._emitChange();
+          } catch (err) { console.warn('db.delete failed:', err); }
+        },
+        async toggleShared(id) {
+          if (typeof id !== 'string' || !id) return;
+          if (!this._dexie) return;
+          const note = await this.get(id);
+          if (!note) return;
+          const updated = { ...note, shared: !note.shared };
+          await this._dexie.notes.put(updated);
+          this._syncCache(updated);
+          this._emitChange();
+        },
+        all() { return this._cache; },
+        async bulkPut(notes) {
+          if (!Array.isArray(notes) || notes.length === 0) return;
+          if (!this._dexie) throw new Error('db.bulkPut: db not initialized');
+          const normalized = notes.map(note => ({
+            id: String(note.id),
+            text: typeof note.text === 'string' ? note.text : '',
+            vector: Array.isArray(note.vector) ? note.vector : null,
+            shared: !!note.shared,
+            createdAt: typeof note.createdAt === 'number' ? note.createdAt : Date.now(),
+            replyTo: typeof note.replyTo === 'string' ? note.replyTo : null,
+            parentId: typeof note.parentId === 'string' ? note.parentId : null
+          }));
+          await this._dexie.notes.bulkPut(normalized);
+          this._cache = await this._dexie.notes.toArray();
+          this._emitChange();
+        },
+        async reset() {
+          const dbName = Alpine.store('config').dbName;
+          try {
+            if (this._dexie) { try { this._dexie.close(); } catch (_) {} this._dexie = null; }
+            await Dexie.delete(dbName);
+            this._cache = [];
+            this._emitChange();
+          } catch (err) { console.warn('db.reset failed:', err); this._cache = []; }
+        },
+        onChange(fn) { if (typeof fn === 'function') this._listeners.push(fn); },
+        _emitChange() { for (const fn of this._listeners) { try { fn(); } catch (_) {} } },
+        _syncCache(note) {
+          const idx = this._cache.findIndex(n => n.id === note.id);
+          if (idx >= 0) this._cache[idx] = note;
+          else this._cache.push(note);
+        }
+      });
 
-      this._addThought(thought);
-      this.peers.set(event.pubkey, Date.now());
+      // ---------- ai ----------
+      Alpine.store('ai', {
+        mode: 'loading',
+        progress: 0,
+        _extractor: null,
+        _cache: new Map(),
+        _loadPromise: null,
+        get ready() { return this.mode !== 'loading'; },
+        get statusDotClass() {
+          return this.mode === 'model' ? 'bg-success'
+               : this.mode === 'hash'  ? 'bg-warning'
+               : 'bg-info animate-pulse';
+        },
+        get statusText() {
+          if (this.mode === 'model') return 'AI';
+          if (this.mode === 'hash')  return 'AI/hash';
+          return `AI ${Math.round(this.progress)}%`;
+        },
+        async load() {
+          if (this._extractor || this.mode === 'hash') return;
+          if (this._loadPromise) return this._loadPromise;
+          this._loadPromise = this._doLoad().finally(() => { this._loadPromise = null; });
+          return this._loadPromise;
+        },
+        async _doLoad() {
+          const model = Alpine.store('config').ai.model;
+          try {
+            const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
+            const { pipeline, env } = mod;
+            if (typeof pipeline !== 'function') throw new Error('transformers: pipeline is not a function');
+            env.allowLocalModels = false;
+            env.useBrowserCache = true;
+            this._extractor = await pipeline('feature-extraction', model, {
+              quantized: true,
+              progress_callback: (p) => {
+                if (p && p.status === 'progress' && typeof p.total === 'number' && p.total > 0) {
+                  this.progress = Math.min(100, (p.loaded / p.total) * 100);
+                }
+              }
+            });
+            this.mode = 'model';
+            this.progress = 100;
+          } catch (err) {
+            console.warn('ai.load failed, fallback to hash:', err && err.message || err);
+            this.mode = 'hash';
+            this._extractor = null;
+            this.progress = 0;
+          }
+        },
+        async embed(text) {
+          const t = typeof text === 'string' ? text.trim() : '';
+          if (!t) return null;
+          if (this._cache.has(t)) {
+            const cached = this._cache.get(t);
+            this._cache.delete(t);
+            this._cache.set(t, cached);
+            return cached;
+          }
+          let vec;
+          if (this.mode === 'model' && this._extractor) vec = await this._embedWithModel(t);
+          if (!vec) vec = this._hashEmbed(t);
+          this._cache.set(t, vec);
+          const limit = Alpine.store('config').ai.cacheLimit;
+          if (this._cache.size > limit) {
+            const oldestKey = this._cache.keys().next().value;
+            this._cache.delete(oldestKey);
+          }
+          return vec;
+        },
+        async _embedWithModel(text) {
+          const timeoutMs = Alpine.store('config').ai.embedTimeout;
+          try {
+            const result = await Promise.race([
+              this._extractor(text, { pooling: 'mean', normalize: true }),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('embed timeout')), timeoutMs))
+            ]);
+            if (result && result.data) return Array.from(result.data);
+            return null;
+          } catch (err) {
+            console.warn('ai._embedWithModel failed:', err && err.message || err);
+            return null;
+          }
+        },
+        _hashEmbed(text) {
+          const DIM = Alpine.store('config').ai.dim;
+          const vec = new Float32Array(DIM);
+          const tokens = (text || '').toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
+          for (let t = 0; t < tokens.length; t++) {
+            const tok = tokens[t];
+            let h = 2166136261;
+            for (let i = 0; i < tok.length; i++) { h ^= tok.charCodeAt(i); h = Math.imul(h, 16777619); }
+            vec[Math.abs(h) % DIM] += 1;
+            const h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
+            vec[Math.abs(h2) % DIM] += 0.5;
+          }
+          let norm = 0;
+          for (let i = 0; i < DIM; i++) norm += vec[i] * vec[i];
+          norm = Math.sqrt(norm) || 1;
+          for (let i = 0; i < DIM; i++) vec[i] /= norm;
+          return Array.from(vec);
+        },
+        cosine(a, b) {
+          if (!Array.isArray(a) || !Array.isArray(b)) return 0;
+          if (a.length === 0 || b.length === 0) return 0;
+          if (a.length !== b.length) return 0;
+          let sum = 0, normA = 0, normB = 0;
+          for (let i = 0; i < a.length; i++) {
+            sum += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+          }
+          const denom = Math.sqrt(normA) * Math.sqrt(normB);
+          if (denom < 1e-10) return 0;
+          const score = sum / denom;
+          return Number.isFinite(score) ? score : 0;
+        }
+      });
 
-      // Ответ на нашу мысль?
-      if (replyTo && this._myEventIds.has(replyTo)) {
-        try {
-          $store.notifications.add('reply', {
-            thoughtId: event.id,
-            text: content.text,
-            pubkey: event.pubkey
+      // ---------- nostr ----------
+      Alpine.store('nostr', {
+        status: 'disconnected',
+        publicKey: null,
+        _secretKey: null,
+        _ndk: null,
+        _subscription: null,
+        publicThoughts: [],
+        peers: new Map(),
+        _myEventIds: new Set(),
+        _storageKeys: { sk: 'noomium:sk', myEventIds: 'noomium:myEventIds' },
+        _MAX_PUBLIC_THOUGHTS: 500,
+        _MAX_MY_EVENT_IDS: 1000,
+        get statusDotClass() {
+          return this.status === 'connected'  ? 'bg-success'
+               : this.status === 'connecting' ? 'bg-info animate-pulse'
+               : this.status === 'failed'     ? 'bg-error'
+               : 'bg-warning';
+        },
+        get statusText() {
+          if (this.status === 'connected') return `online · ${this.peers.size}`;
+          return this.status;
+        },
+        async init(password) {
+          if (!password || typeof password !== 'string') throw new Error('nostr.init: password required');
+          this.status = 'connecting';
+          try {
+            let skHex;
+            let stored = null;
+            try { stored = localStorage.getItem(this._storageKeys.sk); } catch (_) {}
+            if (stored) {
+              try { skHex = await Alpine.store('crypto').decryptKey(stored, password); }
+              catch (e) {
+                const err = new Error('WRONG_PASSWORD');
+                err.cause = e;
+                throw err;
+              }
+            } else {
+              const nt = this._getNostrTools();
+              const skBytes = nt.generateSecretKey();
+              skHex = Array.from(skBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+              const encrypted = await Alpine.store('crypto').encryptKey(skHex, password);
+              try { localStorage.setItem(this._storageKeys.sk, encrypted); } catch (_) {}
+            }
+            this._secretKey = skHex;
+            const nt = this._getNostrTools();
+            this.publicKey = nt.getPublicKey(skHex);
+            try {
+              const raw = localStorage.getItem(this._storageKeys.myEventIds);
+              const arr = raw ? JSON.parse(raw) : [];
+              this._myEventIds = new Set(Array.isArray(arr) ? arr : []);
+            } catch (_) { this._myEventIds = new Set(); }
+
+            if (typeof NDK === 'undefined') throw new Error('NDK is not loaded');
+            const SignerClass = window.NDKPrivateKeySigner;
+            const signer = SignerClass ? new SignerClass(skHex) : null;
+            this._ndk = new NDK({ explicitRelayUrls: Alpine.store('config').relays, signer });
+            await this._ndk.connect();
+            const cfgNostr = Alpine.store('config').nostr;
+            const filter = {
+              kinds: [cfgNostr.kindThought],
+              '#t': ['noomium-main'],
+              since: Math.floor(Date.now() / 1000) - cfgNostr.subWindowSec
+            };
+            this._subscription = this._ndk.subscribe(filter);
+            if (this._subscription && typeof this._subscription.on === 'function') {
+              this._subscription.on('event', (e) => this._onEvent(e));
+            }
+            this.status = 'connected';
+          } catch (err) {
+            this.status = 'failed';
+            throw err;
+          }
+        },
+        _getNostrTools() {
+          const nt = window.nostrTools || window.NostrTools || window.Nostr || window.nostr_tools;
+          if (!nt || typeof nt.generateSecretKey !== 'function' || typeof nt.getPublicKey !== 'function') {
+            throw new Error('nostr-tools is not available');
+          }
+          return nt;
+        },
+        _getNDKEventClass() {
+          const cls = window.NDKEvent || (this._ndk && this._ndk.NDKEvent);
+          if (!cls) throw new Error('NDKEvent class is not available');
+          return cls;
+        },
+        async publishThought(text, vector, isShared) {
+          if (!this._ndk || !this._secretKey) throw new Error('nostr.publishThought: not initialized');
+          if (typeof text !== 'string' || !text.trim()) throw new Error('nostr.publishThought: text required');
+          if (!Array.isArray(vector)) throw new Error('nostr.publishThought: vector required');
+          const NDKEventClass = this._getNDKEventClass();
+          const event = new NDKEventClass(this._ndk, {
+            kind: Alpine.store('config').nostr.kindThought,
+            created_at: Math.floor(Date.now() / 1000),
+            content: JSON.stringify({ text, vector }),
+            tags: [['t', 'noomium-main']]
           });
-        } catch (e) {
-          console.warn('nostr: notifications.add failed', e);
+          await event.sign();
+          await event.publish();
+          if (event.id) { this._myEventIds.add(event.id); this._persistMyEventIds(); }
+          if (isShared) {
+            this._addThought({
+              id: event.id, text, vector,
+              author: this.publicKey,
+              createdAt: event.created_at * 1000,
+              replyTo: null, own: true
+            });
+          }
+          return event.id;
+        },
+        async reply(text, vector, replyToId) {
+          if (!this._ndk || !this._secretKey) throw new Error('nostr.reply: not initialized');
+          if (typeof text !== 'string' || !text.trim()) throw new Error('nostr.reply: text required');
+          if (!Array.isArray(vector)) throw new Error('nostr.reply: vector required');
+          if (typeof replyToId !== 'string' || !replyToId) throw new Error('nostr.reply: replyToId required');
+          const NDKEventClass = this._getNDKEventClass();
+          const event = new NDKEventClass(this._ndk, {
+            kind: Alpine.store('config').nostr.kindThought,
+            created_at: Math.floor(Date.now() / 1000),
+            content: JSON.stringify({ text, vector }),
+            tags: [['t', 'noomium-main'], ['e', replyToId]]
+          });
+          await event.sign();
+          await event.publish();
+          if (event.id) { this._myEventIds.add(event.id); this._persistMyEventIds(); }
+          this._addThought({
+            id: event.id, text, vector,
+            author: this.publicKey,
+            createdAt: event.created_at * 1000,
+            replyTo: replyToId, own: true
+          });
+          return event.id;
+        },
+        _onEvent(event) {
+          try {
+            if (!event || typeof event !== 'object') return;
+            if (typeof event.pubkey !== 'string') return;
+            if (event.pubkey === this.publicKey) return;
+            if (event.kind !== Alpine.store('config').nostr.kindThought) return;
+            const tags = Array.isArray(event.tags) ? event.tags : [];
+            const hasRoomTag = tags.some(t => Array.isArray(t) && t[0] === 't' && t[1] === 'noomium-main');
+            if (!hasRoomTag) return;
+            let content;
+            try { content = JSON.parse(event.content || '{}'); } catch (_) { return; }
+            if (!content || typeof content !== 'object') return;
+            if (typeof content.text !== 'string' || !content.text) return;
+            if (!Array.isArray(content.vector)) return;
+            for (let i = 0; i < content.vector.length; i++) {
+              if (typeof content.vector[i] !== 'number') return;
+            }
+            let replyTo = null;
+            for (const tag of tags) {
+              if (Array.isArray(tag) && tag[0] === 'e' && typeof tag[1] === 'string') { replyTo = tag[1]; break; }
+            }
+            const thought = {
+              id: event.id, text: content.text, vector: content.vector,
+              author: event.pubkey,
+              createdAt: (typeof event.created_at === 'number' ? event.created_at : 0) * 1000,
+              replyTo, own: false
+            };
+            this._addThought(thought);
+            this.peers.set(event.pubkey, Date.now());
+            if (replyTo && this._myEventIds.has(replyTo)) {
+              try {
+                Alpine.store('notifications').add('reply', {
+                  thoughtId: event.id, text: content.text, pubkey: event.pubkey
+                });
+              } catch (e) { console.warn('nostr: notifications.add failed', e); }
+            }
+            const echo = Alpine.store('echo');
+            if (echo && typeof echo.check === 'function') {
+              try { echo.check(thought); } catch (e) { console.warn('nostr: echo.check failed', e); }
+            }
+          } catch (err) { console.warn('nostr._onEvent error:', err); }
+        },
+        _addThought(thought) {
+          if (!thought || !thought.id) return;
+          if (this.publicThoughts.some(t => t.id === thought.id)) return;
+          this.publicThoughts = [thought, ...this.publicThoughts];
+          if (this.publicThoughts.length > this._MAX_PUBLIC_THOUGHTS) {
+            this.publicThoughts = this.publicThoughts.slice(0, this._MAX_PUBLIC_THOUGHTS);
+          }
+        },
+        _persistMyEventIds() {
+          try {
+            const arr = Array.from(this._myEventIds);
+            const toSave = arr.length > this._MAX_MY_EVENT_IDS
+              ? arr.slice(arr.length - this._MAX_MY_EVENT_IDS) : arr;
+            localStorage.setItem(this._storageKeys.myEventIds, JSON.stringify(toSave));
+          } catch (e) { console.warn('nostr._persistMyEventIds failed:', e); }
+        },
+        stop() {
+          if (this._subscription) {
+            try {
+              if (typeof this._subscription.stop === 'function') this._subscription.stop();
+              else if (typeof this._subscription.unsub === 'function') this._subscription.unsub();
+            } catch (_) {}
+            this._subscription = null;
+          }
+          if (this._ndk) {
+            try { if (this._ndk.pool && typeof this._ndk.pool.disconnect === 'function') this._ndk.pool.disconnect(); } catch (_) {}
+            this._ndk = null;
+          }
+          this.publicThoughts = [];
+          this.peers.clear();
+          this.status = 'disconnected';
+        },
+        formatDate(ts) {
+          if (!ts) return '';
+          try {
+            if (typeof dayjs === 'undefined') return '';
+            if (typeof dayjs().fromNow === 'function') return dayjs(ts).fromNow();
+            return dayjs(ts).format('DD.MM.YY HH:mm');
+          } catch (_) { return ''; }
         }
-      }
-
-      // Эхо
-      if ($store.echo && typeof $store.echo.check === 'function') {
-        try {
-          $store.echo.check(thought);
-        } catch (e) {
-          console.warn('nostr: echo.check failed', e);
-        }
-      }
-    } catch (err) {
-      console.warn('nostr._onEvent error:', err);
-    }
-  },
-
-  /**
-   * Добавить мысль в publicThoughts с дедупликацией и лимитом.
-   * @private
-   */
-  _addThought(thought) {
-    if (!thought || !thought.id) return;
-    if (this.publicThoughts.some(t => t.id === thought.id)) return;
-
-    // Присваивание массива — реактивно для Alpine
-    this.publicThoughts = [thought, ...this.publicThoughts];
-
-    if (this.publicThoughts.length > this._MAX_PUBLIC_THOUGHTS) {
-      this.publicThoughts = this.publicThoughts.slice(0, this._MAX_PUBLIC_THOUGHTS);
-    }
-  },
-
-  /**
-   * Сохранить _myEventIds в localStorage.
-   * @private
-   */
-  _persistMyEventIds() {
-    try {
-      const arr = Array.from(this._myEventIds);
-      const toSave = arr.length > this._MAX_MY_EVENT_IDS
-        ? arr.slice(arr.length - this._MAX_MY_EVENT_IDS)
-        : arr;
-      localStorage.setItem(this._storageKeys.myEventIds, JSON.stringify(toSave));
-    } catch (e) {
-      console.warn('nostr._persistMyEventIds failed:', e);
-    }
-  },
-
-  /**
-   * Отключение от сети.
-   */
-  stop() {
-    if (this._subscription) {
-      try {
-        if (typeof this._subscription.stop === 'function') {
-          this._subscription.stop();
-        } else if (typeof this._subscription.unsub === 'function') {
-          this._subscription.unsub();
-        }
-      } catch (_) {}
-      this._subscription = null;
-    }
-    if (this._ndk) {
-      try {
-        if (this._ndk.pool && typeof this._ndk.pool.disconnect === 'function') {
-          this._ndk.pool.disconnect();
-        }
-      } catch (_) {}
-      this._ndk = null;
-    }
-    this.publicThoughts = [];
-    this.peers.clear();
-    this.status = 'disconnected';
-  },
-
-  /**
-   * Форматирование даты через Day.js (relative time).
-   * @param {number} ts — миллисекунды
-   * @returns {string}
-   */
-  formatDate(ts) {
-    if (!ts) return '';
-    try {
-      if (typeof dayjs === 'undefined') return '';
-      // Относительное время требует плагина relativeTime —
-      // если он не подключён, fallback на обычный формат
-      if (typeof dayjs().fromNow === 'function') {
-        return dayjs(ts).fromNow();
-      }
-      return dayjs(ts).format('DD.MM.YY HH:mm');
-    } catch (e) {
-      return '';
-    }
-  }
-});
-
-// ============================================================
-// STORE: search (semantic search orchestration)
-// ============================================================
-Alpine.store('search', {
-  results: { my: [], world: [], insights: [] },
-  _lastQueryVec: null,
-  _debounceTimer: null,
-
-  /**
-   * Выполнить поиск по тексту.
-   * @param {string} queryText
-   */
-  async run(queryText) {
-    const text = typeof queryText === 'string' ? queryText.trim() : '';
-    if (!text) {
-      this.clear();
-      return;
-    }
-    if (!$store.ai || !$store.ai.ready) {
-      return;
-    }
-
-    const vec = await $store.ai.embed(text);
-    if (!vec) {
-      this.clear();
-      return;
-    }
-
-    const threshold = $store.config.search.threshold;
-    const serendipity = $store.config.search.serendipity;
-    const insightFloor = threshold - serendipity;
-
-    // ---- 1. Локальные заметки (my + insightsLocal) ----
-    const localNotes = Array.isArray($store.db.all) ? $store.db.all() : [];
-    const my = [];
-    const insightsLocal = [];
-
-    for (let i = 0; i < localNotes.length; i++) {
-      const note = localNotes[i];
-      if (!note || !Array.isArray(note.vector)) continue;
-
-      const score = $store.ai.cosine(vec, note.vector);
-      if (score >= threshold) {
-        my.push({
-          id: note.id,
-          text: note.text,
-          score,
-          shared: !!note.shared,
-          createdAt: note.createdAt,
-          own: true
-        });
-      } else if (score >= insightFloor && score < threshold) {
-        insightsLocal.push({
-          id: note.id,
-          text: note.text,
-          score,
-          shared: !!note.shared,
-          createdAt: note.createdAt,
-          own: true
-        });
-      }
-    }
-
-    // ---- 2. Публичные мысли из Nostr (world + insightsWorld) ----
-    const publicThoughts = Array.isArray($store.nostr.publicThoughts)
-      ? $store.nostr.publicThoughts
-      : [];
-    const myPk = $store.nostr.publicKey;
-    const world = [];
-    const insightsWorld = [];
-
-    for (let i = 0; i < publicThoughts.length; i++) {
-      const note = publicThoughts[i];
-      if (!note || !Array.isArray(note.vector)) continue;
-      // Пропускаем свои, попавшие в publicThoughts
-      if (myPk && note.author === myPk) continue;
-
-      const score = $store.ai.cosine(vec, note.vector);
-      const peerShort = note.author ? String(note.author).slice(0, 8) : '';
-
-      if (score >= threshold) {
-        world.push({
-          id: note.id,
-          text: note.text,
-          score,
-          peer: peerShort,
-          fullPubkey: note.author,
-          createdAt: note.createdAt,
-          replyTo: note.replyTo || null,
-          own: false
-        });
-      } else if (score >= insightFloor && score < threshold) {
-        insightsWorld.push({
-          id: note.id,
-          text: note.text,
-          score,
-          peer: peerShort,
-          fullPubkey: note.author,
-          createdAt: note.createdAt,
-          replyTo: note.replyTo || null,
-          own: false
-        });
-      }
-    }
-
-    // ---- 3. Сортировка ----
-    my.sort((a, b) => b.score - a.score);
-    world.sort((a, b) => b.score - a.score);
-    const insights = [...insightsLocal, ...insightsWorld]
-      .sort((a, b) => b.score - a.score);
-
-    // ---- 4. Обновление реактивно ----
-    this.results = { my, world, insights };
-    this._lastQueryVec = vec;
-  },
-
-  /**
-   * Запустить run с дебаунсом.
-   * @param {string} queryText
-   */
-  schedule(queryText) {
-    if (this._debounceTimer) {
-      clearTimeout(this._debounceTimer);
-      this._debounceTimer = null;
-    }
-    const delay = $store.config.search.debounceMs;
-    this._debounceTimer = setTimeout(() => {
-      this._debounceTimer = null;
-      this.run(queryText).catch(err => {
-        console.warn('search.run failed:', err);
       });
-    }, delay);
-  },
 
-  /**
-   * Очистить результаты и отменить запланированный поиск.
-   */
-  clear() {
-    this.results = { my: [], world: [], insights: [] };
-    this._lastQueryVec = null;
-    if (this._debounceTimer) {
-      clearTimeout(this._debounceTimer);
-      this._debounceTimer = null;
-    }
-  }
-});
-    
-// ============================================================
-// STORE: echo (semantic resonance detection)
-// ============================================================
-Alpine.store('echo', {
-  _localVectors: [],           // [{id, vector}] — кеш локальных векторов
-  _processedIds: new Set(),    // Set уже проверенных чужих мыслей
-  _MAX_PROCESSED: 1000,
-
-  /**
-   * Инициализация: загрузка локальных векторов.
-   * Можно вызвать при старте приложения.
-   */
-  init() {
-    this._refreshLocalVectors();
-  },
-
-  /**
-   * Обновить кеш локальных векторов из DB.
-   * @private
-   */
-  _refreshLocalVectors() {
-    try {
-      const notes = typeof $store.db.all === 'function' ? $store.db.all() : [];
-      this._localVectors = notes
-        .filter(n => n && Array.isArray(n.vector) && n.vector.length > 0)
-        .map(n => ({ id: n.id, vector: n.vector }));
-    } catch (e) {
-      console.warn('echo._refreshLocalVectors failed:', e);
-      this._localVectors = [];
-    }
-  },
-
-  /**
-   * Проверить чужую мысль на смысловое эхо с локальными заметками.
-   * @param {Object} remoteNote — мысль из Nostr с полями id, text, vector, author
-   */
-  async check(remoteNote) {
-    // Валидация входных данных
-    if (!remoteNote || typeof remoteNote !== 'object') return;
-    if (typeof remoteNote.id !== 'string' || !remoteNote.id) return;
-    if (!Array.isArray(remoteNote.vector) || remoteNote.vector.length === 0) return;
-    if (typeof remoteNote.text !== 'string' || !remoteNote.text.trim()) return;
-
-    // Проверка на дублирование
-    if (this._processedIds.has(remoteNote.id)) return;
-    this._processedIds.add(remoteNote.id);
-
-    // Лимит processedIds: при переполнении оставляем только последние 50%
-    if (this._processedIds.size > this._MAX_PROCESSED) {
-      const arr = Array.from(this._processedIds);
-      const keep = Math.floor(this._MAX_PROCESSED / 2);
-      this._processedIds = new Set(arr.slice(arr.length - keep));
-    }
-
-    // Обновляем локальные векторы (можно оптимизировать через подписку на db-changed)
-    this._refreshLocalVectors();
-
-    if (this._localVectors.length === 0) return;
-
-    // Ищем максимальное косинусное сходство
-    const threshold = $store.config.search.echoThreshold;
-    let maxScore = 0;
-
-    for (let i = 0; i < this._localVectors.length; i++) {
-      const local = this._localVectors[i];
-      try {
-        const score = $store.ai.cosine(remoteNote.vector, local.vector);
-        if (score > maxScore) {
-          maxScore = score;
+      // ---------- search ----------
+      Alpine.store('search', {
+        results: { my: [], world: [], insights: [] },
+        _lastQueryVec: null,
+        _debounceTimer: null,
+        async run(queryText) {
+          const text = typeof queryText === 'string' ? queryText.trim() : '';
+          if (!text) { this.clear(); return; }
+          const ai = Alpine.store('ai');
+          if (!ai || !ai.ready) return;
+          const vec = await ai.embed(text);
+          if (!vec) { this.clear(); return; }
+          const cfg = Alpine.store('config').search;
+          const threshold = cfg.threshold;
+          const insightFloor = threshold - cfg.serendipity;
+          const db = Alpine.store('db');
+          const localNotes = Array.isArray(db.all) ? db.all() : [];
+          const my = [], insightsLocal = [];
+          for (let i = 0; i < localNotes.length; i++) {
+            const note = localNotes[i];
+            if (!note || !Array.isArray(note.vector)) continue;
+            const score = ai.cosine(vec, note.vector);
+            if (score >= threshold) {
+              my.push({ id: note.id, text: note.text, score, shared: !!note.shared, createdAt: note.createdAt, own: true });
+            } else if (score >= insightFloor && score < threshold) {
+              insightsLocal.push({ id: note.id, text: note.text, score, shared: !!note.shared, createdAt: note.createdAt, own: true });
+            }
+          }
+          const nostr = Alpine.store('nostr');
+          const publicThoughts = Array.isArray(nostr.publicThoughts) ? nostr.publicThoughts : [];
+          const myPk = nostr.publicKey;
+          const world = [], insightsWorld = [];
+          for (let i = 0; i < publicThoughts.length; i++) {
+            const note = publicThoughts[i];
+            if (!note || !Array.isArray(note.vector)) continue;
+            if (myPk && note.author === myPk) continue;
+            const score = ai.cosine(vec, note.vector);
+            const peerShort = note.author ? String(note.author).slice(0, 8) : '';
+            if (score >= threshold) {
+              world.push({ id: note.id, text: note.text, score, peer: peerShort, fullPubkey: note.author, createdAt: note.createdAt, replyTo: note.replyTo || null, own: false });
+            } else if (score >= insightFloor && score < threshold) {
+              insightsWorld.push({ id: note.id, text: note.text, score, peer: peerShort, fullPubkey: note.author, createdAt: note.createdAt, replyTo: note.replyTo || null, own: false });
+            }
+          }
+          my.sort((a, b) => b.score - a.score);
+          world.sort((a, b) => b.score - a.score);
+          const insights = [...insightsLocal, ...insightsWorld].sort((a, b) => b.score - a.score);
+          this.results = { my, world, insights };
+          this._lastQueryVec = vec;
+        },
+        schedule(queryText) {
+          if (this._debounceTimer) { clearTimeout(this._debounceTimer); this._debounceTimer = null; }
+          const delay = Alpine.store('config').search.debounceMs;
+          this._debounceTimer = setTimeout(() => {
+            this._debounceTimer = null;
+            this.run(queryText).catch(err => console.warn('search.run failed:', err));
+          }, delay);
+        },
+        clear() {
+          this.results = { my: [], world: [], insights: [] };
+          this._lastQueryVec = null;
+          if (this._debounceTimer) { clearTimeout(this._debounceTimer); this._debounceTimer = null; }
         }
-      } catch (e) {
-        // Игнорируем ошибки cosine
-      }
-    }
+      });
 
-    // Если найдено эхо — создаём уведомление
-    if (maxScore >= threshold) {
-      try {
-        $store.notifications.add('echo', {
-          thoughtId: remoteNote.id,
-          text: remoteNote.text,
-          pubkey: remoteNote.author || remoteNote.pubkey || null
-        });
-      } catch (e) {
-        console.warn('echo.check: notifications.add failed', e);
-      }
-    }
-  }
-});
-    
-// ============================================================
-// STORE: notifications
-// ============================================================
-Alpine.store('notifications', {
-  showModal: false,
-  list: [],
-  _storageKey: 'noomium:notifications',
-  _MAX_NOTIFICATIONS: 100,
+      // ---------- echo ----------
+      Alpine.store('echo', {
+        _localVectors: [],
+        _processedIds: new Set(),
+        _MAX_PROCESSED: 1000,
+        init() { this._refreshLocalVectors(); },
+        _refreshLocalVectors() {
+          try {
+            const db = Alpine.store('db');
+            const notes = typeof db.all === 'function' ? db.all() : [];
+            this._localVectors = notes
+              .filter(n => n && Array.isArray(n.vector) && n.vector.length > 0)
+              .map(n => ({ id: n.id, vector: n.vector }));
+          } catch (e) { console.warn('echo._refreshLocalVectors failed:', e); this._localVectors = []; }
+        },
+        async check(remoteNote) {
+          if (!remoteNote || typeof remoteNote !== 'object') return;
+          if (typeof remoteNote.id !== 'string' || !remoteNote.id) return;
+          if (!Array.isArray(remoteNote.vector) || remoteNote.vector.length === 0) return;
+          if (typeof remoteNote.text !== 'string' || !remoteNote.text.trim()) return;
+          if (this._processedIds.has(remoteNote.id)) return;
+          this._processedIds.add(remoteNote.id);
+          if (this._processedIds.size > this._MAX_PROCESSED) {
+            const arr = Array.from(this._processedIds);
+            const keep = Math.floor(this._MAX_PROCESSED / 2);
+            this._processedIds = new Set(arr.slice(arr.length - keep));
+          }
+          this._refreshLocalVectors();
+          if (this._localVectors.length === 0) return;
+          const threshold = Alpine.store('config').search.echoThreshold;
+          let maxScore = 0;
+          const ai = Alpine.store('ai');
+          for (let i = 0; i < this._localVectors.length; i++) {
+            const local = this._localVectors[i];
+            try {
+              const score = ai.cosine(remoteNote.vector, local.vector);
+              if (score > maxScore) maxScore = score;
+            } catch (_) {}
+          }
+          if (maxScore >= threshold) {
+            try {
+              Alpine.store('notifications').add('echo', {
+                thoughtId: remoteNote.id,
+                text: remoteNote.text,
+                pubkey: remoteNote.author || remoteNote.pubkey || null
+              });
+            } catch (e) { console.warn('echo.check: notifications.add failed', e); }
+          }
+        }
+      });
 
-  /**
-   * Количество непрочитанных уведомлений.
-   */
-  get unreadCount() {
-    return this.list.filter(n => !n.read).length;
-  },
+      // ---------- notifications ----------
+      Alpine.store('notifications', {
+        showModal: false,
+        list: [],
+        _storageKey: 'noomium:notifications',
+        _MAX_NOTIFICATIONS: 100,
+        get unreadCount() { return this.list.filter(n => !n.read).length; },
+        init() {
+          try {
+            const raw = localStorage.getItem(this._storageKey);
+            if (raw) { const parsed = JSON.parse(raw); this.list = Array.isArray(parsed) ? parsed : []; }
+            else this.list = [];
+          } catch (e) { console.warn('notifications.init: load failed', e); this.list = []; }
+        },
+        add(type, payload) {
+          if (type !== 'echo' && type !== 'reply') return;
+          if (!payload || typeof payload !== 'object') return;
+          const notif = {
+            id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+            type,
+            text: typeof payload.text === 'string' ? payload.text : '',
+            thoughtId: typeof payload.thoughtId === 'string' ? payload.thoughtId : null,
+            pubkey: typeof payload.pubkey === 'string' ? payload.pubkey : null,
+            timestamp: Date.now(),
+            read: false
+          };
+          this.list.unshift(notif);
+          this._persist();
+        },
+        markRead(id) {
+          if (typeof id !== 'string' || !id) return;
+          const notif = this.list.find(n => n.id === id);
+          if (notif) { notif.read = true; this._persist(); }
+        },
+        clearAll() { this.list = []; this._persist(); },
+        _persist() {
+          try {
+            const toSave = this.list.slice(0, this._MAX_NOTIFICATIONS);
+            localStorage.setItem(this._storageKey, JSON.stringify(toSave));
+          } catch (e) { console.warn('notifications._persist failed:', e); }
+        }
+      });
 
-  /**
-   * Инициализация: загрузка уведомлений из localStorage.
-   */
-  init() {
-    try {
-      const raw = localStorage.getItem(this._storageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        this.list = Array.isArray(parsed) ? parsed : [];
-      } else {
-        this.list = [];
-      }
-    } catch (e) {
-      console.warn('notifications.init: load failed', e);
-      this.list = [];
-    }
-  },
+      // ---------- editor ----------
+      Alpine.store('editor', {
+        text: '',
+        mode: 'private',
+        replyTo: null,
+        get charCountText() { return `${this.text.length} chars`; },
+        get canSend() { return this.text.trim().length > 0 && Alpine.store('ai').ready; },
+        setMode(mode) { this.mode = mode; },
+        onInput() { Alpine.store('search').schedule(this.text); },
+        async send() {
+          if (!this.canSend) return;
+          const text = this.text.trim();
+          const ai = Alpine.store('ai');
+          const db = Alpine.store('db');
+          const nostr = Alpine.store('nostr');
+          const i18n = Alpine.store('i18n');
+          const id = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+          try {
+            const vector = await ai.embed(text);
+            const isWorld = this.mode === 'world';
+            const note = {
+              id, text, vector,
+              shared: isWorld,
+              createdAt: Date.now(),
+              replyTo: this.replyTo?.id || null,
+              parentId: null
+            };
+            await db.put(note);
+            if (isWorld && nostr.status === 'connected') {
+              try {
+                if (this.replyTo?.id) await nostr.reply(text, vector, this.replyTo.id);
+                else await nostr.publishThought(text, vector, true);
+              } catch (e) { console.warn('editor.send: publish failed', e); }
+            }
+            this.text = '';
+            this.replyTo = null;
+            Alpine.store('search').run(text);
+            Alpine.store('base').recalcStats();
+          } catch (err) {
+            console.error('editor.send failed:', err);
+            alert(i18n.t('toast.error'));
+          }
+        },
+        edit(note) {
+          this.text = note.text;
+          this.mode = note.shared ? 'world' : 'private';
+          this.replyTo = null;
+          setTimeout(() => { const ta = document.getElementById('main-editor'); if (ta) ta.focus(); }, 50);
+        },
+        replyTo(note) {
+          this.replyTo = note;
+          this.text = '';
+          this.mode = 'world';
+          setTimeout(() => { const ta = document.getElementById('main-editor'); if (ta) ta.focus(); }, 50);
+        }
+      });
 
-  /**
-   * Добавить новое уведомление.
-   * @param {'echo' | 'reply'} type
-   * @param {Object} payload — { thoughtId, text, pubkey }
-   */
-  add(type, payload) {
-    if (type !== 'echo' && type !== 'reply') return;
-    if (!payload || typeof payload !== 'object') return;
+      // ---------- base ----------
+      Alpine.store('base', {
+        query: '',
+        stats: { total: 0, shared: 0, private: 0 },
+        get visibleNotes() {
+          const db = Alpine.store('db');
+          const notes = typeof db.all === 'function' ? db.all() : [];
+          const q = this.query.trim().toLowerCase();
+          let list = notes.slice();
+          if (q) list = list.filter(n => n && n.text && n.text.toLowerCase().includes(q));
+          list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+          return list;
+        },
+        onQueryChange() { /* reactivity через getter */ },
+        recalcStats() {
+          const db = Alpine.store('db');
+          const notes = typeof db.all === 'function' ? db.all() : [];
+          let shared = 0;
+          for (const n of notes) if (n && n.shared) shared++;
+          this.stats = { total: notes.length, shared, private: notes.length - shared };
+        },
+        openNote(note) {
+          Alpine.store('editor').edit(note);
+          Alpine.store('app').activeTab = 'stream';
+        },
+        formatDate(ts) {
+          if (!ts) return '';
+          try {
+            if (typeof dayjs === 'undefined') return '';
+            if (typeof dayjs().fromNow === 'function') return dayjs(ts).fromNow();
+            return dayjs(ts).format('DD.MM.YY HH:mm');
+          } catch (_) { return ''; }
+        }
+      });
 
-    const notif = {
-      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
-      type,
-      text: typeof payload.text === 'string' ? payload.text : '',
-      thoughtId: typeof payload.thoughtId === 'string' ? payload.thoughtId : null,
-      pubkey: typeof payload.pubkey === 'string' ? payload.pubkey : null,
-      timestamp: Date.now(),
-      read: false
-    };
-
-    // Добавляем в начало списка
-    this.list.unshift(notif);
-    this._persist();
-  },
-
-  /**
-   * Отметить уведомление как прочитанное.
-   * @param {string} id
-   */
-  markRead(id) {
-    if (typeof id !== 'string' || !id) return;
-    const notif = this.list.find(n => n.id === id);
-    if (notif) {
-      notif.read = true;
-      this._persist();
-    }
-  },
-
-  /**
-   * Очистить все уведомления.
-   */
-  clearAll() {
-    this.list = [];
-    this._persist();
-  },
-
-  /**
-   * Сохранить список в localStorage.
-   * @private
-   */
-  _persist() {
-    try {
-      // Лимит: сохраняем только последние N уведомлений
-      const toSave = this.list.slice(0, this._MAX_NOTIFICATIONS);
-      localStorage.setItem(this._storageKey, JSON.stringify(toSave));
-    } catch (e) {
-      console.warn('notifications._persist failed:', e);
-    }
-  }
-});
-
-    // ============================================================
-    // STORE: editor (UI state of the input field)
-    // ============================================================
-    Alpine.store('editor', {
-      text: '',
-      mode: 'private',
-      replyTo: null,
-
-      get charCountText() {
-        return `${this.text.length} chars`;
-      },
-      get canSend() {
-        return this.text.trim().length > 0 && $store.ai.ready;
-      },
-
-      setMode(mode) { this.mode = mode; },
-      onInput() {
-        // TODO: trigger $store.search.schedule(this.text)
-      },
-      async send() {
-        // TODO: embed, save to $store.db, publish if mode==='world', clear
-      },
-      edit(note) {
-        // TODO: load note into editor
-      },
-      replyTo(note) {
-        // TODO: set replyTo, prefix "Re: ", focus editor
-      }
-    });
-
-    // ============================================================
-    // STORE: base (all-notes tab state)
-    // ============================================================
-    Alpine.store('base', {
-      query: '',
-      stats: { total: 0, shared: 0, private: 0 },
-
-      get visibleNotes() {
-        // TODO: filter $store.db.all() by query
-        return [];
-      },
-      onQueryChange() {
-        // TODO: debounce if needed
-      },
-      recalcStats() {
-        // TODO: count from $store.db.all()
-      },
-      openNote(note) {
-        // TODO: navigate to detail view (future)
-      },
-      formatDate(ts) {
-        return dayjs(ts).fromNow();
-      }
-    });
-
-    // ============================================================
-    // STORE: app (thin orchestrator — bootstrap only)
-    // ============================================================
-    Alpine.store('app', {
-      initialized: false,
-      showMenu: false,
-      showOnboarding: false,
-      showPassword: false,
-      activeTab: 'stream',
-      isNewUser: false,
-
-      async bootstrap() {
-        try {
-          await $store.i18n.init();
-          $store.settings.init();
-          $store.notifications.init();
-          await $store.db.init();
-          
-          this.isNewUser = !localStorage.getItem('noomium:sk');
-          
-          // AI loads in parallel; Nostr waits for password modal
-          $store.ai.load();
-          
-          if (this.isNewUser) {
+      // ---------- app ----------
+      Alpine.store('app', {
+        initialized: false,
+        showMenu: false,
+        showOnboarding: false,
+        showPassword: false,
+        activeTab: 'stream',
+        isNewUser: false,
+        password: '',
+        passwordConfirm: '',
+        passwordError: '',
+        _pendingBootstrapPassword: null,
+        async bootstrap() {
+          try {
+            Alpine.store('i18n').init();
+            Alpine.store('settings').init();
+            Alpine.store('notifications').init();
+            await Alpine.store('db').init();
+            Alpine.store('echo').init();
+            this.isNewUser = !localStorage.getItem('noomium:sk');
+            Alpine.store('ai').load();
+            Alpine.store('db').onChange(() => { Alpine.store('base').recalcStats(); });
+            Alpine.store('base').recalcStats();
             this.showPassword = true;
-          } else {
-            this.showPassword = true; // ask existing password
+            if (!Alpine.store('settings').onboarded) this.showOnboarding = true;
+            // Скрываем boot-screen
+            const bs = document.getElementById('boot-screen');
+            if (bs) bs.style.display = 'none';
+            this.initialized = true;
+          } catch (err) {
+            console.error('Bootstrap failed:', err);
+            const bs = document.getElementById('boot-screen');
+            if (bs) bs.innerHTML = `<div class="alert alert-error"><span>Bootstrap failed: ${err.message}</span></div>`;
           }
-          
-          if (!$store.settings.onboarded) {
-            this.showOnboarding = true;
+        },
+        async submitPassword() {
+          this.passwordError = '';
+          const i18n = Alpine.store('i18n');
+          if (!this.password) { this.passwordError = i18n.t('password.empty'); return; }
+          if (this.isNewUser) {
+            if (this.password !== this.passwordConfirm) {
+              this.passwordError = i18n.t('password.mismatch');
+              return;
+            }
           }
-          
-          this.initialized = true;
-        } catch (err) {
-          console.error('Bootstrap failed:', err);
+          try {
+            await Alpine.store('nostr').init(this.password);
+            this.showPassword = false;
+            this.password = '';
+            this.passwordConfirm = '';
+          } catch (err) {
+            if (err && err.message === 'WRONG_PASSWORD') {
+              this.passwordError = i18n.t('password.wrong');
+              this.password = '';
+            } else {
+              console.error('nostr.init failed:', err);
+              this.passwordError = err.message || 'Init failed';
+            }
+          }
         }
-      }
+      });
+
+    }); // end alpine:init
+
+    // ============================================================
+    // ПОСЛЕ ПОЛНОЙ ИНИЦИАЛИЗАЦИИ ALPINE ЗАПУСКАЕМ BOOTSTRAP
+    // ============================================================
+    document.addEventListener('alpine:initialized', () => {
+      Alpine.store('app').bootstrap();
     });
 
     // ============================================================
-    // Component stubs (thin wrappers — all logic in stores)
+    // Component stubs
     // ============================================================
-    function editorComponent() {
-      return {}; // state lives in $store.editor
-    }
+    function editorComponent() { return {}; }
 
     // ============================================================
-    // Service Worker (Workbox — to be implemented)
+    // Service Worker (Workbox)
     // ============================================================
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        // TODO: Workbox registration
+        try {
+          // Минимальный inline SW через blob
+          const swCode = `
+            const CACHE = 'noomium-v1';
+            self.addEventListener('install', e => { self.skipWaiting(); });
+            self.addEventListener('activate', e => { e.waitUntil(self.clients.claim()); });
+            self.addEventListener('fetch', e => {
+              if (e.request.method !== 'GET') return;
+              e.respondWith(
+                caches.match(e.request).then(r => r || fetch(e.request).then(res => {
+                  if (res.status === 200) {
+                    const clone = res.clone();
+                    caches.open(CACHE).then(c => c.put(e.request, clone));
+                  }
+                  return res;
+                }).catch(() => caches.match(e.request)))
+              );
+            });
+          `;
+          const blob = new Blob([swCode], { type: 'application/javascript' });
+          const swUrl = URL.createObjectURL(blob);
+          navigator.serviceWorker.register(swUrl).catch(() => {});
+        } catch (_) {}
       });
     }
   </script>
