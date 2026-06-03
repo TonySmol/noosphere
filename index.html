@@ -1,1732 +1,1265 @@
-<!DOCTYPE html>
-<html lang="ru" data-theme="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="theme-color" content="#1d232a">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta http-equiv="Content-Security-Policy" content="
-    default-src 'self';
-    script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net;
-    style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
-    connect-src 'self' https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co wss:;
-    img-src 'self' data: blob:;
-    worker-src 'self' blob:;
-    manifest-src 'self' data:;
-    base-uri 'self';
-    form-action 'self';
-  ">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◆</text></svg>">
-  <link rel="manifest" href='data:application/manifest+json,{"name":"NOOmium","short_name":"NOOmium","start_url":"./","display":"standalone","background_color":"%231d232a","theme_color":"%231d232a"}'>
-  <title>NOOmium</title>
+/**
+ * NOOmium Engine Core
+ * Изолированное ядро приложения с DI, EventBus и плагинной системой
+ * @module noomium-engine
+ */
 
-  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet">
-  <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/csp@3.14.1/dist/cdn.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.7/dist/dexie.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/plugin/relativeTime.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/locale/ru.js"></script>
+// ============================================================================
+// LOGGER
+// ============================================================================
 
-  <style>
-    [x-cloak] { display: none !important; }
-    .line-clamp-3 {
-      display: -webkit-box;
-      -webkit-line-clamp: 3;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-    }
-    .pulse-dot { animation: pulse-dot 1.4s ease-in-out infinite; }
-    @keyframes pulse-dot { 50% { opacity: 0.3; } }
-  </style>
-</head>
-<body class="bg-base-100 min-h-screen">
-
-  <div x-data="app" x-init="init" x-cloak>
-
-    <!-- HEADER -->
-    <header class="navbar bg-base-200 shadow-lg sticky top-0 z-40">
-      <div class="flex-1">
-        <span class="text-xl font-bold px-4">NOO<span class="text-primary">.</span>mium</span>
-      </div>
-      <div class="flex-none gap-2">
-        <div class="badge badge-ghost gap-2">
-          <span class="w-2 h-2 rounded-full" :class="storageStatusClass"></span>
-          <span class="text-xs" x-text="storageStatusText"></span>
-        </div>
-        <div class="badge badge-ghost gap-2">
-          <span class="w-2 h-2 rounded-full" :class="aiStatusClass"></span>
-          <span class="text-xs" x-text="aiStatusText"></span>
-        </div>
-        <button class="btn btn-ghost btn-sm" @click="openSettings">⚙</button>
-      </div>
-    </header>
-
-    <!-- MAIN -->
-    <main class="container mx-auto p-4 max-w-4xl">
-
-      <!-- EDITOR -->
-      <section class="card bg-base-200 shadow-xl mb-6">
-        <div class="card-body">
-          <textarea
-            x-model:value="editorText"
-            @input="onEditorInput"
-            class="textarea textarea-bordered h-24 text-lg"
-            placeholder="О чём думаешь?"></textarea>
-          <div class="flex justify-between items-center mt-2 flex-wrap gap-2">
-            <span class="text-sm opacity-70" x-text="charCount"></span>
-            <div class="flex gap-2 flex-wrap">
-              <div class="btn-group">
-                <button class="btn btn-sm" :class="privateBtnClass" @click="setPrivateMode">Личное</button>
-                <button class="btn btn-sm" :class="worldBtnClass" @click="setWorldMode">Мир</button>
-              </div>
-              <button class="btn btn-primary" :disabled="isSendDisabled" @click="sendNote">Послать</button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- TABS -->
-      <div role="tablist" class="tabs tabs-lifted mb-4">
-        <a role="tab" class="tab" :class="streamTabClass" @click="setStreamTab">Поток</a>
-        <a role="tab" class="tab" :class="baseTabClass" @click="setBaseTab">База</a>
-      </div>
-
-      <!-- STREAM TAB -->
-      <div x-show="isStreamTab" class="space-y-6">
-
-        <section x-show="hasMyResults">
-          <h3 class="text-lg font-bold mb-2">Моё</h3>
-          <div class="space-y-2">
-            <template x-for="note in myResults" :key="note.id">
-              <article class="card bg-base-200 shadow cursor-pointer" @click="openNoteView(note)">
-                <div class="card-body p-4">
-                  <p x-text="note.text"></p>
-                  <div class="flex justify-between items-center mt-2 flex-wrap gap-2">
-                    <span class="badge badge-primary badge-sm" x-text="note.scoreText"></span>
-                    <div class="flex gap-1">
-                      <button class="btn btn-ghost btn-xs" @click.stop="toggleShared(note.id)" x-text="note.toggleText"></button>
-                      <button class="btn btn-ghost btn-xs btn-error" @click.stop="confirmDelete(note.id)">Удалить</button>
-                    </div>
-                  </div>
-                </div>
-              </article>
-            </template>
-          </div>
-        </section>
-
-        <section x-show="hasInsightsResults">
-          <h3 class="text-lg font-bold mb-2">Озарения</h3>
-          <div class="space-y-2">
-            <template x-for="note in insightsResults" :key="note.id">
-              <article class="card bg-base-200 shadow">
-                <div class="card-body p-4">
-                  <p x-text="note.text"></p>
-                  <div class="flex justify-end mt-2">
-                    <span class="badge badge-accent badge-sm" x-text="note.scoreText"></span>
-                  </div>
-                </div>
-              </article>
-            </template>
-          </div>
-        </section>
-
-        <div x-show="showNoResults" class="text-center py-10 opacity-50">
-          <p>Ничего не найдено. Попробуйте другую формулировку.</p>
-        </div>
-
-        <div x-show="showEmptyState" class="text-center py-10 opacity-50">
-          <p>Начните печатать, чтобы найти созвучия в вашей базе.</p>
-        </div>
-      </div>
-
-      <!-- BASE TAB -->
-      <div x-show="isBaseTab">
-        <div class="stats shadow mb-4 w-full">
-          <div class="stat">
-            <div class="stat-title">Всего</div>
-            <div class="stat-value text-lg" x-text="totalNotes"></div>
-          </div>
-          <div class="stat">
-            <div class="stat-title">Открыто</div>
-            <div class="stat-value text-lg" x-text="sharedNotes"></div>
-          </div>
-          <div class="stat">
-            <div class="stat-title">Лично</div>
-            <div class="stat-value text-lg" x-text="privateNotes"></div>
-          </div>
-        </div>
-        <div class="space-y-2">
-          <template x-for="note in allNotes" :key="note.id">
-            <article class="card bg-base-200 shadow cursor-pointer hover:bg-base-300 transition-colors" @click="openNoteView(note)">
-              <div class="card-body p-4">
-                <p class="line-clamp-3" x-text="note.text"></p>
-                <div class="flex justify-between items-center mt-2">
-                  <span class="badge badge-sm" :class="note.badgeClass" x-text="note.statusText"></span>
-                  <span class="text-xs opacity-60" x-text="note.dateText"></span>
-                </div>
-              </div>
-            </article>
-          </template>
-        </div>
-      </div>
-
-    </main>
-
-    <!-- PASSWORD MODAL -->
-    <dialog class="modal" :class="modalClass">
-      <div class="modal-box">
-        <h3 class="font-bold text-lg" x-text="passwordTitle"></h3>
-        <p class="py-4 opacity-70" x-text="passwordModalText"></p>
-        <div class="form-control">
-          <input
-            type="password"
-            x-model:value="password"
-            @keydown.enter="confirmPassword"
-            placeholder="Пароль (минимум 4 символа)"
-            class="input input-bordered"
-            :class="passwordInputClass">
-          <p x-show="hasPasswordError" class="text-error text-sm mt-1" x-text="passwordError"></p>
-        </div>
-        <div class="modal-action">
-          <button class="btn btn-primary" @click="confirmPassword">Продолжить</button>
-        </div>
-      </div>
-    </dialog>
-
-    <!-- SETTINGS MODAL -->
-    <dialog class="modal" :class="settingsModalClass">
-      <div class="modal-box">
-        <h3 class="font-bold text-lg">Настройки</h3>
-        <div class="py-4 space-y-3">
-          <button class="btn btn-outline w-full justify-start" @click="openChangePassword">🔑 Сменить пароль</button>
-          <button class="btn btn-outline w-full justify-start" @click="openExportPassword">⬇ Экспорт базы</button>
-          <button class="btn btn-outline w-full justify-start" @click="importData">⬆ Импорт базы</button>
-          <button class="btn btn-outline btn-error w-full justify-start" @click="wipeData">🗑 Стереть всё</button>
-        </div>
-        <div class="modal-action">
-          <button class="btn" @click="closeSettings">Закрыть</button>
-        </div>
-      </div>
-    </dialog>
-
-    <!-- CHANGE PASSWORD MODAL -->
-    <dialog class="modal" :class="changePasswordModalClass">
-      <div class="modal-box">
-        <h3 class="font-bold text-lg">Смена пароля</h3>
-        <div class="py-4 space-y-3">
-          <input type="password" x-model:value="oldPassword" placeholder="Текущий пароль" class="input input-bordered w-full">
-          <input type="password" x-model:value="newPassword" placeholder="Новый пароль (минимум 4 символа)" class="input input-bordered w-full">
-          <input type="password" x-model:value="confirmNewPassword" placeholder="Подтвердите новый пароль" class="input input-bordered w-full">
-          <p x-show="hasChangePasswordError" class="text-error text-sm" x-text="changePasswordError"></p>
-        </div>
-        <div class="modal-action">
-          <button class="btn" @click="closeChangePassword">Отмена</button>
-          <button class="btn btn-primary" @click="doChangePassword">Сменить</button>
-        </div>
-      </div>
-    </dialog>
-
-    <!-- EXPORT PASSWORD MODAL -->
-    <dialog class="modal" :class="exportPasswordModalClass">
-      <div class="modal-box">
-        <h3 class="font-bold text-lg">Пароль для экспорта</h3>
-        <p class="py-2 opacity-70">Этот пароль защитит вашу резервную копию. Запомните его — без него импорт невозможен.</p>
-        <div class="py-4 space-y-3">
-          <input type="password" x-model:value="exportPassword" placeholder="Пароль экспорта (минимум 4 символа)" class="input input-bordered w-full">
-          <input type="password" x-model:value="exportPasswordConfirm" placeholder="Подтвердите пароль" class="input input-bordered w-full">
-          <p x-show="hasExportPasswordError" class="text-error text-sm" x-text="exportPasswordError"></p>
-        </div>
-        <div class="modal-action">
-          <button class="btn" @click="closeExportPassword">Отмена</button>
-          <button class="btn btn-primary" @click="doExport">Экспортировать</button>
-        </div>
-      </div>
-    </dialog>
-
-    <!-- IMPORT PASSWORD MODAL -->
-    <dialog class="modal" :class="importPasswordModalClass">
-      <div class="modal-box">
-        <h3 class="font-bold text-lg">Пароль от резервной копии</h3>
-        <p class="py-2 opacity-70">Введите пароль, который использовался при создании этой резервной копии.</p>
-        <div class="py-4 space-y-3">
-          <input type="password" x-model:value="importPassword" @keydown.enter="doImport" placeholder="Пароль импорта" class="input input-bordered w-full">
-          <p x-show="hasImportPasswordError" class="text-error text-sm" x-text="importPasswordError"></p>
-        </div>
-        <div class="modal-action">
-          <button class="btn" @click="closeImportPassword">Отмена</button>
-          <button class="btn btn-primary" @click="doImport">Импортировать</button>
-        </div>
-      </div>
-    </dialog>
-
-    <!-- NOTE VIEW/EDIT MODAL -->
-    <dialog class="modal" :class="noteViewModalClass">
-      <div class="modal-box">
-        <div class="flex justify-between items-start mb-4">
-          <h3 class="font-bold text-lg" x-text="noteViewTitle"></h3>
-          <button class="btn btn-sm" @click="toggleEditNote" x-text="noteViewEditBtnText"></button>
-        </div>
-        <div x-show="isNoteViewEditing" class="form-control">
-          <textarea x-model:value="noteViewText" class="textarea textarea-bordered h-48"></textarea>
-        </div>
-        <div x-show="isNoteViewReadOnly" class="whitespace-pre-wrap" x-text="noteViewText"></div>
-        <div class="modal-action">
-          <button class="btn btn-error" @click="confirmDeleteFromView">Удалить</button>
-          <button class="btn" @click="closeNoteView">Закрыть</button>
-          <button x-show="isNoteViewEditing" class="btn btn-primary" @click="saveNoteView">Сохранить</button>
-        </div>
-      </div>
-    </dialog>
-
-    <!-- CONFIRM DIALOG -->
-    <dialog class="modal" :class="confirmDialogClass">
-      <div class="modal-box">
-        <h3 class="font-bold text-lg" x-text="confirmTitle"></h3>
-        <p class="py-4" x-text="confirmMessage"></p>
-        <div class="modal-action">
-          <button class="btn" @click="cancelConfirm">Отмена</button>
-          <button class="btn btn-error" @click="proceedConfirm" x-text="confirmButtonText"></button>
-        </div>
-      </div>
-    </dialog>
-
-    <!-- TOAST -->
-    <div x-show="hasToast" x-transition class="toast toast-end z-50">
-      <div class="alert" :class="toastClass">
-        <span x-text="toastText"></span>
-      </div>
-    </div>
-
-    <!-- HIDDEN FILE INPUT -->
-    <input type="file" x-ref="importFileInput" accept="application/json" style="display:none" @change="handleImportFile">
-
-  </div>
-
-<script>
-'use strict';
-
-dayjs.extend(dayjs_plugin_relativeTime);
-dayjs.locale('ru');
-
-// ===========================================================================
-// CORE: KERNEL — DI container + EventBus + Logger
-// ===========================================================================
-const Kernel = (() => {
-  const modules = new Map();
-  const listeners = new Map();
-
-  const logger = {
-    info: (msg, data) => console.log(`[INFO] ${msg}`, data !== undefined ? data : ''),
-    warn: (msg, data) => console.warn(`[WARN] ${msg}`, data !== undefined ? data : ''),
-    error: (msg, data) => console.error(`[ERROR] ${msg}`, data !== undefined ? data : '')
-  };
-
-  return {
-    register(name, factory) {
-      if (modules.has(name)) logger.warn(`Module ${name} re-registered`);
-      modules.set(name, { factory, instance: null });
-    },
-    get(name) {
-      const mod = modules.get(name);
-      if (!mod) throw new Error(`Module "${name}" not found in Kernel`);
-      if (!mod.instance) mod.instance = mod.factory(this);
-      return mod.instance;
-    },
-    async boot() {
-      for (const [name, mod] of modules) {
-        if (mod.instance) continue;
-        try {
-          mod.instance = await Promise.resolve(mod.factory(this));
-          logger.info(`Module "${name}" initialized`);
-        } catch (err) {
-          logger.error(`Module "${name}" failed to initialize`, err);
-        }
-      }
-    },
-    on(event, handler) {
-      if (!listeners.has(event)) listeners.set(event, new Set());
-      listeners.get(event).add(handler);
-    },
-    off(event, handler) {
-      const set = listeners.get(event);
-      if (set) set.delete(handler);
-    },
-    emit(event, payload) {
-      const set = listeners.get(event);
-      if (!set) return;
-      for (const handler of set) {
-        try { handler(payload); } catch (err) { logger.error(`Event handler error for "${event}"`, err); }
-      }
-    },
-    logger
-  };
-})();
-
-// ===========================================================================
-// MODULE: CONFIG
-// ===========================================================================
-Kernel.register('config', () => {
-  const STORAGE_KEY = 'noomium:config';
-  const defaults = Object.freeze({
-    dbName: 'noomium_v2',
-    crypto: { iterations: 100000, saltLen: 16, ivLen: 12 },
-    ai: {
-      model: 'Xenova/multilingual-e5-small',
-      dim: 384,
-      cacheLimit: 300,
-      embedTimeout: 30000,
-      initTimeout: 60000
-    },
-    search: {
-      threshold: 0.30,
-      serendipity: 0.15,
-      debounceMs: 800
-    },
-    cache: {
-      plaintextLimit: 50
-    }
-  });
-
-  let state = structuredClone(defaults);
-
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) state = { ...state, ...JSON.parse(saved) };
-  } catch (err) {
-    Kernel.logger.warn('Config load failed', err);
+class Logger {
+  constructor(debug = false) {
+    this.debug = debug;
+    this._enabled = true;
   }
 
-  return {
-    defaults: () => structuredClone(defaults),
-    get(key, def) {
-      const value = state[key];
-      return value !== undefined ? value : def;
-    },
-    set(key, value) {
-      state[key] = value;
-      this.save();
-    },
-    save() {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-      catch (err) { Kernel.logger.error('Config save failed', err); }
+  enable() { this._enabled = true; }
+  disable() { this._enabled = false; }
+
+  info(msg, data) {
+    if (!this._enabled) return;
+    console.log(`[INFO] ${msg}`, data !== undefined ? data : '');
+  }
+
+  warn(msg, data) {
+    if (!this._enabled) return;
+    console.warn(`[WARN] ${msg}`, data !== undefined ? data : '');
+  }
+
+  error(msg, data) {
+    if (!this._enabled) return;
+    console.error(`[ERROR] ${msg}`, data !== undefined ? data : '');
+  }
+
+  debug_log(msg, data) {
+    if (!this._enabled || !this.debug) return;
+    console.log(`[DEBUG] ${msg}`, data !== undefined ? data : '');
+  }
+}
+
+// ============================================================================
+// ENGINE CORE
+// ============================================================================
+
+class Engine {
+  /**
+   * @param {Object} options
+   * @param {boolean} options.debug - включить debug-логи
+   * @param {Object} options.config - конфигурация по умолчанию
+   */
+  constructor(options = {}) {
+    this.debug = options.debug || false;
+    this.config = { ...options.config };
+    
+    // DI Container
+    this._factories = new Map();
+    this._instances = new Map();
+    this._resolving = new Set(); // для детекции циклических зависимостей
+    
+    // EventBus
+    this._listeners = new Map();
+    this._eventRegistry = new Map(); // зарегистрированные события с описаниями
+    
+    // Module status tracking
+    this._moduleStatus = new Map();
+    
+    // Plugins
+    this._plugins = [];
+    
+    // Logger
+    this.log = new Logger(this.debug);
+    
+    // Timestamps
+    this._startTime = Date.now();
+    this._started = false;
+  }
+
+  // ==========================================================================
+  // DI CONTAINER
+  // ==========================================================================
+
+  /**
+   * Регистрация сервиса в DI-контейнере
+   * @param {string} name - имя сервиса
+   * @param {Function} factory - фабрика (engine) => service
+   * @param {string[]} deps - список зависимостей (имена других сервисов)
+   */
+  register(name, factory, deps = []) {
+    if (this._factories.has(name)) {
+      this.log.warn(`Service "${name}" re-registered`);
     }
-  };
-});
+    this._factories.set(name, { factory, deps });
+    this._setModuleStatus(name, 'pending');
+  }
 
-// ===========================================================================
-// MODULE: CRYPTO — PBKDF2 (master key) + AES-GCM (DEK) + plaintext LRU cache
-// ===========================================================================
-Kernel.register('crypto', (kernel) => {
-  const config = kernel.get('config');
-  const SK_KEY = 'noomium:sk';
-  const SALT_KEY = 'noomium:salt';
-
-  let dek = null;
-  let ready = false;
-
-  const plaintextCache = new Map();
-  const plaintextLimit = config.get('cache').plaintextLimit;
-
-  const touchPlaintext = (key, value) => {
-    plaintextCache.delete(key);
-    plaintextCache.set(key, value);
-    if (plaintextCache.size > plaintextLimit) {
-      const oldest = plaintextCache.keys().next().value;
-      plaintextCache.delete(oldest);
+  /**
+   * Получение инстанса сервиса (lazy initialization)
+   * @param {string} name
+   * @returns {any}
+   */
+  get(name) {
+    // Возвращаем кэшированный инстанс
+    if (this._instances.has(name)) {
+      return this._instances.get(name);
     }
-  };
 
-  const b64 = {
-    encode: (bytes) => btoa(String.fromCharCode.apply(null, bytes)),
-    decode: (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0))
-  };
+    const def = this._factories.get(name);
+    if (!def) {
+      const err = new Error(`Service "${name}" not registered`);
+      this.log.error(err.message);
+      throw err;
+    }
 
-  const deriveMasterKey = async (password, salt) => {
-    const enc = new TextEncoder();
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']
-    );
-    return crypto.subtle.deriveKey(
-      { name: 'PBKDF2', salt, iterations: config.get('crypto').iterations, hash: 'SHA-256' },
-      keyMaterial,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt', 'decrypt']
-    );
-  };
+    // Детекция циклических зависимостей
+    if (this._resolving.has(name)) {
+      const err = new Error(`Circular dependency detected: ${name}`);
+      this.log.error(err.message);
+      this._setModuleStatus(name, 'error', err.message);
+      throw err;
+    }
 
-  const randomBytes = (len) => crypto.getRandomValues(new Uint8Array(len));
+    this._resolving.add(name);
 
-  const importDek = (rawDek) => crypto.subtle.importKey(
-    'raw', rawDek, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
-  );
+    try {
+      // Резолвим зависимости
+      const resolvedDeps = def.deps.map(depName => this.get(depName));
+      
+      // Вызываем фабрику
+      const instance = def.factory(this, ...resolvedDeps);
+      this._instances.set(name, instance);
+      this._setModuleStatus(name, 'ready');
+      
+      return instance;
+    } catch (err) {
+      this._setModuleStatus(name, 'error', err.message);
+      this.log.error(`Failed to initialize service "${name}"`, err);
+      throw err;
+    } finally {
+      this._resolving.delete(name);
+    }
+  }
 
-  return {
-    isReady: () => ready,
+  /**
+   * Проверка, зарегистрирован ли сервис
+   * @param {string} name
+   * @returns {boolean}
+   */
+  has(name) {
+    return this._factories.has(name);
+  }
 
-    async initialize(password) {
-      const saltB64 = localStorage.getItem(SALT_KEY);
-      const encDekB64 = localStorage.getItem(SK_KEY);
-      const cfg = config.get('crypto');
+  // ==========================================================================
+  // EVENT BUS
+  // ==========================================================================
 
-      let salt;
-      if (saltB64) {
-        salt = b64.decode(saltB64);
-      } else {
-        salt = randomBytes(cfg.saltLen);
-        localStorage.setItem(SALT_KEY, b64.encode(salt));
+  /**
+   * Регистрация типа события (для документации и проверок)
+   * @param {string} eventName
+   * @param {string} description
+   */
+  registerEvent(eventName, description = '') {
+    this._eventRegistry.set(eventName, {
+      description,
+      registeredAt: Date.now()
+    });
+  }
+
+  /**
+   * Подписка на событие
+   * @param {string} event
+   * @param {Function} handler
+   */
+  on(event, handler) {
+    if (this.debug && !this._eventRegistry.has(event)) {
+      this.log.warn(`Event "${event}" not registered (use registerEvent for documentation)`);
+    }
+
+    if (!this._listeners.has(event)) {
+      this._listeners.set(event, new Set());
+    }
+    this._listeners.get(event).add(handler);
+  }
+
+  /**
+   * Отписка от события
+   * @param {string} event
+   * @param {Function} handler
+   */
+  off(event, handler) {
+    const set = this._listeners.get(event);
+    if (set) {
+      set.delete(handler);
+      if (set.size === 0) {
+        this._listeners.delete(event);
       }
+    }
+  }
 
-      const mk = await deriveMasterKey(password, salt);
+  /**
+   * Эмиссия события
+   * @param {string} event
+   * @param {any} payload
+   */
+  emit(event, payload) {
+    const set = this._listeners.get(event);
+    if (!set) return;
 
-      if (encDekB64) {
-        const combined = b64.decode(encDekB64);
-        const iv = combined.slice(0, cfg.ivLen);
-        const ciphertext = combined.slice(cfg.ivLen);
+    for (const handler of set) {
+      try {
+        handler(payload);
+      } catch (err) {
+        this.log.error(`Event handler error for "${event}"`, err);
+      }
+    }
+  }
+
+  /**
+   * Подписка на событие с автоматической отпиской (one-time)
+   * @param {string} event
+   * @param {Function} handler
+   */
+  once(event, handler) {
+    const wrapper = (payload) => {
+      this.off(event, wrapper);
+      handler(payload);
+    };
+    this.on(event, wrapper);
+  }
+
+  // ==========================================================================
+  // PLUGIN SYSTEM
+  // ==========================================================================
+
+  /**
+   * Установка плагина
+   * @param {Function} installFn - (engine) => void
+   */
+  plugin(installFn) {
+    if (typeof installFn !== 'function') {
+      throw new Error('Plugin must be a function');
+    }
+    this._plugins.push(installFn);
+    
+    try {
+      installFn(this);
+      this.log.debug_log(`Plugin installed`);
+    } catch (err) {
+      this.log.error('Plugin installation failed', err);
+      throw err;
+    }
+  }
+
+  // ==========================================================================
+  // LIFECYCLE
+  // ==========================================================================
+
+  /**
+   * Запуск движка (инициализация всех модулей)
+   * @returns {Promise<Object>} - отчёт о запуске
+   */
+  async start() {
+    if (this._started) {
+      this.log.warn('Engine already started');
+      return this.diagnostics();
+    }
+
+    this.log.info('Engine starting...');
+    this.emit('engine:starting');
+
+    const results = {
+      total: this._factories.size,
+      ready: 0,
+      errors: 0,
+      details: []
+    };
+
+    // Инициализируем все зарегистрированные сервисы
+    for (const [name] of this._factories) {
+      try {
+        this.get(name); // trigger lazy init
+        results.ready++;
+        results.details.push({ name, status: 'ready' });
+      } catch (err) {
+        results.errors++;
+        results.details.push({ name, status: 'error', error: err.message });
+      }
+    }
+
+    this._started = true;
+    this.emit('engine:started', results);
+    this.log.info(`Engine started: ${results.ready}/${results.total} modules ready`);
+
+    return this.diagnostics();
+  }
+
+  /**
+   * Остановка движка
+   */
+  async stop() {
+    this.log.info('Engine stopping...');
+    this.emit('engine:stopping');
+
+    // Вызываем destroy у сервисов, если есть
+    for (const [name, instance] of this._instances) {
+      if (instance && typeof instance.destroy === 'function') {
         try {
-          const rawDek = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, mk, ciphertext);
-          dek = new Uint8Array(rawDek);
+          await instance.destroy();
         } catch (err) {
-          throw new Error('WRONG_PASSWORD');
+          this.log.error(`Error destroying service "${name}"`, err);
         }
-      } else {
-        dek = randomBytes(32);
+      }
+    }
+
+    this._instances.clear();
+    this._listeners.clear();
+    this._started = false;
+    
+    this.emit('engine:stopped');
+    this.log.info('Engine stopped');
+  }
+
+  // ==========================================================================
+  // DIAGNOSTICS
+  // ==========================================================================
+
+  /**
+   * Установка статуса модуля
+   * @param {string} name
+   * @param {string} status - 'pending' | 'ready' | 'error' | 'fallback'
+   * @param {string} message
+   */
+  _setModuleStatus(name, status, message = '') {
+    this._moduleStatus.set(name, {
+      status,
+      message,
+      updatedAt: Date.now()
+    });
+    this.emit('engine:module-status', { name, status, message });
+  }
+
+  /**
+   * Публичный метод для установки статуса из плагинов
+   */
+  setModuleStatus(name, status, message = '') {
+    this._setModuleStatus(name, status, message);
+  }
+
+  /**
+   * Получить полную диагностику движка
+   * @returns {Object}
+   */
+  diagnostics() {
+    const modules = [];
+    let hasErrors = false;
+    let hasFallbacks = false;
+
+    for (const [name, info] of this._moduleStatus) {
+      modules.push({
+        name,
+        status: info.status,
+        message: info.message,
+        updatedAt: info.updatedAt
+      });
+
+      if (info.status === 'error') hasErrors = true;
+      if (info.status === 'fallback') hasFallbacks = true;
+    }
+
+    let overallStatus = 'ok';
+    if (hasErrors) overallStatus = 'error';
+    else if (hasFallbacks) overallStatus = 'degraded';
+
+    return {
+      status: overallStatus,
+      started: this._started,
+      uptime: Date.now() - this._startTime,
+      modules,
+      events: {
+        registered: this._eventRegistry.size,
+        active: this._listeners.size
+      },
+      services: {
+        registered: this._factories.size,
+        instantiated: this._instances.size
+      }
+    };
+  }
+
+  /**
+   * Получить список всех зарегистрированных событий
+   * @returns {Array}
+   */
+  listEvents() {
+    return Array.from(this._eventRegistry.entries()).map(([name, info]) => ({
+      name,
+      description: info.description,
+      registeredAt: info.registeredAt
+    }));
+  }
+
+  /**
+   * Получить список всех сервисов
+   * @returns {Array}
+   */
+  listServices() {
+    return Array.from(this._factories.entries()).map(([name, def]) => ({
+      name,
+      deps: def.deps,
+      instantiated: this._instances.has(name),
+      status: this._moduleStatus.get(name)?.status || 'unknown'
+    }));
+  }
+}
+
+// ============================================================================
+// FACTORY FUNCTION
+// ============================================================================
+
+/**
+ * Создать новый инстанс движка
+ * @param {Object} options
+ * @returns {Engine}
+ */
+export function createEngine(options = {}) {
+  return new Engine(options);
+}
+
+// ============================================================================
+// PLUGIN: CONFIG
+// ============================================================================
+
+export function configPlugin(engine) {
+  engine.registerEvent('config:changed', 'Конфигурация изменена');
+  
+  engine.register('config', (eng) => {
+    const STORAGE_KEY = 'noomium:config';
+    
+    const defaults = Object.freeze({
+      dbName: 'noomium_v2',
+      crypto: { iterations: 100000, saltLen: 16, ivLen: 12 },
+      ai: {
+        model: 'Xenova/multilingual-e5-small',
+        dim: 384,
+        cacheLimit: 300,
+        embedTimeout: 30000,
+        initTimeout: 60000
+      },
+      search: {
+        threshold: 0.30,
+        serendipity: 0.15,
+        debounceMs: 800
+      },
+      cache: {
+        plaintextLimit: 50
+      }
+    });
+
+    let state = { ...defaults, ...eng.config };
+
+    // Load from localStorage if available
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          state = { ...state, ...JSON.parse(saved) };
+        }
+      } catch (err) {
+        eng.log.warn('Config load from localStorage failed', err);
+      }
+    }
+
+    return {
+      defaults: () => ({ ...defaults }),
+      
+      get(key, def) {
+        const value = state[key];
+        return value !== undefined ? value : def;
+      },
+      
+      set(key, value) {
+        state[key] = value;
+        this.save();
+        eng.emit('config:changed', { key, value });
+      },
+      
+      save() {
+        if (typeof localStorage === 'undefined') return;
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch (err) {
+          eng.log.error('Config save failed', err);
+        }
+      },
+      
+      getAll() {
+        return { ...state };
+      }
+    };
+  });
+}
+
+// ============================================================================
+// PLUGIN: CRYPTO
+// ============================================================================
+
+export function cryptoPlugin(engine) {
+  engine.registerEvent('crypto:ready', 'Криптография инициализирована');
+  engine.registerEvent('crypto:error', 'Ошибка криптографии');
+  
+  engine.register('crypto', (eng) => {
+    const config = eng.get('config');
+    const SK_KEY = 'noomium:sk';
+    const SALT_KEY = 'noomium:salt';
+
+    let dek = null;
+    let ready = false;
+
+    const plaintextCache = new Map();
+    const plaintextLimit = config.get('cache').plaintextLimit;
+
+    const touchPlaintext = (key, value) => {
+      plaintextCache.delete(key);
+      plaintextCache.set(key, value);
+      if (plaintextCache.size > plaintextLimit) {
+        const oldest = plaintextCache.keys().next().value;
+        plaintextCache.delete(oldest);
+      }
+    };
+
+    const b64 = {
+      encode: (bytes) => btoa(String.fromCharCode.apply(null, bytes)),
+      decode: (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0))
+    };
+
+    // Check if Web Crypto API is available
+    const hasWebCrypto = typeof crypto !== 'undefined' && crypto.subtle;
+
+    if (!hasWebCrypto) {
+      eng.log.error('Web Crypto API not available');
+      eng.setModuleStatus('crypto', 'error', 'Web Crypto API not available');
+      throw new Error('Web Crypto API required');
+    }
+
+    const deriveMasterKey = async (password, salt) => {
+      const enc = new TextEncoder();
+      const keyMaterial = await crypto.subtle.importKey(
+        'raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']
+      );
+      return crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt, iterations: config.get('crypto').iterations, hash: 'SHA-256' },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+      );
+    };
+
+    const randomBytes = (len) => crypto.getRandomValues(new Uint8Array(len));
+
+    const importDek = (rawDek) => crypto.subtle.importKey(
+      'raw', rawDek, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+    );
+
+    return {
+      isReady: () => ready,
+
+      async initialize(password) {
+        try {
+          const saltB64 = localStorage.getItem(SALT_KEY);
+          const encDekB64 = localStorage.getItem(SK_KEY);
+          const cfg = config.get('crypto');
+
+          let salt;
+          if (saltB64) {
+            salt = b64.decode(saltB64);
+          } else {
+            salt = randomBytes(cfg.saltLen);
+            localStorage.setItem(SALT_KEY, b64.encode(salt));
+          }
+
+          const mk = await deriveMasterKey(password, salt);
+
+          if (encDekB64) {
+            const combined = b64.decode(encDekB64);
+            const iv = combined.slice(0, cfg.ivLen);
+            const ciphertext = combined.slice(cfg.ivLen);
+            try {
+              const rawDek = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, mk, ciphertext);
+              dek = new Uint8Array(rawDek);
+            } catch (err) {
+              throw new Error('WRONG_PASSWORD');
+            }
+          } else {
+            dek = randomBytes(32);
+            const iv = randomBytes(cfg.ivLen);
+            const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, mk, dek);
+            const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+            combined.set(iv, 0);
+            combined.set(new Uint8Array(ciphertext), iv.length);
+            localStorage.setItem(SK_KEY, b64.encode(combined));
+          }
+
+          ready = true;
+          plaintextCache.clear();
+          eng.setModuleStatus('crypto', 'ready');
+          eng.emit('crypto:ready');
+        } catch (err) {
+          eng.setModuleStatus('crypto', 'error', err.message);
+          eng.emit('crypto:error', { error: err.message });
+          throw err;
+        }
+      },
+
+      async encryptText(plainText) {
+        if (!dek) throw new Error('Crypto not initialized');
+        const cfg = config.get('crypto');
         const iv = randomBytes(cfg.ivLen);
-        const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, mk, dek);
+        const key = await importDek(dek);
+        const enc = new TextEncoder();
+        const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(plainText));
+        return {
+          iv: b64.encode(iv),
+          ct: b64.encode(new Uint8Array(ciphertext))
+        };
+      },
+
+      async decryptText(noteId, { iv, ct }) {
+        if (!dek) throw new Error('Crypto not initialized');
+        if (plaintextCache.has(noteId)) {
+          const val = plaintextCache.get(noteId);
+          touchPlaintext(noteId, val);
+          return val;
+        }
+        const key = await importDek(dek);
+        const raw = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: b64.decode(iv) }, key, b64.decode(ct)
+        );
+        const plain = new TextDecoder().decode(raw);
+        touchPlaintext(noteId, plain);
+        return plain;
+      },
+
+      invalidatePlaintextCache(noteId) {
+        if (noteId) plaintextCache.delete(noteId);
+        else plaintextCache.clear();
+      },
+
+      async changePassword(oldPassword, newPassword) {
+        if (!dek) throw new Error('Crypto not initialized');
+        const cfg = config.get('crypto');
+        const saltB64 = localStorage.getItem(SALT_KEY);
+        const salt = saltB64 ? b64.decode(saltB64) : randomBytes(cfg.saltLen);
+        const newMk = await deriveMasterKey(newPassword, salt);
+        const iv = randomBytes(cfg.ivLen);
+        const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, newMk, dek);
         const combined = new Uint8Array(iv.length + ciphertext.byteLength);
         combined.set(iv, 0);
         combined.set(new Uint8Array(ciphertext), iv.length);
+        localStorage.setItem(SALT_KEY, b64.encode(salt));
         localStorage.setItem(SK_KEY, b64.encode(combined));
-      }
+      },
 
-      ready = true;
-      plaintextCache.clear();
-      kernel.emit('crypto:ready');
-    },
+      hasExistingKey() {
+        return !!localStorage.getItem(SK_KEY);
+      },
 
-    async encryptText(plainText) {
-      if (!dek) throw new Error('Crypto not initialized');
-      const cfg = config.get('crypto');
-      const iv = randomBytes(cfg.ivLen);
-      const key = await importDek(dek);
-      const enc = new TextEncoder();
-      const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(plainText));
-      return {
-        iv: b64.encode(iv),
-        ct: b64.encode(new Uint8Array(ciphertext))
-      };
-    },
-
-    async decryptText(noteId, { iv, ct }) {
-      if (!dek) throw new Error('Crypto not initialized');
-      if (plaintextCache.has(noteId)) {
-        const val = plaintextCache.get(noteId);
-        touchPlaintext(noteId, val);
-        return val;
-      }
-      const key = await importDek(dek);
-      const raw = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: b64.decode(iv) }, key, b64.decode(ct)
-      );
-      const plain = new TextDecoder().decode(raw);
-      touchPlaintext(noteId, plain);
-      return plain;
-    },
-
-    invalidatePlaintextCache(noteId) {
-      if (noteId) plaintextCache.delete(noteId);
-      else plaintextCache.clear();
-    },
-
-    async changePassword(oldPassword, newPassword) {
-      if (!dek) throw new Error('Crypto not initialized');
-      const cfg = config.get('crypto');
-      const saltB64 = localStorage.getItem(SALT_KEY);
-      const salt = saltB64 ? b64.decode(saltB64) : randomBytes(cfg.saltLen);
-      const newMk = await deriveMasterKey(newPassword, salt);
-      const iv = randomBytes(cfg.ivLen);
-      const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, newMk, dek);
-      const combined = new Uint8Array(iv.length + ciphertext.byteLength);
-      combined.set(iv, 0);
-      combined.set(new Uint8Array(ciphertext), iv.length);
-      localStorage.setItem(SALT_KEY, b64.encode(salt));
-      localStorage.setItem(SK_KEY, b64.encode(combined));
-    },
-
-    async exportKeyWithPassword(exportPassword) {
-      if (!dek) throw new Error('Crypto not initialized');
-      const cfg = config.get('crypto');
-      const salt = randomBytes(cfg.saltLen);
-      const mk = await deriveMasterKey(exportPassword, salt);
-      const iv = randomBytes(cfg.ivLen);
-      const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, mk, dek);
-      return {
-        salt: b64.encode(salt),
-        iv: b64.encode(iv),
-        ct: b64.encode(new Uint8Array(ciphertext))
-      };
-    },
-
-    async importKeyWithPassword(encryptedDek, importPassword) {
-      const cfg = config.get('crypto');
-      const salt = b64.decode(encryptedDek.salt);
-      const mk = await deriveMasterKey(importPassword, salt);
-      try {
-        const rawDek = await crypto.subtle.decrypt(
-          { name: 'AES-GCM', iv: b64.decode(encryptedDek.iv) },
-          mk,
-          b64.decode(encryptedDek.ct)
-        );
-        dek = new Uint8Array(rawDek);
-        ready = true;
-        return true;
-      } catch (err) {
-        throw new Error('WRONG_IMPORT_PASSWORD');
-      }
-    },
-
-    hasExistingKey() {
-      return !!localStorage.getItem(SK_KEY);
-    },
-
-    wipe() {
-      localStorage.removeItem(SK_KEY);
-      localStorage.removeItem(SALT_KEY);
-      dek = null;
-      ready = false;
-      plaintextCache.clear();
-    }
-  };
-});
-
-// ===========================================================================
-// MODULE: STORAGE — Dexie (IndexedDB)
-// ===========================================================================
-Kernel.register('storage', (kernel) => {
-  const config = kernel.get('config');
-  const dbName = config.get('dbName', 'noomium_v2');
-
-  const db = new Dexie(dbName);
-  db.version(1).stores({
-    notes: 'id, shared, createdAt, isEncrypted',
-    embeddings: 'noteId'
-  });
-
-  let notesCache = [];
-  let embeddingsCache = new Map();
-  let opened = false;
-
-  const refreshNotesCache = async () => {
-    try { notesCache = await db.notes.toArray(); }
-    catch (err) { kernel.logger.error('Notes cache refresh failed', err); notesCache = []; }
-  };
-
-  const refreshEmbeddingsCache = async () => {
-    try {
-      const all = await db.embeddings.toArray();
-      embeddingsCache = new Map(all.map((e) => [e.noteId, e.embedding]));
-    } catch (err) { kernel.logger.error('Embeddings cache refresh failed', err); embeddingsCache = new Map(); }
-  };
-
-  const open = async () => {
-    if (opened) return;
-    try {
-      await db.open();
-      await refreshNotesCache();
-      await refreshEmbeddingsCache();
-      opened = true;
-      kernel.emit('storage:ready');
-    } catch (err) {
-      kernel.logger.error('Storage open failed', err);
-    }
-  };
-
-  const emitChange = () => kernel.emit('storage:changed', { notes: notesCache });
-
-  return {
-    open,
-    isReady: () => opened,
-    allNotes: () => notesCache,
-    getNote: (id) => notesCache.find((n) => n.id === id),
-    getEmbedding: (noteId) => embeddingsCache.get(noteId),
-    allEmbeddings: () => embeddingsCache,
-
-    async put(note) {
-      if (!opened) await open();
-      await db.notes.put(note);
-      await refreshNotesCache();
-      emitChange();
-      kernel.emit('note:saved', { note });
-    },
-
-    async delete(id) {
-      if (!opened) await open();
-      await db.notes.delete(id);
-      await db.embeddings.delete(id);
-      embeddingsCache.delete(id);
-      await refreshNotesCache();
-      emitChange();
-      kernel.emit('note:deleted', { id });
-    },
-
-    async toggleShared(id) {
-      if (!opened) await open();
-      const note = await db.notes.get(id);
-      if (!note) return;
-      note.shared = !note.shared;
-      await db.notes.put(note);
-      await refreshNotesCache();
-      emitChange();
-      kernel.emit('note:updated', { note });
-    },
-
-    async saveEmbedding(noteId, embedding) {
-      if (!opened) await open();
-      await db.embeddings.put({ noteId, embedding });
-      embeddingsCache.set(noteId, embedding);
-      kernel.emit('embedding:saved', { noteId });
-    },
-
-    async reset() {
-      try { await db.delete(); } catch (_) {}
-      notesCache = [];
-      embeddingsCache = new Map();
-      opened = false;
-      await open();
-      emitChange();
-      kernel.emit('storage:reset');
-    }
-  };
-});
-
-// ===========================================================================
-// MODULE: AI — Web Worker wrapper for Transformers.js + hash fallback
-// ===========================================================================
-Kernel.register('ai', (kernel) => {
-  const config = kernel.get('config');
-  const aiConfig = config.get('ai');
-
-  let mode = 'loading';
-  let progress = 0;
-  let worker = null;
-  let workerReady = false;
-  let pendingEmbed = new Map();
-  let reqId = 0;
-  let initTimer = null;
-
-  const cache = new Map();
-
-  const hashEmbed = (text) => {
-    const DIM = aiConfig.dim;
-    const vec = new Float32Array(DIM);
-    const tokens = (text || '').toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
-    for (const tok of tokens) {
-      let h = 2166136261;
-      for (let i = 0; i < tok.length; i++) {
-        h ^= tok.charCodeAt(i);
-        h = Math.imul(h, 16777619);
-      }
-      vec[Math.abs(h) % DIM] += 1;
-      const h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
-      vec[Math.abs(h2) % DIM] += 0.5;
-    }
-    let norm = 0;
-    for (let i = 0; i < DIM; i++) norm += vec[i] * vec[i];
-    norm = Math.sqrt(norm) || 1;
-    for (let i = 0; i < DIM; i++) vec[i] /= norm;
-    return Array.from(vec);
-  };
-
-  const switchToHash = (reason) => {
-    if (mode === 'hash') return;
-    mode = 'hash';
-    kernel.emit('ai:ready', { mode });
-    kernel.logger.warn('AI switched to hash mode', reason);
-  };
-
-  const workerCode = `
-    let pipeline = null;
-    let env = null;
-    self.onmessage = async (e) => {
-      const { type, payload, reqId } = e.data;
-      try {
-        if (type === 'init') {
-          try {
-            const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
-            pipeline = mod.pipeline;
-            env = mod.env;
-            env.allowLocalModels = false;
-            env.useBrowserCache = true;
-            const extractor = await pipeline('feature-extraction', payload.model, {
-              quantized: true,
-              progress_callback: (p) => {
-                if (p.status === 'progress' && p.total > 0) {
-                  self.postMessage({ type: 'progress', payload: { loaded: p.loaded, total: p.total } });
-                }
-              }
-            });
-            self._extractor = extractor;
-            self.postMessage({ type: 'ready', reqId });
-          } catch (initErr) {
-            self.postMessage({ type: 'ready-fallback', payload: { error: initErr.message || 'init failed' } });
-          }
-        } else if (type === 'embed') {
-          if (!self._extractor) {
-            self.postMessage({ type: 'error', reqId, payload: { error: 'extractor not ready' } });
-            return;
-          }
-          const out = await self._extractor(payload.text, { pooling: 'mean', normalize: true });
-          self.postMessage({ type: 'embed-result', reqId, payload: { vector: Array.from(out.data) } });
-        }
-      } catch (err) {
-        self.postMessage({ type: 'error', reqId, payload: { error: err.message || 'worker error' } });
+      wipe() {
+        localStorage.removeItem(SK_KEY);
+        localStorage.removeItem(SALT_KEY);
+        dek = null;
+        ready = false;
+        plaintextCache.clear();
       }
     };
-  `;
+  }, ['config']);
+}
 
-  const setupWorker = () => {
-    try {
-      const blob = new Blob([workerCode], { type: 'application/javascript' });
-      const url = URL.createObjectURL(blob);
-      worker = new Worker(url);
-      worker.onmessage = (e) => {
+// ============================================================================
+// PLUGIN: STORAGE (Dexie)
+// ============================================================================
+
+export function storagePlugin(engine) {
+  engine.registerEvent('storage:ready', 'Хранилище готово');
+  engine.registerEvent('storage:changed', 'Данные изменены');
+  engine.registerEvent('storage:error', 'Ошибка хранилища');
+  engine.registerEvent('note:saved', 'Заметка сохранена');
+  engine.registerEvent('note:deleted', 'Заметка удалена');
+  engine.registerEvent('note:updated', 'Заметка обновлена');
+  
+  engine.register('storage', (eng) => {
+    const config = eng.get('config');
+    const dbName = config.get('dbName', 'noomium_v2');
+
+    // Check if Dexie is available
+    if (typeof Dexie === 'undefined') {
+      eng.log.error('Dexie not available');
+      eng.setModuleStatus('storage', 'error', 'Dexie not loaded');
+      throw new Error('Dexie required');
+    }
+
+    const db = new Dexie(dbName);
+    db.version(1).stores({
+      notes: 'id, shared, createdAt, isEncrypted',
+      embeddings: 'noteId'
+    });
+
+    let notesCache = [];
+    let embeddingsCache = new Map();
+    let opened = false;
+
+    const refreshNotesCache = async () => {
+      try {
+        notesCache = await db.notes.toArray();
+      } catch (err) {
+        eng.log.error('Notes cache refresh failed', err);
+        notesCache = [];
+      }
+    };
+
+    const refreshEmbeddingsCache = async () => {
+      try {
+        const all = await db.embeddings.toArray();
+        embeddingsCache = new Map(all.map((e) => [e.noteId, e.embedding]));
+      } catch (err) {
+        eng.log.error('Embeddings cache refresh failed', err);
+        embeddingsCache = new Map();
+      }
+    };
+
+    const open = async () => {
+      if (opened) return;
+      try {
+        await db.open();
+        await refreshNotesCache();
+        await refreshEmbeddingsCache();
+        opened = true;
+        eng.setModuleStatus('storage', 'ready');
+        eng.emit('storage:ready');
+      } catch (err) {
+        eng.log.error('Storage open failed', err);
+        eng.setModuleStatus('storage', 'error', err.message);
+        eng.emit('storage:error', { error: err.message });
+      }
+    };
+
+    const emitChange = () => eng.emit('storage:changed', { notes: notesCache });
+
+    return {
+      open,
+      isReady: () => opened,
+      allNotes: () => notesCache,
+      getNote: (id) => notesCache.find((n) => n.id === id),
+      getEmbedding: (noteId) => embeddingsCache.get(noteId),
+      allEmbeddings: () => embeddingsCache,
+
+      async put(note) {
+        if (!opened) await open();
+        await db.notes.put(note);
+        await refreshNotesCache();
+        emitChange();
+        eng.emit('note:saved', { note });
+      },
+
+      async delete(id) {
+        if (!opened) await open();
+        await db.notes.delete(id);
+        await db.embeddings.delete(id);
+        embeddingsCache.delete(id);
+        await refreshNotesCache();
+        emitChange();
+        eng.emit('note:deleted', { id });
+      },
+
+      async toggleShared(id) {
+        if (!opened) await open();
+        const note = await db.notes.get(id);
+        if (!note) return;
+        note.shared = !note.shared;
+        await db.notes.put(note);
+        await refreshNotesCache();
+        emitChange();
+        eng.emit('note:updated', { note });
+      },
+
+      async saveEmbedding(noteId, embedding) {
+        if (!opened) await open();
+        await db.embeddings.put({ noteId, embedding });
+        embeddingsCache.set(noteId, embedding);
+      },
+
+      async reset() {
+        try { await db.delete(); } catch (_) {}
+        notesCache = [];
+        embeddingsCache = new Map();
+        opened = false;
+        await open();
+        emitChange();
+      }
+    };
+  }, ['config']);
+}
+
+// ============================================================================
+// PLUGIN: AI (Transformers.js with hash fallback)
+// ============================================================================
+
+export function aiPlugin(engine) {
+  engine.registerEvent('ai:ready', 'AI готов');
+  engine.registerEvent('ai:progress', 'Прогресс загрузки AI');
+  engine.registerEvent('ai:error', 'Ошибка AI');
+  
+  engine.register('ai', (eng) => {
+    const config = eng.get('config');
+    const aiConfig = config.get('ai');
+
+    let mode = 'loading';
+    let progress = 0;
+    let worker = null;
+    let workerReady = false;
+    let pendingEmbed = new Map();
+    let reqId = 0;
+    let initTimer = null;
+
+    const cache = new Map();
+
+    const hashEmbed = (text) => {
+      const DIM = aiConfig.dim;
+      const vec = new Float32Array(DIM);
+      const tokens = (text || '').toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
+      for (const tok of tokens) {
+        let h = 2166136261;
+        for (let i = 0; i < tok.length; i++) {
+          h ^= tok.charCodeAt(i);
+          h = Math.imul(h, 16777619);
+        }
+        vec[Math.abs(h) % DIM] += 1;
+        const h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
+        vec[Math.abs(h2) % DIM] += 0.5;
+      }
+      let norm = 0;
+      for (let i = 0; i < DIM; i++) norm += vec[i] * vec[i];
+      norm = Math.sqrt(norm) || 1;
+      for (let i = 0; i < DIM; i++) vec[i] /= norm;
+      return Array.from(vec);
+    };
+
+    const switchToHash = (reason) => {
+      if (mode === 'hash') return;
+      mode = 'hash';
+      eng.setModuleStatus('ai', 'fallback', reason);
+      eng.emit('ai:ready', { mode });
+      eng.log.warn('AI switched to hash mode', reason);
+    };
+
+    const workerCode = `
+      let pipeline = null;
+      let env = null;
+      self.onmessage = async (e) => {
         const { type, payload, reqId } = e.data;
-        if (type === 'progress') {
-          progress = (payload.loaded / payload.total) * 100;
-          kernel.emit('ai:progress', { progress });
-        } else if (type === 'ready') {
-          if (initTimer) { clearTimeout(initTimer); initTimer = null; }
-          workerReady = true;
-          mode = 'model';
-          kernel.emit('ai:ready', { mode });
-          kernel.logger.info('AI worker ready');
-        } else if (type === 'ready-fallback') {
-          if (initTimer) { clearTimeout(initTimer); initTimer = null; }
-          switchToHash(payload?.error || 'worker init failed');
-        } else if (type === 'embed-result') {
-          const pending = pendingEmbed.get(reqId);
-          if (pending) {
-            pending.resolve(payload.vector);
-            pendingEmbed.delete(reqId);
-          }
-        } else if (type === 'error') {
-          const pending = pendingEmbed.get(reqId);
-          if (pending) {
-            pending.reject(new Error(payload.error));
-            pendingEmbed.delete(reqId);
-          } else if (reqId === undefined) {
-            switchToHash(payload?.error || 'worker error');
-          }
-        }
-      };
-      worker.onerror = (err) => {
-        switchToHash(err.message || 'worker onerror');
-      };
-      worker.postMessage({ type: 'init', payload: { model: aiConfig.model } });
-      
-      initTimer = setTimeout(() => {
-        if (!workerReady && mode === 'loading') {
-          switchToHash('init timeout');
-        }
-      }, aiConfig.initTimeout);
-    } catch (err) {
-      switchToHash(err.message || 'worker not supported');
-    }
-  };
-
-  const embed = (text) => {
-    const t = (text || '').trim();
-    if (!t) return Promise.resolve(null);
-
-    if (cache.has(t)) {
-      const val = cache.get(t);
-      cache.delete(t);
-      cache.set(t, val);
-      return Promise.resolve(val);
-    }
-
-    if (mode === 'model' && workerReady && worker) {
-      return new Promise((resolve, reject) => {
-        const id = ++reqId;
-        pendingEmbed.set(id, { resolve, reject });
-        worker.postMessage({ type: 'embed', reqId: id, payload: { text: t } });
-        setTimeout(() => {
-          if (pendingEmbed.has(id)) {
-            pendingEmbed.delete(id);
-            resolve(hashEmbed(t));
-          }
-        }, aiConfig.embedTimeout);
-      }).then((vec) => {
-        cache.set(t, vec);
-        if (cache.size > aiConfig.cacheLimit) {
-          const oldest = cache.keys().next().value;
-          cache.delete(oldest);
-        }
-        return vec;
-      }).catch(() => {
-        const vec = hashEmbed(t);
-        cache.set(t, vec);
-        return vec;
-      });
-    }
-
-    const vec = hashEmbed(t);
-    cache.set(t, vec);
-    if (cache.size > aiConfig.cacheLimit) {
-      const oldest = cache.keys().next().value;
-      cache.delete(oldest);
-    }
-    return Promise.resolve(vec);
-  };
-
-  const cosine = (a, b) => {
-    if (!a || !b || a.length !== b.length) return 0;
-    let sum = 0;
-    for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
-    return Math.abs(sum) < 1e-8 ? 0 : sum;
-  };
-
-  setTimeout(setupWorker, 100);
-
-  return {
-    get mode() { return mode; },
-    get progress() { return progress; },
-    get ready() { return mode === 'model' || mode === 'hash'; },
-    embed,
-    cosine
-  };
-});
-
-// ===========================================================================
-// MODULE: SEARCH — semantic search with threshold + serendipity
-// ===========================================================================
-Kernel.register('search', (kernel) => {
-  const config = kernel.get('config');
-  const searchCfg = config.get('search');
-
-  const formatResult = (note, text) => ({
-    id: note.id,
-    text,
-    score: note.score,
-    scoreText: Math.round(note.score * 100) + '%',
-    shared: note.shared,
-    toggleText: note.shared ? 'Скрыть' : 'Открыть',
-    createdAt: note.createdAt
-  });
-
-  const search = async (queryText) => {
-    const ai = kernel.get('ai');
-    const storage = kernel.get('storage');
-    const crypto = kernel.get('crypto');
-
-    if (!queryText || !ai.ready) return { my: [], insights: [] };
-
-    const queryVec = await ai.embed(queryText);
-    if (!queryVec) return { my: [], insights: [] };
-
-    const notes = storage.allNotes();
-    const scored = [];
-
-    for (const note of notes) {
-      const vec = storage.getEmbedding(note.id);
-      if (!vec) continue;
-
-      let score = ai.cosine(queryVec, vec);
-      const serendipityRoll = Math.random();
-      const effectiveThreshold = serendipityRoll < searchCfg.serendipity
-        ? searchCfg.threshold - searchCfg.serendipity
-        : searchCfg.threshold;
-
-      if (score >= effectiveThreshold) {
-        let text = note.text;
-        if (note.isEncrypted && crypto.isReady()) {
-          try {
-            text = await crypto.decryptText(note.id, { iv: note.iv, ct: note.ct });
-          } catch (err) {
-            kernel.logger.warn('Decrypt failed for note', note.id);
-            text = '[ошибка расшифровки]';
-          }
-        }
-        scored.push({ ...note, score, _text: text });
-      }
-    }
-
-    scored.sort((a, b) => b.score - a.score);
-
-    const my = scored
-      .filter((n) => n.score >= searchCfg.threshold)
-      .map((n) => formatResult(n, n._text));
-
-    const insights = scored
-      .filter((n) => n.score >= (searchCfg.threshold - searchCfg.serendipity) && n.score < searchCfg.threshold)
-      .map((n) => formatResult(n, n._text));
-
-    return { my, insights };
-  };
-
-  return { search };
-});
-
-// ===========================================================================
-// MODULE: BACKUP — export/import encrypted data
-// ===========================================================================
-Kernel.register('backup', (kernel) => {
-  const exportAll = async (exportPassword) => {
-    const storage = kernel.get('storage');
-    const crypto = kernel.get('crypto');
-
-    const notes = storage.allNotes();
-    const plaintexts = {};
-
-    for (const note of notes) {
-      if (note.isEncrypted) {
         try {
-          plaintexts[note.id] = await crypto.decryptText(note.id, { iv: note.iv, ct: note.ct });
+          if (type === 'init') {
+            try {
+              const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
+              pipeline = mod.pipeline;
+              env = mod.env;
+              env.allowLocalModels = false;
+              env.useBrowserCache = true;
+              const extractor = await pipeline('feature-extraction', payload.model, {
+                quantized: true,
+                progress_callback: (p) => {
+                  if (p.status === 'progress' && p.total > 0) {
+                    self.postMessage({ type: 'progress', payload: { loaded: p.loaded, total: p.total } });
+                  }
+                }
+              });
+              self._extractor = extractor;
+              self.postMessage({ type: 'ready', reqId });
+            } catch (initErr) {
+              self.postMessage({ type: 'ready-fallback', payload: { error: initErr.message || 'init failed' } });
+            }
+          } else if (type === 'embed') {
+            if (!self._extractor) {
+              self.postMessage({ type: 'error', reqId, payload: { error: 'extractor not ready' } });
+              return;
+            }
+            const out = await self._extractor(payload.text, { pooling: 'mean', normalize: true });
+            self.postMessage({ type: 'embed-result', reqId, payload: { vector: Array.from(out.data) } });
+          }
         } catch (err) {
-          kernel.logger.warn('Backup decrypt failed for', note.id);
+          self.postMessage({ type: 'error', reqId, payload: { error: err.message || 'worker error' } });
         }
-      } else {
-        plaintexts[note.id] = note.text;
+      };
+    `;
+
+    const setupWorker = () => {
+      // Check if Worker is available
+      if (typeof Worker === 'undefined' || typeof Blob === 'undefined' || typeof URL === 'undefined') {
+        switchToHash('Web Workers not supported');
+        return;
       }
-    }
 
-    const embeddings = {};
-    for (const [noteId, vec] of storage.allEmbeddings()) {
-      embeddings[noteId] = vec;
-    }
-
-    const dekForExport = await crypto.exportKeyWithPassword(exportPassword);
-
-    const capsule = {
-      version: 2,
-      exportedAt: Date.now(),
-      encryptedDek: dekForExport,
-      notes: notes.map((n) => ({
-        id: n.id,
-        shared: n.shared,
-        createdAt: n.createdAt,
-        text: plaintexts[n.id] || ''
-      })),
-      embeddings
+      try {
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const url = URL.createObjectURL(blob);
+        worker = new Worker(url);
+        
+        worker.onmessage = (e) => {
+          const { type, payload, reqId } = e.data;
+          if (type === 'progress') {
+            progress = (payload.loaded / payload.total) * 100;
+            eng.emit('ai:progress', { progress });
+          } else if (type === 'ready') {
+            if (initTimer) { clearTimeout(initTimer); initTimer = null; }
+            workerReady = true;
+            mode = 'model';
+            eng.setModuleStatus('ai', 'ready');
+            eng.emit('ai:ready', { mode });
+            eng.log.info('AI worker ready');
+          } else if (type === 'ready-fallback') {
+            if (initTimer) { clearTimeout(initTimer); initTimer = null; }
+            switchToHash(payload?.error || 'worker init failed');
+          } else if (type === 'embed-result') {
+            const pending = pendingEmbed.get(reqId);
+            if (pending) {
+              pending.resolve(payload.vector);
+              pendingEmbed.delete(reqId);
+            }
+          } else if (type === 'error') {
+            const pending = pendingEmbed.get(reqId);
+            if (pending) {
+              pending.reject(new Error(payload.error));
+              pendingEmbed.delete(reqId);
+            } else if (reqId === undefined) {
+              switchToHash(payload?.error || 'worker error');
+            }
+          }
+        };
+        
+        worker.onerror = (err) => {
+          switchToHash(err.message || 'worker onerror');
+        };
+        
+        worker.postMessage({ type: 'init', payload: { model: aiConfig.model } });
+        
+        initTimer = setTimeout(() => {
+          if (!workerReady && mode === 'loading') {
+            switchToHash('init timeout');
+          }
+        }, aiConfig.initTimeout);
+      } catch (err) {
+        switchToHash(err.message || 'worker not supported');
+      }
     };
 
-    const blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `noomium-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    URL.revokeObjectURL(url);
-    anchor.remove();
-  };
+    const embed = (text) => {
+      const t = (text || '').trim();
+      if (!t) return Promise.resolve(null);
 
-  const importAll = async (file, importPassword) => {
-    const storage = kernel.get('storage');
-    const crypto = kernel.get('crypto');
+      if (cache.has(t)) {
+        const val = cache.get(t);
+        cache.delete(t);
+        cache.set(t, val);
+        return Promise.resolve(val);
+      }
 
-    const text = await file.text();
-    const capsule = JSON.parse(text);
+      if (mode === 'model' && workerReady && worker) {
+        return new Promise((resolve, reject) => {
+          const id = ++reqId;
+          pendingEmbed.set(id, { resolve, reject });
+          worker.postMessage({ type: 'embed', reqId: id, payload: { text: t } });
+          setTimeout(() => {
+            if (pendingEmbed.has(id)) {
+              pendingEmbed.delete(id);
+              resolve(hashEmbed(t));
+            }
+          }, aiConfig.embedTimeout);
+        }).then((vec) => {
+          cache.set(t, vec);
+          if (cache.size > aiConfig.cacheLimit) {
+            const oldest = cache.keys().next().value;
+            cache.delete(oldest);
+          }
+          return vec;
+        }).catch(() => {
+          const vec = hashEmbed(t);
+          cache.set(t, vec);
+          return vec;
+        });
+      }
 
-    if (!capsule.version || !capsule.notes) {
-      throw new Error('Invalid backup format');
-    }
+      const vec = hashEmbed(t);
+      cache.set(t, vec);
+      if (cache.size > aiConfig.cacheLimit) {
+        const oldest = cache.keys().next().value;
+        cache.delete(oldest);
+      }
+      return Promise.resolve(vec);
+    };
 
-    await crypto.importKeyWithPassword(capsule.encryptedDek, importPassword);
+    const cosine = (a, b) => {
+      if (!a || !b || a.length !== b.length) return 0;
+      let sum = 0;
+      for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+      return Math.abs(sum) < 1e-8 ? 0 : sum;
+    };
 
-    let imported = 0;
-    for (const note of capsule.notes) {
-      if (!note.id || typeof note.text !== 'string') continue;
-      const id = note.id;
-      const existing = storage.getNote(id);
-      if (existing) continue;
+    // Auto-setup worker on registration
+    setTimeout(setupWorker, 100);
 
-      const isShared = !!note.shared;
-      const stored = {
-        id,
-        shared: isShared,
-        createdAt: note.createdAt || Date.now(),
-        isEncrypted: false,
-        text: note.text,
-        iv: null,
-        ct: null
-      };
+    return {
+      get mode() { return mode; },
+      get progress() { return progress; },
+      get ready() { return mode === 'model' || mode === 'hash'; },
+      embed,
+      cosine
+    };
+  }, ['config']);
+}
 
-      if (!isShared) {
-        try {
-          const enc = await crypto.encryptText(note.text);
-          stored.isEncrypted = true;
-          stored.iv = enc.iv;
-          stored.ct = enc.ct;
-          stored.text = '[зашифровано]';
-        } catch (err) {
-          kernel.logger.warn('Import encrypt failed for', id);
-          stored.isEncrypted = false;
-          stored.text = note.text;
+// ============================================================================
+// PLUGIN: SEARCH
+// ============================================================================
+
+export function searchPlugin(engine) {
+  engine.registerEvent('search:started', 'Поиск начат');
+  engine.registerEvent('search:completed', 'Поиск завершён');
+  
+  engine.register('search', (eng) => {
+    const config = eng.get('config');
+    const searchCfg = config.get('search');
+
+    const formatResult = (note, text) => ({
+      id: note.id,
+      text,
+      score: note.score,
+      scoreText: Math.round(note.score * 100) + '%',
+      shared: note.shared,
+      toggleText: note.shared ? 'Скрыть' : 'Открыть',
+      createdAt: note.createdAt
+    });
+
+    const search = async (queryText) => {
+      const ai = eng.get('ai');
+      const storage = eng.get('storage');
+      const crypto = eng.get('crypto');
+
+      if (!queryText || !ai.ready) return { my: [], insights: [] };
+
+      eng.emit('search:started', { query: queryText });
+
+      const queryVec = await ai.embed(queryText);
+      if (!queryVec) return { my: [], insights: [] };
+
+      const notes = storage.allNotes();
+      const scored = [];
+
+      for (const note of notes) {
+        const vec = storage.getEmbedding(note.id);
+        if (!vec) continue;
+
+        let score = ai.cosine(queryVec, vec);
+        const serendipityRoll = Math.random();
+        const effectiveThreshold = serendipityRoll < searchCfg.serendipity
+          ? searchCfg.threshold - searchCfg.serendipity
+          : searchCfg.threshold;
+
+        if (score >= effectiveThreshold) {
+          let text = note.text;
+          if (note.isEncrypted && crypto.isReady()) {
+            try {
+              text = await crypto.decryptText(note.id, { iv: note.iv, ct: note.ct });
+            } catch (err) {
+              eng.log.warn('Decrypt failed for note', note.id);
+              text = '[ошибка расшифровки]';
+            }
+          }
+          scored.push({ ...note, score, _text: text });
         }
       }
 
-      await storage.put(stored);
-      imported++;
+      scored.sort((a, b) => b.score - a.score);
 
-      if (capsule.embeddings && capsule.embeddings[id]) {
-        await storage.saveEmbedding(id, capsule.embeddings[id]);
+      const my = scored
+        .filter((n) => n.score >= searchCfg.threshold)
+        .map((n) => formatResult(n, n._text));
+
+      const insights = scored
+        .filter((n) => n.score >= (searchCfg.threshold - searchCfg.serendipity) && n.score < searchCfg.threshold)
+        .map((n) => formatResult(n, n._text));
+
+      const result = { my, insights };
+      eng.emit('search:completed', { query: queryText, resultCount: my.length + insights.length });
+      return result;
+    };
+
+    return { search };
+  }, ['config', 'ai', 'storage', 'crypto']);
+}
+
+// ============================================================================
+// PLUGIN: BACKUP
+// ============================================================================
+
+export function backupPlugin(engine) {
+  engine.registerEvent('backup:exported', 'Бэкап экспортирован');
+  engine.registerEvent('backup:imported', 'Бэкап импортирован');
+  
+  engine.register('backup', (eng) => {
+    const exportAll = async (exportPassword) => {
+      const storage = eng.get('storage');
+      const crypto = eng.get('crypto');
+
+      const notes = storage.allNotes();
+      const plaintexts = {};
+
+      for (const note of notes) {
+        if (note.isEncrypted) {
+          try {
+            plaintexts[note.id] = await crypto.decryptText(note.id, { iv: note.iv, ct: note.ct });
+          } catch (err) {
+            eng.log.warn('Backup decrypt failed for', note.id);
+          }
+        } else {
+          plaintexts[note.id] = note.text;
+        }
       }
-    }
 
-    return imported;
-  };
-
-  return { exportAll, importAll };
-});
-
-// ===========================================================================
-// MIDDLEWARE: vectorize note on save using plainText
-// ===========================================================================
-Kernel.on('note:saved', async ({ note, plainText }) => {
-  try {
-    const ai = Kernel.get('ai');
-    const storage = Kernel.get('storage');
-    if (!ai.ready) return;
-    if (storage.getEmbedding(note.id)) return;
-
-    const textToEmbed = plainText || note.text;
-    if (!textToEmbed || textToEmbed === '[зашифровано]') return;
-
-    const vec = await ai.embed(textToEmbed);
-    if (vec) await storage.saveEmbedding(note.id, vec);
-  } catch (err) {
-    Kernel.logger.warn('Vectorize middleware failed', err);
-  }
-});
-
-Kernel.on('note:deleted', ({ id }) => {
-  try {
-    const crypto = Kernel.get('crypto');
-    crypto.invalidatePlaintextCache(id);
-  } catch (_) {}
-});
-
-// ===========================================================================
-// ALPINE COMPONENT
-// ===========================================================================
-document.addEventListener('alpine:init', () => {
-  Alpine.data('app', () => ({
-    editorText: '',
-    editorMode: 'private',
-    activeTab: 'stream',
-    allNotes: [],
-    myResults: [],
-    insightsResults: [],
-    showPasswordModal: false,
-    password: '',
-    passwordError: '',
-    isNewUser: false,
-    storageReady: false,
-    cryptoReady: false,
-    toast: { show: false, text: '', type: 'info' },
-    _searchTimer: null,
-
-    showSettingsModal: false,
-
-    showChangePasswordModal: false,
-    oldPassword: '',
-    newPassword: '',
-    confirmNewPassword: '',
-    changePasswordError: '',
-
-    showExportPasswordModal: false,
-    exportPassword: '',
-    exportPasswordConfirm: '',
-    exportPasswordError: '',
-
-    showImportPasswordModal: false,
-    importPassword: '',
-    importPasswordError: '',
-    _importFile: null,
-
-    showNoteViewModal: false,
-    noteViewId: null,
-    noteViewText: '',
-    noteViewIsEncrypted: false,
-    noteViewIsShared: false,
-    isNoteViewEditing: false,
-
-    showConfirmDialog: false,
-    confirmTitle: '',
-    confirmMessage: '',
-    confirmButtonText: 'Подтвердить',
-    _confirmResolve: null,
-
-    async init() {
-      try {
-        await Kernel.boot();
-
-        const storage = Kernel.get('storage');
-        const crypto = Kernel.get('crypto');
-
-        Kernel.on('storage:changed', ({ notes }) => {
-          this.allNotes = notes.map(this.formatNoteForUi.bind(this));
-          if (this.editorText && this.cryptoReady) this.runSearch();
-        });
-
-        Kernel.on('ai:ready', () => {
-          if (this.editorText && this.cryptoReady) this.runSearch();
-        });
-
-        Kernel.on('crypto:ready', async () => {
-          this.cryptoReady = true;
-          await storage.open();
-          this.storageReady = true;
-        });
-
-        this.isNewUser = !crypto.hasExistingKey();
-        this.showPasswordModal = true;
-      } catch (err) {
-        Kernel.logger.error('App init failed', err);
-        this.showToast('Ошибка инициализации', 'error');
+      const embeddings = {};
+      for (const [noteId, vec] of storage.allEmbeddings()) {
+        embeddings[noteId] = vec;
       }
-    },
 
-    get charCount() { return `${this.editorText.length} симв.`; },
-    get isSendDisabled() {
-      const textOk = this.editorText.trim().length > 0;
-      const ai = Kernel.get('ai');
-      return !(textOk && ai.ready && this.cryptoReady);
-    },
-    get privateBtnClass() { return this.editorMode === 'private' ? 'btn-primary' : 'btn-ghost'; },
-    get worldBtnClass() { return this.editorMode === 'world' ? 'btn-primary' : 'btn-ghost'; },
-    get streamTabClass() { return { 'tab-active': this.activeTab === 'stream' }; },
-    get baseTabClass() { return { 'tab-active': this.activeTab === 'base' }; },
-    get isStreamTab() { return this.activeTab === 'stream'; },
-    get isBaseTab() { return this.activeTab === 'base'; },
-    get hasMyResults() { return this.myResults.length > 0; },
-    get hasInsightsResults() { return this.insightsResults.length > 0; },
-    get showNoResults() {
-      return this.myResults.length === 0
-        && this.insightsResults.length === 0
-        && this.editorText.length > 0
-        && this.cryptoReady;
-    },
-    get showEmptyState() {
-      return this.editorText.length === 0 && this.myResults.length === 0 && this.insightsResults.length === 0;
-    },
-    get totalNotes() { return this.allNotes.length; },
-    get sharedNotes() { return this.allNotes.filter((n) => n.shared).length; },
-    get privateNotes() { return this.allNotes.filter((n) => !n.shared).length; },
-    get storageStatusClass() {
-      if (!this.cryptoReady) return 'bg-warning pulse-dot';
-      return this.storageReady ? 'bg-success' : 'bg-warning pulse-dot';
-    },
-    get storageStatusText() {
-      if (!this.cryptoReady) return 'locked';
-      return this.storageReady ? 'ready' : 'loading';
-    },
-    get aiStatusClass() {
-      const ai = Kernel.get('ai');
-      if (ai.mode === 'model') return 'bg-success';
-      if (ai.mode === 'hash') return 'bg-warning';
-      if (ai.mode === 'error') return 'bg-error';
-      return 'bg-info pulse-dot';
-    },
-    get aiStatusText() {
-      const ai = Kernel.get('ai');
-      if (ai.mode === 'model') return 'AI';
-      if (ai.mode === 'hash') return 'AI/hash';
-      if (ai.mode === 'error') return 'AI error';
-      return `AI ${Math.round(ai.progress)}%`;
-    },
-    get modalClass() { return { 'modal-open': this.showPasswordModal }; },
-    get passwordTitle() { return this.isNewUser ? 'Создайте пароль' : 'Введите пароль'; },
-    get passwordModalText() {
-      return this.isNewUser
-        ? 'Пароль защищает личные заметки. Минимум 4 символа. Восстановление невозможно.'
-        : 'Пароль нужен для расшифровки ваших личных заметок.';
-    },
-    get hasPasswordError() { return this.passwordError.length > 0; },
-    get passwordInputClass() { return this.hasPasswordError ? 'input-error' : ''; },
-    get settingsModalClass() { return { 'modal-open': this.showSettingsModal }; },
-    get changePasswordModalClass() { return { 'modal-open': this.showChangePasswordModal }; },
-    get hasChangePasswordError() { return this.changePasswordError.length > 0; },
-    get exportPasswordModalClass() { return { 'modal-open': this.showExportPasswordModal }; },
-    get hasExportPasswordError() { return this.exportPasswordError.length > 0; },
-    get importPasswordModalClass() { return { 'modal-open': this.showImportPasswordModal }; },
-    get hasImportPasswordError() { return this.importPasswordError.length > 0; },
-    get noteViewModalClass() { return { 'modal-open': this.showNoteViewModal }; },
-    get noteViewTitle() { return this.isNoteViewEditing ? 'Редактирование' : 'Заметка'; },
-    get noteViewEditBtnText() { return this.isNoteViewEditing ? 'Отмена' : 'Редактировать'; },
-    get isNoteViewReadOnly() { return !this.isNoteViewEditing; },
-    get confirmDialogClass() { return { 'modal-open': this.showConfirmDialog }; },
-    get hasToast() { return this.toast.show; },
-    get toastText() { return this.toast.text; },
-    get toastClass() {
-      return this.toast.type === 'error' ? 'alert-error'
-        : this.toast.type === 'success' ? 'alert-success' : 'alert-info';
-    },
+      const capsule = {
+        version: 2,
+        exportedAt: Date.now(),
+        notes: notes.map((n) => ({
+          id: n.id,
+          shared: n.shared,
+          createdAt: n.createdAt,
+          text: plaintexts[n.id] || ''
+        })),
+        embeddings
+      };
 
-    setPrivateMode() { this.editorMode = 'private'; },
-    setWorldMode() { this.editorMode = 'world'; },
-    setStreamTab() { this.activeTab = 'stream'; },
-    setBaseTab() { this.activeTab = 'base'; },
-
-    onEditorInput() {
-      clearTimeout(this._searchTimer);
-      this._searchTimer = setTimeout(() => this.runSearch(), 800);
-    },
-
-    async runSearch() {
-      if (!this.cryptoReady) return;
-      try {
-        const search = Kernel.get('search');
-        const result = await search.search(this.editorText);
-        this.myResults = result.my;
-        this.insightsResults = result.insights;
-      } catch (err) {
-        Kernel.logger.error('Search failed', err);
+      // Check if we're in browser environment
+      if (typeof Blob !== 'undefined' && typeof URL !== 'undefined' && typeof document !== 'undefined') {
+        const blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `noomium-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        URL.revokeObjectURL(url);
+        anchor.remove();
       }
-    },
 
-    async sendNote() {
-      if (this.isSendDisabled) return;
-      const text = this.editorText.trim();
-      if (!text) return;
+      eng.emit('backup:exported', { noteCount: notes.length });
+      return capsule;
+    };
 
-      const crypto = Kernel.get('crypto');
-      const storage = Kernel.get('storage');
-      const isShared = this.editorMode === 'world';
-      const id = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const importAll = async (file, importPassword) => {
+      const storage = eng.get('storage');
+      const crypto = eng.get('crypto');
 
-      try {
-        const note = {
-          id, shared: isShared, createdAt: Date.now(),
-          isEncrypted: false, text, iv: null, ct: null
+      const text = await file.text();
+      const capsule = JSON.parse(text);
+
+      if (!capsule.version || !capsule.notes) {
+        throw new Error('Invalid backup format');
+      }
+
+      let imported = 0;
+      for (const note of capsule.notes) {
+        if (!note.id || typeof note.text !== 'string') continue;
+        const id = note.id;
+        const existing = storage.getNote(id);
+        if (existing) continue;
+
+        const isShared = !!note.shared;
+        const stored = {
+          id,
+          shared: isShared,
+          createdAt: note.createdAt || Date.now(),
+          isEncrypted: false,
+          text: note.text,
+          iv: null,
+          ct: null
         };
 
-        if (!isShared) {
-          const enc = await crypto.encryptText(text);
-          note.isEncrypted = true;
-          note.iv = enc.iv;
-          note.ct = enc.ct;
-          note.text = '[зашифровано]';
+        if (!isShared && crypto.isReady()) {
+          try {
+            const enc = await crypto.encryptText(note.text);
+            stored.isEncrypted = true;
+            stored.iv = enc.iv;
+            stored.ct = enc.ct;
+            stored.text = '[зашифровано]';
+          } catch (err) {
+            eng.log.warn('Import encrypt failed for', id);
+          }
         }
 
-        await storage.put(note);
-        Kernel.emit('note:saved', { note, plainText: text });
+        await storage.put(stored);
+        imported++;
 
-        this.editorText = '';
-        this.showToast(isShared ? 'Опубликовано в Мир' : 'Сохранено лично', 'success');
-      } catch (err) {
-        Kernel.logger.error('Send note failed', err);
-        this.showToast('Ошибка сохранения', 'error');
-      }
-    },
-
-    async toggleShared(id) {
-      const storage = Kernel.get('storage');
-      const crypto = Kernel.get('crypto');
-      const note = storage.getNote(id);
-      if (!note) return;
-
-      try {
-        let plainText = note.text;
-        if (note.isEncrypted) {
-          plainText = await crypto.decryptText(id, { iv: note.iv, ct: note.ct });
-        }
-
-        const becomingPrivate = note.shared;
-
-        if (becomingPrivate) {
-          const enc = await crypto.encryptText(plainText);
-          note.isEncrypted = true;
-          note.iv = enc.iv;
-          note.ct = enc.ct;
-          note.text = '[зашифровано]';
-          note.shared = false;
-        } else {
-          note.isEncrypted = false;
-          note.iv = null;
-          note.ct = null;
-          note.text = plainText;
-          note.shared = true;
-        }
-
-        await storage.put(note);
-        Kernel.emit('note:saved', { note, plainText });
-
-        crypto.invalidatePlaintextCache(id);
-      } catch (err) {
-        Kernel.logger.error('Toggle shared failed', err);
-        this.showToast('Ошибка переключения', 'error');
-      }
-    },
-
-    async confirmDelete(id) {
-      const ok = await this.showConfirm('Удалить заметку?', 'Это действие нельзя отменить.', 'Удалить');
-      if (!ok) return;
-      const storage = Kernel.get('storage');
-      try {
-        await storage.delete(id);
-        this.showToast('Удалено', 'success');
-      } catch (err) {
-        Kernel.logger.error('Delete failed', err);
-        this.showToast('Ошибка удаления', 'error');
-      }
-    },
-
-    async openNoteView(noteUi) {
-      const storage = Kernel.get('storage');
-      const crypto = Kernel.get('crypto');
-      const note = storage.getNote(noteUi.id);
-      if (!note) return;
-
-      this.noteViewId = note.id;
-      this.noteViewIsEncrypted = !!note.isEncrypted;
-      this.noteViewIsShared = !!note.shared;
-      this.isNoteViewEditing = false;
-
-      try {
-        if (note.isEncrypted) {
-          this.noteViewText = await crypto.decryptText(note.id, { iv: note.iv, ct: note.ct });
-        } else {
-          this.noteViewText = note.text;
-        }
-      } catch (err) {
-        this.noteViewText = '[ошибка расшифровки]';
-      }
-
-      this.showNoteViewModal = true;
-    },
-
-    toggleEditNote() {
-      this.isNoteViewEditing = !this.isNoteViewEditing;
-    },
-
-    async saveNoteView() {
-      if (!this.noteViewId) return;
-      const newText = this.noteViewText.trim();
-      if (!newText) {
-        this.showToast('Текст не может быть пустым', 'error');
-        return;
-      }
-
-      const storage = Kernel.get('storage');
-      const crypto = Kernel.get('crypto');
-      const note = storage.getNote(this.noteViewId);
-      if (!note) return;
-
-      try {
-        if (this.noteViewIsShared) {
-          note.text = newText;
-          note.isEncrypted = false;
-          note.iv = null;
-          note.ct = null;
-        } else {
-          const enc = await crypto.encryptText(newText);
-          note.isEncrypted = true;
-          note.iv = enc.iv;
-          note.ct = enc.ct;
-          note.text = '[зашифровано]';
-        }
-        await storage.put(note);
-        Kernel.emit('note:saved', { note, plainText: newText });
-        crypto.invalidatePlaintextCache(note.id);
-
-        this.isNoteViewEditing = false;
-        this.showToast('Сохранено', 'success');
-      } catch (err) {
-        Kernel.logger.error('Save note view failed', err);
-        this.showToast('Ошибка сохранения', 'error');
-      }
-    },
-
-    async confirmDeleteFromView() {
-      if (!this.noteViewId) return;
-      const ok = await this.showConfirm('Удалить заметку?', 'Это действие нельзя отменить.', 'Удалить');
-      if (!ok) return;
-      const storage = Kernel.get('storage');
-      try {
-        await storage.delete(this.noteViewId);
-        this.showNoteViewModal = false;
-        this.showToast('Удалено', 'success');
-      } catch (err) {
-        this.showToast('Ошибка удаления', 'error');
-      }
-    },
-
-    closeNoteView() {
-      this.showNoteViewModal = false;
-      this.noteViewId = null;
-      this.isNoteViewEditing = false;
-    },
-
-    async confirmPassword() {
-      this.passwordError = '';
-      if (this.password.length < 4) {
-        this.passwordError = 'Минимум 4 символа';
-        return;
-      }
-      const crypto = Kernel.get('crypto');
-      try {
-        await crypto.initialize(this.password);
-        this.showPasswordModal = false;
-        this.password = '';
-      } catch (err) {
-        if (err.message === 'WRONG_PASSWORD') this.passwordError = 'Неверный пароль';
-        else {
-          this.passwordError = 'Ошибка шифрования';
-          Kernel.logger.error('Crypto initialize failed', err);
+        if (capsule.embeddings && capsule.embeddings[id]) {
+          await storage.saveEmbedding(id, capsule.embeddings[id]);
         }
       }
-    },
 
-    openSettings() { this.showSettingsModal = true; },
-    closeSettings() { this.showSettingsModal = false; },
+      eng.emit('backup:imported', { importedCount: imported });
+      return imported;
+    };
 
-    openChangePassword() {
-      this.showSettingsModal = false;
-      this.oldPassword = '';
-      this.newPassword = '';
-      this.confirmNewPassword = '';
-      this.changePasswordError = '';
-      this.showChangePasswordModal = true;
-    },
-
-    closeChangePassword() { this.showChangePasswordModal = false; },
-
-    async doChangePassword() {
-      this.changePasswordError = '';
-      if (this.newPassword.length < 4) {
-        this.changePasswordError = 'Новый пароль: минимум 4 символа';
-        return;
-      }
-      if (this.newPassword !== this.confirmNewPassword) {
-        this.changePasswordError = 'Пароли не совпадают';
-        return;
-      }
-
-      const crypto = Kernel.get('crypto');
-      try {
-        await crypto.initialize(this.oldPassword);
-        await crypto.changePassword(this.oldPassword, this.newPassword);
-        this.showChangePasswordModal = false;
-        this.showToast('Пароль изменён', 'success');
-      } catch (err) {
-        if (err.message === 'WRONG_PASSWORD') this.changePasswordError = 'Неверный текущий пароль';
-        else {
-          this.changePasswordError = 'Ошибка смены пароля';
-          Kernel.logger.error('Change password failed', err);
-        }
-      }
-    },
-
-    openExportPassword() {
-      this.showSettingsModal = false;
-      this.exportPassword = '';
-      this.exportPasswordConfirm = '';
-      this.exportPasswordError = '';
-      this.showExportPasswordModal = true;
-    },
-
-    closeExportPassword() { this.showExportPasswordModal = false; },
-
-    async doExport() {
-      this.exportPasswordError = '';
-      if (this.exportPassword.length < 4) {
-        this.exportPasswordError = 'Минимум 4 символа';
-        return;
-      }
-      if (this.exportPassword !== this.exportPasswordConfirm) {
-        this.exportPasswordError = 'Пароли не совпадают';
-        return;
-      }
-      try {
-        const backup = Kernel.get('backup');
-        await backup.exportAll(this.exportPassword);
-        this.showExportPasswordModal = false;
-        this.showToast('Экспорт завершён', 'success');
-      } catch (err) {
-        Kernel.logger.error('Export failed', err);
-        this.showToast('Ошибка экспорта', 'error');
-      }
-    },
-
-    async importData() {
-      this.showSettingsModal = false;
-      const input = this.$refs.importFileInput;
-      input.click();
-    },
-
-    async handleImportFile(e) {
-      const file = e.target.files && e.target.files[0];
-      if (!file) return;
-      this._importFile = file;
-      this.importPassword = '';
-      this.importPasswordError = '';
-      this.showImportPasswordModal = true;
-      e.target.value = '';
-    },
-
-    closeImportPassword() {
-      this.showImportPasswordModal = false;
-      this._importFile = null;
-    },
-
-    async doImport() {
-      this.importPasswordError = '';
-      if (!this.importPassword) {
-        this.importPasswordError = 'Введите пароль';
-        return;
-      }
-      if (!this._importFile) {
-        this.importPasswordError = 'Файл не выбран';
-        return;
-      }
-      try {
-        const backup = Kernel.get('backup');
-        const count = await backup.importAll(this._importFile, this.importPassword);
-        this.showImportPasswordModal = false;
-        this._importFile = null;
-        this.showToast(`Импортировано: ${count}`, 'success');
-      } catch (err) {
-        if (err.message === 'WRONG_IMPORT_PASSWORD') this.importPasswordError = 'Неверный пароль от копии';
-        else {
-          Kernel.logger.error('Import failed', err);
-          this.importPasswordError = 'Ошибка импорта';
-        }
-      }
-    },
-
-    async wipeData() {
-      this.showSettingsModal = false;
-      const ok = await this.showConfirm('Стереть всё?', 'Все заметки, ключи и настройки будут удалены безвозвратно.', 'Стереть');
-      if (!ok) return;
-      try {
-        const storage = Kernel.get('storage');
-        const crypto = Kernel.get('crypto');
-        await storage.reset();
-        crypto.wipe();
-        localStorage.removeItem('noomium:config');
-        this.showToast('Всё стёрто. Обновляю...', 'success');
-        setTimeout(() => location.reload(), 1200);
-      } catch (err) {
-        this.showToast('Ошибка стирания', 'error');
-      }
-    },
-
-    showConfirm(title, message, buttonText) {
-      return new Promise((resolve) => {
-        this.confirmTitle = title;
-        this.confirmMessage = message;
-        this.confirmButtonText = buttonText;
-        this._confirmResolve = resolve;
-        this.showConfirmDialog = true;
-      });
-    },
-
-    proceedConfirm() {
-      this.showConfirmDialog = false;
-      if (this._confirmResolve) {
-        this._confirmResolve(true);
-        this._confirmResolve = null;
-      }
-    },
-
-    cancelConfirm() {
-      this.showConfirmDialog = false;
-      if (this._confirmResolve) {
-        this._confirmResolve(false);
-        this._confirmResolve = null;
-      }
-    },
-
-    formatNoteForUi(note) {
-      return {
-        id: note.id,
-        text: note.isEncrypted ? '🔒 [зашифровано]' : (note.text || ''),
-        shared: note.shared,
-        createdAt: note.createdAt,
-        badgeClass: note.shared ? 'badge-secondary' : 'badge-ghost',
-        statusText: note.shared ? 'открыто' : 'лично',
-        dateText: dayjs(note.createdAt).fromNow()
-      };
-    },
-
-    showToast(text, type = 'info') {
-      this.toast = { show: true, text, type };
-      setTimeout(() => { this.toast.show = false; }, 2500);
-    }
-  }));
-});
-
-// ===========================================================================
-// PWA: Service Worker with proper caching strategy
-// ===========================================================================
-if ('serviceWorker' in navigator) {
-  const swCode = `
-    const CACHE = 'noomium-v2-r2';
-    const CORE_ASSETS = [
-      './',
-      'https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css',
-      'https://cdn.jsdelivr.net/npm/@alpinejs/csp@3.14.1/dist/cdn.min.js',
-      'https://cdn.jsdelivr.net/npm/dexie@3.2.7/dist/dexie.min.js',
-      'https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js',
-      'https://cdn.jsdelivr.net/npm/dayjs@1.11.13/plugin/relativeTime.js',
-      'https://cdn.jsdelivr.net/npm/dayjs@1.11.13/locale/ru.js'
-    ];
-
-    self.addEventListener('install', (e) => {
-      e.waitUntil(
-        caches.open(CACHE).then((c) => c.addAll(CORE_ASSETS).catch(() => {}))
-          .then(() => self.skipWaiting())
-      );
-    });
-
-    self.addEventListener('activate', (e) => {
-      e.waitUntil(
-        caches.keys().then((names) =>
-          Promise.all(names.filter((n) => n !== CACHE).map((n) => caches.delete(n)))
-        ).then(() => self.clients.claim())
-      );
-    });
-
-    self.addEventListener('fetch', (e) => {
-      if (e.request.method !== 'GET') return;
-      const url = new URL(e.request.url);
-
-      if (e.request.mode === 'navigate') {
-        e.respondWith(
-          fetch(e.request).then((res) => {
-            if (res && res.status === 200) {
-              const clone = res.clone();
-              caches.open(CACHE).then((c) => c.put(e.request, clone));
-            }
-            return res;
-          }).catch(() => caches.match(e.request).then((r) => r || caches.match('./')))
-        );
-        return;
-      }
-
-      e.respondWith(
-        caches.match(e.request).then((cached) => {
-          if (cached) return cached;
-          return fetch(e.request).then((res) => {
-            if (res && res.status === 200 && (url.hostname.includes('jsdelivr.net') || url.hostname.includes('huggingface.co') || url.hostname.includes('hf.co'))) {
-              const clone = res.clone();
-              caches.open(CACHE).then((c) => c.put(e.request, clone));
-            }
-            return res;
-          }).catch(() => cached);
-        })
-      );
-    });
-  `;
-  try {
-    const blob = new Blob([swCode], { type: 'application/javascript' });
-    const swUrl = URL.createObjectURL(blob);
-    navigator.serviceWorker.register(swUrl).catch(() => {});
-  } catch (_) {}
+    return { exportAll, importAll };
+  }, ['storage', 'crypto']);
 }
-</script>
-</body>
-</html>
+
+// ============================================================================
+// MIDDLEWARE PLUGIN: Vectorize on save
+// ============================================================================
+
+export function vectorizeMiddlewarePlugin(engine) {
+  engine.on('note:saved', async ({ note, plainText }) => {
+    try {
+      const ai = engine.get('ai');
+      const storage = engine.get('storage');
+      if (!ai.ready) return;
+      if (storage.getEmbedding(note.id)) return;
+
+      const textToEmbed = plainText || note.text;
+      if (!textToEmbed || textToEmbed === '[зашифровано]') return;
+
+      const vec = await ai.embed(textToEmbed);
+      if (vec) await storage.saveEmbedding(note.id, vec);
+    } catch (err) {
+      engine.log.warn('Vectorize middleware failed', err);
+    }
+  });
+
+  engine.on('note:deleted', ({ id }) => {
+    try {
+      const crypto = engine.get('crypto');
+      crypto.invalidatePlaintextCache(id);
+    } catch (_) {}
+  });
+}
+
+// ============================================================================
+// EXPORTS
+// ============================================================================
+
+export {
+  Engine,
+  Logger,
+  configPlugin,
+  cryptoPlugin,
+  storagePlugin,
+  aiPlugin,
+  searchPlugin,
+  backupPlugin,
+  vectorizeMiddlewarePlugin
+};
+
+export default createEngine;
