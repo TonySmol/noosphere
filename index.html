@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.2">
+<meta name="app-version" content="1.2.3">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1840,6 +1840,217 @@ DI.register('StateManager', function() {
   };
 }, []);
 <!-- NOOMIUM_MODULE_END StateManager -->
+
+<!-- NOOMIUM_MODULE_START SearchService -->
+DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I18n, Toast, Logger, Utils) {
+  /**
+   * Внутреннее состояние сервиса
+   */
+  var sendLock = false;
+  var lastVec = null;
+  var lastQuery = 0;
+  var searchAbortController = null;
+  
+  /**
+   * Получить текущий режим отправки
+   * @returns {string} 'private' или 'world'
+   */
+  function getSendMode() {
+    return StateManager.getState().sendMode;
+  }
+  
+  /**
+   * Установить режим отправки
+   * @param {string} mode - 'private' или 'world'
+   */
+  function setSendMode(mode) {
+    StateManager.setState({ sendMode: mode });
+  }
+  
+  /**
+   * Проверить, идёт ли сейчас отправка
+   * @returns {boolean}
+   */
+  function isSending() {
+    return sendLock;
+  }
+  
+  /**
+   * Основная функция поиска похожих мыслей
+   * @param {string} text - Текст запроса
+   * @param {boolean} force - Принудительный поиск (игнорировать порог похожести)
+   * @returns {Promise<void>}
+   */
+  function search(text, force) {
+    if (!text || !AI.ready()) {
+      StateManager.setState({ lists: { local: [], world: [], seren: [] } });
+      return Promise.resolve();
+    }
+    
+    // Отменяем предыдущий запрос
+    if (searchAbortController) {
+      searchAbortController.abort();
+    }
+    var controller = new AbortController();
+    searchAbortController = controller;
+    var signal = controller.signal;
+    
+    return AI.embed(text).then(function(vec) {
+      if (signal.aborted) return;
+      if (!vec) return;
+      
+      // Проверяем, достаточно ли изменился вектор для нового запроса в сеть
+      var shouldSendToNet = false;
+      if (!lastVec || AI.cosine(vec, lastVec) < Config.get('vectorSimilarityThreshold', 0.98) || force) {
+        lastVec = vec;
+        lastQuery = Date.now();
+        shouldSendToNet = true;
+      }
+      
+      if (shouldSendToNet && AI.getMode() === 'model') {
+        var state = StateManager.getState();
+        if (state.netAuthorized && Net && typeof Net.send === 'function') {
+          Net.send(vec);
+        }
+      }
+      
+      // Получаем все заметки и вычисляем similarity scores
+      return getAllNotesCached().then(function(notes) {
+        if (signal.aborted) return;
+        
+        var localScored = [];
+        for (var i = 0; i < notes.length; i++) {
+          var note = notes[i];
+          if (note && note.vector) {
+            localScored.push({
+              id: note.id,
+              text: note.text,
+              vector: note.vector,
+              score: AI.cosine(vec, note.vector),
+              shared: note.shared,
+              peer: note.peer,
+              createdAt: note.createdAt
+            });
+          }
+        }
+        
+        var state = StateManager.getState();
+        var worldAnswers = state.netAuthorized ? Net.activeAnswers() : [];
+        var worldScored = [];
+        for (var i = 0; i < worldAnswers.length; i++) {
+          worldScored.push({
+            id: worldAnswers[i].id,
+            text: worldAnswers[i].text,
+            vector: worldAnswers[i].vector,
+            score: AI.cosine(vec, worldAnswers[i].vector),
+            shared: worldAnswers[i].shared,
+            peer: worldAnswers[i].peer,
+            createdAt: worldAnswers[i].createdAt
+          });
+        }
+        
+        var threshold = Config.get('threshold', 0.30);
+        var serendipityDelta = Config.get('serendipity', 0.15);
+        
+        var newLists = {
+          local: localScored.filter(function(n) { return n.score >= threshold; })
+            .sort(function(a, b) { return b.score - a.score; }),
+          world: worldScored.filter(function(n) { return n.score >= threshold; })
+            .sort(function(a, b) { return b.score - a.score; }),
+          seren: localScored.concat(worldScored)
+            .filter(function(n) { return n.score >= (threshold - serendipityDelta) && n.score < threshold; })
+            .sort(function(a, b) { return b.score - a.score; })
+        };
+        
+        StateManager.setState({ lists: newLists });
+      });
+    }).catch(function(err) {
+      if (signal.aborted) return;
+      Toast.show('err', String(err && err.message || err) || 'Search failed');
+      Logger.warn('SearchService.search error', String(err && err.message || err));
+    }).finally(function() {
+      searchAbortController = null;
+    });
+  }
+  
+  /**
+   * Отправить новую мысль
+   * @param {string} text - Текст мысли
+   * @param {string} mode - Режим отправки ('private' или 'world')
+   * @returns {Promise<void>}
+   */
+  function send(text, mode) {
+    if (sendLock) return Promise.resolve();
+    
+    var trimmedText = (text || '').trim();
+    if (!trimmedText) {
+      Toast.show('warn', I18n.t('toast.empty'));
+      return Promise.resolve();
+    }
+    
+    if (!AI.ready()) {
+      Toast.show('err', I18n.t('toast.ai.notready'));
+      return Promise.resolve();
+    }
+    
+    var state = StateManager.getState();
+    if (mode === 'world' && !state.netAuthorized) {
+      // Запрашиваем авторизацию через callback из StateManager
+      if (state.requestNetworkAuth) {
+        state.requestNetworkAuth(function() {
+          send(trimmedText, mode);
+        });
+      }
+      return Promise.resolve();
+    }
+    
+    var isWorld = mode === 'world';
+    sendLock = true;
+    StateManager.setState({ sendLock: true });
+    
+    return AI.embed(trimmedText)
+      .then(function(vector) {
+        return DB.put({
+          id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          text: trimmedText,
+          vector: vector,
+          shared: !!isWorld,
+          createdAt: Date.now()
+        });
+      })
+      .then(function() {
+        lastVec = null;
+        Toast.show('ok', isWorld ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
+      })
+      .catch(function(err) {
+        Toast.show('err', String(err && err.message || err) || 'Send failed');
+      })
+      .finally(function() {
+        sendLock = false;
+        StateManager.setState({ sendLock: false });
+      });
+  }
+  
+  /**
+   * Инициализация сервиса (подписки на события)
+   */
+  function init() {
+    // Подписка на изменения БД для сброса кеша
+    Bus.on('db:change', function() {
+      // Кеш сбрасывается в App.State через allNotesCache = null
+    });
+  }
+  
+  return {
+    search: search,
+    send: send,
+    getSendMode: getSendMode,
+    setSendMode: setSendMode,
+    isSending: isSending,
+    init: init
+  };
+}, ['AI', 'DB', 'Net', 'Config', 'Bus', 'StateManager', 'I18n', 'Toast', 'Logger', 'Utils']);
+<!-- NOOMIUM_MODULE_END SearchService -->
   
 <!-- NOOMIUM_MODULE_START App.State -->
   var Logger = DI.resolve('Logger');
@@ -1855,6 +2066,7 @@ DI.register('StateManager', function() {
   var Toast = DI.resolve('Toast');
   var Progress = DI.resolve('Progress');
   var StateManager = DI.resolve('StateManager');
+  var SearchService = DI.resolve('SearchService');
 
   // Временная обратная совместимость: appState теперь ссылка на состояние из StateManager
   var appState = StateManager.getState();
@@ -1863,7 +2075,6 @@ DI.register('StateManager', function() {
   var uiState = {
     activeIdx: { local: 0, world: 0, seren: 0 },
     carouselObserver: null,
-    searchAbortController: null,
     searchTimer: null,
     baseSearchTimer: null,
     windowHandlers: { resize: null, focusin: null, focusout: null, orientationchange: null, beforeunload: null },
@@ -1926,8 +2137,80 @@ DI.register('StateManager', function() {
     if (dot) dot.className = 'hdr-st-dot ' + (cls || '');
     if (txtEl) txtEl.textContent = text;
   }
-<!-- NOOMIUM_MODULE_END App.State -->
 
+  /**
+   * Обёртка: обновление счётчика символов в редакторе
+   */
+  function updateCounter() {
+    var value = getEditorValue();
+    var counter = document.getElementById('ed-cnt');
+    if (counter) counter.textContent = Utils.word('symbols', value.length, I18n.getLang());
+  }
+
+  /**
+   * Обёртка: переключение режима отправки
+   * @param {string} newMode - 'private' или 'world'
+   */
+  function handleToggleMode(newMode) {
+    var currentMode = SearchService.getSendMode();
+    if (newMode === currentMode) return;
+    
+    SearchService.setSendMode(newMode);
+    
+    // Обновляем UI напрямую (для обратной совместимости)
+    var toggleEl = document.getElementById('mode-toggle');
+    if (!toggleEl) return;
+    toggleEl.setAttribute('data-mode', newMode);
+    toggleEl.querySelectorAll('.tog-sw-opt').forEach(function(opt) {
+      opt.classList.toggle('on', opt.getAttribute('data-v') === newMode);
+    });
+  }
+
+  /**
+   * Обёртка: отправка мысли
+   */
+  function handleSend() {
+    var text = getEditorValue().trim();
+    var mode = SearchService.getSendMode();
+    var btn = document.getElementById('btn-send');
+    
+    if (btn) {
+      btn.classList.add('sending');
+      btn.disabled = true;
+      btn.innerHTML = SPINNER_SVG;
+    }
+    
+    SearchService.send(text, mode)
+      .then(function() {
+        setEditorValue('');
+        updateCounter();
+        return executeSearch();
+      })
+      .then(function() {
+        var state = StateManager.getState();
+        if (state.view === 'base') renderBase();
+      })
+      .finally(function() {
+        if (btn) {
+          btn.classList.remove('sending');
+          btn.disabled = false;
+          btn.innerHTML = PAPER_PLANE_SVG;
+        }
+      });
+  }
+
+  /**
+   * Обёртка: выполнение поиска
+   * @param {boolean} force - Принудительный поиск
+   */
+  function executeSearch(force) {
+    var text = getEditorValue();
+    return SearchService.search(text, force).then(function() {
+      updateCounts();
+      renderCarousel();
+    });
+  }
+<!-- NOOMIUM_MODULE_END App.State -->
 <!-- NOOMIUM_MODULE_START UI.Layout -->
   function buildHeaderMarkup() {
     return '<div class="hdr">' +
