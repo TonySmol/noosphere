@@ -2,8 +2,8 @@
 <html lang="ru" data-theme="dark">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#0b0b10">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#1d232a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>NOOmium</title>
   
@@ -12,650 +12,850 @@
   <script src="https://cdn.tailwindcss.com"></script>
   
   <!-- Alpine.js -->
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  
+  <!-- Dexie.js (IndexedDB wrapper) -->
+  <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.7/dist/dexie.min.js"></script>
+  
+  <!-- Day.js (dates) -->
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/locale/ru.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/locale/en.js"></script>
   
   <!-- NDK (Nostr Development Kit) -->
-  <script src="https://cdn.jsdelivr.net/npm/@nostr-dev-kit/ndk@2.8.0/dist/index.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@nostr-dev-kit/ndk@2.10.0/dist/index.umd.js"></script>
   
-  <!-- Dexie.js -->
-  <script src="https://cdn.jsdelivr.net/npm/dexie@4.0.11/dist/dexie.min.js"></script>
+  <!-- nostr-tools (keys, signing) -->
+  <script src="https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/lib/index.umd.js"></script>
   
-  <!-- Transformers.js -->
-  <script src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js"></script>
+  <!-- Transformers.js (AI models) -->
+  <script type="module">
+    import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+    window.TransformersPipeline = pipeline;
+    window.TransformersEnv = env;
+  </script>
 
   <style>
+    /* Custom styles (minimal) */
     [x-cloak] { display: none !important; }
-    .safe-top { padding-top: env(safe-area-inset-top); }
-    .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
   </style>
 </head>
-<body class="min-h-screen bg-base-100 text-base-content">
-
-<div id="app" x-data="app()" x-init="init()" x-cloak>
+<body class="bg-base-100 min-h-screen">
   
-  <!-- Header -->
-  <header class="navbar bg-base-200 shadow-lg safe-top sticky top-0 z-50">
-    <div class="flex-1">
-      <span class="text-xl font-bold px-4">NOO<span class="text-primary">.</span>mium</span>
-    </div>
-    <div class="flex-none gap-2">
-      <div class="flex items-center gap-2 text-sm">
-        <span class="badge" :class="$store.ndk.status === 'connected' ? 'badge-success' : 'badge-warning'">
-          <span x-text="$store.ndk.status === 'connected' ? 'онлайн' : 'сеть'"></span>
-        </span>
-        <span class="badge" :class="$store.ai.ready ? 'badge-success' : 'badge-info'">
-          <span x-text="$store.ai.ready ? 'ии' : 'модель'"></span>
-        </span>
-      </div>
-      <button class="btn btn-ghost btn-circle" @click="showNotifications = true">
-        <div class="indicator">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-          </svg>
-          <span class="badge badge-xs badge-primary indicator-item" x-show="$store.notifications.getUnreadCount() > 0" x-text="$store.notifications.getUnreadCount()"></span>
-        </div>
-      </button>
-      <button class="btn btn-ghost btn-circle" @click="showMenu = true">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
-      </button>
-    </div>
-  </header>
-
-  <!-- Main Content -->
-  <main class="container mx-auto px-4 pb-20">
+  <div id="app" x-data="app()" x-init="init()" x-cloak>
     
-    <!-- Stream View -->
-    <div x-show="currentView === 'stream'" x-transition>
-      <div x-data="editor()" class="card bg-base-200 shadow-xl mt-4">
-        <div class="card-body">
-          <textarea 
-            x-model="text"
-            class="textarea textarea-bordered w-full h-24 resize-none" 
-            placeholder="О чём думаешь?"
-          ></textarea>
-          <div class="card-actions justify-between items-center mt-2">
-            <span class="text-sm opacity-70" x-text="text.length + ' симв.'"></span>
-            <div class="flex gap-2">
-              <div class="join">
-                <button 
-                  class="join-item btn btn-sm" 
-                  :class="mode === 'private' ? 'btn-primary' : 'btn-ghost'"
-                  @click="mode = 'private'"
-                >Себе</button>
-                <button 
-                  class="join-item btn btn-sm" 
-                  :class="mode === 'world' ? 'btn-primary' : 'btn-ghost'"
-                  @click="mode = 'world'"
-                >Миру</button>
-              </div>
-              <button 
-                class="btn btn-primary btn-sm"
-                :disabled="!text.trim() || sending"
-                @click="send()"
-              >
-                <span class="loading loading-spinner loading-xs" x-show="sending"></span>
-                <span x-show="!sending">Отправить</span>
-              </button>
-            </div>
+    <!-- HEADER COMPONENT -->
+    <div x-data="header()" x-show="$store.app.initialized">
+      <!-- TODO: Header with logo, status indicators, notifications badge -->
+      <div class="navbar bg-base-200 shadow-lg">
+        <div class="flex-1">
+          <span class="text-xl font-bold px-4">NOOmium</span>
+        </div>
+        <div class="flex-none gap-2">
+          <!-- Network status -->
+          <div class="badge badge-ghost gap-2">
+            <span class="w-2 h-2 rounded-full" :class="getNetworkStatusClass()"></span>
+            <span x-text="getNetworkStatusText()"></span>
           </div>
-        </div>
-      </div>
-
-      <div x-data="carousel()" class="mt-4">
-        <div class="text-center py-12 opacity-50">
-          <div class="text-6xl mb-4">◇</div>
-          <p>Здесь будет карусель мыслей</p>
+          <!-- AI status -->
+          <div class="badge badge-ghost gap-2">
+            <span class="w-2 h-2 rounded-full" :class="getAIStatusClass()"></span>
+            <span x-text="getAIStatusText()"></span>
+          </div>
+          <!-- Notifications -->
+          <button class="btn btn-ghost btn-circle" @click="$store.notifications.showModal = true">
+            <div class="indicator">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+              <span x-show="$store.notifications.unreadCount > 0" 
+                    x-text="$store.notifications.unreadCount"
+                    class="badge badge-sm badge-primary indicator-item"></span>
+            </div>
+          </button>
+          <!-- Menu -->
+          <button class="btn btn-ghost btn-circle" @click="$store.app.showMenu = true">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
         </div>
       </div>
     </div>
 
-    <!-- Feed View -->
-    <div x-data="feed()" x-show="currentView === 'feed'" x-transition>
-      <h2 class="text-2xl font-bold mt-4 mb-4">Лента</h2>
-      <div class="text-center py-12 opacity-50">
-        <div class="text-6xl mb-4">◇</div>
-        <p>Здесь будет лента публичных мыслей</p>
-      </div>
-    </div>
-
-    <!-- Base View -->
-    <div x-data="base()" x-show="currentView === 'base'" x-transition x-init="init()">
-      <h2 class="text-2xl font-bold mt-4 mb-4">База</h2>
-      <div class="form-control mb-4">
-        <input type="text" placeholder="Поиск..." class="input input-bordered" x-model="searchQuery" @input="updateSearch()">
-      </div>
-      <div class="space-y-2">
-        <template x-for="note in filteredNotes" :key="note.id">
-          <div class="card bg-base-200 shadow cursor-pointer" @click="openNote(note.id)">
-            <div class="card-body p-4">
-              <p class="line-clamp-2" x-text="note.text"></p>
-              <div class="flex justify-between items-center mt-2">
-                <span class="badge badge-sm" :class="note.shared ? 'badge-info' : 'badge-primary'" x-text="note.shared ? 'открыто' : 'лично'"></span>
-                <span class="text-xs opacity-50" x-text="formatDate(note.createdAt)"></span>
+    <!-- MAIN CONTENT -->
+    <main class="container mx-auto p-4 max-w-4xl" x-show="$store.app.initialized">
+      
+      <!-- EDITOR COMPONENT -->
+      <div x-data="editor()" class="mb-6">
+        <!-- TODO: Textarea with send button, mode toggle (Private/World) -->
+        <div class="card bg-base-200 shadow-xl">
+          <div class="card-body">
+            <textarea 
+              x-model="text"
+              @input="debouncedSearch()"
+              class="textarea textarea-bordered h-24 text-lg"
+              :placeholder="$store.app.t('editor.placeholder')"
+            ></textarea>
+            <div class="flex justify-between items-center mt-2">
+              <span class="text-sm opacity-70" x-text="charCount"></span>
+              <div class="flex gap-2">
+                <!-- Mode toggle -->
+                <div class="btn-group">
+                  <button 
+                    class="btn btn-sm"
+                    :class="mode === 'private' ? 'btn-primary' : 'btn-ghost'"
+                    @click="mode = 'private'"
+                    x-text="$store.app.t('mode.private')"
+                  ></button>
+                  <button 
+                    class="btn btn-sm"
+                    :class="mode === 'world' ? 'btn-primary' : 'btn-ghost'"
+                    @click="mode = 'world'"
+                    x-text="$store.app.t('mode.world')"
+                  ></button>
+                </div>
+                <button 
+                  class="btn btn-primary"
+                  :disabled="!text.trim() || !$store.app.aiReady"
+                  @click="send()"
+                  x-text="$store.app.t('btn.send')"
+                ></button>
               </div>
             </div>
           </div>
-        </template>
-        <div x-show="filteredNotes.length === 0" class="text-center py-12 opacity-50">
-          <p>Нет заметок</p>
         </div>
       </div>
-    </div>
 
-  </main>
+      <!-- TABS NAVIGATION -->
+      <div role="tablist" class="tabs tabs-lifted mb-4">
+        <a 
+          role="tab" 
+          class="tab"
+          :class="{ 'tab-active': activeTab === 'stream' }"
+          @click="activeTab = 'stream'"
+          x-text="$store.app.t('tab.stream')"
+        ></a>
+        <a 
+          role="tab" 
+          class="tab"
+          :class="{ 'tab-active': activeTab === 'feed' }"
+          @click="activeTab = 'feed'"
+          x-text="$store.app.t('tab.feed')"
+        ></a>
+        <a 
+          role="tab" 
+          class="tab"
+          :class="{ 'tab-active': activeTab === 'base' }"
+          @click="activeTab = 'base'"
+          x-text="$store.app.t('tab.base')"
+        ></a>
+      </div>
 
-  <!-- Bottom Navigation -->
-  <nav class="btm-nav btm-nav-sm fixed bottom-0 left-0 right-0 bg-base-200 safe-bottom z-40">
-    <button 
-      :class="currentView === 'stream' ? 'active' : ''"
-      @click="currentView = 'stream'"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-      </svg>
-      <span class="btm-nav-label">Поток</span>
-    </button>
-    <button 
-      :class="currentView === 'feed' ? 'active' : ''"
-      @click="currentView = 'feed'"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
-      </svg>
-      <span class="btm-nav-label">Лента</span>
-    </button>
-    <button 
-      :class="currentView === 'base' ? 'active' : ''"
-      @click="currentView = 'base'"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-      </svg>
-      <span class="btm-nav-label">База</span>
-    </button>
-  </nav>
-
-  <!-- Notifications Modal -->
-  <div x-data="notifications()" x-show="showNotifications" x-transition class="modal modal-open">
-    <div class="modal-box">
-      <h3 class="font-bold text-lg">Уведомления</h3>
-      <div class="py-4 space-y-2">
-        <template x-for="(notif, idx) in $store.notifications.items" :key="notif.id">
-          <div class="alert" :class="notif.read ? 'alert-info' : 'alert-warning'">
-            <div>
-              <span class="badge badge-sm" x-text="notif.type"></span>
-              <p class="text-sm mt-1" x-text="notif.text"></p>
+      <!-- STREAM TAB (Search results) -->
+      <div x-show="activeTab === 'stream'" x-data="stream()">
+        <!-- TODO: Three sections - My, World, Insights -->
+        <div class="grid gap-4">
+          <!-- My thoughts -->
+          <div x-show="results.my.length > 0">
+            <h3 class="text-lg font-bold mb-2" x-text="$store.app.t('stream.my')"></h3>
+            <div class="space-y-2">
+              <template x-for="note in results.my" :key="note.id">
+                <div x-data="{ note }" class="card bg-base-200 shadow">
+                  <div class="card-body p-4">
+                    <p x-text="note.text"></p>
+                    <div class="flex justify-between items-center mt-2">
+                      <span class="badge badge-primary" x-text="Math.round(note.score * 100) + '%'"></span>
+                      <div class="flex gap-1">
+                        <button class="btn btn-ghost btn-xs" @click="edit(note)">
+                          <span x-text="$store.app.t('btn.edit')"></span>
+                        </button>
+                        <button class="btn btn-ghost btn-xs" @click="toggleShare(note)">
+                          <span x-text="note.shared ? $store.app.t('btn.hide') : $store.app.t('btn.share')"></span>
+                        </button>
+                        <button class="btn btn-ghost btn-xs btn-error" @click="delete(note)">
+                          <span x-text="$store.app.t('btn.delete')"></span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
             </div>
-            <button class="btn btn-sm btn-ghost" @click="markRead(idx)">✓</button>
           </div>
-        </template>
-        <div x-show="$store.notifications.items.length === 0" class="text-center opacity-50 py-8">
-          Нет уведомлений
+
+          <!-- World (public thoughts) -->
+          <div x-show="results.world.length > 0">
+            <h3 class="text-lg font-bold mb-2" x-text="$store.app.t('stream.world')"></h3>
+            <div class="space-y-2">
+              <template x-for="note in results.world" :key="note.id">
+                <div class="card bg-base-200 shadow">
+                  <div class="card-body p-4">
+                    <p x-text="note.text"></p>
+                    <div class="flex justify-between items-center mt-2">
+                      <span class="badge badge-secondary" x-text="Math.round(note.score * 100) + '%'"></span>
+                      <button class="btn btn-ghost btn-xs" @click="reply(note)">
+                        <span x-text="$store.app.t('btn.reply')"></span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <!-- Insights (serendipity) -->
+          <div x-show="results.insights.length > 0">
+            <h3 class="text-lg font-bold mb-2" x-text="$store.app.t('stream.insights')"></h3>
+            <div class="space-y-2">
+              <template x-for="note in results.insights" :key="note.id">
+                <div class="card bg-base-200 shadow">
+                  <div class="card-body p-4">
+                    <p x-text="note.text"></p>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
         </div>
       </div>
-      <div class="modal-action">
-        <button class="btn btn-ghost btn-sm" @click="$store.notifications.clear()">Очистить все</button>
-        <button class="btn btn-primary btn-sm" @click="showNotifications = false">Закрыть</button>
-      </div>
-    </div>
-  </div>
 
-  <!-- Menu Modal -->
-  <div x-show="showMenu" x-transition class="modal modal-open">
-    <div class="modal-box">
-      <h3 class="font-bold text-lg mb-4">Настройки</h3>
-      <div class="space-y-4">
-        <div class="form-control">
-          <label class="label cursor-pointer">
-            <span class="label-text">Тёмная тема</span>
-            <input type="checkbox" class="toggle toggle-primary" x-model="$store.config.darkTheme" @change="$store.config.toggleTheme()">
-          </label>
+      <!-- FEED TAB (Public thoughts stream) -->
+      <div x-show="activeTab === 'feed'" x-data="feed()">
+        <!-- TODO: Real-time feed of public thoughts from Nostr -->
+        <div class="space-y-2">
+          <template x-for="note in publicFeed" :key="note.id">
+            <div class="card bg-base-200 shadow">
+              <div class="card-body p-4">
+                <div class="flex justify-between items-start mb-2">
+                  <span class="badge badge-ghost" x-text="note.author.slice(0, 8)"></span>
+                  <span class="text-xs opacity-60" x-text="formatDate(note.createdAt)"></span>
+                </div>
+                <p x-text="note.text"></p>
+                <button class="btn btn-ghost btn-sm mt-2" @click="reply(note)">
+                  <span x-text="$store.app.t('btn.reply')"></span>
+                </button>
+              </div>
+            </div>
+          </template>
         </div>
-        <div class="divider">Опасная зона</div>
-        <button class="btn btn-error btn-outline btn-block" @click="wipeData()">Стереть всё</button>
       </div>
-      <div class="modal-action">
-        <button class="btn btn-primary" @click="showMenu = false">Закрыть</button>
+
+      <!-- BASE TAB (All notes) -->
+      <div x-show="activeTab === 'base'" x-data="base()">
+        <!-- TODO: Search, stats, list of all notes -->
+        <div class="mb-4">
+          <input 
+            type="text" 
+            x-model="searchQuery"
+            @input="debouncedFilter()"
+            :placeholder="$store.app.t('base.search')"
+            class="input input-bordered w-full"
+          />
+        </div>
+        <div class="stats shadow mb-4 w-full">
+          <div class="stat">
+            <div class="stat-title" x-text="$store.app.t('base.total')"></div>
+            <div class="stat-value" x-text="stats.total"></div>
+          </div>
+          <div class="stat">
+            <div class="stat-title" x-text="$store.app.t('base.shared')"></div>
+            <div class="stat-value" x-text="stats.shared"></div>
+          </div>
+          <div class="stat">
+            <div class="stat-title" x-text="$store.app.t('base.private')"></div>
+            <div class="stat-value" x-text="stats.private"></div>
+          </div>
+        </div>
+        <div class="space-y-2">
+          <template x-for="note in filteredNotes" :key="note.id">
+            <div class="card bg-base-200 shadow cursor-pointer" @click="openNote(note)">
+              <div class="card-body p-4">
+                <p class="line-clamp-3" x-text="note.text"></p>
+                <div class="flex justify-between items-center mt-2">
+                  <span class="badge" :class="note.shared ? 'badge-secondary' : 'badge-ghost'" 
+                        x-text="note.shared ? $store.app.t('tag.shared') : $store.app.t('tag.private')"></span>
+                  <span class="text-xs opacity-60" x-text="formatDate(note.createdAt)"></span>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- MODALS -->
+    
+    <!-- Notifications Modal -->
+    <div x-show="$store.notifications.showModal" 
+         x-data="notificationsModal()"
+         class="modal"
+         :class="{ 'modal-open': $store.notifications.showModal }">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg" x-text="$store.app.t('notifications.title')"></h3>
+        <div class="py-4 space-y-2">
+          <template x-for="notif in $store.notifications.list" :key="notif.id">
+            <div class="alert" :class="notif.read ? 'alert-info' : 'alert-warning'">
+              <div>
+                <span x-text="notif.type === 'echo' ? '🔔' : '💬'"></span>
+                <span x-text="notif.text"></span>
+              </div>
+              <button class="btn btn-sm btn-ghost" @click="markAsRead(notif)">✓</button>
+            </div>
+          </template>
+        </div>
+        <div class="modal-action">
+          <button class="btn" @click="clearAll()" x-text="$store.app.t('btn.clearAll')"></button>
+          <button class="btn btn-primary" @click="$store.notifications.showModal = false" x-text="$store.app.t('btn.close')"></button>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- Password Modal -->
-  <div x-data="passwordModal()" x-show="showPasswordModal" x-transition class="modal modal-open">
-    <div class="modal-box">
-      <h3 class="font-bold text-lg" x-text="isNewUser ? 'Создать пароль' : 'Введите пароль'"></h3>
-      <div class="py-4 space-y-4">
-        <input type="password" placeholder="Пароль" class="input input-bordered w-full" x-model="password">
-        <input x-show="isNewUser" type="password" placeholder="Подтвердите пароль" class="input input-bordered w-full" x-model="passwordConfirm">
-        <div x-show="passwordError" class="alert alert-error text-sm" x-text="passwordError"></div>
-      </div>
-      <div class="modal-action">
-        <button class="btn btn-primary" @click="submitPassword()">Продолжить</button>
+    <!-- Menu Modal -->
+    <div x-show="$store.app.showMenu" 
+         x-data="menuModal()"
+         class="modal"
+         :class="{ 'modal-open': $store.app.showMenu }">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg" x-text="$store.app.t('menu.title')"></h3>
+        <div class="py-4 space-y-4">
+          <!-- Theme toggle -->
+          <div class="form-control">
+            <label class="label cursor-pointer">
+              <span class="label-text" x-text="$store.app.t('menu.darkMode')"></span>
+              <input type="checkbox" class="toggle" 
+                     :checked="$store.settings.theme === 'dark'"
+                     @change="toggleTheme()" />
+            </label>
+          </div>
+          <!-- Language -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text" x-text="$store.app.t('menu.language')"></span>
+            </label>
+            <select class="select select-bordered" 
+                    x-model="$store.settings.lang"
+                    @change="changeLang()">
+              <option value="ru">Русский</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+          <!-- Export/Import -->
+          <div class="flex gap-2">
+            <button class="btn btn-outline flex-1" @click="exportData()">
+              <span x-text="$store.app.t('menu.export')"></span>
+            </button>
+            <button class="btn btn-outline flex-1" @click="importData()">
+              <span x-text="$store.app.t('menu.import')"></span>
+            </button>
+          </div>
+          <!-- Danger zone -->
+          <div class="divider" x-text="$store.app.t('menu.danger')"></div>
+          <button class="btn btn-error w-full" @click="wipeData()">
+            <span x-text="$store.app.t('menu.wipe')"></span>
+          </button>
+        </div>
+        <div class="modal-action">
+          <button class="btn btn-primary" @click="$store.app.showMenu = false" x-text="$store.app.t('btn.close')"></button>
+        </div>
       </div>
     </div>
+
+    <!-- Onboarding Modal -->
+    <div x-show="$store.app.showOnboarding" 
+         x-data="onboardingModal()"
+         class="modal"
+         :class="{ 'modal-open': $store.app.showOnboarding }">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg" x-text="$store.app.t('onboarding.title')"></h3>
+        <div class="py-4 space-y-4">
+          <p x-text="$store.app.t('onboarding.intro')"></p>
+          <div class="space-y-2">
+            <h4 class="font-bold" x-text="$store.app.t('onboarding.local')"></h4>
+            <p class="text-sm opacity-70" x-text="$store.app.t('onboarding.localDesc')"></p>
+            <h4 class="font-bold" x-text="$store.app.t('onboarding.world')"></h4>
+            <p class="text-sm opacity-70" x-text="$store.app.t('onboarding.worldDesc')"></p>
+            <h4 class="font-bold" x-text="$store.app.t('onboarding.insights')"></h4>
+            <p class="text-sm opacity-70" x-text="$store.app.t('onboarding.insightsDesc')"></p>
+          </div>
+        </div>
+        <div class="modal-action">
+          <button class="btn btn-primary" @click="completeOnboarding()" x-text="$store.app.t('btn.gotIt')"></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Password Modal (First run or decrypt) -->
+    <div x-show="$store.app.showPassword" 
+         x-data="passwordModal()"
+         class="modal"
+         :class="{ 'modal-open': $store.app.showPassword }">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg" x-text="isNewUser ? $store.app.t('password.create') : $store.app.t('password.enter')"></h3>
+        <div class="py-4 space-y-4">
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text" x-text="$store.app.t('password.label')"></span>
+            </label>
+            <input type="password" x-model="password" class="input input-bordered" />
+          </div>
+          <div x-show="isNewUser" class="form-control">
+            <label class="label">
+              <span class="label-text" x-text="$store.app.t('password.confirm')"></span>
+            </label>
+            <input type="password" x-model="passwordConfirm" class="input input-bordered" />
+          </div>
+          <div x-show="error" class="alert alert-error">
+            <span x-text="error"></span>
+          </div>
+        </div>
+        <div class="modal-action">
+          <button x-show="!isNewUser" class="btn btn-ghost" @click="resetStorage()">
+            <span x-text="$store.app.t('password.forgot')"></span>
+          </button>
+          <button class="btn btn-primary" @click="submitPassword()">
+            <span x-text="isNewUser ? $store.app.t('btn.save') : $store.app.t('btn.login')"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI Loading Progress -->
+    <div x-show="$store.app.aiLoading" 
+         class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-base-100 p-8 rounded-lg shadow-xl text-center">
+        <div class="loading loading-spinner loading-lg mb-4"></div>
+        <p x-text="$store.app.t('ai.loading')"></p>
+        <p class="text-sm opacity-70 mt-2" x-text="$store.app.aiProgress + '%'"></p>
+      </div>
+    </div>
+
   </div>
 
-</div>
-
-<script>
-// ============================================================================
-// СЕРВИСНЫЙ СЛОЙ (Alpine Stores)
-// ============================================================================
-
-document.addEventListener('alpine:init', () => {
-  
-  // $store.config — конфигурация
-  Alpine.store('config', {
-    darkTheme: true,
-    echoThreshold: 0.8,
-    
-    init() {
-      const saved = localStorage.getItem('noomium:config');
-      if (saved) {
-        try {
-          Object.assign(this, JSON.parse(saved));
-        } catch (e) {}
+  <script>
+    // ========================================
+    // MODULE: Config
+    // ========================================
+    const CONFIG = {
+      // TODO: All configuration constants
+      dbName: 'noomium_v2',
+      storeName: 'notes',
+      nostrRelays: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://relay.nostr.band'],
+      ai: {
+        model: 'Xenova/multilingual-e5-small',
+        dim: 384,
+        cacheLimit: 300,
+        timeout: 15000
+      },
+      search: {
+        threshold: 0.30,
+        serendipity: 0.15,
+        debounce: 800
+      },
+      crypto: {
+        iterations: 100000,
+        saltLength: 16,
+        ivLength: 12
       }
-      document.documentElement.setAttribute('data-theme', this.darkTheme ? 'dark' : 'light');
-    },
-    
-    save() {
-      localStorage.setItem('noomium:config', JSON.stringify({
-        darkTheme: this.darkTheme,
-        echoThreshold: this.echoThreshold
-      }));
-    },
-    
-    toggleTheme() {
-      document.documentElement.setAttribute('data-theme', this.darkTheme ? 'dark' : 'light');
-      this.save();
-    }
-  });
+    };
 
-  // $store.db — база данных
-  Alpine.store('db', {
-    db: null,
-    ready: false,
-    
-    async init() {
-      this.db = new Dexie('noomium');
-      this.db.version(1).stores({
-        notes: 'id, text, shared, createdAt, replyTo, parentId'
-      });
-      await this.db.open();
-      this.ready = true;
-    },
-    
-    async put(note) {
-      await this.db.notes.put(note);
-    },
-    
-    async get(id) {
-      return await this.db.notes.get(id);
-    },
-    
-    async del(id) {
-      await this.db.notes.delete(id);
-    },
-    
-    async all() {
-      return await this.db.notes.toArray();
-    },
-    
-    async filtered(query) {
-      const all = await this.all();
-      if (!query) return all;
-      const q = query.toLowerCase();
-      return all.filter(n => n.text.toLowerCase().includes(q));
-    }
-  });
-
-  // $store.ai — векторизация (ЗАГЛУШКА)
-  Alpine.store('ai', {
-    ready: false,
-    
-    async init() {
-      // TODO: реализовать загрузку Transformers.js модели
-      // Пока просто устанавливаем ready = true
-      this.ready = true;
-      console.log('AI store initialized (stub)');
-    },
-    
-    async embed(text) {
-      // TODO: реализовать реальную векторизацию через Transformers.js
-      // Пока возвращаем хеш-вектор
-      console.log('embed (stub):', text);
-      const vector = new Array(384).fill(0).map(() => Math.random());
-      return vector;
-    },
-    
-    cosine(a, b) {
-      // TODO: реализовать реальное косинусное сходство
-      console.log('cosine (stub)');
-      return 0.5;
-    }
-  });
-
-  // $store.ndk — Nostr сеть (ЗАГЛУШКА)
-  Alpine.store('ndk', {
-    status: 'disconnected',
-    sk: null,
-    pk: '0'.repeat(64),
-    
-    async init(password) {
-      // TODO: реализовать реальную инициализацию NDK
-      // TODO: реализовать шифрование/дешифрование ключа (PBKDF2 + AES-GCM)
-      // TODO: реализовать подключение к relay
-      // TODO: реализовать подписку на kind 20202
-      
-      console.log('NDK init (stub) with password');
-      
-      // Имитация подключения
-      setTimeout(() => {
-        this.status = 'connected';
-      }, 1000);
-    },
-    
-    async publishThought(text, vector, replyToEventId = null) {
-      // TODO: реализовать реальную публикацию через NDK
-      console.log('publishThought (stub):', { text, vector, replyToEventId });
-    },
-    
-    stop() {
-      // TODO: реализовать отключение NDK
-      console.log('NDK stop (stub)');
-      this.status = 'disconnected';
-    }
-  });
-
-  // $store.notifications — уведомления
-  Alpine.store('notifications', {
-    items: [],
-    
-    init() {
-      const saved = localStorage.getItem('noomium:notifications');
-      if (saved) {
-        try {
-          this.items = JSON.parse(saved);
-        } catch (e) {}
+    // ========================================
+    // MODULE: DB (Dexie.js)
+    // ========================================
+    class DB {
+      constructor() {
+        // TODO: Initialize Dexie database with schema
+        this.db = null;
       }
-    },
-    
-    add(notification) {
-      const notif = {
-        id: notification.id || (Date.now() + '_' + Math.random()),
-        type: notification.type || 'info',
-        text: notification.text || '',
-        timestamp: notification.timestamp || Date.now(),
-        read: false
-      };
-      this.items.unshift(notif);
-      this.save();
-    },
-    
-    getAll() {
-      return [...this.items];
-    },
-    
-    markRead(index) {
-      if (this.items[index]) {
-        this.items[index].read = true;
-        this.save();
+
+      async init() {
+        // TODO: Create Dexie instance, define schema, handle upgrades
       }
-    },
-    
-    clear() {
-      this.items = [];
-      this.save();
-    },
-    
-    getUnreadCount() {
-      return this.items.filter(n => !n.read).length;
-    },
-    
-    save() {
-      localStorage.setItem('noomium:notifications', JSON.stringify(this.items));
-    }
-  });
 
-  // $store.echo — детектор эха (ЗАГЛУШКА)
-  Alpine.store('echo', {
-    init() {
-      // TODO: реализовать детектор смыслового эха
-      console.log('Echo store initialized (stub)');
-    }
-  });
-
-});
-
-// ============================================================================
-// UI КОМПОНЕНТЫ (Alpine x-data)
-// ============================================================================
-
-function app() {
-  return {
-    currentView: 'stream',
-    showNotifications: false,
-    showMenu: false,
-    showPasswordModal: false,
-    
-    async init() {
-      Alpine.store('config').init();
-      await Alpine.store('db').init();
-      await Alpine.store('ai').init();
-      
-      // Показать модалку пароля
-      this.showPasswordModal = true;
-    },
-    
-    async completeInit(password) {
-      try {
-        await Alpine.store('ndk').init(password);
-        Alpine.store('notifications').init();
-        Alpine.store('echo').init();
-        this.showPasswordModal = false;
-      } catch (err) {
-        console.error('Init failed:', err);
-        alert('Ошибка инициализации: ' + err.message);
+      async put(note) {
+        // TODO: Save note to IndexedDB
       }
-    },
-    
-    async wipeData() {
-      if (!confirm('Удалить ВСЕ данные навсегда?')) return;
-      await Alpine.store('db').db.notes.clear();
-      localStorage.clear();
-      location.reload();
-    }
-  };
-}
 
-function editor() {
-  return {
-    text: '',
-    mode: 'private',
-    sending: false,
+      async get(id) {
+        // TODO: Get note by ID
+      }
+
+      async delete(id) {
+        // TODO: Delete note
+      }
+
+      async all() {
+        // TODO: Get all notes
+      }
+
+      async search(query) {
+        // TODO: Text search
+      }
+
+      async bulkPut(notes) {
+        // TODO: Bulk insert
+      }
+
+      async reset() {
+        // TODO: Clear all data
+      }
+    }
+
+    // ========================================
+    // MODULE: Crypto (Web Crypto API)
+    // ========================================
+    class Crypto {
+      async deriveKey(password, salt) {
+        // TODO: PBKDF2 key derivation
+      }
+
+      async encrypt(text, password) {
+        // TODO: AES-GCM encryption
+      }
+
+      async decrypt(encrypted, password) {
+        // TODO: AES-GCM decryption
+      }
+
+      generateSalt() {
+        // TODO: Generate random salt
+      }
+
+      generateIV() {
+        // TODO: Generate random IV
+      }
+    }
+
+    // ========================================
+    // MODULE: AI (Transformers.js)
+    // ========================================
+    class AI {
+      constructor() {
+        this.extractor = null;
+        this.cache = new Map();
+        this.mode = 'loading'; // loading | model | hash
+      }
+
+      async load(onProgress) {
+        // TODO: Load Transformers.js model with progress callback
+      }
+
+      async embed(text) {
+        // TODO: Generate embedding vector (or hash fallback)
+      }
+
+      cosine(a, b) {
+        // TODO: Cosine similarity
+      }
+
+      isReady() {
+        return this.mode !== 'loading';
+      }
+    }
+
+    // ========================================
+    // MODULE: Nostr (NDK + nostr-tools)
+    // ========================================
+    class Nostr {
+      constructor() {
+        this.ndk = null;
+        this.secretKey = null;
+        this.publicKey = null;
+        this.initialized = false;
+      }
+
+      async init(password) {
+        // TODO: Load or generate keys, decrypt if needed
+      }
+
+      async publish(text, vector, tags = []) {
+        // TODO: Publish event to Nostr (kind 20202)
+      }
+
+      async subscribe(room, onEvent) {
+        // TODO: Subscribe to public thoughts
+      }
+
+      async reply(text, vector, replyToId) {
+        // TODO: Publish reply with 'e' tag
+      }
+
+      stop() {
+        // TODO: Unsubscribe and cleanup
+      }
+    }
+
+    // ========================================
+    // MODULE: Search
+    // ========================================
+    class Search {
+      async execute(query, allNotes, threshold, serendipity) {
+        // TODO: Semantic search with grouping (my, world, insights)
+      }
+
+      async findEcho(newNote, localNotes, threshold) {
+        // TODO: Check for semantic echoes
+      }
+    }
+
+    // ========================================
+    // MODULE: I18n
+    // ========================================
+    const I18N = {
+      ru: {
+        // TODO: Russian translations
+      },
+      en: {
+        // TODO: English translations
+      }
+    };
+
+    // ========================================
+    // Alpine.js Stores
+    // ========================================
     
-    async send() {
-      if (!this.text.trim()) return;
+    // App Store
+    Alpine.store('app', {
+      initialized: false,
+      aiReady: false,
+      aiLoading: true,
+      aiProgress: 0,
+      netReady: false,
+      showMenu: false,
+      showOnboarding: false,
+      showPassword: false,
+      lang: 'ru',
       
-      this.sending = true;
-      
-      try {
-        const vector = await Alpine.store('ai').embed(this.text);
+      t(key) {
+        // TODO: Translation function
+        return I18N[this.lang]?.[key] || key;
+      }
+    });
+
+    // Notifications Store
+    Alpine.store('notifications', {
+      showModal: false,
+      list: [],
+      unreadCount: 0,
+
+      add(notif) {
+        // TODO: Add notification
+      },
+
+      markAsRead(id) {
+        // TODO: Mark as read
+      },
+
+      clearAll() {
+        // TODO: Clear all notifications
+      },
+
+      load() {
+        // TODO: Load from localStorage
+      },
+
+      save() {
+        // TODO: Save to localStorage
+      }
+    });
+
+    // Settings Store
+    Alpine.store('settings', {
+      theme: 'dark',
+      lang: 'ru',
+
+      save() {
+        // TODO: Save to localStorage
+      },
+
+      load() {
+        // TODO: Load from localStorage
+      }
+    });
+
+    // ========================================
+    // Alpine.js Components
+    // ========================================
+
+    function app() {
+      return {
+        activeTab: 'stream',
         
-        const note = {
-          id: 'n' + Date.now() + Math.random().toString(36).slice(2, 6),
-          text: this.text,
-          vector: vector,
-          shared: this.mode === 'world',
-          createdAt: Date.now(),
-          replyTo: null,
-          parentId: null
-        };
-        
-        await Alpine.store('db').put(note);
-        
-        if (this.mode === 'world') {
-          await Alpine.store('ndk').publishThought(this.text, vector, null);
+        async init() {
+          // TODO: Initialize all services, load AI, connect to Nostr
         }
+      };
+    }
+
+    function header() {
+      return {
+        getNetworkStatusClass() {
+          // TODO: Return badge class based on network status
+        },
+        getNetworkStatusText() {
+          // TODO: Return network status text
+        },
+        getAIStatusClass() {
+          // TODO: Return badge class based on AI status
+        },
+        getAIStatusText() {
+          // TODO: Return AI status text
+        }
+      };
+    }
+
+    function editor() {
+      return {
+        text: '',
+        mode: 'private',
+        charCount: 0,
         
-        this.text = '';
-        alert('Заметка сохранена');
-      } catch (err) {
-        console.error('Send failed:', err);
-        alert('Ошибка отправки: ' + err.message);
-      } finally {
-        this.sending = false;
-      }
+        debouncedSearch() {
+          // TODO: Debounced semantic search
+        },
+        
+        async send() {
+          // TODO: Vectorize, save, publish if mode === 'world'
+        }
+      };
     }
-  };
-}
 
-function carousel() {
-  return {
-    // TODO: реализовать карусель мыслей
-    // Данные будут браться из $store после поиска по вектору
-  };
-}
-
-function feed() {
-  return {
-    // TODO: реализовать ленту публичных мыслей
-    // Данные будут браться из $store.ndk.publicThoughts
-  };
-}
-
-function base() {
-  return {
-    filteredNotes: [],
-    searchQuery: '',
-    
-    async init() {
-      await this.updateSearch();
-    },
-    
-    async updateSearch() {
-      this.filteredNotes = await Alpine.store('db').filtered(this.searchQuery);
-    },
-    
-    formatDate(ts) {
-      return new Date(ts).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
-    },
-    
-    openNote(id) {
-      // TODO: реализовать просмотр заметки
-      console.log('Open note:', id);
+    function stream() {
+      return {
+        results: {
+          my: [],
+          world: [],
+          insights: []
+        },
+        
+        edit(note) {
+          // TODO: Open note for editing
+        },
+        
+        async toggleShare(note) {
+          // TODO: Toggle shared status
+        },
+        
+        async delete(note) {
+          // TODO: Delete note
+        },
+        
+        reply(note) {
+          // TODO: Switch editor to reply mode
+        }
+      };
     }
-  };
-}
 
-function notifications() {
-  return {
-    markRead(idx) {
-      Alpine.store('notifications').markRead(idx);
+    function feed() {
+      return {
+        publicFeed: [],
+        
+        formatDate(timestamp) {
+          // TODO: Format with Day.js
+        },
+        
+        reply(note) {
+          // TODO: Reply to note
+        }
+      };
     }
-  };
-}
 
-function passwordModal() {
-  return {
-    isNewUser: !localStorage.getItem('noomium:sk'),
-    password: '',
-    passwordConfirm: '',
-    passwordError: '',
-    
-    async submitPassword() {
-      if (this.isNewUser && this.password !== this.passwordConfirm) {
-        this.passwordError = 'Пароли не совпадают';
-        return;
-      }
-      if (!this.password) {
-        this.passwordError = 'Введите пароль';
-        return;
-      }
-      
-      try {
-        await this.$root.completeInit(this.password);
-        this.passwordError = '';
-      } catch (err) {
-        this.passwordError = 'Ошибка: ' + err.message;
-      }
+    function base() {
+      return {
+        searchQuery: '',
+        filteredNotes: [],
+        stats: {
+          total: 0,
+          shared: 0,
+          private: 0
+        },
+        
+        debouncedFilter() {
+          // TODO: Debounced text search
+        },
+        
+        formatDate(timestamp) {
+          // TODO: Format with Day.js
+        },
+        
+        openNote(note) {
+          // TODO: Open note detail view
+        }
+      };
     }
-  };
-}
 
-// ============================================================================
-// SERVICE WORKER & MANIFEST
-// ============================================================================
+    function notificationsModal() {
+      return {
+        markAsRead(notif) {
+          // TODO: Mark notification as read
+        },
+        
+        clearAll() {
+          // TODO: Clear all notifications
+        }
+      };
+    }
 
-if ('serviceWorker' in navigator) {
-  const swCode = `
-    const CACHE = 'noomium-v1';
-    
-    self.addEventListener('install', e => {
-      self.skipWaiting();
-    });
-    
-    self.addEventListener('activate', e => {
-      e.waitUntil(clients.claim());
-    });
-    
-    self.addEventListener('fetch', e => {
-      if (e.request.method !== 'GET') return;
-      
-      // Network first strategy
-      e.respondWith(
-        fetch(e.request)
-          .then(response => {
-            // Кешируем успешные ответы
-            if (response.status === 200) {
-              const responseClone = response.clone();
-              caches.open(CACHE).then(cache => {
-                cache.put(e.request, responseClone);
-              });
-            }
-            return response;
-          })
-          .catch(() => {
-            // Если сеть недоступна, пытаемся достать из кеша
-            return caches.match(e.request).then(response => {
-              return response || new Response('Offline', { status: 503 });
-            });
-          })
-      );
-    });
-  `;
-  const blob = new Blob([swCode], { type: 'application/javascript' });
-  const swUrl = URL.createObjectURL(blob);
-  navigator.serviceWorker.register(swUrl).catch(err => {
-    console.warn('SW registration failed:', err);
-  });
-}
+    function menuModal() {
+      return {
+        toggleTheme() {
+          // TODO: Toggle theme
+        },
+        
+        changeLang() {
+          // TODO: Change language
+        },
+        
+        async exportData() {
+          // TODO: Export to JSON
+        },
+        
+        async importData() {
+          // TODO: Import from JSON
+        },
+        
+        async wipeData() {
+          // TODO: Wipe all data
+        }
+      };
+    }
 
-const manifest = {
-  name: 'NOOmium',
-  short_name: 'NOOmium',
-  description: 'Блокнот с антисоцсетью',
-  start_url: '.',
-  display: 'standalone',
-  background_color: '#0b0b10',
-  theme_color: '#0b0b10',
-  icons: [{
-    src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">◆</text></svg>',
-    sizes: 'any',
-    type: 'image/svg+xml'
-  }]
-};
-const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
-const manifestUrl = URL.createObjectURL(manifestBlob);
-const link = document.createElement('link');
-link.rel = 'manifest';
-link.href = manifestUrl;
-document.head.appendChild(link);
+    function onboardingModal() {
+      return {
+        completeOnboarding() {
+          // TODO: Mark onboarding as complete
+        }
+      };
+    }
 
-</script>
+    function passwordModal() {
+      return {
+        password: '',
+        passwordConfirm: '',
+        isNewUser: true,
+        error: '',
+        
+        async submitPassword() {
+          // TODO: Validate and submit password
+        },
+        
+        async resetStorage() {
+          // TODO: Reset storage after confirmation
+        }
+      };
+    }
 
+    // ========================================
+    // Service Worker (Workbox)
+    // ========================================
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        // TODO: Register Workbox service worker
+        // navigator.serviceWorker.register('/sw.js')
+      });
+    }
+
+  </script>
 </body>
 </html>
