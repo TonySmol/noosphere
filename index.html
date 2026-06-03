@@ -2,22 +2,54 @@
 <html lang="ru" data-theme="dark">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#1d232a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <!--
+    CSP для single-file прототипа.
+    Для production вынести JS во внешние файлы и заменить 'unsafe-inline' на nonce/hash.
+    'unsafe-eval' НЕ используется — Alpine CSP build работает без него.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+    style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
+    connect-src 'self' https://cdn.jsdelivr.net https://huggingface.co https://huggingface.co wss:;
+    img-src 'self' data: blob:;
+    worker-src 'self' blob:;
+    base-uri 'self';
+    form-action 'self';
+  ">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◆</text></svg>">
+  <link rel="manifest" href='data:application/manifest+json,{"name":"NOOmium","short_name":"NOOmium","start_url":".","display":"standalone","background_color":"%231d232a","theme_color":"%231d232a"}'>
   <title>NOOmium</title>
-  
+
   <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet">
   <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/csp@3.14.1/dist/cdn.min.js"></script>
-  
+  <script src="https://cdn.jsdelivr.net/npm/dexie@3.2.7/dist/dexie.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/plugin/relativeTime.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/locale/ru.js"></script>
+
   <style>
     [x-cloak] { display: none !important; }
+    .line-clamp-3 {
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .pulse-dot { animation: pulse-dot 1.4s ease-in-out infinite; }
+    @keyframes pulse-dot { 50% { opacity: 0.3; } }
   </style>
 </head>
 <body class="bg-base-100 min-h-screen">
-  
+
   <div x-data="app" x-init="init" x-cloak>
-    
+
     <!-- HEADER -->
-    <div class="navbar bg-base-200 shadow-lg sticky top-0 z-40">
+    <header class="navbar bg-base-200 shadow-lg sticky top-0 z-40">
       <div class="flex-1">
         <span class="text-xl font-bold px-4">NOO<span class="text-primary">.</span>mium</span>
       </div>
@@ -31,40 +63,31 @@
           <span class="text-xs" x-text="aiStatusText"></span>
         </div>
       </div>
-    </div>
+    </header>
 
     <!-- MAIN -->
     <main class="container mx-auto p-4 max-w-4xl">
-      
+
       <!-- EDITOR -->
-      <div class="card bg-base-200 shadow-xl mb-6">
+      <section class="card bg-base-200 shadow-xl mb-6">
         <div class="card-body">
-          <textarea 
+          <textarea
             x-model="editorText"
             @input="onEditorInput"
             class="textarea textarea-bordered h-24 text-lg"
-            placeholder="О чём думаешь?"
-          ></textarea>
-          <div class="flex justify-between items-center mt-2">
+            placeholder="О чём думаешь?"></textarea>
+          <div class="flex justify-between items-center mt-2 flex-wrap gap-2">
             <span class="text-sm opacity-70" x-text="charCount"></span>
-            <div class="flex gap-2">
+            <div class="flex gap-2 flex-wrap">
               <div class="btn-group">
-                <button class="btn btn-sm"
-                        :class="privateBtnClass"
-                        @click="setPrivateMode">Личное</button>
-                <button class="btn btn-sm"
-                        :class="worldBtnClass"
-                        @click="setWorldMode">Мир</button>
+                <button class="btn btn-sm" :class="privateBtnClass" @click="setPrivateMode">Личное</button>
+                <button class="btn btn-sm" :class="worldBtnClass" @click="setWorldMode">Мир</button>
               </div>
-              <button class="btn btn-primary"
-                      :disabled="!canSend"
-                      @click="sendNote">
-                Послать
-              </button>
+              <button class="btn btn-primary" :disabled="isSendDisabled" @click="sendNote">Послать</button>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
       <!-- TABS -->
       <div role="tablist" class="tabs tabs-lifted mb-4">
@@ -74,15 +97,15 @@
 
       <!-- STREAM TAB -->
       <div x-show="isStreamTab" class="space-y-6">
-        
+
         <section x-show="hasMyResults">
           <h3 class="text-lg font-bold mb-2">Моё</h3>
           <div class="space-y-2">
             <template x-for="note in myResults" :key="note.id">
-              <div class="card bg-base-200 shadow">
+              <article class="card bg-base-200 shadow">
                 <div class="card-body p-4">
                   <p x-text="note.text"></p>
-                  <div class="flex justify-between items-center mt-2">
+                  <div class="flex justify-between items-center mt-2 flex-wrap gap-2">
                     <span class="badge badge-primary badge-sm" x-text="note.scoreText"></span>
                     <div class="flex gap-1">
                       <button class="btn btn-ghost btn-xs" @click="toggleShared(note.id)" x-text="note.toggleText"></button>
@@ -90,7 +113,7 @@
                     </div>
                   </div>
                 </div>
-              </div>
+              </article>
             </template>
           </div>
         </section>
@@ -99,24 +122,24 @@
           <h3 class="text-lg font-bold mb-2">Озарения</h3>
           <div class="space-y-2">
             <template x-for="note in insightsResults" :key="note.id">
-              <div class="card bg-base-200 shadow">
+              <article class="card bg-base-200 shadow">
                 <div class="card-body p-4">
                   <p x-text="note.text"></p>
                   <div class="flex justify-end mt-2">
                     <span class="badge badge-accent badge-sm" x-text="note.scoreText"></span>
                   </div>
                 </div>
-              </div>
+              </article>
             </template>
           </div>
         </section>
 
         <div x-show="showNoResults" class="text-center py-10 opacity-50">
-          <p>Ничего не найдено.</p>
+          <p>Ничего не найдено. Попробуйте другую формулировку.</p>
         </div>
-        
+
         <div x-show="showEmptyState" class="text-center py-10 opacity-50">
-          <p>Начните печатать.</p>
+          <p>Начните печатать, чтобы найти созвучия в вашей базе.</p>
         </div>
       </div>
 
@@ -138,7 +161,7 @@
         </div>
         <div class="space-y-2">
           <template x-for="note in allNotes" :key="note.id">
-            <div class="card bg-base-200 shadow cursor-pointer">
+            <article class="card bg-base-200 shadow cursor-pointer hover:bg-base-300 transition-colors" @click="openNote(note.id)">
               <div class="card-body p-4">
                 <p class="line-clamp-3" x-text="note.text"></p>
                 <div class="flex justify-between items-center mt-2">
@@ -146,7 +169,7 @@
                   <span class="text-xs opacity-60" x-text="note.dateText"></span>
                 </div>
               </div>
-            </div>
+            </article>
           </template>
         </div>
       </div>
@@ -156,212 +179,950 @@
     <!-- PASSWORD MODAL -->
     <dialog class="modal" :class="modalClass">
       <div class="modal-box">
-        <h3 class="font-bold text-lg">Защита данных</h3>
+        <h3 class="font-bold text-lg" x-text="passwordTitle"></h3>
         <p class="py-4 opacity-70" x-text="passwordModalText"></p>
         <div class="form-control">
-          <input type="password" x-model="password" @keydown.enter="confirmPassword" placeholder="Пароль" class="input input-bordered" />
+          <input
+            type="password"
+            x-model="password"
+            @keydown.enter="confirmPassword"
+            placeholder="Пароль (минимум 4 символа)"
+            class="input input-bordered"
+            :class="passwordInputClass">
+          <p x-show="hasPasswordError" class="text-error text-sm mt-1" x-text="passwordError"></p>
         </div>
         <div class="modal-action">
-          <button class="btn btn-primary" @click="confirmPassword">Сохранить</button>
+          <button class="btn btn-primary" @click="confirmPassword">Продолжить</button>
         </div>
       </div>
     </dialog>
 
+    <!-- ERROR TOAST -->
+    <div x-show="hasToast" x-transition class="toast toast-end z-50">
+      <div class="alert" :class="toastClass">
+        <span x-text="toastText"></span>
+      </div>
+    </div>
+
   </div>
 
-  <script>
-    // ================================================================
-    // ALPINE COMPONENT (CSP-compliant)
-    // ================================================================
-    document.addEventListener('alpine:init', () => {
-      Alpine.data('app', () => ({
-        // State
-        editorText: '',
-        editorMode: 'private',
-        activeTab: 'stream',
-        allNotes: [],
-        myResults: [],
-        insightsResults: [],
-        showPasswordModal: false,
-        passwordModalText: 'Придумайте пароль для шифрования.',
-        password: '',
-        storageStatus: 'loading',
-        aiStatus: 'loading',
-        _searchTimer: null,
+<script>
+'use strict';
 
-        // Lifecycle
-        async init() {
-          console.log('[INFO] App initialized');
-          this.storageStatus = 'ready';
-          this.showPasswordModal = true;
-        },
+dayjs.extend(dayjs_plugin_relativeTime);
+dayjs.locale('ru');
 
-        // Computed properties (getters)
-        get charCount() {
-          return `${this.editorText.length} симв.`;
-        },
+// ===========================================================================
+// CORE: KERNEL — DI container + EventBus + Logger
+// ===========================================================================
+const Kernel = (() => {
+  const modules = new Map();
+  const listeners = new Map();
 
-        get canSend() {
-          return this.editorText.trim().length > 0;
-        },
+  const logger = {
+    info: (msg, data) => console.log(`[INFO] ${msg}`, data !== undefined ? data : ''),
+    warn: (msg, data) => console.warn(`[WARN] ${msg}`, data !== undefined ? data : ''),
+    error: (msg, data) => console.error(`[ERROR] ${msg}`, data !== undefined ? data : '')
+  };
 
-        get privateBtnClass() {
-          return this.editorMode === 'private' ? 'btn-primary' : 'btn-ghost';
-        },
-
-        get worldBtnClass() {
-          return this.editorMode === 'world' ? 'btn-primary' : 'btn-ghost';
-        },
-
-        get streamTabClass() {
-          return { 'tab-active': this.activeTab === 'stream' };
-        },
-
-        get baseTabClass() {
-          return { 'tab-active': this.activeTab === 'base' };
-        },
-
-        get isStreamTab() {
-          return this.activeTab === 'stream';
-        },
-
-        get isBaseTab() {
-          return this.activeTab === 'base';
-        },
-
-        get hasMyResults() {
-          return this.myResults.length > 0;
-        },
-
-        get hasInsightsResults() {
-          return this.insightsResults.length > 0;
-        },
-
-        get showNoResults() {
-          return this.myResults.length === 0 && this.insightsResults.length === 0 && this.editorText.length > 0;
-        },
-
-        get showEmptyState() {
-          return this.editorText.length === 0;
-        },
-
-        get totalNotes() {
-          return this.allNotes.length;
-        },
-
-        get sharedNotes() {
-          return this.allNotes.filter(n => n.shared).length;
-        },
-
-        get privateNotes() {
-          return this.allNotes.filter(n => !n.shared).length;
-        },
-
-        get storageStatusClass() {
-          const classes = {
-            loading: 'bg-warning animate-pulse',
-            ready: 'bg-success',
-            error: 'bg-error'
-          };
-          return classes[this.storageStatus] || 'bg-warning';
-        },
-
-        get storageStatusText() {
-          return this.storageStatus;
-        },
-
-        get aiStatusClass() {
-          const classes = {
-            loading: 'bg-warning animate-pulse',
-            ready: 'bg-success',
-            error: 'bg-error'
-          };
-          return classes[this.aiStatus] || 'bg-warning';
-        },
-
-        get aiStatusText() {
-          return this.aiStatus;
-        },
-
-        get modalClass() {
-          return { 'modal-open': this.showPasswordModal };
-        },
-
-        // Methods
-        setPrivateMode() {
-          this.editorMode = 'private';
-        },
-
-        setWorldMode() {
-          this.editorMode = 'world';
-        },
-
-        setStreamTab() {
-          this.activeTab = 'stream';
-        },
-
-        setBaseTab() {
-          this.activeTab = 'base';
-        },
-
-        onEditorInput() {
-          clearTimeout(this._searchTimer);
-          this._searchTimer = setTimeout(() => {
-            this.runSearch();
-          }, 800);
-        },
-
-        async runSearch() {
-          // TODO: Implement search logic
-          this.myResults = [];
-          this.insightsResults = [];
-        },
-
-        async sendNote() {
-          if (!this.canSend) return;
-          
-          const note = {
-            id: 'n' + Date.now().toString(36),
-            text: this.editorText.trim(),
-            shared: this.editorMode === 'world',
-            createdAt: Date.now(),
-            badgeClass: this.editorMode === 'world' ? 'badge-secondary' : 'badge-ghost',
-            statusText: this.editorMode === 'world' ? 'открыто' : 'лично',
-            dateText: 'только что'
-          };
-          
-          this.allNotes.unshift(note);
-          this.editorText = '';
-          this.myResults = [];
-          this.insightsResults = [];
-        },
-
-        async toggleShared(id) {
-          const note = this.allNotes.find(n => n.id === id);
-          if (note) {
-            note.shared = !note.shared;
-            note.badgeClass = note.shared ? 'badge-secondary' : 'badge-ghost';
-            note.statusText = note.shared ? 'открыто' : 'лично';
-          }
-        },
-
-        async deleteNote(id) {
-          if (!confirm('Удалить эту мысль навсегда?')) return;
-          this.allNotes = this.allNotes.filter(n => n.id !== id);
-        },
-
-        async confirmPassword() {
-          if (!this.password || this.password.length < 4) {
-            this.passwordModalText = 'Пароль должен быть не менее 4 символов.';
-            return;
-          }
-          
-          this.showPasswordModal = false;
-          this.password = '';
-          console.log('[INFO] Password confirmed');
+  return {
+    register(name, factory) {
+      if (modules.has(name)) {
+        logger.warn(`Module ${name} re-registered`);
+      }
+      modules.set(name, { factory, instance: null });
+    },
+    get(name) {
+      const mod = modules.get(name);
+      if (!mod) throw new Error(`Module "${name}" not found in Kernel`);
+      if (!mod.instance) {
+        mod.instance = mod.factory(this);
+      }
+      return mod.instance;
+    },
+    async boot() {
+      for (const [name, mod] of modules) {
+        if (mod.instance) continue;
+        try {
+          mod.instance = await Promise.resolve(mod.factory(this));
+          logger.info(`Module "${name}" initialized`);
+        } catch (err) {
+          logger.error(`Module "${name}" failed to initialize`, err);
         }
-      }));
+      }
+    },
+    on(event, handler) {
+      if (!listeners.has(event)) listeners.set(event, new Set());
+      listeners.get(event).add(handler);
+    },
+    off(event, handler) {
+      const set = listeners.get(event);
+      if (set) set.delete(handler);
+    },
+    emit(event, payload) {
+      const set = listeners.get(event);
+      if (!set) return;
+      for (const handler of set) {
+        try {
+          handler(payload);
+        } catch (err) {
+          logger.error(`Event handler error for "${event}"`, err);
+        }
+      }
+    },
+    logger
+  };
+})();
+
+// ===========================================================================
+// MODULE: CONFIG
+// ===========================================================================
+Kernel.register('config', () => {
+  const STORAGE_KEY = 'noomium:config';
+  const defaults = Object.freeze({
+    dbName: 'noomium_v2',
+    crypto: { iterations: 100000, saltLen: 16, ivLen: 12 },
+    ai: {
+      model: 'Xenova/multilingual-e5-small',
+      dim: 384,
+      cacheLimit: 300,
+      embedTimeout: 15000
+    },
+    search: {
+      threshold: 0.30,
+      serendipity: 0.15,
+      debounceMs: 800
+    }
+  });
+
+  let state = structuredClone(defaults);
+
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      state = { ...state, ...parsed };
+    }
+  } catch (err) {
+    Kernel.logger.warn('Config load failed', err);
+  }
+
+  return {
+    defaults: () => structuredClone(defaults),
+    get(key, def) {
+      const value = state[key];
+      return value !== undefined ? value : def;
+    },
+    set(key, value) {
+      state[key] = value;
+      this.save();
+    },
+    save() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      } catch (err) {
+        Kernel.logger.error('Config save failed', err);
+      }
+    }
+  };
+});
+
+// ===========================================================================
+// MODULE: CRYPTO — PBKDF2 (master key) + AES-GCM (data encryption key)
+// ===========================================================================
+Kernel.register('crypto', (kernel) => {
+  const config = kernel.get('config');
+  const SK_KEY = 'noomium:sk';       // encrypted DEK (base64)
+  const SALT_KEY = 'noomium:salt';   // public salt (base64)
+
+  let dek = null; // raw Uint8Array, kept in memory only while session active
+  let ready = false;
+
+  const b64 = {
+    encode: (bytes) => btoa(String.fromCharCode.apply(null, bytes)),
+    decode: (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0))
+  };
+
+  const deriveMasterKey = async (password, salt) => {
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']
+    );
+    return crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt,
+        iterations: config.get('crypto').iterations,
+        hash: 'SHA-256'
+      },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt', 'wrapKey', 'unwrapKey']
+    );
+  };
+
+  const randomBytes = (len) => crypto.getRandomValues(new Uint8Array(len));
+
+  const importDek = (rawDek) => crypto.subtle.importKey(
+    'raw', rawDek, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+  );
+
+  return {
+    isReady: () => ready,
+
+    async initialize(password) {
+      const saltB64 = localStorage.getItem(SALT_KEY);
+      const encDekB64 = localStorage.getItem(SK_KEY);
+      const cfg = config.get('crypto');
+
+      let salt;
+      if (saltB64) {
+        salt = b64.decode(saltB64);
+      } else {
+        salt = randomBytes(cfg.saltLen);
+        localStorage.setItem(SALT_KEY, b64.encode(salt));
+      }
+
+      const mk = await deriveMasterKey(password, salt);
+
+      if (encDekB64) {
+        // Existing user — decrypt DEK
+        const combined = b64.decode(encDekB64);
+        const iv = combined.slice(0, cfg.ivLen);
+        const ciphertext = combined.slice(cfg.ivLen);
+        try {
+          const rawDek = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv }, mk, ciphertext
+          );
+          dek = new Uint8Array(rawDek);
+        } catch (err) {
+          throw new Error('WRONG_PASSWORD');
+        }
+      } else {
+        // New user — generate DEK, encrypt with MK, persist
+        dek = randomBytes(32);
+        const iv = randomBytes(cfg.ivLen);
+        const ciphertext = await crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv }, mk, dek
+        );
+        const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+        combined.set(iv, 0);
+        combined.set(new Uint8Array(ciphertext), iv.length);
+        localStorage.setItem(SK_KEY, b64.encode(combined));
+      }
+
+      ready = true;
+      kernel.emit('crypto:ready');
+    },
+
+    async encryptText(plainText) {
+      if (!dek) throw new Error('Crypto not initialized');
+      const cfg = config.get('crypto');
+      const iv = randomBytes(cfg.ivLen);
+      const key = await importDek(dek);
+      const enc = new TextEncoder();
+      const ciphertext = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv }, key, enc.encode(plainText)
+      );
+      return {
+        iv: b64.encode(iv),
+        ct: b64.encode(new Uint8Array(ciphertext))
+      };
+    },
+
+    async decryptText({ iv, ct }) {
+      if (!dek) throw new Error('Crypto not initialized');
+      const key = await importDek(dek);
+      const raw = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: b64.decode(iv) },
+        key,
+        b64.decode(ct)
+      );
+      return new TextDecoder().decode(raw);
+    },
+
+    async changePassword(oldPassword, newPassword) {
+      if (!dek) throw new Error('Crypto not initialized');
+      const cfg = config.get('crypto');
+      const saltB64 = localStorage.getItem(SALT_KEY);
+      const salt = saltB64 ? b64.decode(saltB64) : randomBytes(cfg.saltLen);
+      const newMk = await deriveMasterKey(newPassword, salt);
+      const iv = randomBytes(cfg.ivLen);
+      const ciphertext = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv }, newMk, dek
+      );
+      const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+      combined.set(iv, 0);
+      combined.set(new Uint8Array(ciphertext), iv.length);
+      localStorage.setItem(SALT_KEY, b64.encode(salt));
+      localStorage.setItem(SK_KEY, b64.encode(combined));
+    },
+
+    wipe() {
+      localStorage.removeItem(SK_KEY);
+      localStorage.removeItem(SALT_KEY);
+      dek = null;
+      ready = false;
+    }
+  };
+});
+
+// ===========================================================================
+// MODULE: STORAGE — Dexie (IndexedDB) with in-memory cache
+// ===========================================================================
+Kernel.register('storage', (kernel) => {
+  const config = kernel.get('config');
+  const dbName = config.get('dbName', 'noomium_v2');
+
+  const db = new Dexie(dbName);
+  db.version(1).stores({
+    notes: 'id, shared, createdAt, isEncrypted',
+    embeddings: 'noteId'
+  });
+
+  let notesCache = [];
+  let embeddingsCache = new Map();
+  let opened = false;
+
+  const refreshNotesCache = async () => {
+    try {
+      notesCache = await db.notes.toArray();
+    } catch (err) {
+      kernel.logger.error('Notes cache refresh failed', err);
+      notesCache = [];
+    }
+  };
+
+  const refreshEmbeddingsCache = async () => {
+    try {
+      const all = await db.embeddings.toArray();
+      embeddingsCache = new Map(all.map((e) => [e.noteId, e.embedding]));
+    } catch (err) {
+      kernel.logger.error('Embeddings cache refresh failed', err);
+      embeddingsCache = new Map();
+    }
+  };
+
+  const open = async () => {
+    if (opened) return;
+    try {
+      await db.open();
+      await refreshNotesCache();
+      await refreshEmbeddingsCache();
+      opened = true;
+      kernel.emit('storage:ready');
+    } catch (err) {
+      kernel.logger.error('Storage open failed', err);
+    }
+  };
+
+  const emitChange = () => kernel.emit('storage:changed', { notes: notesCache });
+
+  return {
+    open,
+    isReady: () => opened,
+    allNotes: () => notesCache,
+    getEmbedding: (noteId) => embeddingsCache.get(noteId),
+    allEmbeddings: () => embeddingsCache,
+
+    async put(note) {
+      if (!opened) await open();
+      await db.notes.put(note);
+      await refreshNotesCache();
+      emitChange();
+      kernel.emit('note:saved', { note });
+    },
+
+    async delete(id) {
+      if (!opened) await open();
+      await db.notes.delete(id);
+      await db.embeddings.delete(id);
+      await refreshNotesCache();
+      await refreshEmbeddingsCache();
+      emitChange();
+      kernel.emit('note:deleted', { id });
+    },
+
+    async toggleShared(id) {
+      if (!opened) await open();
+      const note = await db.notes.get(id);
+      if (!note) return;
+      note.shared = !note.shared;
+      await db.notes.put(note);
+      await refreshNotesCache();
+      emitChange();
+      kernel.emit('note:updated', { note });
+    },
+
+    async saveEmbedding(noteId, embedding) {
+      if (!opened) await open();
+      await db.embeddings.put({ noteId, embedding });
+      embeddingsCache.set(noteId, embedding);
+      kernel.emit('embedding:saved', { noteId });
+    },
+
+    async reset() {
+      try { await db.delete(); } catch (_) {}
+      notesCache = [];
+      embeddingsCache = new Map();
+      opened = false;
+      await open();
+      emitChange();
+      kernel.emit('storage:reset');
+    }
+  };
+});
+
+// ===========================================================================
+// MODULE: AI — Transformers.js with hash fallback
+// ===========================================================================
+Kernel.register('ai', (kernel) => {
+  const config = kernel.get('config');
+  const aiConfig = config.get('ai');
+
+  let mode = 'loading';    // 'loading' | 'model' | 'hash' | 'error'
+  let progress = 0;
+  let extractor = null;
+  const cache = new Map();
+
+  const hashEmbed = (text) => {
+    const DIM = aiConfig.dim;
+    const vec = new Float32Array(DIM);
+    const tokens = (text || '').toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
+    for (const tok of tokens) {
+      let h = 2166136261;
+      for (let i = 0; i < tok.length; i++) {
+        h ^= tok.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      vec[Math.abs(h) % DIM] += 1;
+      const h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
+      vec[Math.abs(h2) % DIM] += 0.5;
+    }
+    let norm = 0;
+    for (let i = 0; i < DIM; i++) norm += vec[i] * vec[i];
+    norm = Math.sqrt(norm) || 1;
+    for (let i = 0; i < DIM; i++) vec[i] /= norm;
+    return Array.from(vec);
+  };
+
+  const load = async () => {
+    try {
+      const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
+      const { pipeline, env } = mod;
+      env.allowLocalModels = false;
+      env.useBrowserCache = true;
+      extractor = await pipeline('feature-extraction', aiConfig.model, {
+        quantized: true,
+        progress_callback: (p) => {
+          if (p.status === 'progress' && p.total > 0) {
+            progress = (p.loaded / p.total) * 100;
+            kernel.emit('ai:progress', { progress });
+          }
+        }
+      });
+      mode = 'model';
+      kernel.emit('ai:ready', { mode });
+      kernel.logger.info('AI model loaded', aiConfig.model);
+    } catch (err) {
+      kernel.logger.warn('AI model load failed, using hash fallback', err);
+      mode = 'hash';
+      kernel.emit('ai:ready', { mode });
+    }
+  };
+
+  const embed = async (text) => {
+    const t = (text || '').trim();
+    if (!t) return null;
+
+    if (cache.has(t)) {
+      const val = cache.get(t);
+      cache.delete(t);
+      cache.set(t, val);
+      return val;
+    }
+
+    let vec;
+    if (mode === 'model' && extractor) {
+      try {
+        const timeout = new Promise((_, rej) =>
+          setTimeout(() => rej(new Error('embed timeout')), aiConfig.embedTimeout)
+        );
+        const out = await Promise.race([
+          extractor(t, { pooling: 'mean', normalize: true }),
+          timeout
+        ]);
+        vec = Array.from(out.data);
+      } catch (err) {
+        kernel.logger.warn('Embed failed, using hash', err);
+        vec = hashEmbed(t);
+      }
+    } else {
+      vec = hashEmbed(t);
+    }
+
+    cache.set(t, vec);
+    if (cache.size > aiConfig.cacheLimit) {
+      const oldest = cache.keys().next().value;
+      cache.delete(oldest);
+    }
+    return vec;
+  };
+
+  const cosine = (a, b) => {
+    if (!a || !b || a.length !== b.length) return 0;
+    let sum = 0;
+    for (let i = 0; i < a.length; i++) sum += a[i] * b[i];
+    return Math.abs(sum) < 1e-8 ? 0 : sum;
+  };
+
+  // Auto-load in background
+  setTimeout(() => load().catch((err) => {
+    mode = 'error';
+    kernel.emit('ai:error', { error: err });
+  }), 100);
+
+  return {
+    get mode() { return mode; },
+    get progress() { return progress; },
+    get ready() { return mode === 'model' || mode === 'hash'; },
+    embed,
+    cosine
+  };
+});
+
+// ===========================================================================
+// MODULE: SEARCH — semantic search with threshold + serendipity
+// ===========================================================================
+Kernel.register('search', (kernel) => {
+  const config = kernel.get('config');
+  const searchCfg = config.get('search');
+
+  const search = async (queryText) => {
+    const ai = kernel.get('ai');
+    const storage = kernel.get('storage');
+    const crypto = kernel.get('crypto');
+
+    if (!queryText || !ai.ready) {
+      return { my: [], insights: [] };
+    }
+
+    const queryVec = await ai.embed(queryText);
+    if (!queryVec) return { my: [], insights: [] };
+
+    const notes = storage.allNotes();
+    const scored = [];
+
+    for (const note of notes) {
+      const vec = storage.getEmbedding(note.id);
+      if (!vec) continue;
+
+      let score = ai.cosine(queryVec, vec);
+      const serendipityRoll = Math.random();
+      const effectiveThreshold = serendipityRoll < searchCfg.serendipity
+        ? searchCfg.threshold - searchCfg.serendipity
+        : searchCfg.threshold;
+
+      if (score >= effectiveThreshold) {
+        let text = note.text;
+        if (note.isEncrypted && crypto.isReady()) {
+          try {
+            text = await crypto.decryptText({ iv: note.iv, ct: note.ciphertext });
+          } catch (err) {
+            kernel.logger.warn('Decrypt failed for note', note.id);
+            text = '[ошибка расшифровки]';
+          }
+        }
+        scored.push({
+          id: note.id,
+          text,
+          score,
+          shared: note.shared,
+          createdAt: note.createdAt
+        });
+      }
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+
+    const my = scored
+      .filter((n) => n.score >= searchCfg.threshold)
+      .map(formatResult);
+
+    const insights = scored
+      .filter((n) => n.score >= (searchCfg.threshold - searchCfg.serendipity) && n.score < searchCfg.threshold)
+      .map(formatResult);
+
+    return { my, insights };
+  };
+
+  const formatResult = (note) => ({
+    id: note.id,
+    text: note.text,
+    score: note.score,
+    scoreText: Math.round(note.score * 100) + '%',
+    shared: note.shared,
+    toggleText: note.shared ? 'Скрыть' : 'Открыть',
+    createdAt: note.createdAt
+  });
+
+  return { search };
+});
+
+// ===========================================================================
+// MIDDLEWARE: encrypt note before save, vectorize after save
+// ===========================================================================
+Kernel.on('note:saved', async ({ note }) => {
+  try {
+    const ai = Kernel.get('ai');
+    const storage = Kernel.get('storage');
+    if (!ai.ready) return;
+    if (storage.getEmbedding(note.id)) return;
+
+    const vec = await ai.embed(note.text);
+    if (vec) {
+      await storage.saveEmbedding(note.id, vec);
+    }
+  } catch (err) {
+    Kernel.logger.warn('Vectorize middleware failed', err);
+  }
+});
+
+// ===========================================================================
+// ALPINE COMPONENT
+// ===========================================================================
+document.addEventListener('alpine:init', () => {
+  Alpine.data('app', () => ({
+    // --- state ---
+    editorText: '',
+    editorMode: 'private',
+    activeTab: 'stream',
+    allNotes: [],
+    myResults: [],
+    insightsResults: [],
+    showPasswordModal: false,
+    password: '',
+    passwordError: '',
+    isNewUser: false,
+    storageReady: false,
+    cryptoReady: false,
+    toast: { show: false, text: '', type: 'info' },
+    _searchTimer: null,
+
+    // --- lifecycle ---
+    async init() {
+      try {
+        await Kernel.boot();
+
+        const storage = Kernel.get('storage');
+        const crypto = Kernel.get('crypto');
+
+        Kernel.on('storage:changed', ({ notes }) => {
+          this.allNotes = notes.map(this.formatNoteForUi.bind(this));
+          if (this.editorText && this.cryptoReady) {
+            this.runSearch();
+          }
+        });
+
+        Kernel.on('ai:progress', () => {
+          // getter handles status; nothing to do here
+        });
+
+        Kernel.on('ai:ready', () => {
+          if (this.editorText && this.cryptoReady) {
+            this.runSearch();
+          }
+        });
+
+        Kernel.on('crypto:ready', async () => {
+          this.cryptoReady = true;
+          await storage.open();
+          this.storageReady = true;
+        });
+
+        // Determine new/existing user
+        this.isNewUser = !localStorage.getItem('noomium:sk');
+        this.showPasswordModal = true;
+      } catch (err) {
+        Kernel.logger.error('App init failed', err);
+        this.showToast('Ошибка инициализации', 'error');
+      }
+    },
+
+    // --- getters (CSP-safe expressions) ---
+    get charCount() {
+      return `${this.editorText.length} симв.`;
+    },
+    get isSendDisabled() {
+      const textOk = this.editorText.trim().length > 0;
+      const ai = Kernel.get('ai');
+      return !(textOk && ai.ready && this.cryptoReady);
+    },
+    get privateBtnClass() {
+      return this.editorMode === 'private' ? 'btn-primary' : 'btn-ghost';
+    },
+    get worldBtnClass() {
+      return this.editorMode === 'world' ? 'btn-primary' : 'btn-ghost';
+    },
+    get streamTabClass() {
+      return { 'tab-active': this.activeTab === 'stream' };
+    },
+    get baseTabClass() {
+      return { 'tab-active': this.activeTab === 'base' };
+    },
+    get isStreamTab() { return this.activeTab === 'stream'; },
+    get isBaseTab() { return this.activeTab === 'base'; },
+    get hasMyResults() { return this.myResults.length > 0; },
+    get hasInsightsResults() { return this.insightsResults.length > 0; },
+    get showNoResults() {
+      return this.myResults.length === 0
+        && this.insightsResults.length === 0
+        && this.editorText.length > 0
+        && this.cryptoReady;
+    },
+    get showEmptyState() {
+      return this.editorText.length === 0 && this.myResults.length === 0 && this.insightsResults.length === 0;
+    },
+    get totalNotes() { return this.allNotes.length; },
+    get sharedNotes() { return this.allNotes.filter((n) => n.shared).length; },
+    get privateNotes() { return this.allNotes.filter((n) => !n.shared).length; },
+
+    get storageStatusClass() {
+      if (!this.cryptoReady) return 'bg-warning pulse-dot';
+      return this.storageReady ? 'bg-success' : 'bg-warning pulse-dot';
+    },
+    get storageStatusText() {
+      if (!this.cryptoReady) return 'locked';
+      return this.storageReady ? 'ready' : 'loading';
+    },
+    get aiStatusClass() {
+      const ai = Kernel.get('ai');
+      if (ai.mode === 'model') return 'bg-success';
+      if (ai.mode === 'hash') return 'bg-warning';
+      if (ai.mode === 'error') return 'bg-error';
+      return 'bg-info pulse-dot';
+    },
+    get aiStatusText() {
+      const ai = Kernel.get('ai');
+      if (ai.mode === 'model') return 'AI';
+      if (ai.mode === 'hash') return 'AI/hash';
+      if (ai.mode === 'error') return 'AI error';
+      return `AI ${Math.round(ai.progress)}%`;
+    },
+    get modalClass() {
+      return { 'modal-open': this.showPasswordModal };
+    },
+    get passwordTitle() {
+      return this.isNewUser ? 'Создайте пароль' : 'Введите пароль';
+    },
+    get passwordModalText() {
+      return this.isNewUser
+        ? 'Пароль защищает ваши личные заметки. Минимум 4 символа. Восстановление невозможно — храните его надёжно.'
+        : 'Пароль нужен для расшифровки ваших личных заметок.';
+    },
+    get hasPasswordError() { return this.passwordError.length > 0; },
+    get passwordInputClass() {
+      return this.hasPasswordError ? 'input-error' : '';
+    },
+    get hasToast() { return this.toast.show; },
+    get toastText() { return this.toast.text; },
+    get toastClass() {
+      return this.toast.type === 'error' ? 'alert-error'
+        : this.toast.type === 'success' ? 'alert-success'
+        : 'alert-info';
+    },
+
+    // --- methods ---
+    setPrivateMode() { this.editorMode = 'private'; },
+    setWorldMode() { this.editorMode = 'world'; },
+    setStreamTab() { this.activeTab = 'stream'; },
+    setBaseTab() { this.activeTab = 'base'; },
+
+    onEditorInput() {
+      clearTimeout(this._searchTimer);
+      this._searchTimer = setTimeout(() => this.runSearch(), 800);
+    },
+
+    async runSearch() {
+      if (!this.cryptoReady) return;
+      try {
+        const search = Kernel.get('search');
+        const result = await search.search(this.editorText);
+        this.myResults = result.my;
+        this.insightsResults = result.insights;
+      } catch (err) {
+        Kernel.logger.error('Search failed', err);
+      }
+    },
+
+    async sendNote() {
+      if (this.isSendDisabled) return;
+      const text = this.editorText.trim();
+      if (!text) return;
+
+      const crypto = Kernel.get('crypto');
+      const storage = Kernel.get('storage');
+      const isShared = this.editorMode === 'world';
+      const id = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+      try {
+        const note = {
+          id,
+          shared: isShared,
+          createdAt: Date.now(),
+          isEncrypted: false,
+          text,
+          iv: null,
+          ct: null
+        };
+
+        // Encrypt only private notes
+        if (!isShared) {
+          const enc = await crypto.encryptText(text);
+          note.isEncrypted = true;
+          note.iv = enc.iv;
+          note.ct = enc.ct;
+          note.text = '[зашифровано]'; // placeholder in DB
+        }
+
+        await storage.put(note);
+        this.editorText = '';
+        this.showToast(isShared ? 'Опубликовано в Мир' : 'Сохранено лично', 'success');
+      } catch (err) {
+        Kernel.logger.error('Send note failed', err);
+        this.showToast('Ошибка сохранения', 'error');
+      }
+    },
+
+    async toggleShared(id) {
+      const storage = Kernel.get('storage');
+      const crypto = Kernel.get('crypto');
+      const note = storage.allNotes().find((n) => n.id === id);
+      if (!note) return;
+
+      try {
+        if (note.shared && !note.isEncrypted) {
+          // World → Private: need to encrypt
+          const enc = await crypto.encryptText(note.text);
+          note.isEncrypted = true;
+          note.iv = enc.iv;
+          note.ct = enc.ct;
+          note.text = '[зашифровано]';
+          note.shared = false;
+          await storage.put(note);
+        } else if (!note.shared && note.isEncrypted) {
+          // Private → World: decrypt then publish plaintext
+          const plain = await crypto.decryptText({ iv: note.iv, ct: note.ct });
+          note.isEncrypted = false;
+          note.iv = null;
+          note.ct = null;
+          note.text = plain;
+          note.shared = true;
+          await storage.put(note);
+        } else {
+          await storage.toggleShared(id);
+        }
+      } catch (err) {
+        Kernel.logger.error('Toggle shared failed', err);
+        this.showToast('Ошибка переключения', 'error');
+      }
+    },
+
+    async deleteNote(id) {
+      if (!confirm('Удалить эту мысль навсегда?')) return;
+      const storage = Kernel.get('storage');
+      try {
+        await storage.delete(id);
+        this.showToast('Удалено', 'success');
+      } catch (err) {
+        Kernel.logger.error('Delete failed', err);
+        this.showToast('Ошибка удаления', 'error');
+      }
+    },
+
+    openNote(id) {
+      // TODO: full-screen note view in future iteration
+      Kernel.logger.info('Open note', id);
+    },
+
+    async confirmPassword() {
+      this.passwordError = '';
+      if (this.password.length < 4) {
+        this.passwordError = 'Минимум 4 символа';
+        return;
+      }
+      const crypto = Kernel.get('crypto');
+      try {
+        await crypto.initialize(this.password);
+        this.showPasswordModal = false;
+        this.password = '';
+      } catch (err) {
+        if (err.message === 'WRONG_PASSWORD') {
+          this.passwordError = 'Неверный пароль';
+        } else {
+          this.passwordError = 'Ошибка шифрования';
+          Kernel.logger.error('Crypto initialize failed', err);
+        }
+      }
+    },
+
+    // --- helpers ---
+    formatNoteForUi(note) {
+      return {
+        id: note.id,
+        text: note.isEncrypted ? '🔒 [зашифровано]' : (note.text || ''),
+        shared: note.shared,
+        createdAt: note.createdAt,
+        badgeClass: note.shared ? 'badge-secondary' : 'badge-ghost',
+        statusText: note.shared ? 'открыто' : 'лично',
+        dateText: dayjs(note.createdAt).fromNow()
+      };
+    },
+
+    showToast(text, type = 'info') {
+      this.toast = { show: true, text, type };
+      setTimeout(() => { this.toast.show = false; }, 2500);
+    }
+  }));
+});
+
+// ===========================================================================
+// PWA: Service Worker registration (inline for single-file prototype)
+// ===========================================================================
+if ('serviceWorker' in navigator) {
+  const swCode = `
+    const CACHE = 'noomium-v2';
+    self.addEventListener('install', (e) => self.skipWaiting());
+    self.addEventListener('activate', (e) => {
+      e.waitUntil(
+        caches.keys().then((names) =>
+          Promise.all(names.filter((n) => n !== CACHE).map((n) => caches.delete(n)))
+        ).then(() => self.clients.claim())
+      );
     });
-  </script>
+    self.addEventListener('fetch', (e) => {
+      if (e.request.method !== 'GET') return;
+      e.respondWith(
+        caches.match(e.request).then((cached) => {
+          const fetchPromise = fetch(e.request).then((res) => {
+            if (res && res.status === 200) {
+              const clone = res.clone();
+              caches.open(CACHE).then((c) => c.put(e.request, clone));
+            }
+            return res;
+          }).catch(() => cached);
+          return cached || fetchPromise;
+        })
+      );
+    });
+  `;
+  try {
+    const blob = new Blob([swCode], { type: 'application/javascript' });
+    const swUrl = URL.createObjectURL(blob);
+    navigator.serviceWorker.register(swUrl).catch(() => {});
+  } catch (_) {}
+}
+</script>
 </body>
 </html>
