@@ -6,18 +6,14 @@
   <meta name="theme-color" content="#1d232a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <!--
-    CSP для single-file прототипа.
-    Для production вынести JS во внешние файлы и заменить 'unsafe-inline' на nonce/hash.
-    'unsafe-eval' НЕ используется — Alpine CSP build работает без него.
-  -->
   <meta http-equiv="Content-Security-Policy" content="
     default-src 'self';
     script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
     style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net;
-    connect-src 'self' https://cdn.jsdelivr.net https://huggingface.co https://huggingface.co wss:;
+    connect-src 'self' https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://*.hf.co wss:;
     img-src 'self' data: blob:;
     worker-src 'self' blob:;
+    manifest-src 'self' data:;
     base-uri 'self';
     form-action 'self';
   ">
@@ -62,6 +58,7 @@
           <span class="w-2 h-2 rounded-full" :class="aiStatusClass"></span>
           <span class="text-xs" x-text="aiStatusText"></span>
         </div>
+        <button class="btn btn-ghost btn-sm" @click="openSettings">⚙</button>
       </div>
     </header>
 
@@ -102,14 +99,14 @@
           <h3 class="text-lg font-bold mb-2">Моё</h3>
           <div class="space-y-2">
             <template x-for="note in myResults" :key="note.id">
-              <article class="card bg-base-200 shadow">
+              <article class="card bg-base-200 shadow cursor-pointer" @click="openNoteView(note)">
                 <div class="card-body p-4">
                   <p x-text="note.text"></p>
                   <div class="flex justify-between items-center mt-2 flex-wrap gap-2">
                     <span class="badge badge-primary badge-sm" x-text="note.scoreText"></span>
                     <div class="flex gap-1">
-                      <button class="btn btn-ghost btn-xs" @click="toggleShared(note.id)" x-text="note.toggleText"></button>
-                      <button class="btn btn-ghost btn-xs btn-error" @click="deleteNote(note.id)">Удалить</button>
+                      <button class="btn btn-ghost btn-xs" @click.stop="toggleShared(note.id)" x-text="note.toggleText"></button>
+                      <button class="btn btn-ghost btn-xs btn-error" @click.stop="confirmDelete(note.id)">Удалить</button>
                     </div>
                   </div>
                 </div>
@@ -161,7 +158,7 @@
         </div>
         <div class="space-y-2">
           <template x-for="note in allNotes" :key="note.id">
-            <article class="card bg-base-200 shadow cursor-pointer hover:bg-base-300 transition-colors" @click="openNote(note.id)">
+            <article class="card bg-base-200 shadow cursor-pointer hover:bg-base-300 transition-colors" @click="openNoteView(note)">
               <div class="card-body p-4">
                 <p class="line-clamp-3" x-text="note.text"></p>
                 <div class="flex justify-between items-center mt-2">
@@ -197,12 +194,79 @@
       </div>
     </dialog>
 
-    <!-- ERROR TOAST -->
+    <!-- SETTINGS MODAL -->
+    <dialog class="modal" :class="settingsModalClass">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg">Настройки</h3>
+        <div class="py-4 space-y-3">
+          <button class="btn btn-outline w-full justify-start" @click="openChangePassword">🔑 Сменить пароль</button>
+          <button class="btn btn-outline w-full justify-start" @click="exportData">⬇ Экспорт базы</button>
+          <button class="btn btn-outline w-full justify-start" @click="importData">⬆ Импорт базы</button>
+          <button class="btn btn-outline btn-error w-full justify-start" @click="wipeData">🗑 Стереть всё</button>
+        </div>
+        <div class="modal-action">
+          <button class="btn" @click="closeSettings">Закрыть</button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- CHANGE PASSWORD MODAL -->
+    <dialog class="modal" :class="changePasswordModalClass">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg">Смена пароля</h3>
+        <div class="py-4 space-y-3">
+          <input type="password" x-model="oldPassword" placeholder="Текущий пароль" class="input input-bordered w-full">
+          <input type="password" x-model="newPassword" placeholder="Новый пароль (минимум 4 символа)" class="input input-bordered w-full">
+          <input type="password" x-model="confirmNewPassword" placeholder="Подтвердите новый пароль" class="input input-bordered w-full">
+          <p x-show="hasChangePasswordError" class="text-error text-sm" x-text="changePasswordError"></p>
+        </div>
+        <div class="modal-action">
+          <button class="btn" @click="closeChangePassword">Отмена</button>
+          <button class="btn btn-primary" @click="doChangePassword">Сменить</button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- NOTE VIEW/EDIT MODAL -->
+    <dialog class="modal" :class="noteViewModalClass">
+      <div class="modal-box">
+        <div class="flex justify-between items-start mb-4">
+          <h3 class="font-bold text-lg" x-text="noteViewTitle"></h3>
+          <button class="btn btn-sm" @click="toggleEditNote" x-text="noteViewEditBtnText"></button>
+        </div>
+        <div x-show="isNoteViewEditing" class="form-control">
+          <textarea x-model="noteViewText" class="textarea textarea-bordered h-48"></textarea>
+        </div>
+        <div x-show="isNoteViewReadOnly" class="whitespace-pre-wrap" x-text="noteViewText"></div>
+        <div class="modal-action">
+          <button class="btn btn-error" @click="confirmDeleteFromView">Удалить</button>
+          <button class="btn" @click="closeNoteView">Закрыть</button>
+          <button x-show="isNoteViewEditing" class="btn btn-primary" @click="saveNoteView">Сохранить</button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- CONFIRM DIALOG -->
+    <dialog class="modal" :class="confirmDialogClass">
+      <div class="modal-box">
+        <h3 class="font-bold text-lg" x-text="confirmTitle"></h3>
+        <p class="py-4" x-text="confirmMessage"></p>
+        <div class="modal-action">
+          <button class="btn" @click="cancelConfirm">Отмена</button>
+          <button class="btn btn-error" @click="proceedConfirm" x-text="confirmButtonText"></button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- TOAST -->
     <div x-show="hasToast" x-transition class="toast toast-end z-50">
       <div class="alert" :class="toastClass">
         <span x-text="toastText"></span>
       </div>
     </div>
+
+    <!-- HIDDEN FILE INPUT -->
+    <input type="file" x-ref="importFileInput" accept="application/json" style="display:none" @change="handleImportFile">
 
   </div>
 
@@ -227,17 +291,13 @@ const Kernel = (() => {
 
   return {
     register(name, factory) {
-      if (modules.has(name)) {
-        logger.warn(`Module ${name} re-registered`);
-      }
+      if (modules.has(name)) logger.warn(`Module ${name} re-registered`);
       modules.set(name, { factory, instance: null });
     },
     get(name) {
       const mod = modules.get(name);
       if (!mod) throw new Error(`Module "${name}" not found in Kernel`);
-      if (!mod.instance) {
-        mod.instance = mod.factory(this);
-      }
+      if (!mod.instance) mod.instance = mod.factory(this);
       return mod.instance;
     },
     async boot() {
@@ -263,11 +323,7 @@ const Kernel = (() => {
       const set = listeners.get(event);
       if (!set) return;
       for (const handler of set) {
-        try {
-          handler(payload);
-        } catch (err) {
-          logger.error(`Event handler error for "${event}"`, err);
-        }
+        try { handler(payload); } catch (err) { logger.error(`Event handler error for "${event}"`, err); }
       }
     },
     logger
@@ -286,12 +342,15 @@ Kernel.register('config', () => {
       model: 'Xenova/multilingual-e5-small',
       dim: 384,
       cacheLimit: 300,
-      embedTimeout: 15000
+      embedTimeout: 30000
     },
     search: {
       threshold: 0.30,
       serendipity: 0.15,
       debounceMs: 800
+    },
+    cache: {
+      plaintextLimit: 50
     }
   });
 
@@ -299,10 +358,7 @@ Kernel.register('config', () => {
 
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      state = { ...state, ...parsed };
-    }
+    if (saved) state = { ...state, ...JSON.parse(saved) };
   } catch (err) {
     Kernel.logger.warn('Config load failed', err);
   }
@@ -318,25 +374,35 @@ Kernel.register('config', () => {
       this.save();
     },
     save() {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      } catch (err) {
-        Kernel.logger.error('Config save failed', err);
-      }
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+      catch (err) { Kernel.logger.error('Config save failed', err); }
     }
   };
 });
 
 // ===========================================================================
-// MODULE: CRYPTO — PBKDF2 (master key) + AES-GCM (data encryption key)
+// MODULE: CRYPTO — PBKDF2 (master key) + AES-GCM (DEK) + plaintext LRU cache
 // ===========================================================================
 Kernel.register('crypto', (kernel) => {
   const config = kernel.get('config');
-  const SK_KEY = 'noomium:sk';       // encrypted DEK (base64)
-  const SALT_KEY = 'noomium:salt';   // public salt (base64)
+  const SK_KEY = 'noomium:sk';
+  const SALT_KEY = 'noomium:salt';
 
-  let dek = null; // raw Uint8Array, kept in memory only while session active
+  let dek = null;
   let ready = false;
+
+  // LRU cache for decrypted plaintexts
+  const plaintextCache = new Map();
+  const plaintextLimit = config.get('cache').plaintextLimit;
+
+  const touchPlaintext = (key, value) => {
+    plaintextCache.delete(key);
+    plaintextCache.set(key, value);
+    if (plaintextCache.size > plaintextLimit) {
+      const oldest = plaintextCache.keys().next().value;
+      plaintextCache.delete(oldest);
+    }
+  };
 
   const b64 = {
     encode: (bytes) => btoa(String.fromCharCode.apply(null, bytes)),
@@ -349,16 +415,11 @@ Kernel.register('crypto', (kernel) => {
       'raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']
     );
     return crypto.subtle.deriveKey(
-      {
-        name: 'PBKDF2',
-        salt,
-        iterations: config.get('crypto').iterations,
-        hash: 'SHA-256'
-      },
+      { name: 'PBKDF2', salt, iterations: config.get('crypto').iterations, hash: 'SHA-256' },
       keyMaterial,
       { name: 'AES-GCM', length: 256 },
       false,
-      ['encrypt', 'decrypt', 'wrapKey', 'unwrapKey']
+      ['encrypt', 'decrypt']
     );
   };
 
@@ -387,25 +448,19 @@ Kernel.register('crypto', (kernel) => {
       const mk = await deriveMasterKey(password, salt);
 
       if (encDekB64) {
-        // Existing user — decrypt DEK
         const combined = b64.decode(encDekB64);
         const iv = combined.slice(0, cfg.ivLen);
         const ciphertext = combined.slice(cfg.ivLen);
         try {
-          const rawDek = await crypto.subtle.decrypt(
-            { name: 'AES-GCM', iv }, mk, ciphertext
-          );
+          const rawDek = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, mk, ciphertext);
           dek = new Uint8Array(rawDek);
         } catch (err) {
           throw new Error('WRONG_PASSWORD');
         }
       } else {
-        // New user — generate DEK, encrypt with MK, persist
         dek = randomBytes(32);
         const iv = randomBytes(cfg.ivLen);
-        const ciphertext = await crypto.subtle.encrypt(
-          { name: 'AES-GCM', iv }, mk, dek
-        );
+        const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, mk, dek);
         const combined = new Uint8Array(iv.length + ciphertext.byteLength);
         combined.set(iv, 0);
         combined.set(new Uint8Array(ciphertext), iv.length);
@@ -413,6 +468,7 @@ Kernel.register('crypto', (kernel) => {
       }
 
       ready = true;
+      plaintextCache.clear();
       kernel.emit('crypto:ready');
     },
 
@@ -422,24 +478,32 @@ Kernel.register('crypto', (kernel) => {
       const iv = randomBytes(cfg.ivLen);
       const key = await importDek(dek);
       const enc = new TextEncoder();
-      const ciphertext = await crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv }, key, enc.encode(plainText)
-      );
+      const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(plainText));
       return {
         iv: b64.encode(iv),
         ct: b64.encode(new Uint8Array(ciphertext))
       };
     },
 
-    async decryptText({ iv, ct }) {
+    async decryptText(noteId, { iv, ct }) {
       if (!dek) throw new Error('Crypto not initialized');
+      if (plaintextCache.has(noteId)) {
+        const val = plaintextCache.get(noteId);
+        touchPlaintext(noteId, val);
+        return val;
+      }
       const key = await importDek(dek);
       const raw = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: b64.decode(iv) },
-        key,
-        b64.decode(ct)
+        { name: 'AES-GCM', iv: b64.decode(iv) }, key, b64.decode(ct)
       );
-      return new TextDecoder().decode(raw);
+      const plain = new TextDecoder().decode(raw);
+      touchPlaintext(noteId, plain);
+      return plain;
+    },
+
+    invalidatePlaintextCache(noteId) {
+      if (noteId) plaintextCache.delete(noteId);
+      else plaintextCache.clear();
     },
 
     async changePassword(oldPassword, newPassword) {
@@ -449,9 +513,7 @@ Kernel.register('crypto', (kernel) => {
       const salt = saltB64 ? b64.decode(saltB64) : randomBytes(cfg.saltLen);
       const newMk = await deriveMasterKey(newPassword, salt);
       const iv = randomBytes(cfg.ivLen);
-      const ciphertext = await crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv }, newMk, dek
-      );
+      const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, newMk, dek);
       const combined = new Uint8Array(iv.length + ciphertext.byteLength);
       combined.set(iv, 0);
       combined.set(new Uint8Array(ciphertext), iv.length);
@@ -459,17 +521,55 @@ Kernel.register('crypto', (kernel) => {
       localStorage.setItem(SK_KEY, b64.encode(combined));
     },
 
+    async exportKeyWithPassword(exportPassword) {
+      if (!dek) throw new Error('Crypto not initialized');
+      const cfg = config.get('crypto');
+      const salt = randomBytes(cfg.saltLen);
+      const mk = await deriveMasterKey(exportPassword, salt);
+      const iv = randomBytes(cfg.ivLen);
+      const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, mk, dek);
+      return {
+        salt: b64.encode(salt),
+        iv: b64.encode(iv),
+        ct: b64.encode(new Uint8Array(ciphertext))
+      };
+    },
+
+    async importKeyWithPassword(encryptedDek, importPassword) {
+      const cfg = config.get('crypto');
+      const salt = b64.decode(encryptedDek.salt);
+      const mk = await deriveMasterKey(importPassword, salt);
+      try {
+        const rawDek = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: b64.decode(encryptedDek.iv) },
+          mk,
+          b64.decode(encryptedDek.ct)
+        );
+        dek = new Uint8Array(rawDek);
+        ready = true;
+        // Persist with current session (no main password) — caller must handle
+        return true;
+      } catch (err) {
+        throw new Error('WRONG_IMPORT_PASSWORD');
+      }
+    },
+
+    hasExistingKey() {
+      return !!localStorage.getItem(SK_KEY);
+    },
+
     wipe() {
       localStorage.removeItem(SK_KEY);
       localStorage.removeItem(SALT_KEY);
       dek = null;
       ready = false;
+      plaintextCache.clear();
     }
   };
 });
 
 // ===========================================================================
-// MODULE: STORAGE — Dexie (IndexedDB) with in-memory cache
+// MODULE: STORAGE — Dexie (IndexedDB)
 // ===========================================================================
 Kernel.register('storage', (kernel) => {
   const config = kernel.get('config');
@@ -486,22 +586,15 @@ Kernel.register('storage', (kernel) => {
   let opened = false;
 
   const refreshNotesCache = async () => {
-    try {
-      notesCache = await db.notes.toArray();
-    } catch (err) {
-      kernel.logger.error('Notes cache refresh failed', err);
-      notesCache = [];
-    }
+    try { notesCache = await db.notes.toArray(); }
+    catch (err) { kernel.logger.error('Notes cache refresh failed', err); notesCache = []; }
   };
 
   const refreshEmbeddingsCache = async () => {
     try {
       const all = await db.embeddings.toArray();
       embeddingsCache = new Map(all.map((e) => [e.noteId, e.embedding]));
-    } catch (err) {
-      kernel.logger.error('Embeddings cache refresh failed', err);
-      embeddingsCache = new Map();
-    }
+    } catch (err) { kernel.logger.error('Embeddings cache refresh failed', err); embeddingsCache = new Map(); }
   };
 
   const open = async () => {
@@ -523,6 +616,7 @@ Kernel.register('storage', (kernel) => {
     open,
     isReady: () => opened,
     allNotes: () => notesCache,
+    getNote: (id) => notesCache.find((n) => n.id === id),
     getEmbedding: (noteId) => embeddingsCache.get(noteId),
     allEmbeddings: () => embeddingsCache,
 
@@ -538,8 +632,8 @@ Kernel.register('storage', (kernel) => {
       if (!opened) await open();
       await db.notes.delete(id);
       await db.embeddings.delete(id);
+      embeddingsCache.delete(id);
       await refreshNotesCache();
-      await refreshEmbeddingsCache();
       emitChange();
       kernel.emit('note:deleted', { id });
     },
@@ -575,15 +669,19 @@ Kernel.register('storage', (kernel) => {
 });
 
 // ===========================================================================
-// MODULE: AI — Transformers.js with hash fallback
+// MODULE: AI — Web Worker wrapper for Transformers.js + hash fallback
 // ===========================================================================
 Kernel.register('ai', (kernel) => {
   const config = kernel.get('config');
   const aiConfig = config.get('ai');
 
-  let mode = 'loading';    // 'loading' | 'model' | 'hash' | 'error'
+  let mode = 'loading';
   let progress = 0;
-  let extractor = null;
+  let worker = null;
+  let workerReady = false;
+  let pendingEmbed = new Map();
+  let reqId = 0;
+
   const cache = new Map();
 
   const hashEmbed = (text) => {
@@ -607,67 +705,132 @@ Kernel.register('ai', (kernel) => {
     return Array.from(vec);
   };
 
-  const load = async () => {
+  // Worker code (inline blob)
+  const workerCode = `
+    let pipeline = null;
+    let env = null;
+    self.onmessage = async (e) => {
+      const { type, payload, reqId } = e.data;
+      try {
+        if (type === 'init') {
+          const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
+          pipeline = mod.pipeline;
+          env = mod.env;
+          env.allowLocalModels = false;
+          env.useBrowserCache = true;
+          const extractor = await pipeline('feature-extraction', payload.model, {
+            quantized: true,
+            progress_callback: (p) => {
+              if (p.status === 'progress' && p.total > 0) {
+                self.postMessage({ type: 'progress', payload: { loaded: p.loaded, total: p.total } });
+              }
+            }
+          });
+          self._extractor = extractor;
+          self.postMessage({ type: 'ready', reqId });
+        } else if (type === 'embed') {
+          if (!self._extractor) {
+            self.postMessage({ type: 'error', reqId, payload: { error: 'extractor not ready' } });
+            return;
+          }
+          const out = await self._extractor(payload.text, { pooling: 'mean', normalize: true });
+          self.postMessage({ type: 'embed-result', reqId, payload: { vector: Array.from(out.data) } });
+        }
+      } catch (err) {
+        self.postMessage({ type: 'error', reqId, payload: { error: err.message || 'worker error' } });
+      }
+    };
+  `;
+
+  const setupWorker = () => {
     try {
-      const mod = await import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2');
-      const { pipeline, env } = mod;
-      env.allowLocalModels = false;
-      env.useBrowserCache = true;
-      extractor = await pipeline('feature-extraction', aiConfig.model, {
-        quantized: true,
-        progress_callback: (p) => {
-          if (p.status === 'progress' && p.total > 0) {
-            progress = (p.loaded / p.total) * 100;
-            kernel.emit('ai:progress', { progress });
+      const blob = new Blob([workerCode], { type: 'application/javascript' });
+      const url = URL.createObjectURL(blob);
+      worker = new Worker(url);
+      worker.onmessage = (e) => {
+        const { type, payload, reqId } = e.data;
+        if (type === 'progress') {
+          progress = (payload.loaded / payload.total) * 100;
+          kernel.emit('ai:progress', { progress });
+        } else if (type === 'ready') {
+          workerReady = true;
+          mode = 'model';
+          kernel.emit('ai:ready', { mode });
+          kernel.logger.info('AI worker ready');
+        } else if (type === 'embed-result') {
+          const pending = pendingEmbed.get(reqId);
+          if (pending) {
+            pending.resolve(payload.vector);
+            pendingEmbed.delete(reqId);
+          }
+        } else if (type === 'error') {
+          const pending = pendingEmbed.get(reqId);
+          if (pending) {
+            pending.reject(new Error(payload.error));
+            pendingEmbed.delete(reqId);
+          } else if (reqId === undefined) {
+            kernel.logger.warn('AI worker init error', payload.error);
+            mode = 'hash';
+            kernel.emit('ai:ready', { mode });
           }
         }
-      });
-      mode = 'model';
-      kernel.emit('ai:ready', { mode });
-      kernel.logger.info('AI model loaded', aiConfig.model);
+      };
+      worker.onerror = (err) => {
+        kernel.logger.warn('AI worker onerror, using hash', err);
+        mode = 'hash';
+        kernel.emit('ai:ready', { mode });
+      };
+      worker.postMessage({ type: 'init', payload: { model: aiConfig.model } });
     } catch (err) {
-      kernel.logger.warn('AI model load failed, using hash fallback', err);
+      kernel.logger.warn('Worker not supported, using hash', err);
       mode = 'hash';
       kernel.emit('ai:ready', { mode });
     }
   };
 
-  const embed = async (text) => {
+  const embed = (text) => {
     const t = (text || '').trim();
-    if (!t) return null;
+    if (!t) return Promise.resolve(null);
 
     if (cache.has(t)) {
       const val = cache.get(t);
       cache.delete(t);
       cache.set(t, val);
-      return val;
+      return Promise.resolve(val);
     }
 
-    let vec;
-    if (mode === 'model' && extractor) {
-      try {
-        const timeout = new Promise((_, rej) =>
-          setTimeout(() => rej(new Error('embed timeout')), aiConfig.embedTimeout)
-        );
-        const out = await Promise.race([
-          extractor(t, { pooling: 'mean', normalize: true }),
-          timeout
-        ]);
-        vec = Array.from(out.data);
-      } catch (err) {
-        kernel.logger.warn('Embed failed, using hash', err);
-        vec = hashEmbed(t);
-      }
-    } else {
-      vec = hashEmbed(t);
+    if (mode === 'model' && workerReady && worker) {
+      return new Promise((resolve, reject) => {
+        const id = ++reqId;
+        pendingEmbed.set(id, { resolve, reject });
+        worker.postMessage({ type: 'embed', reqId: id, payload: { text: t } });
+        setTimeout(() => {
+          if (pendingEmbed.has(id)) {
+            pendingEmbed.delete(id);
+            resolve(hashEmbed(t));
+          }
+        }, aiConfig.embedTimeout);
+      }).then((vec) => {
+        cache.set(t, vec);
+        if (cache.size > aiConfig.cacheLimit) {
+          const oldest = cache.keys().next().value;
+          cache.delete(oldest);
+        }
+        return vec;
+      }).catch(() => {
+        const vec = hashEmbed(t);
+        cache.set(t, vec);
+        return vec;
+      });
     }
 
+    const vec = hashEmbed(t);
     cache.set(t, vec);
     if (cache.size > aiConfig.cacheLimit) {
       const oldest = cache.keys().next().value;
       cache.delete(oldest);
     }
-    return vec;
+    return Promise.resolve(vec);
   };
 
   const cosine = (a, b) => {
@@ -677,11 +840,7 @@ Kernel.register('ai', (kernel) => {
     return Math.abs(sum) < 1e-8 ? 0 : sum;
   };
 
-  // Auto-load in background
-  setTimeout(() => load().catch((err) => {
-    mode = 'error';
-    kernel.emit('ai:error', { error: err });
-  }), 100);
+  setTimeout(setupWorker, 100);
 
   return {
     get mode() { return mode; },
@@ -699,14 +858,22 @@ Kernel.register('search', (kernel) => {
   const config = kernel.get('config');
   const searchCfg = config.get('search');
 
+  const formatResult = (note, text) => ({
+    id: note.id,
+    text,
+    score: note.score,
+    scoreText: Math.round(note.score * 100) + '%',
+    shared: note.shared,
+    toggleText: note.shared ? 'Скрыть' : 'Открыть',
+    createdAt: note.createdAt
+  });
+
   const search = async (queryText) => {
     const ai = kernel.get('ai');
     const storage = kernel.get('storage');
     const crypto = kernel.get('crypto');
 
-    if (!queryText || !ai.ready) {
-      return { my: [], insights: [] };
-    }
+    if (!queryText || !ai.ready) return { my: [], insights: [] };
 
     const queryVec = await ai.embed(queryText);
     if (!queryVec) return { my: [], insights: [] };
@@ -728,19 +895,13 @@ Kernel.register('search', (kernel) => {
         let text = note.text;
         if (note.isEncrypted && crypto.isReady()) {
           try {
-            text = await crypto.decryptText({ iv: note.iv, ct: note.ciphertext });
+            text = await crypto.decryptText(note.id, { iv: note.iv, ct: note.ct });
           } catch (err) {
             kernel.logger.warn('Decrypt failed for note', note.id);
             text = '[ошибка расшифровки]';
           }
         }
-        scored.push({
-          id: note.id,
-          text,
-          score,
-          shared: note.shared,
-          createdAt: note.createdAt
-        });
+        scored.push({ ...note, score, _text: text });
       }
     }
 
@@ -748,45 +909,158 @@ Kernel.register('search', (kernel) => {
 
     const my = scored
       .filter((n) => n.score >= searchCfg.threshold)
-      .map(formatResult);
+      .map((n) => formatResult(n, n._text));
 
     const insights = scored
       .filter((n) => n.score >= (searchCfg.threshold - searchCfg.serendipity) && n.score < searchCfg.threshold)
-      .map(formatResult);
+      .map((n) => formatResult(n, n._text));
 
     return { my, insights };
   };
-
-  const formatResult = (note) => ({
-    id: note.id,
-    text: note.text,
-    score: note.score,
-    scoreText: Math.round(note.score * 100) + '%',
-    shared: note.shared,
-    toggleText: note.shared ? 'Скрыть' : 'Открыть',
-    createdAt: note.createdAt
-  });
 
   return { search };
 });
 
 // ===========================================================================
-// MIDDLEWARE: encrypt note before save, vectorize after save
+// MODULE: BACKUP — export/import encrypted data
 // ===========================================================================
-Kernel.on('note:saved', async ({ note }) => {
+Kernel.register('backup', (kernel) => {
+  const exportAll = async (exportPassword) => {
+    const storage = kernel.get('storage');
+    const crypto = kernel.get('crypto');
+
+    const notes = storage.allNotes();
+    const plaintexts = {};
+
+    for (const note of notes) {
+      if (note.isEncrypted) {
+        try {
+          plaintexts[note.id] = await crypto.decryptText(note.id, { iv: note.iv, ct: note.ct });
+        } catch (err) {
+          kernel.logger.warn('Backup decrypt failed for', note.id);
+        }
+      } else {
+        plaintexts[note.id] = note.text;
+      }
+    }
+
+    const embeddings = {};
+    for (const [noteId, vec] of storage.allEmbeddings()) {
+      embeddings[noteId] = vec;
+    }
+
+    const dekForExport = await crypto.exportKeyWithPassword(exportPassword);
+
+    const capsule = {
+      version: 2,
+      exportedAt: Date.now(),
+      encryptedDek: dekForExport,
+      notes: notes.map((n) => ({
+        id: n.id,
+        shared: n.shared,
+        createdAt: n.createdAt,
+        text: plaintexts[n.id] || ''
+      })),
+      embeddings
+    };
+
+    const blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `noomium-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    URL.revokeObjectURL(url);
+    anchor.remove();
+  };
+
+  const importAll = async (file, importPassword) => {
+    const storage = kernel.get('storage');
+    const crypto = kernel.get('crypto');
+
+    const text = await file.text();
+    const capsule = JSON.parse(text);
+
+    if (!capsule.version || !capsule.notes) {
+      throw new Error('Invalid backup format');
+    }
+
+    // Decrypt imported DEK to verify password
+    await crypto.importKeyWithPassword(capsule.encryptedDek, importPassword);
+
+    let imported = 0;
+    for (const note of capsule.notes) {
+      if (!note.id || typeof note.text !== 'string') continue;
+      const id = note.id;
+      const existing = storage.getNote(id);
+      if (existing) continue;
+
+      const isShared = !!note.shared;
+      const stored = {
+        id,
+        shared: isShared,
+        createdAt: note.createdAt || Date.now(),
+        isEncrypted: false,
+        text: note.text,
+        iv: null,
+        ct: null
+      };
+
+      // Re-encrypt private notes with current session DEK
+      if (!isShared) {
+        try {
+          const enc = await crypto.encryptText(note.text);
+          stored.isEncrypted = true;
+          stored.iv = enc.iv;
+          stored.ct = enc.ct;
+          stored.text = '[зашифровано]';
+        } catch (err) {
+          kernel.logger.warn('Import encrypt failed for', id);
+          stored.isEncrypted = false;
+          stored.text = note.text;
+        }
+      }
+
+      await storage.put(stored);
+      imported++;
+
+      if (capsule.embeddings && capsule.embeddings[id]) {
+        await storage.saveEmbedding(id, capsule.embeddings[id]);
+      }
+    }
+
+    return imported;
+  };
+
+  return { exportAll, importAll };
+});
+
+// ===========================================================================
+// MIDDLEWARE: vectorize note on save using plainText
+// ===========================================================================
+Kernel.on('note:saved', async ({ note, plainText }) => {
   try {
     const ai = Kernel.get('ai');
     const storage = Kernel.get('storage');
     if (!ai.ready) return;
     if (storage.getEmbedding(note.id)) return;
 
-    const vec = await ai.embed(note.text);
-    if (vec) {
-      await storage.saveEmbedding(note.id, vec);
-    }
+    const textToEmbed = plainText || note.text;
+    if (!textToEmbed || textToEmbed === '[зашифровано]') return;
+
+    const vec = await ai.embed(textToEmbed);
+    if (vec) await storage.saveEmbedding(note.id, vec);
   } catch (err) {
     Kernel.logger.warn('Vectorize middleware failed', err);
   }
+});
+
+Kernel.on('note:deleted', ({ id }) => {
+  try {
+    const crypto = Kernel.get('crypto');
+    crypto.invalidatePlaintextCache(id);
+  } catch (_) {}
 });
 
 // ===========================================================================
@@ -794,7 +1068,6 @@ Kernel.on('note:saved', async ({ note }) => {
 // ===========================================================================
 document.addEventListener('alpine:init', () => {
   Alpine.data('app', () => ({
-    // --- state ---
     editorText: '',
     editorMode: 'private',
     activeTab: 'stream',
@@ -810,6 +1083,34 @@ document.addEventListener('alpine:init', () => {
     toast: { show: false, text: '', type: 'info' },
     _searchTimer: null,
 
+    // Settings
+    showSettingsModal: false,
+
+    // Change password
+    showChangePasswordModal: false,
+    oldPassword: '',
+    newPassword: '',
+    confirmNewPassword: '',
+    changePasswordError: '',
+
+    // Note view/edit
+    showNoteViewModal: false,
+    noteViewId: null,
+    noteViewText: '',
+    noteViewIsEncrypted: false,
+    noteViewIsShared: false,
+    isNoteViewEditing: false,
+
+    // Confirm dialog
+    showConfirmDialog: false,
+    confirmTitle: '',
+    confirmMessage: '',
+    confirmButtonText: 'Подтвердить',
+    _confirmResolve: null,
+
+    // Import file
+    _importResolve: null,
+
     // --- lifecycle ---
     async init() {
       try {
@@ -820,19 +1121,11 @@ document.addEventListener('alpine:init', () => {
 
         Kernel.on('storage:changed', ({ notes }) => {
           this.allNotes = notes.map(this.formatNoteForUi.bind(this));
-          if (this.editorText && this.cryptoReady) {
-            this.runSearch();
-          }
-        });
-
-        Kernel.on('ai:progress', () => {
-          // getter handles status; nothing to do here
+          if (this.editorText && this.cryptoReady) this.runSearch();
         });
 
         Kernel.on('ai:ready', () => {
-          if (this.editorText && this.cryptoReady) {
-            this.runSearch();
-          }
+          if (this.editorText && this.cryptoReady) this.runSearch();
         });
 
         Kernel.on('crypto:ready', async () => {
@@ -841,8 +1134,7 @@ document.addEventListener('alpine:init', () => {
           this.storageReady = true;
         });
 
-        // Determine new/existing user
-        this.isNewUser = !localStorage.getItem('noomium:sk');
+        this.isNewUser = !crypto.hasExistingKey();
         this.showPasswordModal = true;
       } catch (err) {
         Kernel.logger.error('App init failed', err);
@@ -850,27 +1142,17 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    // --- getters (CSP-safe expressions) ---
-    get charCount() {
-      return `${this.editorText.length} симв.`;
-    },
+    // --- getters ---
+    get charCount() { return `${this.editorText.length} симв.`; },
     get isSendDisabled() {
       const textOk = this.editorText.trim().length > 0;
       const ai = Kernel.get('ai');
       return !(textOk && ai.ready && this.cryptoReady);
     },
-    get privateBtnClass() {
-      return this.editorMode === 'private' ? 'btn-primary' : 'btn-ghost';
-    },
-    get worldBtnClass() {
-      return this.editorMode === 'world' ? 'btn-primary' : 'btn-ghost';
-    },
-    get streamTabClass() {
-      return { 'tab-active': this.activeTab === 'stream' };
-    },
-    get baseTabClass() {
-      return { 'tab-active': this.activeTab === 'base' };
-    },
+    get privateBtnClass() { return this.editorMode === 'private' ? 'btn-primary' : 'btn-ghost'; },
+    get worldBtnClass() { return this.editorMode === 'world' ? 'btn-primary' : 'btn-ghost'; },
+    get streamTabClass() { return { 'tab-active': this.activeTab === 'stream' }; },
+    get baseTabClass() { return { 'tab-active': this.activeTab === 'base' }; },
     get isStreamTab() { return this.activeTab === 'stream'; },
     get isBaseTab() { return this.activeTab === 'base'; },
     get hasMyResults() { return this.myResults.length > 0; },
@@ -887,7 +1169,6 @@ document.addEventListener('alpine:init', () => {
     get totalNotes() { return this.allNotes.length; },
     get sharedNotes() { return this.allNotes.filter((n) => n.shared).length; },
     get privateNotes() { return this.allNotes.filter((n) => !n.shared).length; },
-
     get storageStatusClass() {
       if (!this.cryptoReady) return 'bg-warning pulse-dot';
       return this.storageReady ? 'bg-success' : 'bg-warning pulse-dot';
@@ -910,27 +1191,28 @@ document.addEventListener('alpine:init', () => {
       if (ai.mode === 'error') return 'AI error';
       return `AI ${Math.round(ai.progress)}%`;
     },
-    get modalClass() {
-      return { 'modal-open': this.showPasswordModal };
-    },
-    get passwordTitle() {
-      return this.isNewUser ? 'Создайте пароль' : 'Введите пароль';
-    },
+    get modalClass() { return { 'modal-open': this.showPasswordModal }; },
+    get passwordTitle() { return this.isNewUser ? 'Создайте пароль' : 'Введите пароль'; },
     get passwordModalText() {
       return this.isNewUser
-        ? 'Пароль защищает ваши личные заметки. Минимум 4 символа. Восстановление невозможно — храните его надёжно.'
+        ? 'Пароль защищает личные заметки. Минимум 4 символа. Восстановление невозможно.'
         : 'Пароль нужен для расшифровки ваших личных заметок.';
     },
     get hasPasswordError() { return this.passwordError.length > 0; },
-    get passwordInputClass() {
-      return this.hasPasswordError ? 'input-error' : '';
-    },
+    get passwordInputClass() { return this.hasPasswordError ? 'input-error' : ''; },
+    get settingsModalClass() { return { 'modal-open': this.showSettingsModal }; },
+    get changePasswordModalClass() { return { 'modal-open': this.showChangePasswordModal }; },
+    get hasChangePasswordError() { return this.changePasswordError.length > 0; },
+    get noteViewModalClass() { return { 'modal-open': this.showNoteViewModal }; },
+    get noteViewTitle() { return this.isNoteViewEditing ? 'Редактирование' : 'Заметка'; },
+    get noteViewEditBtnText() { return this.isNoteViewEditing ? 'Отмена' : 'Редактировать'; },
+    get isNoteViewReadOnly() { return !this.isNoteViewEditing; },
+    get confirmDialogClass() { return { 'modal-open': this.showConfirmDialog }; },
     get hasToast() { return this.toast.show; },
     get toastText() { return this.toast.text; },
     get toastClass() {
       return this.toast.type === 'error' ? 'alert-error'
-        : this.toast.type === 'success' ? 'alert-success'
-        : 'alert-info';
+        : this.toast.type === 'success' ? 'alert-success' : 'alert-info';
     },
 
     // --- methods ---
@@ -968,25 +1250,22 @@ document.addEventListener('alpine:init', () => {
 
       try {
         const note = {
-          id,
-          shared: isShared,
-          createdAt: Date.now(),
-          isEncrypted: false,
-          text,
-          iv: null,
-          ct: null
+          id, shared: isShared, createdAt: Date.now(),
+          isEncrypted: false, text, iv: null, ct: null
         };
 
-        // Encrypt only private notes
         if (!isShared) {
           const enc = await crypto.encryptText(text);
           note.isEncrypted = true;
           note.iv = enc.iv;
           note.ct = enc.ct;
-          note.text = '[зашифровано]'; // placeholder in DB
+          note.text = '[зашифровано]';
         }
 
+        // Pass plainText so middleware can vectorize correctly
         await storage.put(note);
+        Kernel.emit('note:saved', { note, plainText: text });
+
         this.editorText = '';
         this.showToast(isShared ? 'Опубликовано в Мир' : 'Сохранено лично', 'success');
       } catch (err) {
@@ -998,39 +1277,47 @@ document.addEventListener('alpine:init', () => {
     async toggleShared(id) {
       const storage = Kernel.get('storage');
       const crypto = Kernel.get('crypto');
-      const note = storage.allNotes().find((n) => n.id === id);
+      const ai = Kernel.get('ai');
+      const note = storage.getNote(id);
       if (!note) return;
 
       try {
-        if (note.shared && !note.isEncrypted) {
-          // World → Private: need to encrypt
-          const enc = await crypto.encryptText(note.text);
+        let plainText = note.text;
+        if (note.isEncrypted) {
+          plainText = await crypto.decryptText(id, { iv: note.iv, ct: note.ct });
+        }
+
+        const becomingPrivate = note.shared;
+
+        if (becomingPrivate) {
+          const enc = await crypto.encryptText(plainText);
           note.isEncrypted = true;
           note.iv = enc.iv;
           note.ct = enc.ct;
           note.text = '[зашифровано]';
           note.shared = false;
-          await storage.put(note);
-        } else if (!note.shared && note.isEncrypted) {
-          // Private → World: decrypt then publish plaintext
-          const plain = await crypto.decryptText({ iv: note.iv, ct: note.ct });
+        } else {
           note.isEncrypted = false;
           note.iv = null;
           note.ct = null;
-          note.text = plain;
+          note.text = plainText;
           note.shared = true;
-          await storage.put(note);
-        } else {
-          await storage.toggleShared(id);
         }
+
+        await storage.put(note);
+        // Re-emit with plainText to re-vectorize properly
+        Kernel.emit('note:saved', { note, plainText });
+
+        crypto.invalidatePlaintextCache(id);
       } catch (err) {
         Kernel.logger.error('Toggle shared failed', err);
         this.showToast('Ошибка переключения', 'error');
       }
     },
 
-    async deleteNote(id) {
-      if (!confirm('Удалить эту мысль навсегда?')) return;
+    async confirmDelete(id) {
+      const ok = await this.showConfirm('Удалить заметку?', 'Это действие нельзя отменить.', 'Удалить');
+      if (!ok) return;
       const storage = Kernel.get('storage');
       try {
         await storage.delete(id);
@@ -1041,9 +1328,90 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    openNote(id) {
-      // TODO: full-screen note view in future iteration
-      Kernel.logger.info('Open note', id);
+    async openNoteView(noteUi) {
+      const storage = Kernel.get('storage');
+      const crypto = Kernel.get('crypto');
+      const note = storage.getNote(noteUi.id);
+      if (!note) return;
+
+      this.noteViewId = note.id;
+      this.noteViewIsEncrypted = !!note.isEncrypted;
+      this.noteViewIsShared = !!note.shared;
+      this.isNoteViewEditing = false;
+
+      try {
+        if (note.isEncrypted) {
+          this.noteViewText = await crypto.decryptText(note.id, { iv: note.iv, ct: note.ct });
+        } else {
+          this.noteViewText = note.text;
+        }
+      } catch (err) {
+        this.noteViewText = '[ошибка расшифровки]';
+      }
+
+      this.showNoteViewModal = true;
+    },
+
+    toggleEditNote() {
+      this.isNoteViewEditing = !this.isNoteViewEditing;
+    },
+
+    async saveNoteView() {
+      if (!this.noteViewId) return;
+      const newText = this.noteViewText.trim();
+      if (!newText) {
+        this.showToast('Текст не может быть пустым', 'error');
+        return;
+      }
+
+      const storage = Kernel.get('storage');
+      const crypto = Kernel.get('crypto');
+      const note = storage.getNote(this.noteViewId);
+      if (!note) return;
+
+      try {
+        if (this.noteViewIsShared) {
+          note.text = newText;
+          note.isEncrypted = false;
+          note.iv = null;
+          note.ct = null;
+        } else {
+          const enc = await crypto.encryptText(newText);
+          note.isEncrypted = true;
+          note.iv = enc.iv;
+          note.ct = enc.ct;
+          note.text = '[зашифровано]';
+        }
+        await storage.put(note);
+        Kernel.emit('note:saved', { note, plainText: newText });
+        crypto.invalidatePlaintextCache(note.id);
+
+        this.isNoteViewEditing = false;
+        this.showToast('Сохранено', 'success');
+      } catch (err) {
+        Kernel.logger.error('Save note view failed', err);
+        this.showToast('Ошибка сохранения', 'error');
+      }
+    },
+
+    async confirmDeleteFromView() {
+      if (!this.noteViewId) return;
+      const ok = await this.showConfirm('Удалить заметку?', 'Это действие нельзя отменить.', 'Удалить');
+      if (!ok) return;
+      const storage = Kernel.get('storage');
+      try {
+        await storage.delete(this.noteViewId);
+        this.showNoteViewModal = false;
+        this.showToast('Удалено', 'success');
+      } catch (err) {
+        this.showToast('Ошибка удаления', 'error');
+      }
+    },
+
+    closeNoteView() {
+      this.showNoteViewModal = false;
+      this.noteViewId = null;
+      this.isNoteViewEditing = false;
     },
 
     async confirmPassword() {
@@ -1058,16 +1426,143 @@ document.addEventListener('alpine:init', () => {
         this.showPasswordModal = false;
         this.password = '';
       } catch (err) {
-        if (err.message === 'WRONG_PASSWORD') {
-          this.passwordError = 'Неверный пароль';
-        } else {
+        if (err.message === 'WRONG_PASSWORD') this.passwordError = 'Неверный пароль';
+        else {
           this.passwordError = 'Ошибка шифрования';
           Kernel.logger.error('Crypto initialize failed', err);
         }
       }
     },
 
-    // --- helpers ---
+    openSettings() { this.showSettingsModal = true; },
+    closeSettings() { this.showSettingsModal = false; },
+
+    openChangePassword() {
+      this.showSettingsModal = false;
+      this.oldPassword = '';
+      this.newPassword = '';
+      this.confirmNewPassword = '';
+      this.changePasswordError = '';
+      this.showChangePasswordModal = true;
+    },
+
+    closeChangePassword() { this.showChangePasswordModal = false; },
+
+    async doChangePassword() {
+      this.changePasswordError = '';
+      if (this.newPassword.length < 4) {
+        this.changePasswordError = 'Новый пароль: минимум 4 символа';
+        return;
+      }
+      if (this.newPassword !== this.confirmNewPassword) {
+        this.changePasswordError = 'Пароли не совпадают';
+        return;
+      }
+
+      const crypto = Kernel.get('crypto');
+      try {
+        // Verify old password by trying to derive MK and decrypt DEK
+        // Re-init with old password to ensure it's correct
+        // Simpler approach: changePassword assumes old is current session password
+        // For robustness: re-decrypt DEK with oldPassword first
+        await crypto.initialize(this.oldPassword);
+        await crypto.changePassword(this.oldPassword, this.newPassword);
+        this.showChangePasswordModal = false;
+        this.showToast('Пароль изменён', 'success');
+      } catch (err) {
+        if (err.message === 'WRONG_PASSWORD') this.changePasswordError = 'Неверный текущий пароль';
+        else {
+          this.changePasswordError = 'Ошибка смены пароля';
+          Kernel.logger.error('Change password failed', err);
+        }
+      }
+    },
+
+    async exportData() {
+      this.showSettingsModal = false;
+      const pwd = prompt('Введите пароль для шифрования экспорта:');
+      if (!pwd || pwd.length < 4) {
+        this.showToast('Пароль экспорта: минимум 4 символа', 'error');
+        return;
+      }
+      try {
+        const backup = Kernel.get('backup');
+        await backup.exportAll(pwd);
+        this.showToast('Экспорт завершён', 'success');
+      } catch (err) {
+        Kernel.logger.error('Export failed', err);
+        this.showToast('Ошибка экспорта', 'error');
+      }
+    },
+
+    async importData() {
+      this.showSettingsModal = false;
+      const input = this.$refs.importFileInput;
+      input.click();
+    },
+
+    async handleImportFile(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const pwd = prompt('Введите пароль от резервной копии:');
+      if (!pwd) { e.target.value = ''; return; }
+      try {
+        const backup = Kernel.get('backup');
+        const count = await backup.importAll(file, pwd);
+        this.showToast(`Импортировано: ${count}`, 'success');
+      } catch (err) {
+        if (err.message === 'WRONG_IMPORT_PASSWORD') this.showToast('Неверный пароль от копии', 'error');
+        else {
+          Kernel.logger.error('Import failed', err);
+          this.showToast('Ошибка импорта', 'error');
+        }
+      }
+      e.target.value = '';
+    },
+
+    async wipeData() {
+      this.showSettingsModal = false;
+      const ok = await this.showConfirm('Стереть всё?', 'Все заметки, ключи и настройки будут удалены безвозвратно.', 'Стереть');
+      if (!ok) return;
+      try {
+        const storage = Kernel.get('storage');
+        const crypto = Kernel.get('crypto');
+        await storage.reset();
+        crypto.wipe();
+        localStorage.removeItem('noomium:config');
+        this.showToast('Всё стёрто. Обновляю...', 'success');
+        setTimeout(() => location.reload(), 1200);
+      } catch (err) {
+        this.showToast('Ошибка стирания', 'error');
+      }
+    },
+
+    showConfirm(title, message, buttonText) {
+      return new Promise((resolve) => {
+        this.confirmTitle = title;
+        this.confirmMessage = message;
+        this.confirmButtonText = buttonText;
+        this._confirmResolve = resolve;
+        this.showConfirmDialog = true;
+      });
+    },
+
+    proceedConfirm() {
+      this.showConfirmDialog = false;
+      if (this._confirmResolve) {
+        this._confirmResolve(true);
+        this._confirmResolve = null;
+      }
+    },
+
+    cancelConfirm() {
+      this.showConfirmDialog = false;
+      if (this._confirmResolve) {
+        this._confirmResolve(false);
+        this._confirmResolve = null;
+      }
+    },
+
     formatNoteForUi(note) {
       return {
         id: note.id,
@@ -1088,12 +1583,28 @@ document.addEventListener('alpine:init', () => {
 });
 
 // ===========================================================================
-// PWA: Service Worker registration (inline for single-file prototype)
+// PWA: Service Worker with proper caching strategy
 // ===========================================================================
 if ('serviceWorker' in navigator) {
   const swCode = `
-    const CACHE = 'noomium-v2';
-    self.addEventListener('install', (e) => self.skipWaiting());
+    const CACHE = 'noomium-v2-r1';
+    const CORE_ASSETS = [
+      './',
+      'https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css',
+      'https://cdn.jsdelivr.net/npm/@alpinejs/csp@3.14.1/dist/cdn.min.js',
+      'https://cdn.jsdelivr.net/npm/dexie@3.2.7/dist/dexie.min.js',
+      'https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js',
+      'https://cdn.jsdelivr.net/npm/dayjs@1.11.13/plugin/relativeTime.js',
+      'https://cdn.jsdelivr.net/npm/dayjs@1.11.13/locale/ru.js'
+    ];
+
+    self.addEventListener('install', (e) => {
+      e.waitUntil(
+        caches.open(CACHE).then((c) => c.addAll(CORE_ASSETS).catch(() => {}))
+          .then(() => self.skipWaiting())
+      );
+    });
+
     self.addEventListener('activate', (e) => {
       e.waitUntil(
         caches.keys().then((names) =>
@@ -1101,18 +1612,36 @@ if ('serviceWorker' in navigator) {
         ).then(() => self.clients.claim())
       );
     });
+
     self.addEventListener('fetch', (e) => {
       if (e.request.method !== 'GET') return;
-      e.respondWith(
-        caches.match(e.request).then((cached) => {
-          const fetchPromise = fetch(e.request).then((res) => {
+      const url = new URL(e.request.url);
+
+      // Network-first for HTML navigation
+      if (e.request.mode === 'navigate') {
+        e.respondWith(
+          fetch(e.request).then((res) => {
             if (res && res.status === 200) {
               const clone = res.clone();
               caches.open(CACHE).then((c) => c.put(e.request, clone));
             }
             return res;
+          }).catch(() => caches.match(e.request).then((r) => r || caches.match('./')))
+        );
+        return;
+      }
+
+      // Cache-first for CDN/static assets
+      e.respondWith(
+        caches.match(e.request).then((cached) => {
+          if (cached) return cached;
+          return fetch(e.request).then((res) => {
+            if (res && res.status === 200 && (url.hostname.includes('jsdelivr.net') || url.hostname.includes('huggingface.co') || url.hostname.includes('hf.co'))) {
+              const clone = res.clone();
+              caches.open(CACHE).then((c) => c.put(e.request, clone));
+            }
+            return res;
           }).catch(() => cached);
-          return cached || fetchPromise;
         })
       );
     });
