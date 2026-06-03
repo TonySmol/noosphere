@@ -1,175 +1,597 @@
-<!doctype html>
-<html lang="ru">
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
 <head>
-<meta name="app-version" content="1.2.0">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="theme-color" content="#0b0b10">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https: wss:; worker-src 'self' blob:; connect-src * https: wss:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src * data: blob:;">
-<title>NOOmium</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>◆</text></svg>">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0b0b10">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>NOOmium</title>
+  
+  <!-- Tailwind CSS + DaisyUI -->
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet" type="text/css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Alpine.js -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
+  
+  <!-- NDK (Nostr Development Kit) -->
+  <script src="https://cdn.jsdelivr.net/npm/@nostr-dev-kit/ndk@2.8.0/dist/index.umd.js"></script>
+  
+  <!-- Dexie.js -->
+  <script src="https://cdn.jsdelivr.net/npm/dexie@4.0.11/dist/dexie.min.js"></script>
+  
+  <!-- Transformers.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js"></script>
 
-<!-- NOOMIUM_MODULE_START CSS -->
-<!-- [Существующий CSS без изменений] -->
-<!-- NOOMIUM_MODULE_END CSS -->
+  <style>
+    [x-cloak] { display: none !important; }
+    .safe-top { padding-top: env(safe-area-inset-top); }
+    .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+  </style>
 </head>
-<body data-theme="dark">
-<div id="app-root"></div>
+<body class="min-h-screen bg-base-100 text-base-content">
+
+<div id="app" x-data="app()" x-init="init()" x-cloak>
+  
+  <!-- Header -->
+  <header class="navbar bg-base-200 shadow-lg safe-top sticky top-0 z-50">
+    <div class="flex-1">
+      <span class="text-xl font-bold px-4">NOO<span class="text-primary">.</span>mium</span>
+    </div>
+    <div class="flex-none gap-2">
+      <div class="flex items-center gap-2 text-sm">
+        <span class="badge" :class="netStatus === 'connected' ? 'badge-success' : 'badge-warning'">
+          <span class="loading loading-spinner loading-xs" x-show="netStatus !== 'connected'"></span>
+          <span x-text="netStatus === 'connected' ? 'онлайн' : 'сеть'"></span>
+        </span>
+        <span class="badge" :class="aiStatus === 'ready' ? 'badge-success' : 'badge-info'">
+          <span class="loading loading-spinner loading-xs" x-show="aiStatus === 'loading'"></span>
+          <span x-text="aiStatus === 'ready' ? 'ии' : 'модель'"></span>
+        </span>
+      </div>
+      <button class="btn btn-ghost btn-circle" @click="showNotifications = true">
+        <div class="indicator">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+          </svg>
+          <span class="badge badge-xs badge-primary indicator-item" x-show="unreadCount > 0" x-text="unreadCount"></span>
+        </div>
+      </button>
+      <button class="btn btn-ghost btn-circle" @click="showMenu = true">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="container mx-auto px-4 pb-20">
+    
+    <!-- Stream View (Editor + Carousel) -->
+    <div x-show="currentView === 'stream'" x-transition>
+      <!-- Editor Component -->
+      <div x-data="editor()" class="card bg-base-200 shadow-xl mt-4">
+        <div class="card-body">
+          <textarea 
+            x-model="text"
+            class="textarea textarea-bordered w-full h-24 resize-none" 
+            placeholder="О чём думаешь?"
+          ></textarea>
+          <div class="card-actions justify-between items-center mt-2">
+            <span class="text-sm opacity-70" x-text="text.length + ' симв.'"></span>
+            <div class="flex gap-2">
+              <div class="join">
+                <button 
+                  class="join-item btn btn-sm" 
+                  :class="mode === 'private' ? 'btn-primary' : 'btn-ghost'"
+                  @click="mode = 'private'"
+                >Себе</button>
+                <button 
+                  class="join-item btn btn-sm" 
+                  :class="mode === 'world' ? 'btn-primary' : 'btn-ghost'"
+                  @click="mode = 'world'"
+                >Миру</button>
+              </div>
+              <button 
+                class="btn btn-primary btn-sm"
+                :disabled="!text.trim() || sending"
+                @click="send()"
+              >
+                <span class="loading loading-spinner loading-xs" x-show="sending"></span>
+                <span x-show="!sending">Отправить</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Segments -->
+      <div class="tabs tabs-boxed mt-4">
+        <button 
+          class="tab" 
+          :class="segment === 'local' ? 'tab-active' : ''"
+          @click="segment = 'local'"
+        >Моё <span class="badge badge-sm ml-1" x-text="localCount"></span></button>
+        <button 
+          class="tab" 
+          :class="segment === 'world' ? 'tab-active' : ''"
+          @click="segment = 'world'"
+        >Мир <span class="badge badge-sm ml-1" x-text="worldCount"></span></button>
+        <button 
+          class="tab" 
+          :class="segment === 'seren' ? 'tab-active' : ''"
+          @click="segment = 'seren'"
+        >Озарения <span class="badge badge-sm ml-1" x-text="serenCount"></span></button>
+      </div>
+
+      <!-- Carousel -->
+      <div class="mt-4">
+        <div x-show="currentList.length === 0" class="text-center py-12 opacity-50">
+          <div class="text-6xl mb-4">◇</div>
+          <p>Пока нет мыслей</p>
+        </div>
+        <div x-show="currentList.length > 0" class="carousel carousel-center w-full space-x-4 rounded-box">
+          <template x-for="(item, idx) in currentList" :key="item.id">
+            <div class="carousel-item w-80">
+              <div class="card bg-base-200 shadow-xl w-full">
+                <div class="card-body">
+                  <div class="flex justify-between items-start">
+                    <span class="badge" :class="item.shared ? 'badge-info' : 'badge-primary'" x-text="item.shared ? 'открыто' : 'лично'"></span>
+                    <span class="text-xs opacity-50" x-text="Math.round(item.score * 100) + '% похожа'"></span>
+                  </div>
+                  <p class="mt-2 whitespace-pre-wrap" x-text="item.text"></p>
+                  <div class="card-actions justify-end mt-4">
+                    <button class="btn btn-ghost btn-xs" @click="editNote(item)">Развить</button>
+                    <button class="btn btn-ghost btn-xs" @click="toggleShare(item)" x-text="item.shared ? 'Скрыть' : 'Открыть'"></button>
+                    <button class="btn btn-error btn-xs" @click="deleteNote(item.id)">Удалить</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Feed View -->
+    <div x-show="currentView === 'feed'" x-transition>
+      <h2 class="text-2xl font-bold mt-4 mb-4">Лента</h2>
+      <div x-show="publicThoughts.length === 0" class="text-center py-12 opacity-50">
+        <div class="text-6xl mb-4">◇</div>
+        <p>Никто не думает вслух</p>
+      </div>
+      <div class="space-y-4">
+        <template x-for="thought in publicThoughts" :key="thought.id">
+          <div class="card bg-base-200 shadow-xl">
+            <div class="card-body">
+              <div class="flex justify-between items-start">
+                <span class="badge badge-ghost" x-text="thought.pubkey.slice(0, 8)"></span>
+                <span class="text-xs opacity-50" x-text="formatDate(thought.createdAt)"></span>
+              </div>
+              <p class="mt-2 whitespace-pre-wrap" x-text="thought.text"></p>
+              <div class="card-actions justify-end mt-4">
+                <button class="btn btn-primary btn-sm" @click="replyTo(thought)">Ответить</button>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Base View -->
+    <div x-show="currentView === 'base'" x-transition>
+      <h2 class="text-2xl font-bold mt-4 mb-4">База</h2>
+      <div class="stats stats-vertical lg:stats-horizontal shadow w-full mb-4">
+        <div class="stat">
+          <div class="stat-title">Всего</div>
+          <div class="stat-value text-primary" x-text="allNotes.length"></div>
+        </div>
+        <div class="stat">
+          <div class="stat-title">Открыто</div>
+          <div class="stat-value text-info" x-text="sharedCount"></div>
+        </div>
+        <div class="stat">
+          <div class="stat-title">Лично</div>
+          <div class="stat-value" x-text="privateCount"></div>
+        </div>
+      </div>
+      <div class="form-control mb-4">
+        <input type="text" placeholder="Поиск..." class="input input-bordered" x-model="searchQuery" @input="searchNotes()">
+      </div>
+      <div class="space-y-2">
+        <template x-for="note in filteredNotes" :key="note.id">
+          <div class="card bg-base-200 shadow cursor-pointer" @click="openNote(note.id)">
+            <div class="card-body p-4">
+              <p class="line-clamp-2" x-text="note.text"></p>
+              <div class="flex justify-between items-center mt-2">
+                <span class="badge badge-sm" :class="note.shared ? 'badge-info' : 'badge-primary'" x-text="note.shared ? 'открыто' : 'лично'"></span>
+                <span class="text-xs opacity-50" x-text="formatDate(note.createdAt)"></span>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Bottom Navigation -->
+  <nav class="btm-nav btm-nav-sm fixed bottom-0 left-0 right-0 bg-base-200 safe-bottom z-40">
+    <button 
+      :class="currentView === 'stream' ? 'active' : ''"
+      @click="currentView = 'stream'"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+      </svg>
+      <span class="btm-nav-label">Поток</span>
+    </button>
+    <button 
+      :class="currentView === 'feed' ? 'active' : ''"
+      @click="currentView = 'feed'"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
+      </svg>
+      <span class="btm-nav-label">Лента</span>
+    </button>
+    <button 
+      :class="currentView === 'base' ? 'active' : ''"
+      @click="currentView = 'base'"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+      </svg>
+      <span class="btm-nav-label">База</span>
+    </button>
+  </nav>
+
+  <!-- Notifications Modal -->
+  <div x-show="showNotifications" x-transition class="modal modal-open">
+    <div class="modal-box">
+      <h3 class="font-bold text-lg">Уведомления</h3>
+      <div class="py-4 space-y-2">
+        <template x-for="(notif, idx) in notifications" :key="notif.id">
+          <div class="alert" :class="notif.read ? 'alert-info' : 'alert-warning'">
+            <div>
+              <span class="badge badge-sm" x-text="notif.type === 'echo' ? 'Эхо' : 'Ответ'"></span>
+              <p class="text-sm mt-1" x-text="notif.text"></p>
+            </div>
+            <button class="btn btn-sm btn-ghost" @click="markRead(idx)">✓</button>
+          </div>
+        </template>
+        <div x-show="notifications.length === 0" class="text-center opacity-50 py-8">
+          Нет уведомлений
+        </div>
+      </div>
+      <div class="modal-action">
+        <button class="btn btn-ghost btn-sm" @click="clearNotifications()">Очистить все</button>
+        <button class="btn btn-primary btn-sm" @click="showNotifications = false">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Menu Modal -->
+  <div x-show="showMenu" x-transition class="modal modal-open">
+    <div class="modal-box">
+      <h3 class="font-bold text-lg mb-4">Настройки</h3>
+      <div class="space-y-4">
+        <div class="form-control">
+          <label class="label cursor-pointer">
+            <span class="label-text">Тёмная тема</span>
+            <input type="checkbox" class="toggle toggle-primary" x-model="darkTheme" @change="toggleTheme()">
+          </label>
+        </div>
+        <button class="btn btn-outline btn-block" @click="exportData()">Экспорт данных</button>
+        <button class="btn btn-outline btn-block" @click="importData()">Импорт данных</button>
+        <div class="divider">Опасная зона</div>
+        <button class="btn btn-error btn-outline btn-block" @click="wipeData()">Стереть всё</button>
+      </div>
+      <div class="modal-action">
+        <button class="btn btn-primary" @click="showMenu = false">Закрыть</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Password Modal -->
+  <div x-show="showPasswordModal" x-transition class="modal modal-open">
+    <div class="modal-box">
+      <h3 class="font-bold text-lg" x-text="isNewUser ? 'Создать пароль' : 'Введите пароль'"></h3>
+      <div class="py-4 space-y-4">
+        <input type="password" placeholder="Пароль" class="input input-bordered w-full" x-model="password">
+        <input x-show="isNewUser" type="password" placeholder="Подтвердите пароль" class="input input-bordered w-full" x-model="passwordConfirm">
+        <div x-show="passwordError" class="alert alert-error text-sm" x-text="passwordError"></div>
+      </div>
+      <div class="modal-action">
+        <button class="btn btn-primary" @click="submitPassword()">Продолжить</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
 <script>
-(function() {
-  'use strict';
+// Alpine.js Store
+document.addEventListener('alpine:init', () => {
+  Alpine.store('app', {
+    ndk: null,
+    db: null,
+    ai: null,
+    sk: null,
+    pk: null,
+  });
+});
 
-<!-- NOOMIUM_MODULE_START DI -->
-// [Существующий DI-контейнер без изменений]
-<!-- NOOMIUM_MODULE_END DI -->
+// Main App Component
+function app() {
+  return {
+    // State
+    currentView: 'stream',
+    segment: 'local',
+    netStatus: 'disconnected',
+    aiStatus: 'loading',
+    showNotifications: false,
+    showMenu: false,
+    showPasswordModal: false,
+    isNewUser: false,
+    password: '',
+    passwordConfirm: '',
+    passwordError: '',
+    darkTheme: true,
+    
+    // Data
+    allNotes: [],
+    publicThoughts: [],
+    notifications: [],
+    localList: [],
+    worldList: [],
+    serenList: [],
+    searchQuery: '',
+    filteredNotes: [],
+    
+    // Computed
+    get localCount() { return this.localList.length; },
+    get worldCount() { return this.worldList.length; },
+    get serenCount() { return this.serenList.length; },
+    get sharedCount() { return this.allNotes.filter(n => n.shared).length; },
+    get privateCount() { return this.allNotes.length - this.sharedCount; },
+    get unreadCount() { return this.notifications.filter(n => !n.read).length; },
+    get currentList() {
+      if (this.segment === 'local') return this.localList;
+      if (this.segment === 'world') return this.worldList;
+      return this.serenList;
+    },
+    
+    // Init
+    async init() {
+      await this.initDB();
+      await this.loadNotes();
+      await this.checkAuth();
+      this.subscribeToPublicThoughts();
+    },
+    
+    async initDB() {
+      const db = new Dexie('noomium');
+      db.version(1).stores({
+        notes: 'id, text, shared, createdAt, replyTo, parentId'
+      });
+      this.$store.app.db = db;
+    },
+    
+    async loadNotes() {
+      this.allNotes = await this.$store.app.db.notes.toArray();
+      this.updateSearch();
+    },
+    
+    async checkAuth() {
+      const stored = localStorage.getItem('noomium:sk');
+      if (!stored) {
+        this.isNewUser = true;
+        this.showPasswordModal = true;
+      } else {
+        this.showPasswordModal = true;
+      }
+    },
+    
+    async submitPassword() {
+      if (this.isNewUser && this.password !== this.passwordConfirm) {
+        this.passwordError = 'Пароли не совпадают';
+        return;
+      }
+      if (!this.password) {
+        this.passwordError = 'Введите пароль';
+        return;
+      }
+      
+      try {
+        await this.initNostr(this.password);
+        await this.initAI();
+        this.showPasswordModal = false;
+        this.passwordError = '';
+      } catch (err) {
+        this.passwordError = 'Ошибка: ' + err.message;
+      }
+    },
+    
+    async initNostr(password) {
+      // TODO: Implement NDK initialization with PBKDF2 + AES-GCM encryption
+      this.netStatus = 'connected';
+    },
+    
+    async initAI() {
+      // TODO: Implement Transformers.js initialization
+      this.aiStatus = 'ready';
+    },
+    
+    subscribeToPublicThoughts() {
+      // TODO: Subscribe to kind 20202 via NDK
+    },
+    
+    // Methods
+    toggleTheme() {
+      document.documentElement.setAttribute('data-theme', this.darkTheme ? 'dark' : 'light');
+    },
+    
+    formatDate(ts) {
+      return new Date(ts).toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
+    },
+    
+    updateSearch() {
+      if (!this.searchQuery) {
+        this.filteredNotes = this.allNotes;
+      } else {
+        const q = this.searchQuery.toLowerCase();
+        this.filteredNotes = this.allNotes.filter(n => n.text.toLowerCase().includes(q));
+      }
+    },
+    
+    searchNotes() {
+      this.updateSearch();
+    },
+    
+    openNote(id) {
+      // TODO: Open note in modal
+    },
+    
+    editNote(item) {
+      // TODO: Set editor to edit mode with note text
+    },
+    
+    async toggleShare(item) {
+      item.shared = !item.shared;
+      await this.$store.app.db.notes.put(item);
+      await this.loadNotes();
+    },
+    
+    async deleteNote(id) {
+      if (!confirm('Удалить навсегда?')) return;
+      await this.$store.app.db.notes.delete(id);
+      await this.loadNotes();
+    },
+    
+    replyTo(thought) {
+      // TODO: Switch to stream view and set reply mode
+      this.currentView = 'stream';
+    },
+    
+    markRead(idx) {
+      this.notifications[idx].read = true;
+    },
+    
+    clearNotifications() {
+      this.notifications = [];
+    },
+    
+    async exportData() {
+      const data = await this.$store.app.db.notes.toArray();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'noomium-export.json';
+      a.click();
+    },
+    
+    async importData() {
+      // TODO: File input and import logic
+    },
+    
+    async wipeData() {
+      if (!confirm('Удалить ВСЕ данные навсегда?')) return;
+      await this.$store.app.db.notes.clear();
+      localStorage.clear();
+      location.reload();
+    }
+  };
+}
 
-<!-- NOOMIUM_MODULE_START Utils -->
-// [Существующий Utils без изменений]
-<!-- NOOMIUM_MODULE_END Utils -->
+// Editor Component
+function editor() {
+  return {
+    text: '',
+    mode: 'private',
+    sending: false,
+    
+    async send() {
+      if (!this.text.trim()) return;
+      this.sending = true;
+      
+      try {
+        // TODO: Vectorize text via AI
+        const vector = []; // Placeholder
+        
+        const note = {
+          id: 'n' + Date.now(),
+          text: this.text,
+          vector: vector,
+          shared: this.mode === 'world',
+          createdAt: Date.now(),
+          replyTo: null,
+          parentId: null
+        };
+        
+        await this.$store.app.db.notes.put(note);
+        await this.$parent.loadNotes();
+        
+        if (this.mode === 'world') {
+          // TODO: Publish to Nostr via NDK
+        }
+        
+        this.text = '';
+      } catch (err) {
+        console.error('Send failed:', err);
+      } finally {
+        this.sending = false;
+      }
+    }
+  };
+}
 
-<!-- NOOMIUM_MODULE_START Logger -->
-// [Существующий Logger без изменений]
-<!-- NOOMIUM_MODULE_END Logger -->
+// Service Worker Registration
+if ('serviceWorker' in navigator) {
+  const swCode = `
+    const CACHE = 'noomium-v1';
+    self.addEventListener('install', e => {
+      e.waitUntil(caches.open(CACHE).then(c => c.addAll(['/'])));
+    });
+    self.addEventListener('fetch', e => {
+      if (e.request.method !== 'GET') return;
+      e.respondWith(
+        fetch(e.request).then(r => {
+          const clone = r.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+          return r;
+        }).catch(() => caches.match(e.request))
+      );
+    });
+  `;
+  const blob = new Blob([swCode], { type: 'application/javascript' });
+  const swUrl = URL.createObjectURL(blob);
+  navigator.serviceWorker.register(swUrl).catch(() => {});
+}
 
-<!-- NOOMIUM_MODULE_START Bus -->
-// [Существующий Bus без изменений]
-<!-- NOOMIUM_MODULE_END Bus -->
-
-<!-- NOOMIUM_MODULE_START Store -->
-// [Существующий Store без изменений]
-<!-- NOOMIUM_MODULE_END Store -->
-
-<!-- NOOMIUM_MODULE_START I18n -->
-// [Существующий I18n без изменений]
-<!-- NOOMIUM_MODULE_END I18n -->
-
-<!-- NOOMIUM_MODULE_START Config -->
-// [Существующий Config без изменений]
-// Добавь в defaults: echoThreshold: 0.8
-<!-- NOOMIUM_MODULE_END Config -->
-
-<!-- NOOMIUM_MODULE_START DB -->
-// [Существующий DB без изменений]
-<!-- NOOMIUM_MODULE_END DB -->
-
-<!-- NOOMIUM_MODULE_START AI -->
-// [Существующий AI без изменений]
-<!-- NOOMIUM_MODULE_END AI -->
-
-<!-- NOOMIUM_MODULE_START NotificationManager -->
-// TODO: Новый модуль. Зависимости: ['Store', 'Bus'].
-// Приватно: notifications[], save().
-// Публично: add, getAll, markRead, clear, getUnreadCount.
-// Bus.on('net:replyReceived', ...) -> add({type:'reply', ...}).
-<!-- NOOMIUM_MODULE_END NotificationManager -->
-
-<!-- NOOMIUM_MODULE_START Net -->
-// [Существующий Net с модификациями]
-// TODO: Добавить myEventIds (Set), publicThoughts[].
-// TODO: publishThought(text, vector, replyToEventId).
-// TODO: getPublicThoughts, onPublicThought, offPublicThought.
-// TODO: Вторая подписка на kind 20202.
-// TODO: onPublicThoughtEvent -> Bus.emit('net:replyReceived', ...).
-<!-- NOOMIUM_MODULE_END Net -->
-
-<!-- NOOMIUM_MODULE_START EchoDetector -->
-// TODO: Новый модуль. Зависимости: ['DB', 'AI', 'Config', 'Net', 'NotificationManager', 'Bus'].
-// Приватно: localVectors[], processedThoughtIds Set.
-// Подписка на db:change и Net.onPublicThought.
-// AI.cosine >= echoThreshold -> NotificationManager.add({type:'echo'}).
-<!-- NOOMIUM_MODULE_END EchoDetector -->
-
-<!-- NOOMIUM_MODULE_START ReplyManager -->
-// TODO: Новый модуль. Зависимости: ['Net', 'Toast', 'I18n'].
-// Метод reply(originalEventId, text, vector).
-<!-- NOOMIUM_MODULE_END ReplyManager -->
-
-<!-- NOOMIUM_MODULE_START Modal -->
-// [Существующий Modal без изменений]
-<!-- NOOMIUM_MODULE_END Modal -->
-
-<!-- NOOMIUM_MODULE_START Toast -->
-// [Существующий Toast без изменений]
-<!-- NOOMIUM_MODULE_END Toast -->
-
-<!-- NOOMIUM_MODULE_START Progress -->
-// [Существующий Progress без изменений]
-<!-- NOOMIUM_MODULE_END Progress -->
-
-<!-- NOOMIUM_MODULE_START App.State -->
-// [Существующий App.State с модификациями]
-// TODO: appState.replyToId = null
-// TODO: appState.view может быть 'world'
-// TODO: lists.world теперь отдельный массив (не путать с world answers)
-<!-- NOOMIUM_MODULE_END App.State -->
-
-<!-- NOOMIUM_MODULE_START UI.Layout -->
-// [Существующий UI.Layout с модификациями]
-// TODO: buildMarkup() -> добавить '<div class="ws base" id="ws-world" style="display:none;flex:1;"></div>'
-// TODO: buildBottomTabMarkup() -> добавить кнопку "Мир" (data-v="world") и кнопку уведомлений с бейджем.
-// TODO: switchView() -> обработать viewName === 'world'.
-<!-- NOOMIUM_MODULE_END UI.Layout -->
-
-<!-- NOOMIUM_MODULE_START UI.Carousel -->
-// [Существующий UI.Carousel без изменений]
-<!-- NOOMIUM_MODULE_END UI.Carousel -->
-
-<!-- NOOMIUM_MODULE_START UI.Base -->
-// [Существующий UI.Base без изменений]
-<!-- NOOMIUM_MODULE_END UI.Base -->
-
-<!-- NOOMIUM_MODULE_START UI.World -->
-// TODO: Новый блок.
-// renderWorldList() -> рендер Net.getPublicThoughts() в #ws-world.
-// Делегирование кликов на [data-act="reply"].
-<!-- NOOMIUM_MODULE_END UI.World -->
-
-<!-- NOOMIUM_MODULE_START UI.Notifications -->
-// TODO: Новый блок.
-// openNotificationsModal() -> Modal.open со списком NotificationManager.getAll().
-// updateNotificationBadge() -> обновление бейджа.
-<!-- NOOMIUM_MODULE_END UI.Notifications -->
-
-<!-- NOOMIUM_MODULE_START App.Logic -->
-// [Существующий App.Logic с модификациями]
-// TODO: handleSend() -> если isWorld, вызвать Net.publishThought(text, vector, appState.replyToId).
-<!-- NOOMIUM_MODULE_END App.Logic -->
-
-<!-- NOOMIUM_MODULE_START UI.Menu -->
-// [Существующий UI.Menu без изменений]
-<!-- NOOMIUM_MODULE_END UI.Menu -->
-
-<!-- NOOMIUM_MODULE_START UI.Help -->
-// [Существующий UI.Help без изменений]
-<!-- NOOMIUM_MODULE_END UI.Help -->
-
-<!-- NOOMIUM_MODULE_START App.Events -->
-// [Существующий App.Events с модификациями]
-// TODO: bindEvents() -> делегирование в #ws-world.
-// TODO: Bus.on('notifications:update', updateNotificationBadge).
-<!-- NOOMIUM_MODULE_END App.Events -->
-
-<!-- NOOMIUM_MODULE_START App.Boot -->
-// [Существующий App.Boot с модификациями]
-// TODO: DI.resolve('NotificationManager'), DI.resolve('EchoDetector') после AI.load().
-<!-- NOOMIUM_MODULE_END App.Boot -->
-
-<!-- NOOMIUM_MODULE_START App -->
-// [Существующий App с обновленным DI-списком и I18n-словарями]
-// TODO: Добавить переводы: toast.reply.sent, world.title, notifications.title, notification.echo, notification.reply.
-<!-- NOOMIUM_MODULE_END App -->
-
-<!-- NOOMIUM_MODULE_START Bootstrap -->
-// [Существующий Bootstrap без изменений]
-<!-- NOOMIUM_MODULE_END Bootstrap -->
-
-<!-- NOOMIUM_MODULE_START SW -->
-// [Существующий SW без изменений]
-<!-- NOOMIUM_MODULE_END SW -->
-
-})();
+// Manifest Registration
+const manifest = {
+  name: 'NOOmium',
+  short_name: 'NOOmium',
+  start_url: '.',
+  display: 'standalone',
+  background_color: '#0b0b10',
+  theme_color: '#0b0b10',
+  icons: [{
+    src: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">◆</text></svg>',
+    sizes: 'any',
+    type: 'image/svg+xml'
+  }]
+};
+const manifestBlob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+const manifestUrl = URL.createObjectURL(manifestBlob);
+const link = document.createElement('link');
+link.rel = 'manifest';
+link.href = manifestUrl;
+document.head.appendChild(link);
 </script>
+
 </body>
 </html>
