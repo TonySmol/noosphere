@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.9">
+<meta name="app-version" content="1.2.10">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -858,7 +858,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               for (var i = 0; i < progressFns.length; i++) {
                 try { progressFns[i](pct); } catch (_) { /* ignore */ }
               }
-              if (bus && bus.emit) bus.emit('ai:progress', { pct: pct });
+              if (bus && bus.emit) {
+                try { bus.emit('ai:progress', { pct: pct }); } catch (_) {}
+                try { bus.emit('ai:status', { mode: 'loading', percent: pct }); } catch (_) {}
+              }
             }
           }
         });
@@ -866,6 +869,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         extractor = pipe;
         mode = 'model';
         if (log) log.info('AI loaded: ' + MODEL);
+        if (bus && bus.emit) { try { bus.emit('ai:status', { mode: 'model' }); } catch (_) {} }
       }).catch(function(err) {
         if (attempt < cfg.get('aiLoadRetries', 2)) {
           var delay = Math.min(cfg.get('aiLoadMaxBackoff', 30000), 2000 * Math.pow(2, attempt));
@@ -874,6 +878,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         }
         if (log) log.warn('AI load failed, hash mode', String(err && err.message || err));
         mode = 'demo';
+        if (bus && bus.emit) { try { bus.emit('ai:status', { mode: 'demo' }); } catch (_) {} }
       });
     }
 
@@ -2224,6 +2229,120 @@ DI.register('AuthService', function(Config, Logger, Bus, DB) {
   };
 }, ['Config', 'Logger', 'Bus', 'DB']);
 <!-- NOOMIUM_MODULE_END AuthService -->
+
+<!-- NOOMIUM_MODULE_START HeaderStatusComponent -->
+DI.register('HeaderStatusComponent', function(Bus, I18n, Net, AI, Utils) {
+  var netStatusHandler = null;
+  var netPeersHandler = null;
+  var aiStatusHandler = null;
+  var i18nHandler = null;
+
+  /**
+   * Обновить индикатор сети. DOM-элементы берутся каждый раз заново,
+   * чтобы компонент корректно работал после refreshUI (пересоздания DOM).
+   */
+  function updateNet(cls, text) {
+    var dot = document.getElementById('st-net-dot');
+    var txt = document.getElementById('st-net-txt');
+    if (dot) dot.className = 'hdr-st-dot ' + (cls || '');
+    if (txt) txt.textContent = text || '';
+  }
+
+  function updateAi(cls, text) {
+    var dot = document.getElementById('st-ai-dot');
+    var txt = document.getElementById('st-ai-txt');
+    if (dot) dot.className = 'hdr-st-dot ' + (cls || '');
+    if (txt) txt.textContent = text || '';
+  }
+
+  function init() {
+    // Обработчик статуса сети
+    netStatusHandler = function(payload) {
+      var status = payload && payload.status ? payload.status : 'disconnected';
+      var text = I18n.t('st.net');
+      var cls = 'load';
+      if (status === 'connected') {
+        text = I18n.t('st.net.online') + ' · ' + Utils.word('peers', Net.peerCount(), I18n.getLang());
+        cls = 'ok';
+      } else if (status === 'connecting') {
+        text = I18n.t('st.net.connecting'); cls = 'load';
+      } else if (status === 'reconnecting') {
+        text = I18n.t('st.net.reconnecting'); cls = 'warn';
+      } else if (status === 'failed') {
+        text = I18n.t('st.net.failed'); cls = 'err';
+      }
+      updateNet(cls, text);
+    };
+
+    // Обработчик количества пиров (обновляет текст при подключении новых узлов)
+    netPeersHandler = function(payload) {
+      var count = payload && typeof payload.count === 'number' ? payload.count : 0;
+      var text = count > 0
+        ? I18n.t('st.net.online') + ' · ' + Utils.word('peers', count, I18n.getLang())
+        : I18n.t('st.net.listen');
+      var cls = count > 0 ? 'ok' : 'load';
+      updateNet(cls, text);
+    };
+
+    // Обработчик статуса AI (loading/model/demo)
+    aiStatusHandler = function(payload) {
+      if (!payload) return;
+      var mode = payload.mode;
+      var percent = payload.percent || 0;
+      if (mode === 'loading') {
+        updateAi('load', I18n.t('st.ai.loading') + ' ' + Math.round(percent) + '%');
+      } else if (mode === 'model') {
+        updateAi('ok', I18n.t('st.ai.ready'));
+      } else if (mode === 'demo') {
+        updateAi('warn', I18n.t('st.ai.demo'));
+      }
+    };
+
+    // При смене языка обновляем статусы на актуальные значения
+    i18nHandler = function() {
+      if (Net) {
+        var currentNetStatus = Net.getStatus();
+        netStatusHandler({ status: currentNetStatus });
+      }
+      if (AI) {
+        if (AI.ready()) {
+          aiStatusHandler({ mode: AI.getMode() });
+        } else {
+          aiStatusHandler({ mode: 'loading' });
+        }
+      }
+    };
+
+    Bus.on('net:status', netStatusHandler);
+    Bus.on('net:peers', netPeersHandler);
+    Bus.on('ai:status', aiStatusHandler);
+    Bus.on('i18n:change', i18nHandler);
+
+    // Отображаем текущее состояние сервисов (важно, если компонент init после загрузки AI/Net)
+    if (Net) {
+      netStatusHandler({ status: Net.getStatus() });
+    } else {
+      updateNet('load', I18n.t('st.net.connecting'));
+    }
+
+    if (AI && AI.ready()) {
+      aiStatusHandler({ mode: AI.getMode() });
+    } else {
+      aiStatusHandler({ mode: 'loading' });
+    }
+  }
+
+  function destroy() {
+    if (netStatusHandler) { try { Bus.off('net:status', netStatusHandler); } catch (_) {} }
+    if (netPeersHandler) { try { Bus.off('net:peers', netPeersHandler); } catch (_) {} }
+    if (aiStatusHandler) { try { Bus.off('ai:status', aiStatusHandler); } catch (_) {} }
+    if (i18nHandler) { try { Bus.off('i18n:change', i18nHandler); } catch (_) {} }
+    netStatusHandler = netPeersHandler = aiStatusHandler = i18nHandler = null;
+  }
+
+  return { init: init, destroy: destroy };
+}, ['Bus', 'I18n', 'Net', 'AI', 'Utils']);
+<!-- NOOMIUM_MODULE_END HeaderStatusComponent -->
   
 <!-- NOOMIUM_MODULE_START App.State -->
   var Logger = DI.resolve('Logger');
@@ -2298,13 +2417,6 @@ DI.register('AuthService', function(Config, Logger, Bus, DB) {
       if (list[i].id === id) return list[i];
     }
     return null;
-  }
-
-  function setStatus(which, text, cls) {
-    var dot = document.getElementById('st-' + which + '-dot');
-    var txtEl = document.getElementById('st-' + which + '-txt');
-    if (dot) dot.className = 'hdr-st-dot ' + (cls || '');
-    if (txtEl) txtEl.textContent = text;
   }
 
   function updateCounter() {
@@ -2400,16 +2512,14 @@ DI.register('AuthService', function(Config, Logger, Bus, DB) {
     setupWindowListeners();
     bindEvents();
 
-    if (AI.ready()) {
-      var mode = AI.getMode();
-      setStatus('ai',
-        mode === 'model' ? translate('st.ai.ready') : translate('st.ai.demo'),
-        mode === 'model' ? 'ok' : 'warn'
-      );
-    } else {
-      setStatus('ai', translate('st.ai.loading'), 'load');
-    }
-    
+    // HeaderStatusComponent сам обновится по событию i18n:change,
+    // но нужно переинициализировать его для новых DOM-элементов
+    try {
+      var headerStatus = DI.resolve('HeaderStatusComponent');
+      headerStatus.destroy();
+      headerStatus.init();
+    } catch (_) { /* ignore */ }
+
     switchView(savedView);
     setSegment(savedSeg);
     handleToggleMode(savedMode);
@@ -2428,7 +2538,6 @@ DI.register('AuthService', function(Config, Logger, Bus, DB) {
     toast: toast,
     applyTheme: applyTheme,
     findItemById: findItemById,
-    setStatus: setStatus,
     updateCounter: updateCounter,
     handleToggleMode: handleToggleMode,
     handleSend: handleSend,
@@ -2439,7 +2548,7 @@ DI.register('AuthService', function(Config, Logger, Bus, DB) {
     getAllNotesCached: getAllNotesCached
   };
 <!-- NOOMIUM_MODULE_END App.State -->
-
+  
 <!-- NOOMIUM_MODULE_START UI.Layout -->
   function buildHeaderMarkup() {
     return '<div class="hdr">' +
@@ -3615,7 +3724,6 @@ DI.register('AuthService', function(Config, Logger, Bus, DB) {
 
 <!-- NOOMIUM_MODULE_START App.Events -->
   var busHandlers = [];
-  var netPeerHandler = null;
 
   function updateOfflineBar() {
     var status = Net.getStatus();
@@ -3729,38 +3837,6 @@ DI.register('AuthService', function(Config, Logger, Bus, DB) {
       }
     });
 
-    netPeerHandler = function(count) {
-      setStatus('net',
-        count > 0
-          ? translate('st.net.online') + ' · ' + Utils.word('peers', count, I18n.getLang())
-          : translate('st.net.listen'),
-        count > 0 ? 'ok' : 'load'
-      );
-      var state = StateManager.getState();
-      if (state.view === 'stream') executeSearch();
-    };
-    Net.onPeers(netPeerHandler);
-
-    var netStatusHandler = function(payload) {
-      var status = payload && payload.status ? payload.status : 'disconnected';
-      var text = translate('st.net');
-      var cls = 'load';
-      if (status === 'connected') {
-        text = translate('st.net.online') + ' · ' + Utils.word('peers', Net.peerCount(), I18n.getLang());
-        cls = 'ok';
-      } else if (status === 'connecting') {
-        text = translate('st.net.connecting'); cls = 'load';
-      } else if (status === 'reconnecting') {
-        text = translate('st.net.reconnecting'); cls = 'warn';
-      } else if (status === 'failed') {
-        text = translate('st.net.failed'); cls = 'err';
-      }
-      setStatus('net', text, cls);
-      updateOfflineBar();
-    };
-    Bus.on('net:status', netStatusHandler);
-    busHandlers.push({event: 'net:status', fn: netStatusHandler});
-    
     var dbChangeHandler = function() { allNotesCache = null; };
     Bus.on('db:change', dbChangeHandler);
     busHandlers.push({event: 'db:change', fn: dbChangeHandler});
@@ -3779,6 +3855,11 @@ DI.register('AuthService', function(Config, Logger, Bus, DB) {
     };
     Bus.on('net:outbox', outboxHandler);
     busHandlers.push({event: 'net:outbox', fn: outboxHandler});
+
+    // Обновляем offline-bar при изменении статуса сети (он зависит от netStatus и outbox)
+    var netStatusForOfflineHandler = function() { updateOfflineBar(); };
+    Bus.on('net:status', netStatusForOfflineHandler);
+    busHandlers.push({event: 'net:status', fn: netStatusForOfflineHandler});
 
     updateOfflineBar();
   }
@@ -3851,11 +3932,6 @@ DI.register('AuthService', function(Config, Logger, Bus, DB) {
       Bus.off(busHandlers[i].event, busHandlers[i].fn);
     }
     busHandlers = [];
-
-    if (netPeerHandler) {
-      Net.offPeers(netPeerHandler);
-      netPeerHandler = null;
-    }
   }
 <!-- NOOMIUM_MODULE_END App.Events -->
 
@@ -3866,15 +3942,7 @@ DI.register('AuthService', function(Config, Logger, Bus, DB) {
     I18n.addDict('ru', { 'btn.forgot': 'Забыли пароль?' });
     I18n.addDict('en', { 'btn.forgot': 'Forgot password?' });
 
-    setStatus('net', translate('st.net.connecting'), 'load');
-    setStatus('ai', translate('st.ai.loading'), 'load');
     Progress.show();
-
-    uiState.progressHandler = function(percent) {
-      setStatus('ai', translate('st.ai.loading') + ' ' + Math.round(percent) + '%', 'load');
-      Progress.update(percent);
-    };
-    AI.onProgress(uiState.progressHandler);
 
     var aiLoaded = false;
     var netInitialized = false;
@@ -3887,10 +3955,6 @@ DI.register('AuthService', function(Config, Logger, Bus, DB) {
 
     AI.load().then(function() {
       Progress.hide();
-      setStatus('ai',
-        AI.getMode() === 'model' ? translate('st.ai.ready') : translate('st.ai.demo'),
-        AI.getMode() === 'model' ? 'ok' : 'warn'
-      );
       aiLoaded = true;
 
       // Запускаем процесс аутентификации без коллбэка (инициализация при старте)
@@ -3899,7 +3963,6 @@ DI.register('AuthService', function(Config, Logger, Bus, DB) {
     }).catch(function(err) {
       Progress.hide();
       if (Logger) Logger.error('AI', String(err && err.message || err));
-      setStatus('ai', translate('st.ai.demo'), 'warn');
       aiLoaded = true;
       checkOnboarding();
     });
@@ -3914,14 +3977,11 @@ DI.register('AuthService', function(Config, Logger, Bus, DB) {
         checkOnboarding();
       }).catch(function(err) {
         if (Logger) Logger.error('Net', String(err && err.message || err));
-        setStatus('net', translate('st.net.failed'), 'err');
       });
     }
 
     /**
      * Единая точка входа: запрашивает пароль и делегирует криптографию в AuthService.
-     * При успехе инициализирует сеть, при провале — повторяет промпт или сбрасывает хранилище.
-     * @param {Function} [onSuccess] - опциональный коллбэк после успешной авторизации
      */
     function requestAuth(onSuccess) {
       if (AuthService.needsNewKey()) {
@@ -4069,6 +4129,12 @@ DI.register('AuthService', function(Config, Logger, Bus, DB) {
       root.innerHTML = buildMarkup();
       setupWindowListeners();
       bindEvents();
+
+      // Инициализация UI-компонентов после монтирования DOM
+      try { DI.resolve('HeaderStatusComponent').init(); } catch (e) {
+        if (Logger) Logger.warn('HeaderStatusComponent init failed', String(e));
+      }
+
       bootApp();
       if (Logger) Logger.info('App mounted');
     } catch (err) {
@@ -4100,7 +4166,7 @@ DI.register('AuthService', function(Config, Logger, Bus, DB) {
     }
   }
 <!-- NOOMIUM_MODULE_END App.Boot -->
-
+  
 <!-- NOOMIUM_MODULE_START App -->
   I18n.addDict('ru', {
     'app.name': 'NOOmium',
