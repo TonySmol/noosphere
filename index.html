@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.11">
+<meta name="app-version" content="1.2.12">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2349,6 +2349,80 @@ DI.register('HeaderStatusComponent', function(Bus, I18n, Net, AI, Utils) {
   return { init: init, destroy: destroy };
 }, ['Bus', 'I18n', 'Net', 'AI', 'Utils']);
 <!-- NOOMIUM_MODULE_END HeaderStatusComponent -->
+
+<!-- NOOMIUM_MODULE_START OfflineBarComponent -->
+DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
+  var netStatusHandler = null;
+  var netOutboxHandler = null;
+  var i18nHandler = null;
+
+  /**
+   * Обновить видимость и текст офлайн-бара.
+   * DOM-элементы берутся при каждом вызове для корректной работы
+   * после refreshUI (когда DOM полностью пересоздаётся).
+   */
+  function update() {
+    var bar = document.getElementById('offline-bar');
+    var textEl = document.getElementById('offline-text');
+    var queueEl = document.getElementById('offline-queue');
+    
+    if (!bar || !textEl || !queueEl) return;
+    
+    var status = Net ? Net.getStatus() : 'disconnected';
+    var outboxLength = Net ? Net.getOutboxLength() : 0;
+    
+    if (status === 'disconnected') {
+      bar.style.display = 'none';
+      return;
+    }
+    
+    if (status === 'connected') {
+      if (outboxLength > 0) {
+        bar.style.display = 'block';
+        textEl.textContent = I18n.t('offline.bar');
+        queueEl.style.display = 'inline';
+        queueEl.textContent = '(' + I18n.t('offline.queue', { count: outboxLength }) + ')';
+      } else {
+        bar.style.display = 'none';
+      }
+      return;
+    }
+    
+    // connecting / reconnecting / failed — показываем бар с текстом "Нет сети"
+    bar.style.display = 'block';
+    textEl.textContent = I18n.t('offline.bar');
+    if (outboxLength > 0) {
+      queueEl.style.display = 'inline';
+      queueEl.textContent = '(' + I18n.t('offline.queue', { count: outboxLength }) + ')';
+    } else {
+      queueEl.style.display = 'none';
+    }
+  }
+
+  function init() {
+    netStatusHandler = function() { update(); };
+    netOutboxHandler = function() { update(); };
+    // При смене языка перерисовываем бар с переведёнными текстами
+    i18nHandler = function() { update(); };
+
+    Bus.on('net:status', netStatusHandler);
+    Bus.on('net:outbox', netOutboxHandler);
+    Bus.on('i18n:change', i18nHandler);
+
+    // Первоначальное отображение с учётом текущего состояния сети
+    update();
+  }
+
+  function destroy() {
+    if (netStatusHandler) { try { Bus.off('net:status', netStatusHandler); } catch (_) {} }
+    if (netOutboxHandler) { try { Bus.off('net:outbox', netOutboxHandler); } catch (_) {} }
+    if (i18nHandler) { try { Bus.off('i18n:change', i18nHandler); } catch (_) {} }
+    netStatusHandler = netOutboxHandler = i18nHandler = null;
+  }
+
+  return { init: init, destroy: destroy };
+}, ['Bus', 'I18n', 'Net']);
+<!-- NOOMIUM_MODULE_END OfflineBarComponent -->
   
 <!-- NOOMIUM_MODULE_START App.State -->
   var Logger = DI.resolve('Logger');
@@ -2503,7 +2577,7 @@ DI.register('HeaderStatusComponent', function(Bus, I18n, Net, AI, Utils) {
     renderCarousel();
   }
 
-  function refreshUI() {
+    function refreshUI() {
     var state = StateManager.getState();
     var savedView = state.view;
     var savedSeg = state.seg;
@@ -2518,12 +2592,17 @@ DI.register('HeaderStatusComponent', function(Bus, I18n, Net, AI, Utils) {
     setupWindowListeners();
     bindEvents();
 
-    // HeaderStatusComponent сам обновится по событию i18n:change,
-    // но нужно переинициализировать его для новых DOM-элементов
+
     try {
       var headerStatus = DI.resolve('HeaderStatusComponent');
       headerStatus.destroy();
       headerStatus.init();
+    } catch (_) { /* ignore */ }
+    
+    try {
+      var offlineBar = DI.resolve('OfflineBarComponent');
+      offlineBar.destroy();
+      offlineBar.init();
     } catch (_) { /* ignore */ }
 
     switchView(savedView);
@@ -3731,42 +3810,6 @@ DI.register('HeaderStatusComponent', function(Bus, I18n, Net, AI, Utils) {
 <!-- NOOMIUM_MODULE_START App.Events -->
   var busHandlers = [];
 
-  function updateOfflineBar() {
-    var status = Net.getStatus();
-    var outboxLength = Net.getOutboxLength();
-    var bar = document.getElementById('offline-bar');
-    var textEl = document.getElementById('offline-text');
-    var queueEl = document.getElementById('offline-queue');
-    
-    if (!bar || !textEl || !queueEl) return;
-    
-    if (status === 'disconnected') {
-      bar.style.display = 'none';
-      return;
-    }
-    
-    if (status === 'connected') {
-      if (outboxLength > 0) {
-        bar.style.display = 'block';
-        textEl.textContent = translate('offline.bar');
-        queueEl.style.display = 'inline';
-        queueEl.textContent = '(' + translate('offline.queue').replace('{count}', outboxLength) + ')';
-      } else {
-        bar.style.display = 'none';
-      }
-      return;
-    }
-    
-    bar.style.display = 'block';
-    textEl.textContent = translate('offline.bar');
-    if (outboxLength > 0) {
-      queueEl.style.display = 'inline';
-      queueEl.textContent = '(' + translate('offline.queue').replace('{count}', outboxLength) + ')';
-    } else {
-      queueEl.style.display = 'none';
-    }
-  }
-
   function bindEvents() {
     var editor = document.getElementById('ed-ta');
     if (editor) {
@@ -3851,23 +3894,7 @@ DI.register('HeaderStatusComponent', function(Bus, I18n, Net, AI, Utils) {
     Bus.on('i18n:change', i18nHandler);
     busHandlers.push({event: 'i18n:change', fn: i18nHandler});
 
-    var outboxHandler = function(payload) {
-      var count = payload && typeof payload.count === 'number' ? payload.count : 0;
-      var queueEl = document.getElementById('offline-queue');
-      if (queueEl) {
-        queueEl.textContent = '(' + translate('offline.queue').replace('{count}', count) + ')';
-      }
-      updateOfflineBar();
-    };
-    Bus.on('net:outbox', outboxHandler);
-    busHandlers.push({event: 'net:outbox', fn: outboxHandler});
-
-    // Обновляем offline-bar при изменении статуса сети (он зависит от netStatus и outbox)
-    var netStatusForOfflineHandler = function() { updateOfflineBar(); };
-    Bus.on('net:status', netStatusForOfflineHandler);
-    busHandlers.push({event: 'net:status', fn: netStatusForOfflineHandler});
-
-    // Обновление прогресс-бара загрузки модели ИИ (восстанавливает анимацию после Шага 3)
+    // Обновление прогресс-бара загрузки модели ИИ
     var aiProgressHandler = function(payload) {
       if (Progress && payload && typeof payload.pct === 'number') {
         Progress.update(payload.pct);
@@ -3875,8 +3902,6 @@ DI.register('HeaderStatusComponent', function(Bus, I18n, Net, AI, Utils) {
     };
     Bus.on('ai:progress', aiProgressHandler);
     busHandlers.push({event: 'ai:progress', fn: aiProgressHandler});
-
-    updateOfflineBar();
   }
 
   function setupWindowListeners() {
@@ -4148,6 +4173,9 @@ DI.register('HeaderStatusComponent', function(Bus, I18n, Net, AI, Utils) {
       // Инициализация UI-компонентов после монтирования DOM
       try { DI.resolve('HeaderStatusComponent').init(); } catch (e) {
         if (Logger) Logger.warn('HeaderStatusComponent init failed', String(e));
+      }
+      try { DI.resolve('OfflineBarComponent').init(); } catch (e) {
+        if (Logger) Logger.warn('OfflineBarComponent init failed', String(e));
       }
 
       bootApp();
