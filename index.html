@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.10">
+<meta name="app-version" content="1.2.11">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -498,8 +498,14 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (set) { set.delete(fn); if (set.size === 0) map.delete(event); }
       },
       emit: function(event, payload) {
-        const set = map.get(event) || [];
-        for (const fn of set) { try { fn(payload); } catch (err) { console.error(err); } }
+        const set = map.get(event);
+        if (!set) return;
+        // Создаём копию слушателей перед итерацией, чтобы удаление/добавление
+        // подписок внутри обработчиков не ломало цикл (fix для i18n:change → refreshUI → cleanup)
+        const listeners = Array.from(set);
+        for (const fn of listeners) {
+          try { fn(payload); } catch (err) { console.error(err); }
+        }
       }
     };
   }, []);
@@ -3860,6 +3866,15 @@ DI.register('HeaderStatusComponent', function(Bus, I18n, Net, AI, Utils) {
     var netStatusForOfflineHandler = function() { updateOfflineBar(); };
     Bus.on('net:status', netStatusForOfflineHandler);
     busHandlers.push({event: 'net:status', fn: netStatusForOfflineHandler});
+
+    // Обновление прогресс-бара загрузки модели ИИ (восстанавливает анимацию после Шага 3)
+    var aiProgressHandler = function(payload) {
+      if (Progress && payload && typeof payload.pct === 'number') {
+        Progress.update(payload.pct);
+      }
+    };
+    Bus.on('ai:progress', aiProgressHandler);
+    busHandlers.push({event: 'ai:progress', fn: aiProgressHandler});
 
     updateOfflineBar();
   }
