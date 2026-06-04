@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.33">
+<meta name="app-version" content="1.2.34">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2079,6 +2079,7 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     getSendMode: getSendMode,
     setSendMode: setSendMode,
     isSending: isSending,
+    getAllNotesCached: getAllNotesCached,
     init: init
   };
 }, ['AI', 'DB', 'Net', 'Config', 'Bus', 'StateManager', 'I18n', 'Toast', 'Logger', 'Utils']);
@@ -3129,7 +3130,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
 <!-- NOOMIUM_MODULE_END StreamViewComponent -->
 
 <!-- NOOMIUM_MODULE_START BaseViewComponent -->
-DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast) {
+DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast, SearchService) {
   var ITEM_HEIGHT = 100;
   var ITEM_GAP = 8;
   var ROW_SIZE = ITEM_HEIGHT + ITEM_GAP;
@@ -3141,25 +3142,9 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
   var poolItems = [];
   var listContainer = null;
 
-  var allNotesCache = null;
-  var allNotesCacheTime = 0;
-  var ALL_NOTES_TTL = 5 * 60 * 1000;
-
   var i18nHandler = null;
   var listsChangedHandler = null;
   var viewChangedHandler = null;
-
-  function getAllNotesCached() {
-    var now = Date.now();
-    if (allNotesCache && (now - allNotesCacheTime < ALL_NOTES_TTL)) {
-      return Promise.resolve(allNotesCache);
-    }
-    return DB.all().then(function(notes) {
-      allNotesCache = notes;
-      allNotesCacheTime = now;
-      return notes;
-    });
-  }
 
   function buildStatCard(value, label) {
     var card = document.createElement('div');
@@ -3269,7 +3254,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     var queryValue = queryInput ? queryInput.value.trim().toLowerCase() : '';
     var sortValue = sortSelect ? sortSelect.value : 'new';
 
-    getAllNotesCached().then(function(allNotes) {
+    SearchService.getAllNotesCached().then(function(allNotes) {
       var statsEl = document.getElementById('base-stats');
       if (statsEl) {
         while (statsEl.firstChild) statsEl.removeChild(statsEl.firstChild);
@@ -3409,7 +3394,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
               Toast.show('ok', I18n.t('toast.edit.saved'));
               isEditing = false;
               renderNoteView();
-              allNotesCache = null;
               renderBase();
               try { Bus.emit('state:lists-changed'); } catch (_) {}
             }).catch(function(err) {
@@ -3433,7 +3417,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
             DB.del(id).then(function() {
               Toast.show('ok', I18n.t('toast.deleted'));
               closeNoteView();
-              allNotesCache = null;
               renderBase();
               try { Bus.emit('state:lists-changed'); } catch (_) {}
             }).catch(function(err) {
@@ -3456,7 +3439,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
             DB.put(record).then(function() {
               Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
               renderNoteView();
-              allNotesCache = null;
               renderBase();
               try { Bus.emit('state:lists-changed'); } catch (_) {}
             }).catch(function(err) {
@@ -3580,7 +3562,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
           }
           DB.bulkPut(clean).then(function() {
             Toast.show('ok', '✓ ' + clean.length);
-            allNotesCache = null;
             if (StateManager.getState().view === 'base') renderBase();
             try { Bus.emit('state:lists-changed'); } catch (_) {}
           }).catch(function(err) {
@@ -3634,7 +3615,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     Bus.on('i18n:change', i18nHandler);
 
     listsChangedHandler = function() {
-      allNotesCache = null;
       if (StateManager.getState().view === 'base') renderBase();
     };
     Bus.on('state:lists-changed', listsChangedHandler);
@@ -3671,7 +3651,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     exportData: exportData,
     importData: importData
   };
-}, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'AI', 'Toast']);
+}, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'AI', 'Toast', 'SearchService']);
 <!-- NOOMIUM_MODULE_END BaseViewComponent -->
   
 <!-- NOOMIUM_MODULE_START App.State -->
