@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.8">
+<meta name="app-version" content="1.2.9">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2060,6 +2060,170 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
   };
 }, ['AI', 'DB', 'Net', 'Config', 'Bus', 'StateManager', 'I18n', 'Toast', 'Logger', 'Utils']);
 <!-- NOOMIUM_MODULE_END SearchService -->
+
+<!-- NOOMIUM_MODULE_START AuthService -->
+DI.register('AuthService', function(Config, Logger, Bus, DB) {
+  var SK_KEY = 'noomium:sk';
+  var CFG_KEY = 'noomium:cfg';
+  var VER_KEY = 'noomium:appVersion';
+  var LANG_KEY = 'noomium:lang';
+  
+  var maxAttempts = Config.get('maxPasswordAttempts', 3);
+  var currentAttempts = 0;
+
+  /**
+   * Вывод ключа AES-GCM из пароля через PBKDF2
+   */
+  function deriveKey(password, salt) {
+    var enc = new TextEncoder();
+    return crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']).then(function(keyMaterial) {
+      return crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+      );
+    });
+  }
+
+  function encryptKey(hexKey, password) {
+    var salt = crypto.getRandomValues(new Uint8Array(16));
+    var iv = crypto.getRandomValues(new Uint8Array(12));
+    return deriveKey(password, salt).then(function(key) {
+      var enc = new TextEncoder();
+      return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(hexKey)).then(function(ciphertext) {
+        var combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
+        combined.set(salt, 0);
+        combined.set(iv, salt.length);
+        combined.set(new Uint8Array(ciphertext), salt.length + iv.length);
+        return btoa(String.fromCharCode.apply(null, combined));
+      });
+    });
+  }
+
+  function decryptKey(base64Str, password) {
+    var combined = Uint8Array.from(atob(base64Str), function(c) { return c.charCodeAt(0); });
+    var salt = combined.slice(0, 16);
+    var iv = combined.slice(16, 28);
+    var ciphertext = combined.slice(28);
+    return deriveKey(password, salt).then(function(key) {
+      return crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext).then(function(dec) {
+        return new TextDecoder().decode(dec);
+      });
+    });
+  }
+
+  function getStoredKey() {
+    try { return localStorage.getItem(SK_KEY); } catch (e) { return null; }
+  }
+
+  /**
+   * Проверка: ключ существует и зашифрован (не hex-формат)
+   */
+  function hasEncryptedKey() {
+    var stored = getStoredKey();
+    return !!(stored && !/^[0-9a-f]{64}$/i.test(stored));
+  }
+
+  /**
+   * Проверка: ключа нет вообще (первый запуск)
+   */
+  function needsNewKey() {
+    return !getStoredKey();
+  }
+
+  function resetAttempts() {
+    currentAttempts = 0;
+  }
+
+  /**
+   * Попытка расшифровать существующий ключ
+   * @param {string} password
+   * @param {Function} onSuccess - вызывается при успехе
+   * @param {Function} onWrongPassword - вызывается при неверном пароле (пока есть попытки)
+   * @param {Function} onMaxAttempts - вызывается при превышении лимита
+   */
+  function unlock(password, onSuccess, onWrongPassword, onMaxAttempts) {
+    var stored = getStoredKey();
+    if (!stored) {
+      if (typeof onWrongPassword === 'function') onWrongPassword(new Error('NO_KEY'));
+      return;
+    }
+    
+    // Legacy: если ключ в hex-формате (старая версия), считаем пароль валидным
+    if (/^[0-9a-f]{64}$/i.test(stored)) {
+      resetAttempts();
+      if (typeof onSuccess === 'function') onSuccess();
+      return;
+    }
+    
+    decryptKey(stored, password).then(function() {
+      resetAttempts();
+      if (typeof onSuccess === 'function') onSuccess();
+    }).catch(function(err) {
+      currentAttempts++;
+      if (Logger) Logger.warn('AuthService: wrong password attempt ' + currentAttempts + '/' + maxAttempts);
+      
+      if (currentAttempts >= maxAttempts) {
+        if (Bus && Bus.emit) { try { Bus.emit('auth:locked'); } catch (_) {} }
+        if (typeof onMaxAttempts === 'function') onMaxAttempts();
+      } else {
+        if (typeof onWrongPassword === 'function') onWrongPassword(err);
+      }
+    });
+  }
+
+  /**
+   * Генерация нового ключа и его сохранение в зашифрованном виде
+   */
+  function createNew(password, onSuccess) {
+    var raw = crypto.getRandomValues(new Uint8Array(32));
+    var keyHex = Array.from(raw).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+    
+    encryptKey(keyHex, password).then(function(encrypted) {
+      try { localStorage.setItem(SK_KEY, encrypted); } catch (e) {
+        if (Logger) Logger.warn('AuthService: failed to save key', String(e));
+      }
+      resetAttempts();
+      if (typeof onSuccess === 'function') onSuccess();
+    }).catch(function(err) {
+      if (Logger) Logger.error('AuthService: createNew failed', String(err && err.message || err));
+    });
+  }
+
+  /**
+   * Полный сброс хранилища: очистка localStorage и IndexedDB
+   * @returns {Promise<void>}
+   */
+  function resetStorage() {
+    try {
+      localStorage.removeItem(SK_KEY);
+      localStorage.removeItem(CFG_KEY);
+      localStorage.removeItem(VER_KEY);
+      localStorage.removeItem(LANG_KEY);
+    } catch (e) {
+      if (Logger) Logger.warn('AuthService: localStorage cleanup failed', String(e));
+    }
+    
+    resetAttempts();
+    
+    return DB.reset().catch(function(err) {
+      if (Logger) Logger.warn('AuthService: DB reset failed', String(err && err.message || err));
+    });
+  }
+
+  return {
+    hasEncryptedKey: hasEncryptedKey,
+    needsNewKey: needsNewKey,
+    unlock: unlock,
+    createNew: createNew,
+    resetStorage: resetStorage,
+    getAttempts: function() { return currentAttempts; },
+    getMaxAttempts: function() { return maxAttempts; }
+  };
+}, ['Config', 'Logger', 'Bus', 'DB']);
+<!-- NOOMIUM_MODULE_END AuthService -->
   
 <!-- NOOMIUM_MODULE_START App.State -->
   var Logger = DI.resolve('Logger');
@@ -3696,6 +3860,8 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
 <!-- NOOMIUM_MODULE_END App.Events -->
 
 <!-- NOOMIUM_MODULE_START App.Boot -->
+  var AuthService = DI.resolve('AuthService');
+
   function bootApp() {
     I18n.addDict('ru', { 'btn.forgot': 'Забыли пароль?' });
     I18n.addDict('en', { 'btn.forgot': 'Forgot password?' });
@@ -3727,14 +3893,8 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
       );
       aiLoaded = true;
 
-      if (!Net.isKeyEncrypted()) {
-        promptNewPassword(function(pwd) {
-          tryInit(pwd, 0);
-        });
-      } else {
-        promptExistingPassword(tryInit, 0);
-      }
-
+      // Запускаем процесс аутентификации без коллбэка (инициализация при старте)
+      requestAuth();
       checkOnboarding();
     }).catch(function(err) {
       Progress.hide();
@@ -3744,25 +3904,52 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
       checkOnboarding();
     });
 
-    function tryInit(password, attempts) {
+    /**
+     * Инициализация сети после успешной аутентификации
+     */
+    function tryInit(password) {
       return Net.init(function() { executeSearch(); }, password).then(function() {
         netInitialized = true;
         StateManager.setState({ netAuthorized: true });
         checkOnboarding();
       }).catch(function(err) {
-        if (err && err.message === 'WRONG_PASSWORD') {
-          toast('Неверный пароль', 'err');
-          var nextAttempts = attempts + 1;
-          if (nextAttempts >= Config.get('maxPasswordAttempts', 3)) {
-            showResetModal();
-          } else {
-            promptExistingPassword(tryInit, nextAttempts);
-          }
-        } else {
-          if (Logger) Logger.error('Net', String(err && err.message || err));
-          setStatus('net', translate('st.net.failed'), 'err');
-        }
+        if (Logger) Logger.error('Net', String(err && err.message || err));
+        setStatus('net', translate('st.net.failed'), 'err');
       });
+    }
+
+    /**
+     * Единая точка входа: запрашивает пароль и делегирует криптографию в AuthService.
+     * При успехе инициализирует сеть, при провале — повторяет промпт или сбрасывает хранилище.
+     * @param {Function} [onSuccess] - опциональный коллбэк после успешной авторизации
+     */
+    function requestAuth(onSuccess) {
+      if (AuthService.needsNewKey()) {
+        promptNewPassword(function(pwd) {
+          AuthService.createNew(pwd, function() {
+            tryInit(pwd).then(function() {
+              if (typeof onSuccess === 'function') onSuccess();
+            });
+          });
+        });
+      } else {
+        promptExistingPassword(function(pwd) {
+          AuthService.unlock(pwd,
+            function() {
+              tryInit(pwd).then(function() {
+                if (typeof onSuccess === 'function') onSuccess();
+              });
+            },
+            function() {
+              toast('Неверный пароль', 'err');
+              requestAuth(onSuccess);
+            },
+            function() {
+              showResetModal();
+            }
+          );
+        });
+      }
     }
 
     function showResetModal() {
@@ -3775,13 +3962,7 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
           {
             text: 'Сбросить данные', danger: true, primary: true,
             onClick: function() {
-              try {
-                localStorage.removeItem('noomium:sk');
-                localStorage.removeItem('noomium:cfg');
-                localStorage.removeItem('noomium:appVersion');
-                localStorage.removeItem('noomium:lang');
-              } catch (e) { /* ignore */ }
-              DB.reset().then(function() {
+              AuthService.resetStorage().then(function() {
                 location.reload(true);
               });
             }
@@ -3819,7 +4000,7 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
       });
     }
 
-    function promptExistingPassword(callback, attempts) {
+    function promptExistingPassword(callback) {
       var body = document.createElement('div');
       body.innerHTML = '<div class="fg"><label class="fl">Введите пароль</label><input type="password" class="fi-input" id="pwd1" /></div>';
 
@@ -3831,16 +4012,8 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
       forgotBtn.onclick = function() {
         if (!confirm(translate('reset_storage.confirm'))) return;
         Modal.close();
-        try {
-          localStorage.removeItem('noomium:sk');
-          localStorage.removeItem('noomium:cfg');
-          localStorage.removeItem('noomium:appVersion');
-          localStorage.removeItem('noomium:lang');
-        } catch (e) { /* ignore */ }
-        DB.reset().then(function() {
+        AuthService.resetStorage().then(function() {
           location.reload(true);
-        }).catch(function(err) {
-          toast(String(err && err.message || err) || 'Reset failed', 'err');
         });
       };
       body.appendChild(forgotBtn);
@@ -3851,59 +4024,32 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
       errorEl.style.marginTop = '8px';
       body.appendChild(errorEl);
 
-      var buttons = [];
-      if (attempts >= Config.get('maxPasswordAttempts', 3)) {
-        buttons.push({
-          text: 'Сбросить данные', danger: true,
-          onClick: function() {
-            try {
-              localStorage.removeItem('noomium:sk');
-              localStorage.removeItem('noomium:cfg');
-              localStorage.removeItem('noomium:appVersion');
-              localStorage.removeItem('noomium:lang');
-            } catch (e) { /* ignore */ }
-            DB.reset().then(function() {
-              location.reload(true);
-            });
-          }
-        });
-      }
-      buttons.push({
-        text: 'Войти', primary: true,
-        onClick: function() {
-          var p1 = document.getElementById('pwd1').value;
-          if (!p1) { errorEl.textContent = 'Введите пароль'; return; }
-          Modal.close();
-          callback(p1, attempts);
-        }
-      });
-
       Modal.open({
         title: 'Доступ к данным',
         body: body,
-        buttons: buttons
+        buttons: [
+          {
+            text: 'Войти', primary: true,
+            onClick: function() {
+              var p1 = document.getElementById('pwd1').value;
+              if (!p1) { errorEl.textContent = 'Введите пароль'; return; }
+              Modal.close();
+              callback(p1);
+            }
+          }
+        ]
       });
     }
 
+    /**
+     * Обработчик запроса авторизации из других частей приложения (например, при публикации в "Мир")
+     */
     function requestNetworkAuth(onSuccess) {
       if (StateManager.getState().netAuthorized) {
         if (typeof onSuccess === 'function') onSuccess();
         return;
       }
-      
-      var initCallback = function(password) {
-        tryInit(password, 0).then(function() {
-          if (typeof onSuccess === 'function') onSuccess();
-        }).catch(function() {
-          // Ошибки обработаны в tryInit
-        });
-      };
-
-      if (Net.isKeyEncrypted()) {
-        promptExistingPassword(initCallback, 0);
-      } else {
-        promptNewPassword(initCallback);
-      }
+      requestAuth(onSuccess);
     }
 
     StateManager.setState({ requestNetworkAuth: requestNetworkAuth });
