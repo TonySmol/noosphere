@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.12">
+<meta name="app-version" content="1.2.13">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2072,6 +2072,220 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
 }, ['AI', 'DB', 'Net', 'Config', 'Bus', 'StateManager', 'I18n', 'Toast', 'Logger', 'Utils']);
 <!-- NOOMIUM_MODULE_END SearchService -->
 
+<!-- NOOMIUM_MODULE_START EditorComponent -->
+DI.register('EditorComponent', function(Bus, I18n, Utils, SearchService, Config, StateManager) {
+  var editor = null;
+  var counter = null;
+  var sendBtn = null;
+  var modeToggle = null;
+  
+  var searchTimer = null;
+  var i18nHandler = null;
+  
+  // Ссылки на DOM-обработчики для корректного removeEventListener при destroy
+  var onInput = null;
+  var onSendClick = null;
+  var onModeClick = null;
+  
+  var PAPER_PLANE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+  var SPINNER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
+
+  /**
+   * Получить свежие ссылки на DOM-элементы.
+   * Вызывается при каждом обращении, так как DOM может быть пересоздан после refreshUI.
+   */
+  function refreshDOM() {
+    editor = document.getElementById('ed-ta');
+    counter = document.getElementById('ed-cnt');
+    sendBtn = document.getElementById('btn-send');
+    modeToggle = document.getElementById('mode-toggle');
+  }
+
+  function getValue() {
+    if (!editor) refreshDOM();
+    return editor ? editor.value : '';
+  }
+
+  function setValue(val) {
+    if (!editor) refreshDOM();
+    if (editor) {
+      editor.value = val;
+      updateCounter();
+    }
+  }
+
+  function clear() {
+    setValue('');
+  }
+
+  function updateCounter() {
+    if (!counter) refreshDOM();
+    if (counter) {
+      var value = getValue();
+      counter.textContent = Utils.word('symbols', value.length, I18n.getLang());
+    }
+  }
+
+  function updateSendMode(mode) {
+    SearchService.setSendMode(mode);
+    if (!modeToggle) refreshDOM();
+    if (!modeToggle) return;
+    modeToggle.setAttribute('data-mode', mode);
+    var opts = modeToggle.querySelectorAll('.tog-sw-opt');
+    for (var i = 0; i < opts.length; i++) {
+      var opt = opts[i];
+      if (opt.getAttribute('data-v') === mode) {
+        opt.classList.add('on');
+      } else {
+        opt.classList.remove('on');
+      }
+    }
+  }
+
+  function setSendingState(isSending) {
+    if (!sendBtn) refreshDOM();
+    if (!sendBtn) return;
+    if (isSending) {
+      sendBtn.classList.add('sending');
+      sendBtn.disabled = true;
+      sendBtn.innerHTML = SPINNER_SVG;
+    } else {
+      sendBtn.classList.remove('sending');
+      sendBtn.disabled = false;
+      sendBtn.innerHTML = PAPER_PLANE_SVG;
+    }
+  }
+
+  function applyI18n() {
+    if (!editor) refreshDOM();
+    if (editor) {
+      editor.placeholder = I18n.t('ed.placeholder');
+    }
+    updateCounter();
+    // Обновляем тексты кнопок переключателя режима
+    if (!modeToggle) refreshDOM();
+    if (modeToggle) {
+      var opts = modeToggle.querySelectorAll('.tog-sw-opt');
+      for (var i = 0; i < opts.length; i++) {
+        var opt = opts[i];
+        var v = opt.getAttribute('data-v');
+        if (v === 'private') opt.textContent = I18n.t('btn.private');
+        else if (v === 'world') opt.textContent = I18n.t('btn.public');
+      }
+    }
+    // Обновляем aria-label кнопки отправки
+    if (sendBtn) {
+      sendBtn.setAttribute('aria-label', I18n.t('btn.send'));
+    }
+  }
+
+  function handleSend() {
+    var text = getValue().trim();
+    var mode = SearchService.getSendMode();
+    
+    setSendingState(true);
+    
+    SearchService.send(text, mode)
+      .then(function() {
+        clear();
+        // Запрашиваем обновление карусели и базы через шину событий
+        if (Bus && Bus.emit) {
+          try { Bus.emit('editor:send-complete'); } catch (_) {}
+        }
+      })
+      .catch(function() {
+        // Ошибки уже обработаны в SearchService через Toast
+      })
+      .finally(function() {
+        setSendingState(false);
+      });
+  }
+
+  function bindDOMEvents() {
+    refreshDOM();
+    
+    if (editor) {
+      onInput = function() {
+        updateCounter();
+        if (searchTimer) clearTimeout(searchTimer);
+        searchTimer = setTimeout(function() {
+          // Debounced запрос поиска — уведомляем App.State через событие
+          if (Bus && Bus.emit) {
+            try { Bus.emit('editor:search-request', { force: false }); } catch (_) {}
+          }
+        }, Config.get('debounce', 800));
+      };
+      editor.addEventListener('input', onInput);
+    }
+    
+    if (sendBtn) {
+      onSendClick = function() { handleSend(); };
+      sendBtn.addEventListener('click', onSendClick);
+    }
+    
+    if (modeToggle) {
+      onModeClick = function(e) {
+        var opt = e.target.closest('.tog-sw-opt');
+        if (opt) {
+          var value = opt.getAttribute('data-v');
+          if (value) updateSendMode(value);
+        }
+      };
+      modeToggle.addEventListener('click', onModeClick);
+    }
+  }
+
+  function unbindDOMEvents() {
+    if (editor && onInput) {
+      try { editor.removeEventListener('input', onInput); } catch (_) {}
+    }
+    if (sendBtn && onSendClick) {
+      try { sendBtn.removeEventListener('click', onSendClick); } catch (_) {}
+    }
+    if (modeToggle && onModeClick) {
+      try { modeToggle.removeEventListener('click', onModeClick); } catch (_) {}
+    }
+    editor = counter = sendBtn = modeToggle = null;
+    onInput = onSendClick = onModeClick = null;
+    if (searchTimer) {
+      clearTimeout(searchTimer);
+      searchTimer = null;
+    }
+  }
+
+  function init() {
+    bindDOMEvents();
+    
+    i18nHandler = function() { applyI18n(); };
+    Bus.on('i18n:change', i18nHandler);
+    
+    // Установить начальное состояние UI
+    var currentMode = SearchService.getSendMode();
+    updateSendMode(currentMode);
+    applyI18n();
+  }
+
+  function destroy() {
+    unbindDOMEvents();
+    if (i18nHandler) {
+      try { Bus.off('i18n:change', i18nHandler); } catch (_) {}
+      i18nHandler = null;
+    }
+  }
+
+  return {
+    init: init,
+    destroy: destroy,
+    getValue: getValue,
+    setValue: setValue,
+    clear: clear,
+    updateCounter: updateCounter,
+    updateSendMode: updateSendMode,
+    setSendingState: setSendingState
+  };
+}, ['Bus', 'I18n', 'Utils', 'SearchService', 'Config', 'StateManager']);
+<!-- NOOMIUM_MODULE_END EditorComponent -->
+  
 <!-- NOOMIUM_MODULE_START AuthService -->
 DI.register('AuthService', function(Config, Logger, Bus, DB) {
   var SK_KEY = 'noomium:sk';
@@ -2439,15 +2653,17 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
   var Progress = DI.resolve('Progress');
   var StateManager = DI.resolve('StateManager');
   var SearchService = DI.resolve('SearchService');
+  var EditorComponent = DI.resolve('EditorComponent');
 
   var uiState = {
     activeIdx: { local: 0, world: 0, seren: 0 },
     carouselObserver: null,
-    searchTimer: null,
     baseSearchTimer: null,
     windowHandlers: { resize: null, focusin: null, focusout: null, orientationchange: null, beforeunload: null },
     noteViewEscHandler: null,
-    progressHandler: null
+    progressHandler: null,
+    editorSearchHandler: null,
+    editorSendHandler: null
   };
 
   var allNotesCache = null;
@@ -2469,18 +2685,6 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
   var cachedQuery = null;
   var cachedRegex = null;
 
-  var PAPER_PLANE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
-  var SPINNER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
-
-  function getEditorValue() {
-    var ta = document.getElementById('ed-ta');
-    return ta ? ta.value : '';
-  }
-  function setEditorValue(val) {
-    var ta = document.getElementById('ed-ta');
-    if (ta) ta.value = val;
-  }
-
   function translate(key, params, fallback) { return I18n.t(key, params, fallback); }
   function toast(msg, type) { if (Toast && Toast.show) Toast.show(type || 'info', msg); }
 
@@ -2499,58 +2703,12 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
     return null;
   }
 
-  function updateCounter() {
-    var value = getEditorValue();
-    var counter = document.getElementById('ed-cnt');
-    if (counter) counter.textContent = Utils.word('symbols', value.length, I18n.getLang());
-  }
-
-  function handleToggleMode(newMode) {
-    var currentMode = SearchService.getSendMode();
-    if (newMode === currentMode) return;
-    
-    SearchService.setSendMode(newMode);
-    
-    var toggleEl = document.getElementById('mode-toggle');
-    if (!toggleEl) return;
-    toggleEl.setAttribute('data-mode', newMode);
-    toggleEl.querySelectorAll('.tog-sw-opt').forEach(function(opt) {
-      opt.classList.toggle('on', opt.getAttribute('data-v') === newMode);
-    });
-  }
-
-  function handleSend() {
-    var text = getEditorValue().trim();
-    var mode = SearchService.getSendMode();
-    var btn = document.getElementById('btn-send');
-    
-    if (btn) {
-      btn.classList.add('sending');
-      btn.disabled = true;
-      btn.innerHTML = SPINNER_SVG;
-    }
-    
-    SearchService.send(text, mode)
-      .then(function() {
-        setEditorValue('');
-        updateCounter();
-        return executeSearch();
-      })
-      .then(function() {
-        var state = StateManager.getState();
-        if (state.view === 'base') renderBase();
-      })
-      .finally(function() {
-        if (btn) {
-          btn.classList.remove('sending');
-          btn.disabled = false;
-          btn.innerHTML = PAPER_PLANE_SVG;
-        }
-      });
-  }
-
+  /**
+   * Запуск поиска с последующим обновлением карусели и счётчиков.
+   * Текст запроса берётся из EditorComponent.
+   */
   function executeSearch(force) {
-    var text = getEditorValue();
+    var text = EditorComponent.getValue();
     return SearchService.search(text, force).then(function() {
       updateCounts();
       renderCarousel();
@@ -2577,11 +2735,10 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
     renderCarousel();
   }
 
-    function refreshUI() {
+  function refreshUI() {
     var state = StateManager.getState();
     var savedView = state.view;
     var savedSeg = state.seg;
-    var savedText = getEditorValue();
     var savedMode = state.sendMode;
     
     cleanup();
@@ -2592,7 +2749,7 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
     setupWindowListeners();
     bindEvents();
 
-
+    // Переинициализируем UI-компоненты для новых DOM-элементов
     try {
       var headerStatus = DI.resolve('HeaderStatusComponent');
       headerStatus.destroy();
@@ -2605,11 +2762,13 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
       offlineBar.init();
     } catch (_) { /* ignore */ }
 
+    try {
+      EditorComponent.destroy();
+      EditorComponent.init();
+    } catch (_) { /* ignore */ }
+
     switchView(savedView);
     setSegment(savedSeg);
-    handleToggleMode(savedMode);
-    setEditorValue(savedText);
-    updateCounter();
     
     if (AI.ready()) {
       executeSearch(true);
@@ -2617,15 +2776,10 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
   }
 
   window.__AppState = {
-    getEditorValue: getEditorValue,
-    setEditorValue: setEditorValue,
     translate: translate,
     toast: toast,
     applyTheme: applyTheme,
     findItemById: findItemById,
-    updateCounter: updateCounter,
-    handleToggleMode: handleToggleMode,
-    handleSend: handleSend,
     executeSearch: executeSearch,
     switchView: switchView,
     setSegment: setSegment,
@@ -2702,6 +2856,7 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
 
 <!-- NOOMIUM_MODULE_START UI.Carousel -->
   var StateManager = DI.resolve('StateManager');
+  var EditorComponent = DI.resolve('EditorComponent');
 
   function highlightText(text, query) {
     var fragment = document.createDocumentFragment();
@@ -2789,7 +2944,7 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
     
     var body = document.createElement('div');
     body.className = 'fi-body';
-    var queryText = getEditorValue();
+    var queryText = EditorComponent.getValue();
     body.appendChild(highlightText(item.text, queryText));
     card.appendChild(body);
     
@@ -3811,29 +3966,6 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
   var busHandlers = [];
 
   function bindEvents() {
-    var editor = document.getElementById('ed-ta');
-    if (editor) {
-      editor.addEventListener('input', function() {
-        updateCounter();
-        if (uiState.searchTimer) clearTimeout(uiState.searchTimer);
-        uiState.searchTimer = setTimeout(function() { executeSearch(); }, Config.get('debounce', 800));
-      });
-    }
-
-    var sendBtn = document.getElementById('btn-send');
-    if (sendBtn) sendBtn.onclick = handleSend;
-
-    var modeToggle = document.getElementById('mode-toggle');
-    if (modeToggle) {
-      modeToggle.addEventListener('click', function(e) {
-        var opt = e.target.closest('.tog-sw-opt');
-        if (opt) {
-          var value = opt.getAttribute('data-v');
-          if (value) handleToggleMode(value);
-        }
-      });
-    }
-
     document.querySelectorAll('.seg-b').forEach(function(b) {
       b.onclick = function() { setSegment(b.getAttribute('data-k')); };
     });
@@ -3876,13 +4008,13 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
 
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Escape') Modal.close();
-      if (e.key === '/' && document.activeElement && document.activeElement !== editor) {
-        e.preventDefault();
-        if (editor) editor.focus();
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && document.activeElement === editor) {
-        e.preventDefault();
-        handleSend();
+      // Глобальное сокращение "/" для фокуса на поле ввода
+      if (e.key === '/') {
+        var editor = document.getElementById('ed-ta');
+        if (editor && document.activeElement !== editor) {
+          e.preventDefault();
+          editor.focus();
+        }
       }
     });
 
@@ -3902,6 +4034,24 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
     };
     Bus.on('ai:progress', aiProgressHandler);
     busHandlers.push({event: 'ai:progress', fn: aiProgressHandler});
+
+    // Реакция на debounced-ввод в редакторе — запуск поиска
+    uiState.editorSearchHandler = function(payload) {
+      var force = payload && payload.force === true;
+      executeSearch(force);
+    };
+    Bus.on('editor:search-request', uiState.editorSearchHandler);
+    busHandlers.push({event: 'editor:search-request', fn: uiState.editorSearchHandler});
+
+    // Реакция на завершение отправки — обновление карусели и (при необходимости) базы
+    uiState.editorSendHandler = function() {
+      executeSearch().then(function() {
+        var state = StateManager.getState();
+        if (state.view === 'base') renderBase();
+      });
+    };
+    Bus.on('editor:send-complete', uiState.editorSendHandler);
+    busHandlers.push({event: 'editor:send-complete', fn: uiState.editorSendHandler});
   }
 
   function setupWindowListeners() {
@@ -3924,11 +4074,14 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
     handlers.orientationchange = function() { setTimeout(setVH, 100); };
     
     handlers.beforeunload = function(e) {
-      var ta = document.getElementById('ed-ta');
-      if (ta && ta.value.trim().length > 0) {
-        e.preventDefault();
-        e.returnValue = '';
-      }
+      try {
+        var EditorComponent = DI.resolve('EditorComponent');
+        var text = EditorComponent.getValue();
+        if (text && text.trim().length > 0) {
+          e.preventDefault();
+          e.returnValue = '';
+        }
+      } catch (_) { /* ignore */ }
     };
 
     window.addEventListener('resize', handlers.resize);
@@ -3949,7 +4102,6 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
       document.removeEventListener('keydown', uiState.noteViewEscHandler);
       uiState.noteViewEscHandler = null;
     }
-    if (uiState.searchTimer) { clearTimeout(uiState.searchTimer); uiState.searchTimer = null; }
     if (uiState.baseSearchTimer) { clearTimeout(uiState.baseSearchTimer); uiState.baseSearchTimer = null; }
     if (uiState.progressHandler) {
       AI.offProgress(uiState.progressHandler);
@@ -3972,9 +4124,11 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
       Bus.off(busHandlers[i].event, busHandlers[i].fn);
     }
     busHandlers = [];
+    uiState.editorSearchHandler = null;
+    uiState.editorSendHandler = null;
   }
 <!-- NOOMIUM_MODULE_END App.Events -->
-
+  
 <!-- NOOMIUM_MODULE_START App.Boot -->
   var AuthService = DI.resolve('AuthService');
 
@@ -3996,8 +4150,6 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
     AI.load().then(function() {
       Progress.hide();
       aiLoaded = true;
-
-      // Запускаем процесс аутентификации без коллбэка (инициализация при старте)
       requestAuth();
       checkOnboarding();
     }).catch(function(err) {
@@ -4007,9 +4159,6 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
       checkOnboarding();
     });
 
-    /**
-     * Инициализация сети после успешной аутентификации
-     */
     function tryInit(password) {
       return Net.init(function() { executeSearch(); }, password).then(function() {
         netInitialized = true;
@@ -4020,9 +4169,6 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
       });
     }
 
-    /**
-     * Единая точка входа: запрашивает пароль и делегирует криптографию в AuthService.
-     */
     function requestAuth(onSuccess) {
       if (AuthService.needsNewKey()) {
         promptNewPassword(function(pwd) {
@@ -4141,9 +4287,6 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
       });
     }
 
-    /**
-     * Обработчик запроса авторизации из других частей приложения (например, при публикации в "Мир")
-     */
     function requestNetworkAuth(onSuccess) {
       if (StateManager.getState().netAuthorized) {
         if (typeof onSuccess === 'function') onSuccess();
@@ -4176,6 +4319,9 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
       }
       try { DI.resolve('OfflineBarComponent').init(); } catch (e) {
         if (Logger) Logger.warn('OfflineBarComponent init failed', String(e));
+      }
+      try { EditorComponent.init(); } catch (e) {
+        if (Logger) Logger.warn('EditorComponent init failed', String(e));
       }
 
       bootApp();
