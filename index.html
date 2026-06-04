@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.36">
+<meta name="app-version" content="1.2.37">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -3397,6 +3397,8 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
               isEditing = false;
               renderNoteView();
               renderBase();
+              // Перестраиваем списки потока, чтобы карусель показала обновлённые данные
+              try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
               try { Bus.emit('state:lists-changed'); } catch (_) {}
             }).catch(function(err) {
               Toast.show('err', String(err && err.message || err) || 'Edit failed');
@@ -3420,6 +3422,8 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
               Toast.show('ok', I18n.t('toast.deleted'));
               closeNoteView();
               renderBase();
+              // Перестраиваем списки потока, чтобы карусель убрала удалённую заметку
+              try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
               try { Bus.emit('state:lists-changed'); } catch (_) {}
             }).catch(function(err) {
               Toast.show('err', String(err && err.message || err) || 'Delete failed');
@@ -3442,6 +3446,8 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
               Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
               renderNoteView();
               renderBase();
+              // Перестраиваем списки потока, чтобы карусель обновила теги
+              try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
               try { Bus.emit('state:lists-changed'); } catch (_) {}
             }).catch(function(err) {
               Toast.show('err', String(err && err.message || err) || 'Toggle failed');
@@ -3565,6 +3571,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
           DB.bulkPut(clean).then(function() {
             Toast.show('ok', '✓ ' + clean.length);
             if (StateManager.getState().view === 'base') renderBase();
+            try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
             try { Bus.emit('state:lists-changed'); } catch (_) {}
           }).catch(function(err) {
             Toast.show('err', String(err && err.message || err) || 'Import failed');
