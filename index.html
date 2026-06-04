@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.50">
+<meta name="app-version" content="1.2.51">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2680,8 +2680,8 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     spacerBefore: null,
     spacerAfter: null,
     windowItems: [],
-    scrollRAF: null,
-    lastScrollLeft: 0
+    observer: null,
+    scrollRAF: null
   };
   var cachedQuery = null;
   var cachedRegex = null;
@@ -2837,15 +2837,44 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     return uiState.carouselEl.clientWidth;
   }
 
+  /**
+   * Заполняет элемент данными заметки или очищает его.
+   * @param {HTMLElement} element - DOM элемент carousel-item
+   * @param {Object|null} item - данные заметки или null для очистки
+   * @param {number} dataIndex - индекс в списке или -1
+   */
+  function fillItem(element, item, dataIndex) {
+    var currentIdx = parseInt(element.getAttribute('data-real-idx') || '-1', 10);
+    if (currentIdx === dataIndex) return; // уже заполнен этим индексом
+
+    while (element.firstChild) {
+      element.removeChild(element.firstChild);
+    }
+    
+    if (item) {
+      element.appendChild(renderItemHTML(item));
+      element.style.visibility = 'visible';
+      element.style.opacity = '1';
+    } else {
+      element.style.visibility = 'hidden';
+      element.style.opacity = '0';
+    }
+    element.setAttribute('data-real-idx', String(dataIndex));
+  }
+
+  /**
+   * Обновляет содержимое окна из 3 элементов вокруг centerIdx.
+   * Структура: [spacerBefore] [item -1] [item 0 (центр)] [item +1] [spacerAfter]
+   */
   function updateCarousel(centerIdx) {
     var state = StateManager.getState();
     var list = state.lists[state.seg];
     if (!list || list.length === 0) return;
+    if (uiState.windowItems.length !== 3) return;
 
     var itemWidth = getItemWidth();
     if (itemWidth <= 0) return;
 
-    // Clamp centerIdx
     centerIdx = Math.max(0, Math.min(centerIdx, list.length - 1));
 
     // Обновляем ширины спейсеров
@@ -2857,63 +2886,49 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       uiState.spacerAfter.style.width = afterWidth + 'px';
     }
 
-    // Обновляем три видимых элемента: [centerIdx-1, centerIdx, centerIdx+1]
+    // Заполняем три элемента: [-1, 0, +1] относительно centerIdx
     for (var i = 0; i < 3; i++) {
-      var windowItem = uiState.windowItems[i];
-      if (!windowItem) continue;
-      
-      var realIdx = centerIdx + (i - 1); // i=0 → -1, i=1 → 0, i=2 → +1
-      
-      if (realIdx >= 0 && realIdx < list.length) {
-        if (windowItem.dataIndex !== realIdx) {
-          while (windowItem.element.firstChild) {
-            windowItem.element.removeChild(windowItem.element.firstChild);
-          }
-          windowItem.element.appendChild(renderItemHTML(list[realIdx]));
-          windowItem.dataIndex = realIdx;
-        }
-        windowItem.element.style.visibility = 'visible';
-        windowItem.element.style.opacity = '1';
-      } else {
-        if (windowItem.dataIndex !== -1) {
-          while (windowItem.element.firstChild) {
-            windowItem.element.removeChild(windowItem.element.firstChild);
-          }
-          windowItem.dataIndex = -1;
-        }
-        windowItem.element.style.visibility = 'hidden';
-        windowItem.element.style.opacity = '0';
-      }
+      var realIdx = centerIdx + (i - 1);
+      var item = (realIdx >= 0 && realIdx < list.length) ? list[realIdx] : null;
+      fillItem(uiState.windowItems[i].element, item, realIdx);
     }
 
     uiState.activeIdx[state.seg] = centerIdx;
     updateCarouselDots(centerIdx, list.length);
   }
 
+  /**
+   * Обработчик скролла: определяет новый центральный индекс
+   * и обновляет окно виртуализации.
+   */
   function onCarouselScroll() {
-    if (uiState.scrollRAF) {
-      cancelAnimationFrame(uiState.scrollRAF);
-    }
+    if (uiState.scrollRAF) return;
     
     uiState.scrollRAF = requestAnimationFrame(function() {
-      if (!uiState.carouselEl) return;
+      if (!uiState.carouselEl) { uiState.scrollRAF = null; return; }
       
       var itemWidth = getItemWidth();
-      if (itemWidth <= 0) return;
+      if (itemWidth <= 0) { uiState.scrollRAF = null; return; }
       
       var state = StateManager.getState();
       var list = state.lists[state.seg];
-      if (!list || list.length === 0) return;
+      if (!list || list.length === 0) { uiState.scrollRAF = null; return; }
       
+      // Центральный элемент — тот, чей центр ближе к центру видимой области.
+      // scrollLeft указывает позицию левого края видимой области.
+      // Центр видимой области = scrollLeft + itemWidth/2.
+      // Позиция центра i-го элемента = spacerBefore.width + i * itemWidth + itemWidth/2.
+      // Значит центральный индекс = round((scrollLeft - spacerBefore.width) / itemWidth) + 1
+      // Но проще: новый centerIdx = round(scrollLeft / itemWidth) если спейсеры уже учтены
       var scrollLeft = uiState.carouselEl.scrollLeft;
-      var newCenterIdx = Math.round(scrollLeft / itemWidth);
+      var spacerBeforeWidth = uiState.spacerBefore ? parseFloat(uiState.spacerBefore.style.width) || 0 : 0;
+      var newCenterIdx = Math.round((scrollLeft - spacerBeforeWidth) / itemWidth);
       newCenterIdx = Math.max(0, Math.min(newCenterIdx, list.length - 1));
       
       if (newCenterIdx !== uiState.activeIdx[state.seg]) {
         updateCarousel(newCenterIdx);
       }
       
-      uiState.lastScrollLeft = scrollLeft;
       uiState.scrollRAF = null;
     });
   }
@@ -2922,6 +2937,16 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     var wrap = document.getElementById('carousel-wrap');
     if (!wrap) return;
     while (wrap.firstChild) wrap.removeChild(wrap.firstChild);
+
+    // Очистка предыдущего observer
+    if (uiState.observer) {
+      uiState.observer.disconnect();
+      uiState.observer = null;
+    }
+    if (uiState.scrollRAF) {
+      cancelAnimationFrame(uiState.scrollRAF);
+      uiState.scrollRAF = null;
+    }
 
     var state = StateManager.getState();
     var list = state.lists[state.seg];
@@ -2968,15 +2993,16 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     carousel.appendChild(spacerBefore);
     uiState.spacerBefore = spacerBefore;
 
-    // Создаём три видимых элемента
+    // Создаём три видимых элемента [-1, 0, +1]
     uiState.windowItems = [];
     for (var i = 0; i < 3; i++) {
       var item = document.createElement('div');
       item.className = 'carousel-item';
       item.style.visibility = 'hidden';
       item.style.opacity = '0';
+      item.setAttribute('data-real-idx', '-1');
       carousel.appendChild(item);
-      uiState.windowItems.push({ element: item, dataIndex: -1 });
+      uiState.windowItems.push({ element: item });
     }
 
     // Создаём spacer-after
@@ -3007,6 +3033,8 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       if (e.key === 'ArrowRight') {
         e.preventDefault();
         var nextIdx = Math.min(uiState.activeIdx[currentState.seg] + 1, currentList.length - 1);
+        // scrollLeft для centerIdx: spacerBefore.width должен стать nextIdx * itemWidth
+        // но мы скроллим к позиции, где центральный элемент по центру
         carousel.scrollTo({ left: nextIdx * itemWidth, behavior: 'smooth' });
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
@@ -3027,12 +3055,11 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         var initialIdx = uiState.activeIdx[state.seg] || 0;
         if (initialIdx >= list.length) initialIdx = 0;
         
-        // Сначала обновляем карусель (спейсеры и элементы)
+        // Сначала обновляем спейсеры и элементы
         updateCarousel(initialIdx);
         
         // Затем устанавливаем scrollLeft
         carousel.scrollLeft = initialIdx * itemWidth;
-        uiState.lastScrollLeft = initialIdx * itemWidth;
       }
     });
   }
@@ -3182,6 +3209,10 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     if (uiState.scrollRAF) {
       cancelAnimationFrame(uiState.scrollRAF);
       uiState.scrollRAF = null;
+    }
+    if (uiState.observer) {
+      uiState.observer.disconnect();
+      uiState.observer = null;
     }
     if (uiState.carouselEl) {
       uiState.carouselEl.removeEventListener('scroll', onCarouselScroll);
