@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.16">
+<meta name="app-version" content="1.2.17">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1867,51 +1867,45 @@ DI.register('StateManager', function() {
 
 <!-- NOOMIUM_MODULE_START SearchService -->
 DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I18n, Toast, Logger, Utils) {
-  /**
-   * Внутреннее состояние сервиса
-   */
   var sendLock = false;
   var lastVec = null;
   var lastQuery = 0;
   var searchAbortController = null;
   
-  /**
-   * Получить текущий режим отправки
-   * @returns {string} 'private' или 'world'
-   */
+  var allNotesCache = null;
+  var allNotesCacheTime = 0;
+  var ALL_NOTES_TTL = 5 * 60 * 1000;
+
+  function getAllNotesCached() {
+    var now = Date.now();
+    if (allNotesCache && (now - allNotesCacheTime < ALL_NOTES_TTL)) {
+      return Promise.resolve(allNotesCache);
+    }
+    return DB.all().then(function(notes) {
+      allNotesCache = notes;
+      allNotesCacheTime = now;
+      return notes;
+    });
+  }
+
   function getSendMode() {
     return StateManager.getState().sendMode;
   }
-  
-  /**
-   * Установить режим отправки
-   * @param {string} mode - 'private' или 'world'
-   */
+
   function setSendMode(mode) {
     StateManager.setState({ sendMode: mode });
   }
-  
-  /**
-   * Проверить, идёт ли сейчас отправка
-   * @returns {boolean}
-   */
+
   function isSending() {
     return sendLock;
   }
-  
-  /**
-   * Основная функция поиска похожих мыслей
-   * @param {string} text - Текст запроса
-   * @param {boolean} force - Принудительный поиск (игнорировать порог похожести)
-   * @returns {Promise<void>}
-   */
+
   function search(text, force) {
     if (!text || !AI.ready()) {
       StateManager.setState({ lists: { local: [], world: [], seren: [] } });
       return Promise.resolve();
     }
     
-    // Отменяем предыдущий запрос
     if (searchAbortController) {
       searchAbortController.abort();
     }
@@ -1923,7 +1917,6 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
       if (signal.aborted) return;
       if (!vec) return;
       
-      // Проверяем, достаточно ли изменился вектор для нового запроса в сеть
       var shouldSendToNet = false;
       if (!lastVec || AI.cosine(vec, lastVec) < Config.get('vectorSimilarityThreshold', 0.98) || force) {
         lastVec = vec;
@@ -1938,7 +1931,6 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
         }
       }
       
-      // Получаем все заметки и вычисляем similarity scores
       return getAllNotesCached().then(function(notes) {
         if (signal.aborted) return;
         
@@ -1996,13 +1988,7 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
       searchAbortController = null;
     });
   }
-  
-  /**
-   * Отправить новую мысль
-   * @param {string} text - Текст мысли
-   * @param {string} mode - Режим отправки ('private' или 'world')
-   * @returns {Promise<void>}
-   */
+
   function send(text, mode) {
     if (sendLock) return Promise.resolve();
     
@@ -2019,7 +2005,6 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     
     var state = StateManager.getState();
     if (mode === 'world' && !state.netAuthorized) {
-      // Запрашиваем авторизацию через callback из StateManager
       if (state.requestNetworkAuth) {
         state.requestNetworkAuth(function() {
           send(trimmedText, mode);
@@ -2054,14 +2039,10 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
         StateManager.setState({ sendLock: false });
       });
   }
-  
-  /**
-   * Инициализация сервиса (подписки на события)
-   */
+
   function init() {
-    // Подписка на изменения БД для сброса кеша
     Bus.on('db:change', function() {
-      // Кеш сбрасывается в App.State через allNotesCache = null
+      allNotesCache = null;
     });
   }
   
