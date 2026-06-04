@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.46">
+<meta name="app-version" content="1.2.47">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -418,7 +418,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 .startup-reload{margin-top:20px;padding:10px 20px;background:#8b7cff;color:white;border:none;border-radius:8px;cursor:pointer}
 .mb-5{margin-bottom:5px}
 .reset-modal-text{color:var(--text-2);margin-bottom:16px}
-.carousel-spacer{flex:0 0 calc(100% - 4px);height:1px}
+.carousel-spacer{flex-shrink:0;height:1px;scroll-snap-align:none}
 </style>
 <!-- NOOMIUM_MODULE_END CSS -->
 </head>
@@ -2674,9 +2674,17 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
 
 <!-- NOOMIUM_MODULE_START StreamViewComponent -->
 DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent) {
+  var VISIBLE_ITEMS = 3;
+  var ITEM_GAP = 10;
+  
   var uiState = {
     activeIdx: { local: 0, world: 0, seren: 0 },
-    carouselEl: null
+    carouselEl: null,
+    spacerBefore: null,
+    spacerAfter: null,
+    windowItems: [],
+    scrollRAF: null,
+    isScrolling: false
   };
   var cachedQuery = null;
   var cachedRegex = null;
@@ -2827,18 +2835,86 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     dotsWrap.appendChild(counter);
   }
 
-  function onCarouselScroll() {
-    if (!uiState.carouselEl) return;
-    var itemWidth = uiState.carouselEl.clientWidth;
-    if (itemWidth <= 0) return;
-    
-    var idx = Math.round(uiState.carouselEl.scrollLeft / itemWidth);
+  function getItemWidth() {
+    if (!uiState.carouselEl) return 0;
+    return uiState.carouselEl.clientWidth;
+  }
+
+  function updateCarousel(centerIdx) {
     var state = StateManager.getState();
-    
-    if (idx !== uiState.activeIdx[state.seg]) {
-      uiState.activeIdx[state.seg] = idx;
-      updateCarouselDots(idx, state.lists[state.seg].length);
+    var list = state.lists[state.seg];
+    if (!list || list.length === 0) return;
+
+    var itemWidth = getItemWidth();
+    if (itemWidth <= 0) return;
+
+    // Clamp centerIdx в допустимых пределах
+    centerIdx = Math.max(0, Math.min(centerIdx, list.length - 1));
+
+    // Обновляем ширины спейсеров
+    if (uiState.spacerBefore) {
+      uiState.spacerBefore.style.width = (centerIdx * itemWidth) + 'px';
     }
+    if (uiState.spacerAfter) {
+      uiState.spacerAfter.style.width = ((list.length - centerIdx - 1) * itemWidth) + 'px';
+    }
+
+    // Обновляем содержимое трёх видимых элементов
+    var offsets = [-1, 0, 1];
+    for (var i = 0; i < VISIBLE_ITEMS; i++) {
+      var windowItem = uiState.windowItems[i];
+      if (!windowItem) continue;
+      
+      var realIdx = centerIdx + offsets[i];
+      
+      if (realIdx >= 0 && realIdx < list.length) {
+        if (windowItem.dataIndex !== realIdx) {
+          while (windowItem.element.firstChild) {
+            windowItem.element.removeChild(windowItem.element.firstChild);
+          }
+          windowItem.element.appendChild(renderItemHTML(list[realIdx]));
+          windowItem.dataIndex = realIdx;
+        }
+        windowItem.element.style.visibility = 'visible';
+      } else {
+        if (windowItem.dataIndex !== -1) {
+          while (windowItem.element.firstChild) {
+            windowItem.element.removeChild(windowItem.element.firstChild);
+          }
+          windowItem.dataIndex = -1;
+        }
+        windowItem.element.style.visibility = 'hidden';
+      }
+    }
+
+    uiState.activeIdx[state.seg] = centerIdx;
+    updateCarouselDots(centerIdx, list.length);
+  }
+
+  function onCarouselScroll() {
+    if (uiState.isScrolling) return;
+    
+    if (uiState.scrollRAF) {
+      cancelAnimationFrame(uiState.scrollRAF);
+    }
+    
+    uiState.scrollRAF = requestAnimationFrame(function() {
+      var itemWidth = getItemWidth();
+      if (itemWidth <= 0) return;
+      
+      var state = StateManager.getState();
+      var list = state.lists[state.seg];
+      if (!list || list.length === 0) return;
+      
+      var newCenterIdx = Math.round(uiState.carouselEl.scrollLeft / itemWidth);
+      newCenterIdx = Math.max(0, Math.min(newCenterIdx, list.length - 1));
+      
+      if (newCenterIdx !== uiState.activeIdx[state.seg]) {
+        updateCarousel(newCenterIdx);
+      }
+      
+      uiState.scrollRAF = null;
+    });
   }
 
   function renderCarousel() {
@@ -2872,6 +2948,9 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       emptyDiv.appendChild(emptyD);
       wrap.appendChild(emptyDiv);
       uiState.carouselEl = null;
+      uiState.spacerBefore = null;
+      uiState.spacerAfter = null;
+      uiState.windowItems = [];
       return;
     }
 
@@ -2881,20 +2960,30 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     carousel.setAttribute('tabindex', '0');
     uiState.carouselEl = carousel;
 
-    // Рендерим все карточки без виртуализации
-    for (var i = 0; i < list.length; i++) {
+    // Создаём spacer-before
+    var spacerBefore = document.createElement('div');
+    spacerBefore.className = 'carousel-spacer';
+    spacerBefore.style.width = '0px';
+    carousel.appendChild(spacerBefore);
+    uiState.spacerBefore = spacerBefore;
+
+    // Создаём три видимых элемента
+    uiState.windowItems = [];
+    for (var i = 0; i < VISIBLE_ITEMS; i++) {
       var item = document.createElement('div');
       item.className = 'carousel-item';
       item.setAttribute('data-idx', String(i));
-      item.appendChild(renderItemHTML(list[i]));
       carousel.appendChild(item);
+      uiState.windowItems.push({ element: item, dataIndex: -1 });
     }
-    
-    // Распорка для компенсации scroll-padding, чтобы последняя карточка могла центрироваться
-    var spacer = document.createElement('div');
-    spacer.className = 'carousel-spacer';
-    carousel.appendChild(spacer);
-    
+
+    // Создаём spacer-after
+    var spacerAfter = document.createElement('div');
+    spacerAfter.className = 'carousel-spacer';
+    spacerAfter.style.width = '0px';
+    carousel.appendChild(spacerAfter);
+    uiState.spacerAfter = spacerAfter;
+
     wrap.appendChild(carousel);
 
     var dotsWrap = document.createElement('div');
@@ -2910,17 +2999,21 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       var currentList = currentState.lists[currentState.seg];
       if (!currentList || currentList.length === 0) return;
 
-      var itemWidth = carousel.clientWidth;
+      var itemWidth = getItemWidth();
       if (itemWidth <= 0) return;
 
       if (e.key === 'ArrowRight') {
         e.preventDefault();
         var nextIdx = Math.min(uiState.activeIdx[currentState.seg] + 1, currentList.length - 1);
+        uiState.isScrolling = true;
         carousel.scrollTo({ left: nextIdx * itemWidth, behavior: 'smooth' });
+        setTimeout(function() { uiState.isScrolling = false; }, 300);
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
         var prevIdx = Math.max(uiState.activeIdx[currentState.seg] - 1, 0);
+        uiState.isScrolling = true;
         carousel.scrollTo({ left: prevIdx * itemWidth, behavior: 'smooth' });
+        setTimeout(function() { uiState.isScrolling = false; }, 300);
       }
     });
 
@@ -2929,14 +3022,19 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       if (el) handleItemAction(el.getAttribute('data-act'), el);
     });
 
-    // Начальная позиция скролла
+    // Начальная отрисовка
     requestAnimationFrame(function() {
-      var itemWidth = carousel.clientWidth;
+      var itemWidth = getItemWidth();
       if (itemWidth > 0) {
         var initialIdx = uiState.activeIdx[state.seg] || 0;
         if (initialIdx >= list.length) initialIdx = 0;
+        
+        updateCarousel(initialIdx);
+        
+        // Устанавливаем начальную позицию скролла
+        uiState.isScrolling = true;
         carousel.scrollLeft = initialIdx * itemWidth;
-        updateCarouselDots(initialIdx, list.length);
+        setTimeout(function() { uiState.isScrolling = false; }, 50);
       }
     });
   }
@@ -3083,10 +3181,17 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
   }
 
   function destroy() {
+    if (uiState.scrollRAF) {
+      cancelAnimationFrame(uiState.scrollRAF);
+      uiState.scrollRAF = null;
+    }
     if (uiState.carouselEl) {
       uiState.carouselEl.removeEventListener('scroll', onCarouselScroll);
     }
     uiState.carouselEl = null;
+    uiState.spacerBefore = null;
+    uiState.spacerAfter = null;
+    uiState.windowItems = [];
     if (i18nHandler) { try { Bus.off('i18n:change', i18nHandler); } catch (_) {} i18nHandler = null; }
     if (listsChangedHandler) { try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) {} listsChangedHandler = null; }
   }
