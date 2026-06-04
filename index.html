@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.39">
+<meta name="app-version" content="1.2.40">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -240,9 +240,10 @@ body.show-app #app-root{display:flex}
   flex-direction:column;animation:fadeScale .2s var(--ease)}
 .nv.on{display:flex}
 @keyframes fadeScale{from{opacity:0;transform:scale(.98)}}
-.nv-f{display:flex;justify-content:flex-start;gap:var(--gap-sm);padding:10px 14px;
+.nv-f{display:flex;justify-content:center;gap:var(--gap-sm);padding:10px 14px;
   padding-top:calc(10px + var(--safe-top));background:var(--surface);
   border-bottom:1px solid var(--line);flex-shrink:0;flex-wrap:wrap}
+.nv-f .nv-act{min-width:80px}
 .nv-b{flex:1;overflow-y:auto;padding:16px;
   -webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 .nv-text{font-size:16px;line-height:1.7;color:var(--text);white-space:pre-wrap;
@@ -251,9 +252,10 @@ body.show-app #app-root{display:flex}
   border-radius:var(--r-sm);padding:12px;font:15px/1.6 var(--font);color:var(--text);
   outline:none;resize:vertical;transition:border-color .15s var(--ease)}
 .nv-ta:focus{border-color:var(--brand)}
-.nv-f-bottom{display:flex;justify-content:flex-end;gap:var(--gap-sm);padding:10px 14px;
+.nv-f-bottom{display:flex;justify-content:space-between;gap:var(--gap-sm);padding:10px 14px;
   padding-bottom:calc(10px + var(--safe-bot));background:var(--surface);
   border-top:1px solid var(--line);flex-shrink:0;flex-wrap:nowrap}
+.nv-f-bottom .nv-act{flex:1;max-width:48%}
 .nv-act{min-height:40px;padding:8px 16px;border-radius:8px;font-size:13px;font-weight:500;
   color:var(--text-2);transition:background .12s var(--ease),color .12s var(--ease);
   border:1px solid var(--line);background:transparent;display:inline-flex;
@@ -498,7 +500,14 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       try { return d.toLocaleDateString(loc, { day: '2-digit', month: 'short' }); }
       catch (_) { return ''; }
     }
-    return { esc: esc, escRe: escRe, word: word, fmtDate: fmtDate };
+    function fmtTime(ts, lang) {
+      if (!ts) return '';
+      const d = new Date(ts);
+      const loc = lang === 'en' ? 'en-US' : 'ru-RU';
+      try { return d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' }); }
+      catch (_) { return ''; }
+    }
+    return { esc: esc, escRe: escRe, word: word, fmtDate: fmtDate, fmtTime: fmtTime };
   }, []);
 <!-- NOOMIUM_MODULE_END Utils -->
 
@@ -2744,7 +2753,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       scoreWrap.appendChild(scoreLabel);
       var scoreValue = document.createElement('span');
       scoreValue.className = 'fi-score-value';
-      scoreValue.textContent = String(scoreNum);
+      scoreValue.textContent = String(scoreNum) + '%';
       scoreWrap.appendChild(scoreValue);
       header.appendChild(scoreWrap);
     }
@@ -3213,10 +3222,16 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     tagEl.className = 'bi-tag';
     tagEl.textContent = note.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
     meta.appendChild(tagEl);
-    var dateEl = document.createElement('span');
-    dateEl.className = 'bi-date';
-    dateEl.textContent = Utils.fmtDate(note.createdAt, I18n.getLang());
-    meta.appendChild(dateEl);
+        var dateEl = document.createElement('span');
+        dateEl.className = 'bi-date';
+        var lang = I18n.getLang();
+        if (note.updatedAt && note.updatedAt > note.createdAt) {
+          dateEl.textContent = (lang === 'ru' ? 'Ред. ' : 'Edit. ') + 
+            Utils.fmtTime(note.updatedAt, lang) + ' ' + Utils.fmtDate(note.updatedAt, lang);
+        } else {
+          dateEl.textContent = Utils.fmtTime(note.createdAt, lang) + ' ' + Utils.fmtDate(note.createdAt, lang);
+        }
+        meta.appendChild(dateEl);
     foot.appendChild(meta);
     element.appendChild(foot);
   }
@@ -3403,6 +3418,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
             var newText = ta.value.trim();
             if (!newText) { Toast.show('err', I18n.t('toast.empty')); return; }
             record.text = newText;
+            record.updatedAt = Date.now();
             AI.embed(newText).then(function(v) {
               record.vector = v;
               return DB.put(record);
