@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.48">
+<meta name="app-version" content="1.2.49">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -96,11 +96,11 @@ body.show-app #app-root{display:flex}
 .seg-b.on[data-k="seren"] .cnt{background:var(--seren-glow);color:var(--seren)}
 .carousel-wrap{flex:1;display:flex;flex-direction:column;min-height:0;position:relative;margin:0;padding:0}
 .carousel{flex:1;display:flex;overflow-x:auto;overflow-y:hidden;
-  scroll-behavior:smooth;gap:10px;padding:0 12px;min-height:0;
+  scroll-behavior:smooth;gap:15px;padding:0 calc(7.5% - 8px);min-height:0;
   -webkit-overflow-scrolling:touch;scrollbar-width:none;touch-action:pan-x}
 .carousel::-webkit-scrollbar{display:none}
 .carousel-spacer{flex-shrink:0;height:1px;min-width:0}
-.carousel-item{flex:0 0 calc(100% - 24px);min-width:0;
+.carousel-item{flex:0 0 85%;min-width:0;
   display:flex;padding:2px 0;touch-action:pan-x}
 .carousel-dots{display:flex;justify-content:center;align-items:center;gap:4px;
   padding:6px 12px 8px;flex-shrink:0;min-height:24px;flex-wrap:wrap}
@@ -2675,7 +2675,8 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
 <!-- NOOMIUM_MODULE_START StreamViewComponent -->
 DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent) {
   var WINDOW_SIZE = 5;
-  var SNAP_DEBOUNCE = 200;
+  var SNAP_DEBOUNCE = 150;
+  var CARD_WIDTH_PERCENT = 0.85;
   
   var uiState = {
     activeIdx: { local: 0, world: 0, seren: 0 },
@@ -2685,7 +2686,8 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     carouselEl: null,
     scrollRAF: null,
     snapTimeout: null,
-    lastCenterIndex: -1
+    lastCenterIndex: -1,
+    isSnapping: false
   };
   var cachedQuery = null;
   var cachedRegex = null;
@@ -2836,19 +2838,45 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     dotsWrap.appendChild(counter);
   }
 
-  function getItemWidth() {
+  /**
+   * Вычисляет ширину одного "слота" (карточка + gap).
+   * Измеряет реальный DOM-элемент для точности.
+   */
+  function getSlotWidth() {
     if (!uiState.carouselEl) return 0;
-    return uiState.carouselEl.clientWidth;
+    if (uiState.windowItems.length === 0) return 0;
+    var firstItem = uiState.windowItems[0].element;
+    if (!firstItem || !firstItem.offsetWidth) return 0;
+    var gap = 15; // из CSS .carousel gap:15px
+    return firstItem.offsetWidth + gap;
+  }
+
+  /**
+   * Вычисляет scrollLeft для привязки к карточке с индексом centerIdx.
+   * Формула учитывает, что карточка занимает 85% ширины, и нужно показать
+   * превью соседних карточек по бокам.
+   */
+  function getScrollTarget(centerIdx) {
+    var slotWidth = getSlotWidth();
+    if (slotWidth <= 0) return 0;
+    // Скроллим так, чтобы карточка centerIdx была по центру видимой области
+    var containerWidth = uiState.carouselEl.clientWidth;
+    var cardWidth = containerWidth * CARD_WIDTH_PERCENT;
+    var padding = (containerWidth - cardWidth) / 2;
+    // Позиция начала карточки centerIdx в scroll content
+    var cardStart = centerIdx * slotWidth;
+    // scrollLeft чтобы карточка была по центру
+    return Math.max(0, cardStart - padding + slotWidth / 2 - containerWidth / 2);
   }
 
   function getCenterIndex() {
     if (!uiState.carouselEl) return 0;
-    var itemWidth = getItemWidth();
-    if (itemWidth <= 0) return 0;
+    var slotWidth = getSlotWidth();
+    if (slotWidth <= 0) return 0;
     var state = StateManager.getState();
     var list = state.lists[state.seg];
     if (!list || list.length === 0) return 0;
-    var idx = Math.round(uiState.carouselEl.scrollLeft / itemWidth);
+    var idx = Math.round(uiState.carouselEl.scrollLeft / slotWidth);
     return Math.max(0, Math.min(idx, list.length - 1));
   }
 
@@ -2858,22 +2886,23 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     if (!list || list.length === 0) return;
     if (uiState.windowItems.length !== WINDOW_SIZE) return;
 
-    var itemWidth = getItemWidth();
-    if (itemWidth <= 0) return;
+    var slotWidth = getSlotWidth();
+    if (slotWidth <= 0) return;
 
     centerIdx = Math.max(0, Math.min(centerIdx, list.length - 1));
 
+    // Обновляем ширины спейсеров
     if (uiState.spacerBefore) {
-      var beforeWidth = Math.max(0, centerIdx * itemWidth);
-      uiState.spacerBefore.style.width = beforeWidth + 'px';
+      uiState.spacerBefore.style.width = (centerIdx * slotWidth) + 'px';
     }
-    
     if (uiState.spacerAfter) {
-      var afterWidth = Math.max(0, (list.length - centerIdx - 1) * itemWidth);
+      var afterWidth = Math.max(0, (list.length - centerIdx - 1) * slotWidth);
       uiState.spacerAfter.style.width = afterWidth + 'px';
     }
 
-    var startIdx = Math.max(0, centerIdx - Math.floor(WINDOW_SIZE / 2));
+    // Заполняем окно из WINDOW_SIZE элементов
+    var halfWindow = Math.floor(WINDOW_SIZE / 2);
+    var startIdx = Math.max(0, centerIdx - halfWindow);
     var endIdx = Math.min(list.length - 1, startIdx + WINDOW_SIZE - 1);
     startIdx = Math.max(0, endIdx - WINDOW_SIZE + 1);
 
@@ -2909,27 +2938,31 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
 
   function performSnap() {
     if (!uiState.carouselEl) return;
-    var itemWidth = getItemWidth();
-    if (itemWidth <= 0) return;
+    if (uiState.isSnapping) return;
+    
     var state = StateManager.getState();
     var list = state.lists[state.seg];
     if (!list || list.length === 0) return;
     
     var centerIndex = getCenterIndex();
-    var targetScroll = centerIndex * itemWidth;
+    var targetScroll = getScrollTarget(centerIndex);
     var diff = Math.abs(uiState.carouselEl.scrollLeft - targetScroll);
     
-    if (diff > 2) {
+    if (diff > 3) {
+      uiState.isSnapping = true;
       uiState.carouselEl.scrollTo({
         left: targetScroll,
         behavior: 'smooth'
       });
+      setTimeout(function() { uiState.isSnapping = false; }, 300);
     }
     
     updateWindow(centerIndex);
   }
 
   function onCarouselScroll() {
+    if (uiState.isSnapping) return;
+    
     if (!uiState.scrollRAF) {
       uiState.scrollRAF = requestAnimationFrame(function() {
         var centerIndex = getCenterIndex();
@@ -2958,6 +2991,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       clearTimeout(uiState.snapTimeout);
       uiState.snapTimeout = null;
     }
+    uiState.isSnapping = false;
 
     var state = StateManager.getState();
     var list = state.lists[state.seg];
@@ -3035,11 +3069,11 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
 
       if (e.key === 'ArrowRight') {
         e.preventDefault();
-        var nextIdx = Math.min(getCenterIndex() + 1, currentList.length - 1);
+        var nextIdx = Math.min(uiState.activeIdx[currentState.seg] + 1, currentList.length - 1);
         scrollToIndex(nextIdx);
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        var prevIdx = Math.max(getCenterIndex() - 1, 0);
+        var prevIdx = Math.max(uiState.activeIdx[currentState.seg] - 1, 0);
         scrollToIndex(prevIdx);
       }
     });
@@ -3056,17 +3090,20 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       var initialIdx = uiState.activeIdx[state.seg] || 0;
       if (initialIdx >= list.length) initialIdx = 0;
       updateWindow(initialIdx);
+      var target = getScrollTarget(initialIdx);
+      carousel.scrollLeft = target;
     });
   }
 
   function scrollToIndex(idx) {
     if (!uiState.carouselEl) return;
-    var itemWidth = getItemWidth();
-    if (itemWidth <= 0) return;
+    var target = getScrollTarget(idx);
+    uiState.isSnapping = true;
     uiState.carouselEl.scrollTo({
-      left: idx * itemWidth,
+      left: target,
       behavior: 'smooth'
     });
+    setTimeout(function() { uiState.isSnapping = false; }, 300);
   }
 
   function updateCounts() {
