@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.38">
+<meta name="app-version" content="1.2.39">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1895,7 +1895,6 @@ DI.register('StateManager', function() {
 
 <!-- NOOMIUM_MODULE_START SearchService -->
 DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I18n, Toast, Logger, Utils) {
-  var sendLock = false;
   var lastVec = null;
   var lastQuery = 0;
   var searchAbortController = null;
@@ -1916,6 +1915,15 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     });
   }
 
+  /**
+   * Явный сброс кэша заметок.
+   * Вызывается перед renderBase() после редактирования/удаления,
+   * чтобы гарантировать, что следующая загрузка получит свежие данные.
+   */
+  function invalidateNotesCache() {
+    allNotesCache = null;
+  }
+
   function getSendMode() {
     return StateManager.getState().sendMode;
   }
@@ -1924,8 +1932,11 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     StateManager.setState({ sendMode: mode });
   }
 
+  /**
+   * Обёртка для проверки состояния отправки через единый источник истины.
+   */
   function isSending() {
-    return sendLock;
+    return StateManager.getState().sendLock;
   }
 
   function search(text, force) {
@@ -2018,7 +2029,8 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
   }
 
   function send(text, mode) {
-    if (sendLock) return Promise.resolve();
+    // Читаем флаг из единого источника истины
+    if (StateManager.getState().sendLock) return Promise.resolve();
     
     var trimmedText = (text || '').trim();
     if (!trimmedText) {
@@ -2042,7 +2054,7 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     }
     
     var isWorld = mode === 'world';
-    sendLock = true;
+    // Единственный источник истины для флага блокировки отправки
     StateManager.setState({ sendLock: true });
     
     return AI.embed(trimmedText)
@@ -2063,7 +2075,7 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
         Toast.show('err', String(err && err.message || err) || 'Send failed');
       })
       .finally(function() {
-        sendLock = false;
+        // Сброс флага через единый источник истины
         StateManager.setState({ sendLock: false });
       });
   }
@@ -2081,6 +2093,7 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     setSendMode: setSendMode,
     isSending: isSending,
     getAllNotesCached: getAllNotesCached,
+    invalidateNotesCache: invalidateNotesCache,
     init: init
   };
 }, ['AI', 'DB', 'Net', 'Config', 'Bus', 'StateManager', 'I18n', 'Toast', 'Logger', 'Utils']);
@@ -2650,7 +2663,7 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
 <!-- NOOMIUM_MODULE_END OfflineBarComponent -->
 
 <!-- NOOMIUM_MODULE_START StreamViewComponent -->
-DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast, EditorComponent, SearchService) {
+DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent) {
   var POOL_SIZE = 7;
   var uiState = {
     activeIdx: { local: 0, world: 0, seren: 0 },
@@ -3047,8 +3060,9 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         cachedQuery = null;
         cachedRegex = null;
         initCarousel();
-        // executeSearch эмитит state:lists-changed, что само обновит базу
-        executeSearch();
+        // Слабая связность: запрашиваем перестройку списков через событие
+        // App.Events → executeSearch → SearchService.search → state:lists-changed
+        try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
       }).catch(function(err) {
         Toast.show('err', String(err && err.message || err) || 'Delete failed');
       });
@@ -3060,8 +3074,8 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         record.shared = !record.shared;
         return DB.put(record).then(function() {
           Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
-          // executeSearch эмитит state:lists-changed, что само обновит базу
-          executeSearch();
+          // Слабая связность: запрашиваем перестройку списков через событие
+          try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
         });
       }).catch(function(err) {
         Toast.show('err', String(err && err.message || err) || 'Toggle failed');
@@ -3127,7 +3141,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
   }
 
   return { init: init, destroy: destroy };
-}, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'AI', 'Toast', 'EditorComponent', 'SearchService']);
+}, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'Toast', 'EditorComponent']);
 <!-- NOOMIUM_MODULE_END StreamViewComponent -->
 
 <!-- NOOMIUM_MODULE_START BaseViewComponent -->
