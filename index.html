@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.44">
+<meta name="app-version" content="1.2.45">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -96,11 +96,14 @@ body.show-app #app-root{display:flex}
 .seg-b.on[data-k="seren"] .cnt{background:var(--seren-glow);color:var(--seren)}
 .carousel-wrap{flex:1;display:flex;flex-direction:column;min-height:0;position:relative;margin:0;padding:0}
 .carousel{flex:1;display:flex;overflow-x:auto;overflow-y:hidden;
-  scroll-behavior:smooth;gap:10px;padding:0 12px;min-height:0;
-  -webkit-overflow-scrolling:touch;scrollbar-width:none;touch-action:pan-x}
+  scroll-behavior:smooth;padding:0 12px;min-height:0;
+  -webkit-overflow-scrolling:touch;scrollbar-width:none;touch-action:pan-x;
+  position:relative}
 .carousel::-webkit-scrollbar{display:none}
-.carousel-item{flex:0 0 calc(100% - 24px);
-  display:flex;min-height:0;width:calc(100% - 24px);padding:2px 0;touch-action:pan-x}
+.carousel-spacer{flex-shrink:0;height:1px}
+.carousel-item{position:absolute;top:0;left:0;
+  width:calc(100% - 24px);padding:2px 0;touch-action:pan-x;
+  display:flex;min-height:0}
 .carousel-dots{display:flex;justify-content:center;align-items:center;gap:4px;
   padding:6px 12px 8px;flex-shrink:0;min-height:24px;flex-wrap:wrap}
 .carousel-dot{width:4px;height:4px;border-radius:50%;background:var(--line-strong);
@@ -2673,12 +2676,14 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
 
 <!-- NOOMIUM_MODULE_START StreamViewComponent -->
 DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent) {
-  var POOL_SIZE = 7;
+  var WINDOW_SIZE = 5; // Окно из 5 элементов (2 слева + центр + 2 справа)
   var SNAP_DEBOUNCE = 200;
   
   var uiState = {
     activeIdx: { local: 0, world: 0, seren: 0 },
-    poolItems: [],
+    windowItems: [],
+    spacerBefore: null,
+    spacerAfter: null,
     carouselEl: null,
     scrollRAF: null,
     snapTimeout: null,
@@ -2833,22 +2838,12 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     dotsWrap.appendChild(counter);
   }
 
-  /**
-   * Измеряет реальную ширину одной карточки + gap.
-   * Использует getBoundingClientRect первого элемента пула.
-   */
   function getItemWidth() {
-    if (!uiState.poolItems || uiState.poolItems.length === 0) return 0;
-    var firstItem = uiState.poolItems[0].element;
-    if (!firstItem) return 0;
-    var rect = firstItem.getBoundingClientRect();
-    // Ширина карточки + gap (10px из CSS .carousel gap:10px)
-    return rect.width + 10;
+    if (!uiState.carouselEl) return 0;
+    // Ширина видимой области контейнера минус padding (12px слева + 12px справа)
+    return uiState.carouselEl.clientWidth - 24;
   }
 
-  /**
-   * Определяет индекс карточки, ближайшей к центру видимой области.
-   */
   function getCenterIndex() {
     if (!uiState.carouselEl) return 0;
     var itemWidth = getItemWidth();
@@ -2860,56 +2855,60 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     return Math.max(0, Math.min(idx, list.length - 1));
   }
 
-  function renderVisibleItems() {
+  /**
+   * Обновляет окно виртуализации: спейсеры и элементы.
+   * Структура: [spacerBefore] [item -2] [item -1] [item 0] [item +1] [item +2] [spacerAfter]
+   */
+  function updateWindow(centerIdx) {
     var state = StateManager.getState();
     var list = state.lists[state.seg];
-    if (!list || list.length === 0) {
-      for (var i = 0; i < uiState.poolItems.length; i++) {
-        var p = uiState.poolItems[i];
-        if (p.dataIndex !== -1) {
-          while (p.element.firstChild) p.element.removeChild(p.element.firstChild);
-          p.dataIndex = -1;
+    if (!list || list.length === 0) return;
+    if (uiState.windowItems.length !== WINDOW_SIZE) return;
+
+    var itemWidth = getItemWidth();
+    if (itemWidth <= 0) return;
+
+    centerIdx = Math.max(0, Math.min(centerIdx, list.length - 1));
+
+    // Обновляем ширины спейсеров
+    if (uiState.spacerBefore) {
+      uiState.spacerBefore.style.width = (centerIdx * itemWidth) + 'px';
+    }
+    if (uiState.spacerAfter) {
+      var afterWidth = Math.max(0, (list.length - centerIdx - 1) * itemWidth);
+      uiState.spacerAfter.style.width = afterWidth + 'px';
+    }
+
+    // Обновляем элементы окна: [-2, -1, 0, +1, +2] относительно centerIdx
+    var offsets = [-2, -1, 0, 1, 2];
+    for (var i = 0; i < WINDOW_SIZE; i++) {
+      var windowItem = uiState.windowItems[i];
+      if (!windowItem) continue;
+      
+      var realIdx = centerIdx + offsets[i];
+      
+      if (realIdx >= 0 && realIdx < list.length) {
+        if (windowItem.dataIndex !== realIdx) {
+          while (windowItem.element.firstChild) {
+            windowItem.element.removeChild(windowItem.element.firstChild);
+          }
+          windowItem.element.appendChild(renderItemHTML(list[realIdx]));
+          windowItem.dataIndex = realIdx;
         }
-      }
-      return;
-    }
-
-    var centerIndex = getCenterIndex();
-    var halfPool = Math.floor(POOL_SIZE / 2);
-    var startIdx = Math.max(0, centerIndex - halfPool);
-    var endIdx = Math.min(list.length - 1, startIdx + POOL_SIZE - 1);
-    startIdx = Math.max(0, endIdx - POOL_SIZE + 1);
-
-    for (var i = 0; i < uiState.poolItems.length; i++) {
-      var poolItem = uiState.poolItems[i];
-      var dataIndex = startIdx + i;
-
-      if (dataIndex > endIdx || dataIndex < 0 || dataIndex >= list.length) {
-        if (poolItem.dataIndex !== -1) {
-          while (poolItem.element.firstChild) poolItem.element.removeChild(poolItem.element.firstChild);
-          poolItem.dataIndex = -1;
-        }
-        continue;
-      }
-
-      if (poolItem.dataIndex !== dataIndex) {
-        while (poolItem.element.firstChild) poolItem.element.removeChild(poolItem.element.firstChild);
-        poolItem.element.appendChild(renderItemHTML(list[dataIndex]));
-        poolItem.dataIndex = dataIndex;
+        // Позиционируем элемент абсолютно
+        var position = (realIdx - centerIdx) * itemWidth;
+        windowItem.element.style.transform = 'translateX(' + position + 'px)';
+        windowItem.element.style.visibility = 'visible';
+      } else {
+        windowItem.element.style.visibility = 'hidden';
+        windowItem.dataIndex = -1;
       }
     }
 
-    if (centerIndex !== uiState.lastCenterIndex) {
-      uiState.lastCenterIndex = centerIndex;
-      uiState.activeIdx[state.seg] = centerIndex;
-      updateCarouselDots(centerIndex, list.length);
-    }
+    uiState.activeIdx[state.seg] = centerIdx;
+    updateCarouselDots(centerIdx, list.length);
   }
 
-  /**
-   * Программный snap: привязывает карусель к ближайшей карточке
-   * после завершения скролла (debounce 200ms).
-   */
   function performSnap() {
     if (!uiState.carouselEl) return;
     var itemWidth = getItemWidth();
@@ -2929,20 +2928,21 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       });
     }
     
-    // Обновляем видимые элементы после snap'а
-    renderVisibleItems();
+    updateWindow(centerIndex);
   }
 
   function onCarouselScroll() {
-    // Обновляем видимые элементы через RAF для плавности
     if (!uiState.scrollRAF) {
       uiState.scrollRAF = requestAnimationFrame(function() {
-        renderVisibleItems();
+        var centerIndex = getCenterIndex();
+        if (centerIndex !== uiState.lastCenterIndex) {
+          updateWindow(centerIndex);
+          uiState.lastCenterIndex = centerIndex;
+        }
         uiState.scrollRAF = null;
       });
     }
     
-    // Debounce для программного snap после окончания скролла
     if (uiState.snapTimeout) clearTimeout(uiState.snapTimeout);
     uiState.snapTimeout = setTimeout(performSnap, SNAP_DEBOUNCE);
   }
@@ -2952,7 +2952,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     if (!wrap) return;
     while (wrap.firstChild) wrap.removeChild(wrap.firstChild);
 
-    // Очистка таймеров
     if (uiState.scrollRAF) {
       cancelAnimationFrame(uiState.scrollRAF);
       uiState.scrollRAF = null;
@@ -2988,7 +2987,9 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       emptyDiv.appendChild(emptyD);
       wrap.appendChild(emptyDiv);
       uiState.carouselEl = null;
-      uiState.poolItems = [];
+      uiState.spacerBefore = null;
+      uiState.spacerAfter = null;
+      uiState.windowItems = [];
       return;
     }
 
@@ -2998,14 +2999,30 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     carousel.setAttribute('tabindex', '0');
     uiState.carouselEl = carousel;
 
-    uiState.poolItems = [];
-    for (var i = 0; i < POOL_SIZE; i++) {
+    // Создаём spacer-before
+    var spacerBefore = document.createElement('div');
+    spacerBefore.className = 'carousel-spacer';
+    spacerBefore.style.width = '0px';
+    carousel.appendChild(spacerBefore);
+    uiState.spacerBefore = spacerBefore;
+
+    // Создаём окно из WINDOW_SIZE элементов
+    uiState.windowItems = [];
+    for (var i = 0; i < WINDOW_SIZE; i++) {
       var item = document.createElement('div');
       item.className = 'carousel-item';
-      item.setAttribute('data-idx', String(i));
+      item.style.visibility = 'hidden';
       carousel.appendChild(item);
-      uiState.poolItems.push({ element: item, dataIndex: -1 });
+      uiState.windowItems.push({ element: item, dataIndex: -1 });
     }
+
+    // Создаём spacer-after
+    var spacerAfter = document.createElement('div');
+    spacerAfter.className = 'carousel-spacer';
+    spacerAfter.style.width = '0px';
+    carousel.appendChild(spacerAfter);
+    uiState.spacerAfter = spacerAfter;
+
     wrap.appendChild(carousel);
 
     var dotsWrap = document.createElement('div');
@@ -3040,9 +3057,10 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     uiState.lastCenterIndex = -1;
     carousel.scrollLeft = 0;
     
-    // Начальная отрисовка через RAF, чтобы DOM успел отрендериться
     requestAnimationFrame(function() {
-      renderVisibleItems();
+      var initialIdx = uiState.activeIdx[state.seg] || 0;
+      if (initialIdx >= list.length) initialIdx = 0;
+      updateWindow(initialIdx);
     });
   }
 
@@ -3210,7 +3228,9 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       uiState.carouselEl.removeEventListener('scroll', onCarouselScroll);
       uiState.carouselEl = null;
     }
-    uiState.poolItems = [];
+    uiState.spacerBefore = null;
+    uiState.spacerAfter = null;
+    uiState.windowItems = [];
     if (i18nHandler) { try { Bus.off('i18n:change', i18nHandler); } catch (_) {} i18nHandler = null; }
     if (listsChangedHandler) { try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) {} listsChangedHandler = null; }
   }
