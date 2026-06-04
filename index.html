@@ -1,13 +1,13 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.51">
+<meta name="app-version" content="1.2.43">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0b0b10">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; form-action 'self'; script-src 'self' 'nonce-CQ7iG64Aber974IyB6EvNQ==' 'wasm-unsafe-eval' 'strict-dynamic' https://cdn.jsdelivr.net; style-src 'self' 'sha256-qF70bpCPWnK9Wtkf1KcTFXD4PWiEnH+n2oeCD8+m9g0='; img-src * data: blob:; connect-src * https: wss:; worker-src 'self' blob:; font-src 'self' data:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; form-action 'self'; script-src 'self' 'nonce-CQ7iG64Aber974IyB6EvNQ==' 'wasm-unsafe-eval' 'strict-dynamic' https://cdn.jsdelivr.net; style-src 'self' 'sha256-gIs8KBt4+4gJ6NHiHV4buVLgm/p9Vo/bWqkdTJiSKfw='; img-src * data: blob:; connect-src * https: wss:; worker-src 'self' blob:; font-src 'self' data:;">
 <title>NOOmium</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>◆</text></svg>">
 <!-- NOOMIUM_MODULE_START CSS -->
@@ -95,12 +95,12 @@ body.show-app #app-root{display:flex}
 .seg-b.on[data-k="world"] .cnt{background:var(--world-glow);color:var(--world)}
 .seg-b.on[data-k="seren"] .cnt{background:var(--seren-glow);color:var(--seren)}
 .carousel-wrap{flex:1;display:flex;flex-direction:column;min-height:0;position:relative;margin:0;padding:0}
-.carousel{flex:1;display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;
-  scroll-behavior:smooth;scroll-padding:0 12px;gap:10px;padding:0 12px 0;min-height:0;
+.carousel{flex:1;display:flex;overflow-x:auto;overflow-y:hidden;
+  scroll-behavior:smooth;gap:10px;padding:0 12px;min-height:0;
   -webkit-overflow-scrolling:touch;scrollbar-width:none;touch-action:pan-x}
 .carousel::-webkit-scrollbar{display:none}
-.carousel-item{flex:0 0 calc(100% - 4px);scroll-snap-align:center;scroll-snap-stop:always;
-  display:flex;min-height:0;width:calc(100% - 4px);padding:2px 0;touch-action:pan-x}
+.carousel-item{flex:0 0 calc(100% - 24px);
+  display:flex;min-height:0;width:calc(100% - 24px);padding:2px 0;touch-action:pan-x}
 .carousel-dots{display:flex;justify-content:center;align-items:center;gap:4px;
   padding:6px 12px 8px;flex-shrink:0;min-height:24px;flex-wrap:wrap}
 .carousel-dot{width:4px;height:4px;border-radius:50%;background:var(--line-strong);
@@ -418,7 +418,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 .startup-reload{margin-top:20px;padding:10px 20px;background:#8b7cff;color:white;border:none;border-radius:8px;cursor:pointer}
 .mb-5{margin-bottom:5px}
 .reset-modal-text{color:var(--text-2);margin-bottom:16px}
-.carousel-spacer{flex-shrink:0;height:1px;scroll-snap-align:none}
 </style>
 <!-- NOOMIUM_MODULE_END CSS -->
 </head>
@@ -2674,14 +2673,16 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
 
 <!-- NOOMIUM_MODULE_START StreamViewComponent -->
 DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent) {
+  var POOL_SIZE = 7;
+  var SNAP_DEBOUNCE = 200;
+  
   var uiState = {
     activeIdx: { local: 0, world: 0, seren: 0 },
+    poolItems: [],
     carouselEl: null,
-    spacerBefore: null,
-    spacerAfter: null,
-    windowItems: [],
-    observer: null,
-    scrollRAF: null
+    scrollRAF: null,
+    snapTimeout: null,
+    lastCenterIndex: -1
   };
   var cachedQuery = null;
   var cachedRegex = null;
@@ -2832,120 +2833,133 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     dotsWrap.appendChild(counter);
   }
 
+  /**
+   * Измеряет реальную ширину одной карточки + gap.
+   * Использует getBoundingClientRect первого элемента пула.
+   */
   function getItemWidth() {
+    if (!uiState.poolItems || uiState.poolItems.length === 0) return 0;
+    var firstItem = uiState.poolItems[0].element;
+    if (!firstItem) return 0;
+    var rect = firstItem.getBoundingClientRect();
+    // Ширина карточки + gap (10px из CSS .carousel gap:10px)
+    return rect.width + 10;
+  }
+
+  /**
+   * Определяет индекс карточки, ближайшей к центру видимой области.
+   */
+  function getCenterIndex() {
     if (!uiState.carouselEl) return 0;
-    return uiState.carouselEl.clientWidth;
+    var itemWidth = getItemWidth();
+    if (itemWidth <= 0) return 0;
+    var state = StateManager.getState();
+    var list = state.lists[state.seg];
+    if (!list || list.length === 0) return 0;
+    var idx = Math.round(uiState.carouselEl.scrollLeft / itemWidth);
+    return Math.max(0, Math.min(idx, list.length - 1));
+  }
+
+  function renderVisibleItems() {
+    var state = StateManager.getState();
+    var list = state.lists[state.seg];
+    if (!list || list.length === 0) {
+      for (var i = 0; i < uiState.poolItems.length; i++) {
+        var p = uiState.poolItems[i];
+        if (p.dataIndex !== -1) {
+          while (p.element.firstChild) p.element.removeChild(p.element.firstChild);
+          p.dataIndex = -1;
+        }
+      }
+      return;
+    }
+
+    var centerIndex = getCenterIndex();
+    var halfPool = Math.floor(POOL_SIZE / 2);
+    var startIdx = Math.max(0, centerIndex - halfPool);
+    var endIdx = Math.min(list.length - 1, startIdx + POOL_SIZE - 1);
+    startIdx = Math.max(0, endIdx - POOL_SIZE + 1);
+
+    for (var i = 0; i < uiState.poolItems.length; i++) {
+      var poolItem = uiState.poolItems[i];
+      var dataIndex = startIdx + i;
+
+      if (dataIndex > endIdx || dataIndex < 0 || dataIndex >= list.length) {
+        if (poolItem.dataIndex !== -1) {
+          while (poolItem.element.firstChild) poolItem.element.removeChild(poolItem.element.firstChild);
+          poolItem.dataIndex = -1;
+        }
+        continue;
+      }
+
+      if (poolItem.dataIndex !== dataIndex) {
+        while (poolItem.element.firstChild) poolItem.element.removeChild(poolItem.element.firstChild);
+        poolItem.element.appendChild(renderItemHTML(list[dataIndex]));
+        poolItem.dataIndex = dataIndex;
+      }
+    }
+
+    if (centerIndex !== uiState.lastCenterIndex) {
+      uiState.lastCenterIndex = centerIndex;
+      uiState.activeIdx[state.seg] = centerIndex;
+      updateCarouselDots(centerIndex, list.length);
+    }
   }
 
   /**
-   * Заполняет элемент данными заметки или очищает его.
-   * @param {HTMLElement} element - DOM элемент carousel-item
-   * @param {Object|null} item - данные заметки или null для очистки
-   * @param {number} dataIndex - индекс в списке или -1
+   * Программный snap: привязывает карусель к ближайшей карточке
+   * после завершения скролла (debounce 200ms).
    */
-  function fillItem(element, item, dataIndex) {
-    var currentIdx = parseInt(element.getAttribute('data-real-idx') || '-1', 10);
-    if (currentIdx === dataIndex) return; // уже заполнен этим индексом
-
-    while (element.firstChild) {
-      element.removeChild(element.firstChild);
-    }
-    
-    if (item) {
-      element.appendChild(renderItemHTML(item));
-      element.style.visibility = 'visible';
-      element.style.opacity = '1';
-    } else {
-      element.style.visibility = 'hidden';
-      element.style.opacity = '0';
-    }
-    element.setAttribute('data-real-idx', String(dataIndex));
-  }
-
-  /**
-   * Обновляет содержимое окна из 3 элементов вокруг centerIdx.
-   * Структура: [spacerBefore] [item -1] [item 0 (центр)] [item +1] [spacerAfter]
-   */
-  function updateCarousel(centerIdx) {
+  function performSnap() {
+    if (!uiState.carouselEl) return;
+    var itemWidth = getItemWidth();
+    if (itemWidth <= 0) return;
     var state = StateManager.getState();
     var list = state.lists[state.seg];
     if (!list || list.length === 0) return;
-    if (uiState.windowItems.length !== 3) return;
-
-    var itemWidth = getItemWidth();
-    if (itemWidth <= 0) return;
-
-    centerIdx = Math.max(0, Math.min(centerIdx, list.length - 1));
-
-    // Обновляем ширины спейсеров
-    if (uiState.spacerBefore) {
-      uiState.spacerBefore.style.width = (centerIdx * itemWidth) + 'px';
-    }
-    if (uiState.spacerAfter) {
-      var afterWidth = Math.max(0, (list.length - centerIdx - 1) * itemWidth);
-      uiState.spacerAfter.style.width = afterWidth + 'px';
-    }
-
-    // Заполняем три элемента: [-1, 0, +1] относительно centerIdx
-    for (var i = 0; i < 3; i++) {
-      var realIdx = centerIdx + (i - 1);
-      var item = (realIdx >= 0 && realIdx < list.length) ? list[realIdx] : null;
-      fillItem(uiState.windowItems[i].element, item, realIdx);
-    }
-
-    uiState.activeIdx[state.seg] = centerIdx;
-    updateCarouselDots(centerIdx, list.length);
-  }
-
-  /**
-   * Обработчик скролла: определяет новый центральный индекс
-   * и обновляет окно виртуализации.
-   */
-  function onCarouselScroll() {
-    if (uiState.scrollRAF) return;
     
-    uiState.scrollRAF = requestAnimationFrame(function() {
-      if (!uiState.carouselEl) { uiState.scrollRAF = null; return; }
-      
-      var itemWidth = getItemWidth();
-      if (itemWidth <= 0) { uiState.scrollRAF = null; return; }
-      
-      var state = StateManager.getState();
-      var list = state.lists[state.seg];
-      if (!list || list.length === 0) { uiState.scrollRAF = null; return; }
-      
-      // Центральный элемент — тот, чей центр ближе к центру видимой области.
-      // scrollLeft указывает позицию левого края видимой области.
-      // Центр видимой области = scrollLeft + itemWidth/2.
-      // Позиция центра i-го элемента = spacerBefore.width + i * itemWidth + itemWidth/2.
-      // Значит центральный индекс = round((scrollLeft - spacerBefore.width) / itemWidth) + 1
-      // Но проще: новый centerIdx = round(scrollLeft / itemWidth) если спейсеры уже учтены
-      var scrollLeft = uiState.carouselEl.scrollLeft;
-      var spacerBeforeWidth = uiState.spacerBefore ? parseFloat(uiState.spacerBefore.style.width) || 0 : 0;
-      var newCenterIdx = Math.round((scrollLeft - spacerBeforeWidth) / itemWidth);
-      newCenterIdx = Math.max(0, Math.min(newCenterIdx, list.length - 1));
-      
-      if (newCenterIdx !== uiState.activeIdx[state.seg]) {
-        updateCarousel(newCenterIdx);
-      }
-      
-      uiState.scrollRAF = null;
-    });
+    var centerIndex = getCenterIndex();
+    var targetScroll = centerIndex * itemWidth;
+    var diff = Math.abs(uiState.carouselEl.scrollLeft - targetScroll);
+    
+    if (diff > 2) {
+      uiState.carouselEl.scrollTo({
+        left: targetScroll,
+        behavior: 'smooth'
+      });
+    }
+    
+    // Обновляем видимые элементы после snap'а
+    renderVisibleItems();
   }
 
-  function renderCarousel() {
+  function onCarouselScroll() {
+    // Обновляем видимые элементы через RAF для плавности
+    if (!uiState.scrollRAF) {
+      uiState.scrollRAF = requestAnimationFrame(function() {
+        renderVisibleItems();
+        uiState.scrollRAF = null;
+      });
+    }
+    
+    // Debounce для программного snap после окончания скролла
+    if (uiState.snapTimeout) clearTimeout(uiState.snapTimeout);
+    uiState.snapTimeout = setTimeout(performSnap, SNAP_DEBOUNCE);
+  }
+
+  function initCarousel() {
     var wrap = document.getElementById('carousel-wrap');
     if (!wrap) return;
     while (wrap.firstChild) wrap.removeChild(wrap.firstChild);
 
-    // Очистка предыдущего observer
-    if (uiState.observer) {
-      uiState.observer.disconnect();
-      uiState.observer = null;
-    }
+    // Очистка таймеров
     if (uiState.scrollRAF) {
       cancelAnimationFrame(uiState.scrollRAF);
       uiState.scrollRAF = null;
+    }
+    if (uiState.snapTimeout) {
+      clearTimeout(uiState.snapTimeout);
+      uiState.snapTimeout = null;
     }
 
     var state = StateManager.getState();
@@ -2974,9 +2988,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       emptyDiv.appendChild(emptyD);
       wrap.appendChild(emptyDiv);
       uiState.carouselEl = null;
-      uiState.spacerBefore = null;
-      uiState.spacerAfter = null;
-      uiState.windowItems = [];
+      uiState.poolItems = [];
       return;
     }
 
@@ -2986,32 +2998,14 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     carousel.setAttribute('tabindex', '0');
     uiState.carouselEl = carousel;
 
-    // Создаём spacer-before
-    var spacerBefore = document.createElement('div');
-    spacerBefore.className = 'carousel-spacer';
-    spacerBefore.style.width = '0px';
-    carousel.appendChild(spacerBefore);
-    uiState.spacerBefore = spacerBefore;
-
-    // Создаём три видимых элемента [-1, 0, +1]
-    uiState.windowItems = [];
-    for (var i = 0; i < 3; i++) {
+    uiState.poolItems = [];
+    for (var i = 0; i < POOL_SIZE; i++) {
       var item = document.createElement('div');
       item.className = 'carousel-item';
-      item.style.visibility = 'hidden';
-      item.style.opacity = '0';
-      item.setAttribute('data-real-idx', '-1');
+      item.setAttribute('data-idx', String(i));
       carousel.appendChild(item);
-      uiState.windowItems.push({ element: item });
+      uiState.poolItems.push({ element: item, dataIndex: -1 });
     }
-
-    // Создаём spacer-after
-    var spacerAfter = document.createElement('div');
-    spacerAfter.className = 'carousel-spacer';
-    spacerAfter.style.width = '0px';
-    carousel.appendChild(spacerAfter);
-    uiState.spacerAfter = spacerAfter;
-
     wrap.appendChild(carousel);
 
     var dotsWrap = document.createElement('div');
@@ -3027,19 +3021,14 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       var currentList = currentState.lists[currentState.seg];
       if (!currentList || currentList.length === 0) return;
 
-      var itemWidth = getItemWidth();
-      if (itemWidth <= 0) return;
-
       if (e.key === 'ArrowRight') {
         e.preventDefault();
-        var nextIdx = Math.min(uiState.activeIdx[currentState.seg] + 1, currentList.length - 1);
-        // scrollLeft для centerIdx: spacerBefore.width должен стать nextIdx * itemWidth
-        // но мы скроллим к позиции, где центральный элемент по центру
-        carousel.scrollTo({ left: nextIdx * itemWidth, behavior: 'smooth' });
+        var nextIdx = Math.min(getCenterIndex() + 1, currentList.length - 1);
+        scrollToIndex(nextIdx);
       } else if (e.key === 'ArrowLeft') {
         e.preventDefault();
-        var prevIdx = Math.max(uiState.activeIdx[currentState.seg] - 1, 0);
-        carousel.scrollTo({ left: prevIdx * itemWidth, behavior: 'smooth' });
+        var prevIdx = Math.max(getCenterIndex() - 1, 0);
+        scrollToIndex(prevIdx);
       }
     });
 
@@ -3048,19 +3037,22 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       if (el) handleItemAction(el.getAttribute('data-act'), el);
     });
 
-    // Начальная отрисовка
+    uiState.lastCenterIndex = -1;
+    carousel.scrollLeft = 0;
+    
+    // Начальная отрисовка через RAF, чтобы DOM успел отрендериться
     requestAnimationFrame(function() {
-      var itemWidth = getItemWidth();
-      if (itemWidth > 0) {
-        var initialIdx = uiState.activeIdx[state.seg] || 0;
-        if (initialIdx >= list.length) initialIdx = 0;
-        
-        // Сначала обновляем спейсеры и элементы
-        updateCarousel(initialIdx);
-        
-        // Затем устанавливаем scrollLeft
-        carousel.scrollLeft = initialIdx * itemWidth;
-      }
+      renderVisibleItems();
+    });
+  }
+
+  function scrollToIndex(idx) {
+    if (!uiState.carouselEl) return;
+    var itemWidth = getItemWidth();
+    if (itemWidth <= 0) return;
+    uiState.carouselEl.scrollTo({
+      left: idx * itemWidth,
+      behavior: 'smooth'
     });
   }
 
@@ -3079,7 +3071,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     });
     cachedQuery = null;
     cachedRegex = null;
-    renderCarousel();
+    initCarousel();
   }
 
   function copyToClipboard(text) {
@@ -3141,7 +3133,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         }
         cachedQuery = null;
         cachedRegex = null;
-        renderCarousel();
+        initCarousel();
         try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
       }).catch(function(err) {
         Toast.show('err', String(err && err.message || err) || 'Delete failed');
@@ -3189,7 +3181,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       updateCounts();
       cachedQuery = null;
       cachedRegex = null;
-      renderCarousel();
+      initCarousel();
     };
     Bus.on('i18n:change', i18nHandler);
 
@@ -3197,12 +3189,12 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       updateCounts();
       cachedQuery = null;
       cachedRegex = null;
-      renderCarousel();
+      initCarousel();
     };
     Bus.on('state:lists-changed', listsChangedHandler);
 
     updateCounts();
-    renderCarousel();
+    initCarousel();
   }
 
   function destroy() {
@@ -3210,17 +3202,15 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       cancelAnimationFrame(uiState.scrollRAF);
       uiState.scrollRAF = null;
     }
-    if (uiState.observer) {
-      uiState.observer.disconnect();
-      uiState.observer = null;
+    if (uiState.snapTimeout) {
+      clearTimeout(uiState.snapTimeout);
+      uiState.snapTimeout = null;
     }
     if (uiState.carouselEl) {
       uiState.carouselEl.removeEventListener('scroll', onCarouselScroll);
+      uiState.carouselEl = null;
     }
-    uiState.carouselEl = null;
-    uiState.spacerBefore = null;
-    uiState.spacerAfter = null;
-    uiState.windowItems = [];
+    uiState.poolItems = [];
     if (i18nHandler) { try { Bus.off('i18n:change', i18nHandler); } catch (_) {} i18nHandler = null; }
     if (listsChangedHandler) { try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) {} listsChangedHandler = null; }
   }
@@ -3228,7 +3218,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
   return { init: init, destroy: destroy };
 }, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'Toast', 'EditorComponent']);
 <!-- NOOMIUM_MODULE_END StreamViewComponent -->
-
+  
 <!-- NOOMIUM_MODULE_START BaseViewComponent -->
 DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast, SearchService) {
   var ITEM_HEIGHT = 100;
