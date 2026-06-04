@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.4">
+<meta name="app-version" content="1.2.5">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2077,9 +2077,6 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
   var StateManager = DI.resolve('StateManager');
   var SearchService = DI.resolve('SearchService');
 
-  // Временная обратная совместимость: appState теперь ссылка на состояние из StateManager
-  var appState = StateManager.getState();
-
   // UI-специфичные временные переменные (остаются локальными)
   var uiState = {
     activeIdx: { local: 0, world: 0, seren: 0 },
@@ -2176,7 +2173,8 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
   }
 
   /**
-   * Обёртка: отправка мысли
+   * Обёртка: отправка мысли через SearchService
+   * Управляет состоянием кнопки и вызывает executeSearch после успешной отправки
    */
   function handleSend() {
     var text = getEditorValue().trim();
@@ -2209,7 +2207,8 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
   }
 
   /**
-   * Обёртка: выполнение поиска
+   * Обёртка: выполнение поиска через SearchService
+   * После завершения обновляет счётчики и перерисовывает карусель
    * @param {boolean} force - Принудительный поиск
    */
   function executeSearch(force) {
@@ -2219,6 +2218,82 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
       renderCarousel();
     });
   }
+
+  function switchView(viewName) {
+    StateManager.setState({ view: viewName });
+    document.querySelectorAll('.btab-b').forEach(function(b) {
+      b.classList.toggle('on', b.getAttribute('data-v') === viewName);
+    });
+    var streamEl = document.getElementById('ws-stream');
+    var baseEl = document.getElementById('ws-base');
+    if (streamEl) streamEl.style.display = viewName === 'stream' ? 'flex' : 'none';
+    if (baseEl) baseEl.style.display = viewName === 'base' ? 'flex' : 'none';
+    if (viewName === 'base') renderBase();
+  }
+
+  function setSegment(segKey) {
+    StateManager.setState({ seg: segKey });
+    document.querySelectorAll('.seg-b').forEach(function(b) {
+      b.classList.toggle('on', b.getAttribute('data-k') === segKey);
+    });
+    renderCarousel();
+  }
+
+  function refreshUI() {
+    var state = StateManager.getState();
+    var savedView = state.view;
+    var savedSeg = state.seg;
+    var savedText = getEditorValue();
+    var savedMode = state.sendMode;
+    
+    cleanup();
+    var root = document.getElementById('app-root');
+    if (root) {
+      root.innerHTML = buildMarkup();
+    }
+    setupWindowListeners();
+    bindEvents();
+
+    if (AI.ready()) {
+      var mode = AI.getMode();
+      setStatus('ai',
+        mode === 'model' ? translate('st.ai.ready') : translate('st.ai.demo'),
+        mode === 'model' ? 'ok' : 'warn'
+      );
+    } else {
+      setStatus('ai', translate('st.ai.loading'), 'load');
+    }
+    
+    switchView(savedView);
+    setSegment(savedSeg);
+    handleToggleMode(savedMode);
+    setEditorValue(savedText);
+    updateCounter();
+    
+    if (AI.ready()) {
+      executeSearch(true);
+    }
+  }
+
+  // Временный мост для обратной совместимости с другими модулями.
+  // Будет удалён на Шаге 5 после полного перевода на DI.
+  window.__AppState = {
+    getEditorValue: getEditorValue,
+    setEditorValue: setEditorValue,
+    translate: translate,
+    toast: toast,
+    applyTheme: applyTheme,
+    findItemById: findItemById,
+    setStatus: setStatus,
+    updateCounter: updateCounter,
+    handleToggleMode: handleToggleMode,
+    handleSend: handleSend,
+    executeSearch: executeSearch,
+    switchView: switchView,
+    setSegment: setSegment,
+    refreshUI: refreshUI,
+    getAllNotesCached: getAllNotesCached
+  };
 <!-- NOOMIUM_MODULE_END App.State -->
 
 <!-- NOOMIUM_MODULE_START UI.Layout -->
@@ -3186,156 +3261,6 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
   }
 <!-- NOOMIUM_MODULE_END UI.Base -->
   
-<!-- NOOMIUM_MODULE_START App.Logic -->
-  function updateCounter() {
-    var value = getEditorValue();
-    var counter = document.getElementById('ed-cnt');
-    if (counter) counter.textContent = Utils.word('symbols', value.length, I18n.getLang());
-  }
-
-  function handleToggleMode(newMode) {
-    if (newMode === appState.sendMode) return;
-    appState.sendMode = newMode;
-    var toggleEl = document.getElementById('mode-toggle');
-    if (!toggleEl) return;
-    toggleEl.setAttribute('data-mode', appState.sendMode);
-    toggleEl.querySelectorAll('.tog-sw-opt').forEach(function(opt) {
-      opt.classList.toggle('on', opt.getAttribute('data-v') === appState.sendMode);
-    });
-  }
-
-  function handleSend() {
-    if (appState.sendLock) return;
-    var text = getEditorValue().trim();
-    if (!text) { toast(translate('toast.empty'), 'warn'); return; }
-    if (!AI.ready()) { toast(translate('toast.ai.notready'), 'err'); return; }
-
-    if (appState.sendMode === 'world' && !appState.netAuthorized) {
-      appState.requestNetworkAuth(handleSend);
-      return;
-    }
-
-    var isWorld = appState.sendMode === 'world';
-    var btn = document.getElementById('btn-send');
-    appState.sendLock = true;
-
-    if (btn) {
-      btn.classList.add('sending');
-      btn.disabled = true;
-      btn.innerHTML = SPINNER_SVG;
-    }
-
-    AI.embed(text)
-      .then(function(vector) {
-        return DB.put({
-          id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-          text: text,
-          vector: vector,
-          shared: !!isWorld,
-          createdAt: Date.now()
-        });
-      })
-      .then(function() {
-        setEditorValue('');
-        updateCounter();
-        appState.lastVec = null;
-        toast(isWorld ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
-        executeSearch();
-        if (appState.view === 'base') renderBase();
-      })
-      .catch(function(err) {
-        toast(String(err && err.message || err) || 'Send failed', 'err');
-      })
-      .finally(function() {
-        appState.sendLock = false;
-        if (btn) {
-          btn.classList.remove('sending');
-          btn.disabled = false;
-          btn.innerHTML = PAPER_PLANE_SVG;
-        }
-      });
-  }
-
-  function executeSearch(force) {
-    var text = getEditorValue();
-    if (!text || !AI.ready()) {
-      appState.lists = { local: [], world: [], seren: [] };
-      updateCounts();
-      renderCarousel();
-      return Promise.resolve();
-    }
-
-    if (uiState.searchAbortController) {
-      uiState.searchAbortController.abort();
-    }
-    var controller = new AbortController();
-    uiState.searchAbortController = controller;
-    var signal = controller.signal;
-
-    return AI.embed(text).then(function(vec) {
-      if (signal.aborted) return;
-      if (!vec) return;
-      if (!appState.lastVec || AI.cosine(vec, appState.lastVec) < Config.get('vectorSimilarityThreshold', 0.98) || force) {
-        appState.lastVec = vec;
-        appState.lastQuery = Date.now();
-        if (AI.getMode() === 'model' && appState.netAuthorized && Net && typeof Net.send === 'function') {
-          Net.send(vec);
-        }
-      }
-      return getAllNotesCached().then(function(notes) {
-        if (signal.aborted) return;
-        var localScored = [];
-        for (var i = 0; i < notes.length; i++) {
-          var note = notes[i];
-          if (note && note.vector) {
-            localScored.push({ 
-              id: note.id, 
-              text: note.text, 
-              vector: note.vector, 
-              score: AI.cosine(vec, note.vector), 
-              shared: note.shared, 
-              peer: note.peer, 
-              createdAt: note.createdAt 
-            });
-          }
-        }
-        var worldAnswers = appState.netAuthorized ? Net.activeAnswers() : [];
-        var worldScored = [];
-        for (var i = 0; i < worldAnswers.length; i++) {
-          worldScored.push({ 
-            id: worldAnswers[i].id, 
-            text: worldAnswers[i].text, 
-            vector: worldAnswers[i].vector, 
-            score: AI.cosine(vec, worldAnswers[i].vector), 
-            shared: worldAnswers[i].shared, 
-            peer: worldAnswers[i].peer, 
-            createdAt: worldAnswers[i].createdAt 
-          });
-        }
-        var threshold = Config.get('threshold', 0.30);
-        var serendipityDelta = Config.get('serendipity', 0.15);
-
-        appState.lists.local = localScored.filter(function(n) { return n.score >= threshold; })
-          .sort(function(a, b) { return b.score - a.score; });
-        appState.lists.world = worldScored.filter(function(n) { return n.score >= threshold; })
-          .sort(function(a, b) { return b.score - a.score; });
-        appState.lists.seren = localScored.concat(worldScored)
-          .filter(function(n) { return n.score >= (threshold - serendipityDelta) && n.score < threshold; })
-          .sort(function(a, b) { return b.score - a.score; });
-
-        updateCounts();
-        renderCarousel();
-      });
-    }).catch(function(err) {
-      if (signal.aborted) return;
-      toast(String(err && err.message || err) || 'Search failed', 'err');
-      if (Logger) Logger.warn('executeSearch error', String(err && err.message || err));
-    }).finally(function() {
-      uiState.searchAbortController = null;
-    });
-  }
-<!-- NOOMIUM_MODULE_END App.Logic -->
-
 <!-- NOOMIUM_MODULE_START UI.Menu -->
   function openMenu() {
     var body = document.createElement('div');
@@ -3726,7 +3651,8 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
           : translate('st.net.listen'),
         count > 0 ? 'ok' : 'load'
       );
-      if (appState.view === 'stream') executeSearch();
+      var state = StateManager.getState();
+      if (state.view === 'stream') executeSearch();
     };
     Net.onPeers(netPeerHandler);
 
