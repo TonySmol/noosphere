@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.6">
+<meta name="app-version" content="1.2.7">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2077,7 +2077,6 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
   var StateManager = DI.resolve('StateManager');
   var SearchService = DI.resolve('SearchService');
 
-  // UI-специфичные временные переменные (остаются локальными)
   var uiState = {
     activeIdx: { local: 0, world: 0, seren: 0 },
     carouselObserver: null,
@@ -2144,26 +2143,18 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     if (txtEl) txtEl.textContent = text;
   }
 
-  /**
-   * Обёртка: обновление счётчика символов в редакторе
-   */
   function updateCounter() {
     var value = getEditorValue();
     var counter = document.getElementById('ed-cnt');
     if (counter) counter.textContent = Utils.word('symbols', value.length, I18n.getLang());
   }
 
-  /**
-   * Обёртка: переключение режима отправки
-   * @param {string} newMode - 'private' или 'world'
-   */
   function handleToggleMode(newMode) {
     var currentMode = SearchService.getSendMode();
     if (newMode === currentMode) return;
     
     SearchService.setSendMode(newMode);
     
-    // Обновляем UI напрямую (для обратной совместимости)
     var toggleEl = document.getElementById('mode-toggle');
     if (!toggleEl) return;
     toggleEl.setAttribute('data-mode', newMode);
@@ -2172,10 +2163,6 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     });
   }
 
-  /**
-   * Обёртка: отправка мысли через SearchService
-   * Управляет состоянием кнопки и вызывает executeSearch после успешной отправки
-   */
   function handleSend() {
     var text = getEditorValue().trim();
     var mode = SearchService.getSendMode();
@@ -2206,11 +2193,6 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
       });
   }
 
-  /**
-   * Обёртка: выполнение поиска через SearchService
-   * После завершения обновляет счётчики и перерисовывает карусель
-   * @param {boolean} force - Принудительный поиск
-   */
   function executeSearch(force) {
     var text = getEditorValue();
     return SearchService.search(text, force).then(function() {
@@ -2275,8 +2257,6 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     }
   }
 
-  // Временный мост для обратной совместимости с другими модулями.
-  // Будет удалён на Шаге 5 после полного перевода на DI.
   window.__AppState = {
     getEditorValue: getEditorValue,
     setEditorValue: setEditorValue,
@@ -2473,7 +2453,6 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     card.className = 'fi t-' + seg;
     card.setAttribute('data-id', item.id);
     
-    // Header
     var header = document.createElement('div');
     header.className = 'fi-h';
     
@@ -2505,14 +2484,12 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     
     card.appendChild(header);
     
-    // Body
     var body = document.createElement('div');
     body.className = 'fi-body';
     var queryText = getEditorValue();
     body.appendChild(highlightText(item.text, queryText));
     card.appendChild(body);
     
-    // Footer
     var footer = document.createElement('div');
     footer.className = 'fi-foot';
     
@@ -2567,7 +2544,6 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     var state = StateManager.getState();
     var list = state.lists[state.seg];
     
-    // Очищаем wrap безопасно
     while (wrap.firstChild) {
       wrap.removeChild(wrap.firstChild);
     }
@@ -2602,7 +2578,6 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
       return;
     }
     
-    // Создаём карусель
     var carousel = document.createElement('div');
     carousel.className = 'carousel';
     carousel.id = 'carousel';
@@ -2618,7 +2593,6 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     
     wrap.appendChild(carousel);
     
-    // Создаём точки и счётчик
     var dotsWrap = document.createElement('div');
     dotsWrap.className = 'carousel-dots';
     dotsWrap.id = 'carousel-dots';
@@ -2638,7 +2612,6 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     
     wrap.appendChild(dotsWrap);
     
-    // IntersectionObserver
     if ('IntersectionObserver' in window) {
       uiState.carouselObserver = new IntersectionObserver(function(entries) {
         entries.forEach(function(entry) {
@@ -2663,7 +2636,6 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
       }
     }
     
-    // Keyboard navigation
     carousel.addEventListener('keydown', function(e) {
       var currentState = StateManager.getState();
       var currentList = currentState.lists[currentState.seg];
@@ -2720,13 +2692,17 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
       if (!confirm(translate('del.confirm'))) return;
       DB.del(id).then(function() {
         toast(translate('toast.deleted'), 'ok');
-        var currentList = state.lists[state.seg];
-        state.lists[state.seg] = currentList.filter(function(n) { return n.id !== id; });
-        if (uiState.activeIdx[state.seg] >= state.lists[state.seg].length) {
-          uiState.activeIdx[state.seg] = Math.max(0, state.lists[state.seg].length - 1);
+        var currentState = StateManager.getState();
+        var currentList = currentState.lists[currentState.seg];
+        var newList = currentList.filter(function(n) { return n.id !== id; });
+        var newLists = Object.assign({}, currentState.lists);
+        newLists[currentState.seg] = newList;
+        StateManager.setState({ lists: newLists });
+        if (uiState.activeIdx[currentState.seg] >= newList.length) {
+          uiState.activeIdx[currentState.seg] = Math.max(0, newList.length - 1);
         }
         renderCarousel();
-        if (state.view === 'base') renderBase();
+        if (currentState.view === 'base') renderBase();
       }).catch(function(err) {
         toast(String(err && err.message || err) || 'Delete failed', 'err');
       });
