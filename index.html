@@ -1,13 +1,13 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.18">
+<meta name="app-version" content="1.2.19">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0b0b10">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https: wss:; worker-src 'self' blob:; connect-src * https: wss:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src * data: blob:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; script-src 'self' 'nonce-CQ7iG64Aber974IyB6EvNQ==' 'strict-dynamic' https://cdn.jsdelivr.net; style-src 'self' 'sha256-89CPoQU0j9Gth2uUpD/zdjA3N/twX2kkOapQBqBs38U='; img-src * data: blob:; connect-src * https: wss:; worker-src 'self' blob:; font-src 'self' data:;">
 <title>NOOmium</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>◆</text></svg>">
 <!-- NOOMIUM_MODULE_START CSS -->
@@ -388,12 +388,17 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 }
 
 @supports (height:100dvh){#app-root{height:100dvh}}
+
+/* CSP compliance: initial hidden states (replaces inline style attributes) */
+.offline-bar-init{display:none;background:var(--danger-glow);color:var(--danger);font-size:11px;padding:4px 14px;text-align:center;font-weight:500;border-bottom:1px solid var(--line-strong)}
+.offline-queue-init{margin-left:8px;display:none}
+.ws-base-init{display:none}
 </style>
 <!-- NOOMIUM_MODULE_END CSS -->
 </head>
 <body data-theme="dark">
 <div id="app-root"></div>
-<script>
+<script nonce="CQ7iG64Aber974IyB6EvNQ==">
 (function() {
   'use strict';
 
@@ -3641,9 +3646,9 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
       '</div>' +
       '<button class="burger" id="btn-menu" aria-label="Menu" aria-expanded="false"><span class="burger-line"></span><span class="burger-line"></span><span class="burger-line"></span></button>' +
     '</div>' +
-    '<div id="offline-bar" style="display:none;background:var(--danger-glow);color:var(--danger);font-size:11px;padding:4px 14px;text-align:center;font-weight:500;border-bottom:1px solid var(--line-strong)">' +
+    '<div id="offline-bar" class="offline-bar-init">' +
       '<span id="offline-text">' + translate('offline.bar') + '</span>' +
-      '<span id="offline-queue" style="margin-left:8px;display:none">(' + translate('offline.queue').replace('{count}', '0') + ')</span>' +
+      '<span id="offline-queue" class="offline-queue-init">(' + translate('offline.queue').replace('{count}', '0') + ')</span>' +
     '</div>';
   }
 
@@ -3673,7 +3678,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
   }
 
   function buildBaseMarkup() {
-    return '<div class="ws base" id="ws-base" style="display:none">' +
+    return '<div class="ws base ws-base-init" id="ws-base">' +
       '<div class="base-h"><div class="base-stats" id="base-stats"></div>' +
       '<div class="base-ctrls"><input type="text" class="base-search" id="base-q" placeholder="' + Utils.esc(translate('base.search')) + '" />' +
       '<select class="base-sort" id="base-sort"><option value="new">' + translate('base.sort.new') + '</option><option value="old">' + translate('base.sort.old') + '</option><option value="az">' + translate('base.sort.az') + '</option></select></div></div>' +
@@ -4491,83 +4496,37 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
   if ('serviceWorker' in navigator) {
     var appVersionMeta = document.querySelector('meta[name="app-version"]');
     var appVersion = appVersionMeta ? appVersionMeta.getAttribute('content') : '0';
-    
-    var storedVersion = null;
-    try { storedVersion = localStorage.getItem('noomium:appVersion'); } catch(e) {}
-    
-    if (storedVersion !== appVersion) {
-      var doReload = function() {
-        try { localStorage.setItem('noomium:appVersion', appVersion); } catch(e) {}
-        location.reload(true);
-      };
-      
-      if (window.caches) {
-        caches.keys().then(function(keys) {
-          return Promise.all(keys.map(function(key) { return caches.delete(key); }));
-        }).then(doReload).catch(doReload);
-      } else {
-        doReload();
-      }
-    } else {
-      const swCode = `
-        const CACHE = 'noomium-v' + ` + JSON.stringify(appVersion) + `;
-        self.addEventListener('install', e => { self.skipWaiting(); });
-        self.addEventListener('activate', e => { 
-          e.waitUntil(
-            caches.keys().then(cacheNames => {
-              return Promise.all(
-                cacheNames.filter(cacheName => cacheName !== CACHE).map(cacheName => caches.delete(cacheName))
-              );
-            }).then(() => self.clients.claim())
-          );
-        });
-        self.addEventListener('message', function(event) { if (event.data && event.data.type === 'SKIP_WAITING') { self.skipWaiting(); } });
-        self.addEventListener('fetch', e => {
-          if (e.request.method !== 'GET') return;
-          if (e.request.mode === 'navigate') {
-            e.respondWith(
-              fetch(e.request).then(res => {
-                if (res && res.status === 200) {
-                  const clone = res.clone();
-                  caches.open(CACHE).then(c => c.put(e.request, clone));
-                }
-                return res;
-              }).catch(() => caches.match(e.request).then(r => r || caches.match('/')))
-            );
-            return;
-          }
-          e.respondWith(
-            caches.match(e.request).then(r => r || fetch(e.request).then(res => {
-              if (res.status === 200 && (e.request.url.startsWith(self.location.origin) || e.request.url.includes('jsdelivr'))) {
-                const clone = res.clone();
-                caches.open(CACHE).then(c => c.put(e.request, clone));
+
+    navigator.serviceWorker.register('/sw.js?v=' + encodeURIComponent(appVersion))
+      .then(function(reg) {
+        // If a waiting SW exists (e.g. from previous session), activate it immediately
+        if (reg.waiting) {
+          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        }
+        reg.addEventListener('updatefound', function() {
+          var installing = reg.installing;
+          if (installing) {
+            installing.addEventListener('statechange', function() {
+              if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+                installing.postMessage({ type: 'SKIP_WAITING' });
+                window.location.reload();
               }
-              return res;
-            }).catch(() => caches.match('/')))
-          );
-        });
-      `;
-      try {
-        const blob = new Blob([swCode], { type: 'application/javascript' });
-        const swUrl = URL.createObjectURL(blob);
-        navigator.serviceWorker.register(swUrl).then(function(reg) {
-          if (reg.waiting) {
-            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+            });
           }
-          reg.onupdatefound = function() {
-            const installing = reg.installing;
-            if (installing) {
-              installing.onstatechange = function() {
-                if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-                  installing.postMessage({ type: 'SKIP_WAITING' });
-                  window.location.reload();
-                }
-              };
-            }
-          };
-        }).catch(function() { /* ignore SW errors */ });
-      } catch(e) { /* ignore */ }
-    }
+        });
+      })
+      .catch(function(err) {
+        // SW registration may fail on file:// or in private mode — not critical
+        console.warn('SW registration failed:', err);
+      });
+
+    // Reload page when a new SW takes control
+    var refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function() {
+      if (refreshing) return;
+      refreshing = true;
+      window.location.reload();
+    });
   }
 <!-- NOOMIUM_MODULE_END SW -->
 })();
