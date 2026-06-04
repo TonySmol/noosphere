@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.41">
+<meta name="app-version" content="1.2.42">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2674,6 +2674,8 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
 <!-- NOOMIUM_MODULE_START StreamViewComponent -->
 DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent) {
   var POOL_SIZE = 7;
+  var ITEM_GAP = 10;
+  
   var uiState = {
     activeIdx: { local: 0, world: 0, seren: 0 },
     poolItems: [],
@@ -2842,7 +2844,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     return Math.round(uiState.carouselEl.scrollLeft / itemWidth);
   }
 
-  function renderVisibleItems() {
+  function updateVisibleItems() {
     var state = StateManager.getState();
     var list = state.lists[state.seg];
     if (!list || list.length === 0) {
@@ -2855,6 +2857,9 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       }
       return;
     }
+
+    var itemWidth = getItemWidth();
+    if (itemWidth <= 0) return;
 
     var centerIndex = getCenterIndex();
     var halfPool = Math.floor(POOL_SIZE / 2);
@@ -2871,6 +2876,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
           while (poolItem.element.firstChild) poolItem.element.removeChild(poolItem.element.firstChild);
           poolItem.dataIndex = -1;
         }
+        poolItem.element.style.transform = 'translateX(-9999px)';
         continue;
       }
 
@@ -2879,6 +2885,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         poolItem.element.appendChild(renderItemHTML(list[dataIndex]));
         poolItem.dataIndex = dataIndex;
       }
+      poolItem.element.style.transform = 'translateX(' + (dataIndex * itemWidth) + 'px)';
     }
 
     if (centerIndex !== uiState.lastCenterIndex) {
@@ -2891,7 +2898,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
   function onCarouselScroll() {
     if (uiState.scrollRAF) return;
     uiState.scrollRAF = requestAnimationFrame(function() {
-      renderVisibleItems();
+      updateVisibleItems();
       uiState.scrollRAF = null;
     });
   }
@@ -2935,12 +2942,29 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     carousel.className = 'carousel';
     carousel.id = 'carousel';
     carousel.setAttribute('tabindex', '0');
+    carousel.style.position = 'relative';
     uiState.carouselEl = carousel;
 
+    // Создаём спейсер для правильной ширины скроллбара
+    var spacer = document.createElement('div');
+    spacer.className = 'carousel-spacer';
+    // Ширина = количество элементов * ширину одной карточки
+    // Используем clientWidth как ширину элемента (так как flex: 0 0 calc(100% - 4px))
+    var itemWidth = carousel.clientWidth || 1;
+    spacer.style.width = (list.length * itemWidth) + 'px';
+    spacer.style.height = '1px';
+    spacer.style.flexShrink = '0';
+    carousel.appendChild(spacer);
+
+    // Создаём элементы пула
     uiState.poolItems = [];
     for (var i = 0; i < POOL_SIZE; i++) {
       var item = document.createElement('div');
       item.className = 'carousel-item';
+      item.style.position = 'absolute';
+      item.style.top = '0';
+      item.style.left = '0';
+      item.style.width = 'calc(100% - 4px)';
       item.setAttribute('data-idx', String(i));
       carousel.appendChild(item);
       uiState.poolItems.push({ element: item, dataIndex: -1 });
@@ -2978,7 +3002,14 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
 
     uiState.lastCenterIndex = -1;
     carousel.scrollLeft = 0;
-    renderVisibleItems();
+    
+    // Небольшая задержка для корректного расчёта ширины после рендера
+    requestAnimationFrame(function() {
+      // Пересчитываем ширину спейсера после рендера
+      var actualItemWidth = carousel.clientWidth || 1;
+      spacer.style.width = (list.length * actualItemWidth) + 'px';
+      updateVisibleItems();
+    });
   }
 
   function scrollToIndex(idx) {
@@ -3044,7 +3075,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     var state = StateManager.getState();
 
     if (action === 'edit') {
-      // Слабая связность: эмитим событие, которое слушает BaseViewComponent
       try { Bus.emit('editor:edit-note', { id: id }); } catch (_) {}
       return;
     }
@@ -3069,8 +3099,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         cachedQuery = null;
         cachedRegex = null;
         initCarousel();
-        // Слабая связность: запрашиваем перестройку списков через событие
-        // App.Events → executeSearch → SearchService.search → state:lists-changed
         try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
       }).catch(function(err) {
         Toast.show('err', String(err && err.message || err) || 'Delete failed');
@@ -3083,7 +3111,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         record.shared = !record.shared;
         return DB.put(record).then(function() {
           Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
-          // Слабая связность: запрашиваем перестройку списков через событие
           try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
         });
       }).catch(function(err) {
