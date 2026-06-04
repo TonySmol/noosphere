@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.4">
+<meta name="app-version" content="1.2.5">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2220,76 +2220,389 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     });
   }
 <!-- NOOMIUM_MODULE_END App.State -->
+
 <!-- NOOMIUM_MODULE_START UI.Layout -->
+  var StateManager = DI.resolve('StateManager');
+
+  /**
+   * Создать SVG-элемент из строки (для константных иконок)
+   * @param {string} svgString - SVG-строка
+   * @returns {SVGElement|null}
+   */
+  function createSVGFromString(svgString) {
+    try {
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(svgString, 'image/svg+xml');
+      var svg = doc.documentElement;
+      if (svg && svg.nodeName === 'svg') {
+        return document.importNode(svg, true);
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  /**
+   * Построить DOM-фрагмент шапки приложения
+   * @returns {DocumentFragment}
+   */
   function buildHeaderMarkup() {
-    return '<div class="hdr">' +
-      '<div class="logo"><span class="logo-mark">N</span><span>NOO<span class="logo-dot">.</span>mium</span></div>' +
-      '<div class="hdr-status">' +
-        '<span class="hdr-st-item"><span class="hdr-st-dot load" id="st-net-dot"></span><span id="st-net-txt">' + translate('st.net') + '</span></span>' +
-        '<span class="hdr-st-sep">·</span>' +
-        '<span class="hdr-st-item"><span class="hdr-st-dot load" id="st-ai-dot"></span><span id="st-ai-txt">' + translate('st.ai.loading') + '</span></span>' +
-      '</div>' +
-      '<button class="burger" id="btn-menu" aria-label="Menu" aria-expanded="false"><span class="burger-line"></span><span class="burger-line"></span><span class="burger-line"></span></button>' +
-    '</div>' +
-    '<div id="offline-bar" style="display:none;background:var(--danger-glow);color:var(--danger);font-size:11px;padding:4px 14px;text-align:center;font-weight:500;border-bottom:1px solid var(--line-strong)">' +
-      '<span id="offline-text">' + translate('offline.bar') + '</span>' +
-      '<span id="offline-queue" style="margin-left:8px;display:none">(' + translate('offline.queue').replace('{count}', '0') + ')</span>' +
-    '</div>';
+    var fragment = document.createDocumentFragment();
+
+    // Header container
+    var hdr = document.createElement('div');
+    hdr.className = 'hdr';
+
+    // Logo
+    var logo = document.createElement('div');
+    logo.className = 'logo';
+
+    var logoMark = document.createElement('span');
+    logoMark.className = 'logo-mark';
+    logoMark.textContent = 'N';
+    logo.appendChild(logoMark);
+
+    var logoText = document.createElement('span');
+    logoText.appendChild(document.createTextNode('NOO'));
+
+    var logoDot = document.createElement('span');
+    logoDot.className = 'logo-dot';
+    logoDot.textContent = '.';
+    logoText.appendChild(logoDot);
+
+    logoText.appendChild(document.createTextNode('mium'));
+    logo.appendChild(logoText);
+    hdr.appendChild(logo);
+
+    // Status container
+    var hdrStatus = document.createElement('div');
+    hdrStatus.className = 'hdr-status';
+
+    // Net status item
+    var netItem = document.createElement('span');
+    netItem.className = 'hdr-st-item';
+    var netDot = document.createElement('span');
+    netDot.className = 'hdr-st-dot load';
+    netDot.id = 'st-net-dot';
+    netItem.appendChild(netDot);
+    var netTxt = document.createElement('span');
+    netTxt.id = 'st-net-txt';
+    netTxt.textContent = translate('st.net');
+    netItem.appendChild(netTxt);
+    hdrStatus.appendChild(netItem);
+
+    // Separator
+    var sep = document.createElement('span');
+    sep.className = 'hdr-st-sep';
+    sep.textContent = '·';
+    hdrStatus.appendChild(sep);
+
+    // AI status item
+    var aiItem = document.createElement('span');
+    aiItem.className = 'hdr-st-item';
+    var aiDot = document.createElement('span');
+    aiDot.className = 'hdr-st-dot load';
+    aiDot.id = 'st-ai-dot';
+    aiItem.appendChild(aiDot);
+    var aiTxt = document.createElement('span');
+    aiTxt.id = 'st-ai-txt';
+    aiTxt.textContent = translate('st.ai.loading');
+    aiItem.appendChild(aiTxt);
+    hdrStatus.appendChild(aiItem);
+
+    hdr.appendChild(hdrStatus);
+
+    // Burger button
+    var burger = document.createElement('button');
+    burger.className = 'burger';
+    burger.id = 'btn-menu';
+    burger.setAttribute('aria-label', 'Menu');
+    burger.setAttribute('aria-expanded', 'false');
+    for (var i = 0; i < 3; i++) {
+      var line = document.createElement('span');
+      line.className = 'burger-line';
+      burger.appendChild(line);
+    }
+    hdr.appendChild(burger);
+
+    fragment.appendChild(hdr);
+
+    // Offline bar
+    var offlineBar = document.createElement('div');
+    offlineBar.id = 'offline-bar';
+    offlineBar.style.cssText = 'display:none;background:var(--danger-glow);color:var(--danger);font-size:11px;padding:4px 14px;text-align:center;font-weight:500;border-bottom:1px solid var(--line-strong)';
+
+    var offlineText = document.createElement('span');
+    offlineText.id = 'offline-text';
+    offlineText.textContent = translate('offline.bar');
+    offlineBar.appendChild(offlineText);
+
+    var offlineQueue = document.createElement('span');
+    offlineQueue.id = 'offline-queue';
+    offlineQueue.style.cssText = 'margin-left:8px;display:none';
+    offlineQueue.textContent = '(' + translate('offline.queue').replace('{count}', '0') + ')';
+    offlineBar.appendChild(offlineQueue);
+
+    fragment.appendChild(offlineBar);
+
+    return fragment;
   }
 
+  /**
+   * Построить DOM-фрагмент сегментов (local/world/seren)
+   * @returns {DocumentFragment}
+   */
   function buildSegmentsMarkup() {
-    return '<div class="seg">' +
-      '<button class="seg-b on" data-k="local"><span class="lbl">' + translate('seg.local') + '</span><span class="cnt" id="c-local">0</span></button>' +
-      '<button class="seg-b" data-k="world"><span class="lbl">' + translate('seg.world') + '</span><span class="cnt" id="c-world">0</span></button>' +
-      '<button class="seg-b" data-k="seren"><span class="lbl">' + translate('seg.seren') + '</span><span class="cnt" id="c-seren">0</span></button>' +
-    '</div>';
+    var fragment = document.createDocumentFragment();
+    var seg = document.createElement('div');
+    seg.className = 'seg';
+
+    var segments = [
+      { key: 'local', label: translate('seg.local'), active: true },
+      { key: 'world', label: translate('seg.world'), active: false },
+      { key: 'seren', label: translate('seg.seren'), active: false }
+    ];
+
+    segments.forEach(function(s) {
+      var btn = document.createElement('button');
+      btn.className = 'seg-b' + (s.active ? ' on' : '');
+      btn.setAttribute('data-k', s.key);
+
+      var lbl = document.createElement('span');
+      lbl.className = 'lbl';
+      lbl.textContent = s.label;
+      btn.appendChild(lbl);
+
+      var cnt = document.createElement('span');
+      cnt.className = 'cnt';
+      cnt.id = 'c-' + s.key;
+      cnt.textContent = '0';
+      btn.appendChild(cnt);
+
+      seg.appendChild(btn);
+    });
+
+    fragment.appendChild(seg);
+    return fragment;
   }
 
+  /**
+   * Построить DOM-фрагмент контейнера карусели
+   * @returns {DocumentFragment}
+   */
   function buildCarouselWrapMarkup() {
-    return '<div class="carousel-wrap" id="carousel-wrap"></div>';
+    var fragment = document.createDocumentFragment();
+    var wrap = document.createElement('div');
+    wrap.className = 'carousel-wrap';
+    wrap.id = 'carousel-wrap';
+    fragment.appendChild(wrap);
+    return fragment;
   }
 
+  /**
+   * Построить DOM-фрагмент редактора
+   * @returns {DocumentFragment}
+   */
   function buildEditorMarkup() {
-    return '<div class="ed"><textarea id="ed-ta" class="ed-ta" placeholder="' + Utils.esc(translate('ed.placeholder')) + '"></textarea>' +
-    '<div class="ed-foot"><span id="ed-cnt" class="ed-cnt">0 ' + translate('ed.chars') + '</span>' +
-    '<div class="ed-acts">' +
-      '<div class="tog-sw" id="mode-toggle" data-mode="private">' +
-        '<div class="tog-sw-thumb"></div>' +
-        '<div class="tog-sw-opt on" data-v="private">' + translate('btn.private') + '</div>' +
-        '<div class="tog-sw-opt" data-v="world">' + translate('btn.public') + '</div>' +
-      '</div>' +
-      '<button class="btn-send" id="btn-send" aria-label="' + translate('btn.send') + '">' + PAPER_PLANE_SVG + '</button>' +
-    '</div></div></div>';
+    var fragment = document.createDocumentFragment();
+    var ed = document.createElement('div');
+    ed.className = 'ed';
+
+    // Textarea
+    var ta = document.createElement('textarea');
+    ta.id = 'ed-ta';
+    ta.className = 'ed-ta';
+    ta.setAttribute('placeholder', translate('ed.placeholder'));
+    ed.appendChild(ta);
+
+    // Footer
+    var foot = document.createElement('div');
+    foot.className = 'ed-foot';
+
+    var cnt = document.createElement('span');
+    cnt.id = 'ed-cnt';
+    cnt.className = 'ed-cnt';
+    cnt.textContent = '0 ' + translate('ed.chars');
+    foot.appendChild(cnt);
+
+    var acts = document.createElement('div');
+    acts.className = 'ed-acts';
+
+    // Toggle switch
+    var togSw = document.createElement('div');
+    togSw.className = 'tog-sw';
+    togSw.id = 'mode-toggle';
+    togSw.setAttribute('data-mode', 'private');
+
+    var thumb = document.createElement('div');
+    thumb.className = 'tog-sw-thumb';
+    togSw.appendChild(thumb);
+
+    var optPriv = document.createElement('div');
+    optPriv.className = 'tog-sw-opt on';
+    optPriv.setAttribute('data-v', 'private');
+    optPriv.textContent = translate('btn.private');
+    togSw.appendChild(optPriv);
+
+    var optWorld = document.createElement('div');
+    optWorld.className = 'tog-sw-opt';
+    optWorld.setAttribute('data-v', 'world');
+    optWorld.textContent = translate('btn.public');
+    togSw.appendChild(optWorld);
+
+    acts.appendChild(togSw);
+
+    // Send button with SVG icon (constant, no user data)
+    var sendBtn = document.createElement('button');
+    sendBtn.className = 'btn-send';
+    sendBtn.id = 'btn-send';
+    sendBtn.setAttribute('aria-label', translate('btn.send'));
+    var sendSvg = createSVGFromString(PAPER_PLANE_SVG);
+    if (sendSvg) {
+      sendBtn.appendChild(sendSvg);
+    }
+    acts.appendChild(sendBtn);
+
+    foot.appendChild(acts);
+    ed.appendChild(foot);
+    fragment.appendChild(ed);
+    return fragment;
   }
 
+  /**
+   * Построить DOM-фрагмент вкладки "База"
+   * @returns {DocumentFragment}
+   */
   function buildBaseMarkup() {
-    return '<div class="ws base" id="ws-base" style="display:none">' +
-      '<div class="base-h"><div class="base-stats" id="base-stats"></div>' +
-      '<div class="base-ctrls"><input type="text" class="base-search" id="base-q" placeholder="' + Utils.esc(translate('base.search')) + '" />' +
-      '<select class="base-sort" id="base-sort"><option value="new">' + translate('base.sort.new') + '</option><option value="old">' + translate('base.sort.old') + '</option><option value="az">' + translate('base.sort.az') + '</option></select></div></div>' +
-      '<div class="base-list" id="base-list"></div>' +
-    '</div>';
+    var fragment = document.createDocumentFragment();
+    var ws = document.createElement('div');
+    ws.className = 'ws base';
+    ws.id = 'ws-base';
+    ws.style.display = 'none';
+
+    // Header
+    var baseH = document.createElement('div');
+    baseH.className = 'base-h';
+
+    // Stats container
+    var baseStats = document.createElement('div');
+    baseStats.className = 'base-stats';
+    baseStats.id = 'base-stats';
+    baseH.appendChild(baseStats);
+
+    // Controls
+    var ctrls = document.createElement('div');
+    ctrls.className = 'base-ctrls';
+
+    var searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.className = 'base-search';
+    searchInput.id = 'base-q';
+    searchInput.setAttribute('placeholder', translate('base.search'));
+    ctrls.appendChild(searchInput);
+
+    var sortSelect = document.createElement('select');
+    sortSelect.className = 'base-sort';
+    sortSelect.id = 'base-sort';
+
+    var optNew = document.createElement('option');
+    optNew.value = 'new';
+    optNew.textContent = translate('base.sort.new');
+    sortSelect.appendChild(optNew);
+
+    var optOld = document.createElement('option');
+    optOld.value = 'old';
+    optOld.textContent = translate('base.sort.old');
+    sortSelect.appendChild(optOld);
+
+    var optAz = document.createElement('option');
+    optAz.value = 'az';
+    optAz.textContent = translate('base.sort.az');
+    sortSelect.appendChild(optAz);
+
+    ctrls.appendChild(sortSelect);
+    baseH.appendChild(ctrls);
+    ws.appendChild(baseH);
+
+    // List container
+    var baseList = document.createElement('div');
+    baseList.className = 'base-list';
+    baseList.id = 'base-list';
+    ws.appendChild(baseList);
+
+    fragment.appendChild(ws);
+    return fragment;
   }
 
+  /**
+   * Построить DOM-фрагмент нижней панели вкладок
+   * @returns {DocumentFragment}
+   */
   function buildBottomTabMarkup() {
-    return '<div class="btab">' +
-      '<button class="btab-b on" data-v="stream"><span class="btab-ic">◇</span><span>' + translate('tab.stream') + '</span></button>' +
-      '<button class="btab-b" data-v="base"><span class="btab-ic">▤</span><span>' + translate('tab.base') + '</span></button>' +
-    '</div>';
+    var fragment = document.createDocumentFragment();
+    var btab = document.createElement('div');
+    btab.className = 'btab';
+
+    var tabs = [
+      { value: 'stream', icon: '◇', label: translate('tab.stream'), active: true },
+      { value: 'base', icon: '▤', label: translate('tab.base'), active: false }
+    ];
+
+    tabs.forEach(function(t) {
+      var btn = document.createElement('button');
+      btn.className = 'btab-b' + (t.active ? ' on' : '');
+      btn.setAttribute('data-v', t.value);
+
+      var ic = document.createElement('span');
+      ic.className = 'btab-ic';
+      ic.textContent = t.icon;
+      btn.appendChild(ic);
+
+      var lbl = document.createElement('span');
+      lbl.textContent = t.label;
+      btn.appendChild(lbl);
+
+      btab.appendChild(btn);
+    });
+
+    fragment.appendChild(btab);
+    return fragment;
   }
 
+  /**
+   * Собрать итоговую разметку приложения
+   * @returns {DocumentFragment}
+   */
   function buildMarkup() {
-    return buildHeaderMarkup() + 
-           '<div class="ws" id="ws-stream">' + buildSegmentsMarkup() + buildCarouselWrapMarkup() + buildEditorMarkup() + '</div>' + 
-           buildBaseMarkup() + 
-           buildBottomTabMarkup();
+    var fragment = document.createDocumentFragment();
+
+    fragment.appendChild(buildHeaderMarkup());
+
+    var wsStream = document.createElement('div');
+    wsStream.className = 'ws';
+    wsStream.id = 'ws-stream';
+
+    wsStream.appendChild(buildSegmentsMarkup());
+    wsStream.appendChild(buildCarouselWrapMarkup());
+    wsStream.appendChild(buildEditorMarkup());
+
+    fragment.appendChild(wsStream);
+    fragment.appendChild(buildBaseMarkup());
+    fragment.appendChild(buildBottomTabMarkup());
+
+    return fragment;
   }
 
+  /**
+   * Переключить активную вкладку (stream/base)
+   * @param {string} viewName - Имя вкладки
+   */
   function switchView(viewName) {
-    appState.view = viewName;
+    StateManager.setState({ view: viewName });
+
     document.querySelectorAll('.btab-b').forEach(function(b) {
       b.classList.toggle('on', b.getAttribute('data-v') === viewName);
     });
+
     var streamEl = document.getElementById('ws-stream');
     var baseEl = document.getElementById('ws-base');
     if (streamEl) streamEl.style.display = viewName === 'stream' ? 'flex' : 'none';
@@ -2297,24 +2610,36 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     if (viewName === 'base') renderBase();
   }
 
+  /**
+   * Переключить активный сегмент (local/world/seren)
+   * @param {string} segKey - Ключ сегмента
+   */
   function setSegment(segKey) {
-    appState.seg = segKey;
+    StateManager.setState({ seg: segKey });
+
     document.querySelectorAll('.seg-b').forEach(function(b) {
       b.classList.toggle('on', b.getAttribute('data-k') === segKey);
     });
     renderCarousel();
   }
 
+  /**
+   * Перерисовать весь UI приложения
+   */
   function refreshUI() {
-    var savedView = appState.view;
-    var savedSeg = appState.seg;
+    var state = StateManager.getState();
+    var savedView = state.view;
+    var savedSeg = state.seg;
     var savedText = getEditorValue();
-    var savedMode = appState.sendMode;
-    
+    var savedMode = state.sendMode;
+
     cleanup();
     var root = document.getElementById('app-root');
     if (root) {
-      root.innerHTML = buildMarkup();
+      while (root.firstChild) {
+        root.removeChild(root.firstChild);
+      }
+      root.appendChild(buildMarkup());
     }
     setupWindowListeners();
     bindEvents();
@@ -2328,13 +2653,13 @@ DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I1
     } else {
       setStatus('ai', translate('st.ai.loading'), 'load');
     }
-    
+
     switchView(savedView);
     setSegment(savedSeg);
     handleToggleMode(savedMode);
     setEditorValue(savedText);
     updateCounter();
-    
+
     if (AI.ready()) {
       executeSearch(true);
     }
