@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.24">
+<meta name="app-version" content="1.2.26">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -215,10 +215,12 @@ body.show-app #app-root{display:flex}
   background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='none' stroke='%23888' stroke-width='1.5' stroke-linecap='round' d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
   background-repeat:no-repeat;background-position:right 10px center}
 .base-sort option{background:var(--surface);color:var(--text)}
-.base-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:8px 12px 100px;
-  display:flex;flex-direction:column;gap:8px;min-height:0;width:100%;
+.base-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:0 12px;
+  position:relative;min-height:0;width:100%;
   -webkit-overflow-scrolling:touch}
-.bi{width:100%;flex-shrink:0;height:100px;background:var(--surface);
+.base-items{position:relative;width:100%}
+.base-items .bi{position:absolute;top:0;left:0;width:100%}
+.bi{width:100%;flex-shrink:0;height:100px;
   border:1px solid var(--line);border-radius:var(--r);padding:12px;
   display:flex;flex-direction:column;gap:6px;position:relative;overflow:hidden;cursor:pointer;
   transition:border-color .15s var(--ease)}
@@ -3127,12 +3129,16 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
 
 <!-- NOOMIUM_MODULE_START BaseViewComponent -->
 DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast) {
-  var baseOffset = 0;
-  var baseIsLoading = false;
-  var baseHasMore = true;
-  var baseTotalNotes = 0;
-  var baseSearchTimer = null;
+  var ITEM_HEIGHT = 100;
+  var ITEM_GAP = 8;
+  var ROW_SIZE = ITEM_HEIGHT + ITEM_GAP;
+  var POOL_SIZE = 15;
+
   var noteViewEscHandler = null;
+  var scrollRAF = null;
+  var filteredNotes = [];
+  var poolItems = [];
+  var listContainer = null;
 
   var allNotesCache = null;
   var allNotesCacheTime = 0;
@@ -3186,95 +3192,81 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     return emptyDiv;
   }
 
-  function onBaseScroll(e) {
-    var el = e.target;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
-      loadBaseNotesChunked();
+  function fillBaseItem(element, note) {
+    while (element.firstChild) element.removeChild(element.firstChild);
+    element.className = 'bi' + (note.shared ? ' shared' : '');
+    element.setAttribute('data-id', note.id);
+
+    var truncateLength = Config.get('truncateTextLength', 120);
+    var textEl = document.createElement('div');
+    textEl.className = 'bi-t' + (note.text && note.text.length > truncateLength ? ' truncated' : '');
+    textEl.textContent = note.text || '';
+    element.appendChild(textEl);
+
+    var foot = document.createElement('div');
+    foot.className = 'bi-f';
+    var meta = document.createElement('div');
+    meta.className = 'bi-meta';
+    var tagEl = document.createElement('span');
+    tagEl.className = 'bi-tag';
+    tagEl.textContent = note.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
+    meta.appendChild(tagEl);
+    var dateEl = document.createElement('span');
+    dateEl.className = 'bi-date';
+    dateEl.textContent = Utils.fmtDate(note.createdAt, I18n.getLang());
+    meta.appendChild(dateEl);
+    foot.appendChild(meta);
+    element.appendChild(foot);
+  }
+
+  function updateVisibleItems() {
+    if (!listContainer || poolItems.length === 0) return;
+    var scrollTop = listContainer.scrollTop;
+    var startIdx = Math.floor(scrollTop / ROW_SIZE);
+    var maxStart = Math.max(0, filteredNotes.length - POOL_SIZE);
+    if (startIdx > maxStart) startIdx = maxStart;
+
+    for (var i = 0; i < poolItems.length; i++) {
+      var poolItem = poolItems[i];
+      var dataIdx = startIdx + i;
+
+      if (dataIdx >= 0 && dataIdx < filteredNotes.length) {
+        if (poolItem.dataIndex !== dataIdx) {
+          fillBaseItem(poolItem.element, filteredNotes[dataIdx]);
+          poolItem.dataIndex = dataIdx;
+        }
+        poolItem.element.style.transform = 'translateY(' + (dataIdx * ROW_SIZE) + 'px)';
+      } else {
+        if (poolItem.dataIndex !== -1) {
+          while (poolItem.element.firstChild) poolItem.element.removeChild(poolItem.element.firstChild);
+          poolItem.element.className = 'bi';
+          poolItem.element.removeAttribute('data-id');
+          poolItem.dataIndex = -1;
+        }
+        poolItem.element.style.transform = 'translateY(-9999px)';
+      }
     }
   }
 
-  function loadBaseNotesChunked() {
-    if (baseIsLoading || !baseHasMore) return;
-    baseIsLoading = true;
-    var chunkSize = Config.get('baseChunkSize', 20);
-    var container = document.getElementById('base-list');
-    var queryInput = document.getElementById('base-q');
-    var sortSelect = document.getElementById('base-sort');
-    var queryValue = queryInput ? queryInput.value.trim().toLowerCase() : '';
-    var sortValue = sortSelect ? sortSelect.value : 'new';
-
-    DB.getAllPaginated(baseOffset, chunkSize).then(function(chunk) {
-      baseIsLoading = false;
-      if (!chunk || chunk.length === 0) {
-        baseHasMore = false;
-        if (baseOffset === 0 && container) {
-          var emptyTitle = I18n.t('empty.base.t');
-          var emptyDesc = baseTotalNotes === 0 ? I18n.t('empty.base.d') : I18n.t('empty.base.empty');
-          while (container.firstChild) container.removeChild(container.firstChild);
-          container.appendChild(buildEmptyState('▤', emptyTitle, emptyDesc));
-        }
-        return;
-      }
-      if (chunk.length < chunkSize) baseHasMore = false;
-
-      var filtered = chunk;
-      if (queryValue) {
-        filtered = filtered.filter(function(n) { return n.text && n.text.toLowerCase().indexOf(queryValue) >= 0; });
-      }
-      if (sortValue === 'old') {
-        filtered.sort(function(a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
-      } else if (sortValue === 'az') {
-        filtered.sort(function(a, b) { return (a.text || '').localeCompare(b.text || '', I18n.getLang() === 'en' ? 'en' : 'ru'); });
-      } else {
-        filtered.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
-      }
-
-      var fragment = document.createDocumentFragment();
-      var truncateLength = Config.get('truncateTextLength', 120);
-      for (var i = 0; i < filtered.length; i++) {
-        var note = filtered[i];
-        var div = document.createElement('div');
-        div.className = 'bi' + (note.shared ? ' shared' : '');
-        div.setAttribute('data-id', note.id);
-        var textEl = document.createElement('div');
-        textEl.className = 'bi-t' + (note.text && note.text.length > truncateLength ? ' truncated' : '');
-        textEl.textContent = note.text || '';
-        div.appendChild(textEl);
-        var foot = document.createElement('div');
-        foot.className = 'bi-f';
-        var meta = document.createElement('div');
-        meta.className = 'bi-meta';
-        var tagEl = document.createElement('span');
-        tagEl.className = 'bi-tag';
-        tagEl.textContent = note.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
-        meta.appendChild(tagEl);
-        var dateEl = document.createElement('span');
-        dateEl.className = 'bi-date';
-        dateEl.textContent = Utils.fmtDate(note.createdAt, I18n.getLang());
-        meta.appendChild(dateEl);
-        foot.appendChild(meta);
-        div.appendChild(foot);
-        fragment.appendChild(div);
-      }
-      if (container) container.appendChild(fragment);
-      baseOffset += chunk.length;
-      if (filtered.length === 0 && baseHasMore) loadBaseNotesChunked();
-    }).catch(function(err) {
-      baseIsLoading = false;
-      Toast.show('err', String(err && err.message || err) || 'Chunk load failed');
+  function onListScroll() {
+    if (scrollRAF) return;
+    scrollRAF = requestAnimationFrame(function() {
+      updateVisibleItems();
+      scrollRAF = null;
     });
   }
 
   function renderBase() {
-    var container = document.getElementById('base-list');
-    if (container) {
-      container.removeEventListener('scroll', onBaseScroll);
-      container.addEventListener('scroll', onBaseScroll);
-      while (container.firstChild) container.removeChild(container.firstChild);
-    }
-    baseOffset = 0;
-    baseHasMore = true;
-    baseIsLoading = false;
+    listContainer = document.getElementById('base-list');
+    if (!listContainer) return;
+
+    listContainer.removeEventListener('scroll', onListScroll);
+    if (scrollRAF) { cancelAnimationFrame(scrollRAF); scrollRAF = null; }
+
+    var queryInput = document.getElementById('base-q');
+    var sortSelect = document.getElementById('base-sort');
+    var queryValue = queryInput ? queryInput.value.trim().toLowerCase() : '';
+    var sortValue = sortSelect ? sortSelect.value : 'new';
 
     getAllNotesCached().then(function(allNotes) {
       var statsEl = document.getElementById('base-stats');
@@ -3288,8 +3280,53 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
         statsEl.appendChild(buildStatCard(sharedCount, I18n.t('base.stat.open')));
         statsEl.appendChild(buildStatCard(allNotes.length - sharedCount, I18n.t('base.stat.priv')));
       }
-      baseTotalNotes = allNotes.length;
-      loadBaseNotesChunked();
+
+      filteredNotes = allNotes.slice();
+      if (queryValue) {
+        filteredNotes = filteredNotes.filter(function(n) {
+          return n.text && n.text.toLowerCase().indexOf(queryValue) >= 0;
+        });
+      }
+      if (sortValue === 'old') {
+        filteredNotes.sort(function(a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+      } else if (sortValue === 'az') {
+        filteredNotes.sort(function(a, b) {
+          return (a.text || '').localeCompare(b.text || '', I18n.getLang() === 'en' ? 'en' : 'ru');
+        });
+      } else {
+        filteredNotes.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+      }
+
+      while (listContainer.firstChild) listContainer.removeChild(listContainer.firstChild);
+
+      if (filteredNotes.length === 0) {
+        var emptyTitle = I18n.t('empty.base.t');
+        var emptyDesc = allNotes.length === 0 ? I18n.t('empty.base.d') : I18n.t('empty.base.empty');
+        listContainer.appendChild(buildEmptyState('▤', emptyTitle, emptyDesc));
+        poolItems = [];
+        return;
+      }
+
+      var spacer = document.createElement('div');
+      spacer.className = 'base-spacer';
+      spacer.style.height = (filteredNotes.length * ROW_SIZE) + 'px';
+      listContainer.appendChild(spacer);
+
+      var itemsContainer = document.createElement('div');
+      itemsContainer.className = 'base-items';
+      listContainer.appendChild(itemsContainer);
+
+      poolItems = [];
+      for (var i = 0; i < POOL_SIZE; i++) {
+        var item = document.createElement('div');
+        item.className = 'bi';
+        itemsContainer.appendChild(item);
+        poolItems.push({ element: item, dataIndex: -1 });
+      }
+
+      listContainer.addEventListener('scroll', onListScroll, { passive: true });
+      listContainer.scrollTop = 0;
+      updateVisibleItems();
     }).catch(function(err) {
       Toast.show('err', String(err && err.message || err) || 'Base load failed');
     });
@@ -3318,7 +3355,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     }
   }
 
-    function openNoteView(id) {
+  function openNoteView(id) {
     DB.get(id).then(function(record) {
       if (!record) return;
       var isEditing = false;
@@ -3570,8 +3607,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     var baseSearchInput = document.getElementById('base-q');
     if (baseSearchInput) {
       baseSearchInput.addEventListener('input', function() {
-        if (baseSearchTimer) clearTimeout(baseSearchTimer);
-        baseSearchTimer = setTimeout(renderBase, Config.get('baseSearchDebounce', 200));
+        renderBase();
       });
     }
     var baseSortSelect = document.getElementById('base-sort');
@@ -3614,7 +3650,13 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
       document.removeEventListener('keydown', noteViewEscHandler);
       noteViewEscHandler = null;
     }
-    if (baseSearchTimer) { clearTimeout(baseSearchTimer); baseSearchTimer = null; }
+    if (scrollRAF) { cancelAnimationFrame(scrollRAF); scrollRAF = null; }
+    if (listContainer) {
+      listContainer.removeEventListener('scroll', onListScroll);
+      listContainer = null;
+    }
+    poolItems = [];
+    filteredNotes = [];
     if (i18nHandler) { try { Bus.off('i18n:change', i18nHandler); } catch (_) {} i18nHandler = null; }
     if (listsChangedHandler) { try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) {} listsChangedHandler = null; }
     if (viewChangedHandler) { try { Bus.off('view:changed', viewChangedHandler); } catch (_) {} viewChangedHandler = null; }
