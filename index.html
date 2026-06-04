@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.34">
+<meta name="app-version" content="1.2.35">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -415,6 +415,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 .startup-message{color:#a0a0ae;margin-top:10px}
 .startup-reload{margin-top:20px;padding:10px 20px;background:#8b7cff;color:white;border:none;border-radius:8px;cursor:pointer}
 .mb-5{margin-bottom:5px}
+.reset-modal-text{color:var(--text-2);margin-bottom:16px}
 </style>
 <!-- NOOMIUM_MODULE_END CSS -->
 </head>
@@ -3021,7 +3022,8 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     var state = StateManager.getState();
 
     if (action === 'edit') {
-      openNoteView(id);
+      // Слабая связность: эмитим событие, которое слушает BaseViewComponent
+      try { Bus.emit('editor:edit-note', { id: id }); } catch (_) {}
       return;
     }
     if (action === 'copy') {
@@ -3045,7 +3047,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         cachedQuery = null;
         cachedRegex = null;
         initCarousel();
-        if (currentState.view === 'base') renderBase();
+        // executeSearch эмитит state:lists-changed, что само обновит базу
         executeSearch();
       }).catch(function(err) {
         Toast.show('err', String(err && err.message || err) || 'Delete failed');
@@ -3058,9 +3060,8 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         record.shared = !record.shared;
         return DB.put(record).then(function() {
           Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
+          // executeSearch эмитит state:lists-changed, что само обновит базу
           executeSearch();
-          var currentState = StateManager.getState();
-          if (currentState.view === 'base') renderBase();
         });
       }).catch(function(err) {
         Toast.show('err', String(err && err.message || err) || 'Toggle failed');
@@ -3145,6 +3146,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
   var i18nHandler = null;
   var listsChangedHandler = null;
   var viewChangedHandler = null;
+  var editNoteHandler = null;
 
   function buildStatCard(value, label) {
     var card = document.createElement('div');
@@ -3624,6 +3626,12 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     };
     Bus.on('view:changed', viewChangedHandler);
 
+    // Подписка на событие редактирования из потока (слабая связность)
+    editNoteHandler = function(payload) {
+      if (payload && payload.id) openNoteView(payload.id);
+    };
+    Bus.on('editor:edit-note', editNoteHandler);
+
     if (StateManager.getState().view === 'base') renderBase();
   }
 
@@ -3642,6 +3650,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     if (i18nHandler) { try { Bus.off('i18n:change', i18nHandler); } catch (_) {} i18nHandler = null; }
     if (listsChangedHandler) { try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) {} listsChangedHandler = null; }
     if (viewChangedHandler) { try { Bus.off('view:changed', viewChangedHandler); } catch (_) {} viewChangedHandler = null; }
+    if (editNoteHandler) { try { Bus.off('editor:edit-note', editNoteHandler); } catch (_) {} editNoteHandler = null; }
   }
 
   return {
@@ -4284,7 +4293,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
 
     function showResetModal() {
       var body = document.createElement('div');
-      body.innerHTML = '<p style="color:var(--text-2);margin-bottom:16px">Превышено количество попыток. Необходимо сбросить данные.</p>';
+      body.innerHTML = '<p class="reset-modal-text">Превышено количество попыток. Необходимо сбросить данные.</p>';
       Modal.open({
         title: 'Ошибка доступа',
         body: body,
