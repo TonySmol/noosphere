@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.15">
+<meta name="app-version" content="1.2.16">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -3040,6 +3040,511 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
   return { init: init, destroy: destroy };
 }, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'AI', 'Toast', 'EditorComponent', 'SearchService']);
 <!-- NOOMIUM_MODULE_END StreamViewComponent -->
+
+<!-- NOOMIUM_MODULE_START BaseViewComponent -->
+DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast) {
+  var baseOffset = 0;
+  var baseIsLoading = false;
+  var baseHasMore = true;
+  var baseTotalNotes = 0;
+  var baseSearchTimer = null;
+  var noteViewEscHandler = null;
+
+  var allNotesCache = null;
+  var allNotesCacheTime = 0;
+  var ALL_NOTES_TTL = 5 * 60 * 1000;
+
+  var i18nHandler = null;
+  var listsChangedHandler = null;
+  var viewChangedHandler = null;
+
+  function getAllNotesCached() {
+    var now = Date.now();
+    if (allNotesCache && (now - allNotesCacheTime < ALL_NOTES_TTL)) {
+      return Promise.resolve(allNotesCache);
+    }
+    return DB.all().then(function(notes) {
+      allNotesCache = notes;
+      allNotesCacheTime = now;
+      return notes;
+    });
+  }
+
+  function buildStatCard(value, label) {
+    var card = document.createElement('div');
+    card.className = 'stat';
+    var valueEl = document.createElement('div');
+    valueEl.className = 'stat-v';
+    valueEl.textContent = String(value);
+    card.appendChild(valueEl);
+    var labelEl = document.createElement('div');
+    labelEl.className = 'stat-l';
+    labelEl.textContent = label;
+    card.appendChild(labelEl);
+    return card;
+  }
+
+  function buildEmptyState(icon, title, description) {
+    var emptyDiv = document.createElement('div');
+    emptyDiv.className = 'feed-empty';
+    var icEl = document.createElement('div');
+    icEl.className = 'feed-empty-ic';
+    icEl.textContent = icon;
+    emptyDiv.appendChild(icEl);
+    var titleEl = document.createElement('div');
+    titleEl.className = 'feed-empty-t';
+    titleEl.textContent = title;
+    emptyDiv.appendChild(titleEl);
+    var descEl = document.createElement('div');
+    descEl.className = 'feed-empty-d';
+    descEl.textContent = description;
+    emptyDiv.appendChild(descEl);
+    return emptyDiv;
+  }
+
+  function onBaseScroll(e) {
+    var el = e.target;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
+      loadBaseNotesChunked();
+    }
+  }
+
+  function loadBaseNotesChunked() {
+    if (baseIsLoading || !baseHasMore) return;
+    baseIsLoading = true;
+    var chunkSize = Config.get('baseChunkSize', 20);
+    var container = document.getElementById('base-list');
+    var queryInput = document.getElementById('base-q');
+    var sortSelect = document.getElementById('base-sort');
+    var queryValue = queryInput ? queryInput.value.trim().toLowerCase() : '';
+    var sortValue = sortSelect ? sortSelect.value : 'new';
+
+    DB.getAllPaginated(baseOffset, chunkSize).then(function(chunk) {
+      baseIsLoading = false;
+      if (!chunk || chunk.length === 0) {
+        baseHasMore = false;
+        if (baseOffset === 0 && container) {
+          var emptyTitle = I18n.t('empty.base.t');
+          var emptyDesc = baseTotalNotes === 0 ? I18n.t('empty.base.d') : I18n.t('empty.base.empty');
+          while (container.firstChild) container.removeChild(container.firstChild);
+          container.appendChild(buildEmptyState('▤', emptyTitle, emptyDesc));
+        }
+        return;
+      }
+      if (chunk.length < chunkSize) baseHasMore = false;
+
+      var filtered = chunk;
+      if (queryValue) {
+        filtered = filtered.filter(function(n) { return n.text && n.text.toLowerCase().indexOf(queryValue) >= 0; });
+      }
+      if (sortValue === 'old') {
+        filtered.sort(function(a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+      } else if (sortValue === 'az') {
+        filtered.sort(function(a, b) { return (a.text || '').localeCompare(b.text || '', I18n.getLang() === 'en' ? 'en' : 'ru'); });
+      } else {
+        filtered.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+      }
+
+      var fragment = document.createDocumentFragment();
+      var truncateLength = Config.get('truncateTextLength', 120);
+      for (var i = 0; i < filtered.length; i++) {
+        var note = filtered[i];
+        var div = document.createElement('div');
+        div.className = 'bi' + (note.shared ? ' shared' : '');
+        div.setAttribute('data-id', note.id);
+        var textEl = document.createElement('div');
+        textEl.className = 'bi-t' + (note.text && note.text.length > truncateLength ? ' truncated' : '');
+        textEl.textContent = note.text || '';
+        div.appendChild(textEl);
+        var foot = document.createElement('div');
+        foot.className = 'bi-f';
+        var meta = document.createElement('div');
+        meta.className = 'bi-meta';
+        var tagEl = document.createElement('span');
+        tagEl.className = 'bi-tag';
+        tagEl.textContent = note.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
+        meta.appendChild(tagEl);
+        var dateEl = document.createElement('span');
+        dateEl.className = 'bi-date';
+        dateEl.textContent = Utils.fmtDate(note.createdAt, I18n.getLang());
+        meta.appendChild(dateEl);
+        foot.appendChild(meta);
+        div.appendChild(foot);
+        fragment.appendChild(div);
+      }
+      if (container) container.appendChild(fragment);
+      baseOffset += chunk.length;
+      if (filtered.length === 0 && baseHasMore) loadBaseNotesChunked();
+    }).catch(function(err) {
+      baseIsLoading = false;
+      Toast.show('err', String(err && err.message || err) || 'Chunk load failed');
+    });
+  }
+
+  function renderBase() {
+    var container = document.getElementById('base-list');
+    if (container) {
+      container.removeEventListener('scroll', onBaseScroll);
+      container.addEventListener('scroll', onBaseScroll);
+      while (container.firstChild) container.removeChild(container.firstChild);
+    }
+    baseOffset = 0;
+    baseHasMore = true;
+    baseIsLoading = false;
+
+    getAllNotesCached().then(function(allNotes) {
+      var statsEl = document.getElementById('base-stats');
+      if (statsEl) {
+        while (statsEl.firstChild) statsEl.removeChild(statsEl.firstChild);
+        var sharedCount = 0;
+        for (var i = 0; i < allNotes.length; i++) {
+          if (allNotes[i] && allNotes[i].shared) sharedCount++;
+        }
+        statsEl.appendChild(buildStatCard(allNotes.length, I18n.t('base.stat.total')));
+        statsEl.appendChild(buildStatCard(sharedCount, I18n.t('base.stat.open')));
+        statsEl.appendChild(buildStatCard(allNotes.length - sharedCount, I18n.t('base.stat.priv')));
+      }
+      baseTotalNotes = allNotes.length;
+      loadBaseNotesChunked();
+    }).catch(function(err) {
+      Toast.show('err', String(err && err.message || err) || 'Base load failed');
+    });
+  }
+
+  function copyToClipboard(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(
+          function() { Toast.show('ok', I18n.t('toast.copied')); },
+          function() { Toast.show('err', I18n.t('toast.copy.fail')); }
+        );
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.top = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); Toast.show('ok', I18n.t('toast.copied')); }
+        catch (err) { Toast.show('err', I18n.t('toast.copy.fail')); }
+        document.body.removeChild(ta);
+      }
+    } catch (err) {
+      Toast.show('err', I18n.t('toast.copy.fail'));
+    }
+  }
+
+  function openNoteView(id) {
+    DB.get(id).then(function(record) {
+      if (!record) return;
+      var isEditing = false;
+      var nvOverlay = null;
+
+      if (noteViewEscHandler) {
+        document.removeEventListener('keydown', noteViewEscHandler);
+        noteViewEscHandler = null;
+      }
+
+      function renderNoteView() {
+        if (!nvOverlay) {
+          nvOverlay = document.createElement('div');
+          nvOverlay.className = 'nv on';
+          document.body.appendChild(nvOverlay);
+        }
+        while (nvOverlay.firstChild) nvOverlay.removeChild(nvOverlay.firstChild);
+
+        var dateStr = Utils.fmtDate(record.createdAt, I18n.getLang());
+        var tagLabel = record.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
+
+        if (isEditing) {
+          var body = document.createElement('div');
+          body.className = 'nv-b';
+          var ta = document.createElement('textarea');
+          ta.className = 'nv-ta';
+          ta.id = 'nv-ta';
+          ta.value = record.text || '';
+          body.appendChild(ta);
+          var bottomFooter = document.createElement('div');
+          bottomFooter.className = 'nv-f-bottom';
+          var cancelBtn = document.createElement('button');
+          cancelBtn.className = 'nv-act';
+          cancelBtn.id = 'nv-cancel';
+          cancelBtn.textContent = I18n.t('btn.cancel');
+          cancelBtn.onclick = function() { isEditing = false; renderNoteView(); };
+          var saveBtn = document.createElement('button');
+          saveBtn.className = 'nv-act primary';
+          saveBtn.id = 'nv-save';
+          saveBtn.textContent = I18n.t('btn.save');
+          saveBtn.onclick = function() {
+            var newText = ta.value.trim();
+            if (!newText) { Toast.show('err', I18n.t('toast.empty')); return; }
+            record.text = newText;
+            AI.embed(newText).then(function(v) {
+              record.vector = v;
+              return DB.put(record);
+            }).then(function() {
+              Toast.show('ok', I18n.t('toast.edit.saved'));
+              isEditing = false;
+              renderNoteView();
+              allNotesCache = null;
+              renderBase();
+              try { Bus.emit('state:lists-changed'); } catch (_) {}
+            }).catch(function(err) {
+              Toast.show('err', String(err && err.message || err) || 'Edit failed');
+            });
+          };
+          bottomFooter.appendChild(cancelBtn);
+          bottomFooter.appendChild(saveBtn);
+          nvOverlay.appendChild(body);
+          nvOverlay.appendChild(bottomFooter);
+        } else {
+          var topFooter = document.createElement('div');
+          topFooter.className = 'nv-f';
+          var delBtn = document.createElement('button');
+          delBtn.className = 'nv-act danger';
+          delBtn.id = 'nv-del';
+          delBtn.setAttribute('aria-label', I18n.t('btn.del'));
+          delBtn.textContent = I18n.t('btn.del');
+          delBtn.onclick = function() {
+            if (!confirm(I18n.t('nv.delete.confirm'))) return;
+            DB.del(id).then(function() {
+              Toast.show('ok', I18n.t('toast.deleted'));
+              closeNoteView();
+              allNotesCache = null;
+              renderBase();
+              try { Bus.emit('state:lists-changed'); } catch (_) {}
+            }).catch(function(err) {
+              Toast.show('err', String(err && err.message || err) || 'Delete failed');
+            });
+          };
+          var copyBtn = document.createElement('button');
+          copyBtn.className = 'nv-act';
+          copyBtn.id = 'nv-copy';
+          copyBtn.setAttribute('aria-label', I18n.t('btn.copy'));
+          copyBtn.textContent = I18n.t('btn.copy');
+          copyBtn.onclick = function() { copyToClipboard(record.text); };
+          var toggleBtn = document.createElement('button');
+          toggleBtn.className = 'nv-act';
+          toggleBtn.id = 'nv-toggle';
+          toggleBtn.setAttribute('aria-label', record.shared ? I18n.t('btn.toggle.priv') : I18n.t('btn.toggle.pub'));
+          toggleBtn.textContent = record.shared ? I18n.t('btn.toggle.priv') : I18n.t('btn.toggle.pub');
+          toggleBtn.onclick = function() {
+            record.shared = !record.shared;
+            DB.put(record).then(function() {
+              Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
+              renderNoteView();
+              allNotesCache = null;
+              renderBase();
+              try { Bus.emit('state:lists-changed'); } catch (_) {}
+            }).catch(function(err) {
+              Toast.show('err', String(err && err.message || err) || 'Toggle failed');
+            });
+          };
+          topFooter.appendChild(delBtn);
+          topFooter.appendChild(copyBtn);
+          topFooter.appendChild(toggleBtn);
+
+          var body = document.createElement('div');
+          body.className = 'nv-b';
+          var infoRow = document.createElement('div');
+          infoRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:12px';
+          var tagEl = document.createElement('span');
+          tagEl.className = 'bi-tag';
+          tagEl.textContent = tagLabel;
+          infoRow.appendChild(tagEl);
+          var dateEl = document.createElement('span');
+          dateEl.style.cssText = 'font-size:11px;color:var(--text-3);font-family:var(--mono)';
+          dateEl.textContent = dateStr;
+          infoRow.appendChild(dateEl);
+          body.appendChild(infoRow);
+          var textDiv = document.createElement('div');
+          textDiv.className = 'nv-text';
+          textDiv.textContent = record.text || '';
+          body.appendChild(textDiv);
+
+          var bottomFooter = document.createElement('div');
+          bottomFooter.className = 'nv-f-bottom';
+          var cancelBtn = document.createElement('button');
+          cancelBtn.className = 'nv-act';
+          cancelBtn.id = 'nv-cancel';
+          cancelBtn.setAttribute('aria-label', I18n.t('btn.cancel'));
+          cancelBtn.textContent = I18n.t('btn.cancel');
+          cancelBtn.onclick = function() { closeNoteView(); };
+          var editBtn = document.createElement('button');
+          editBtn.className = 'nv-act primary';
+          editBtn.id = 'nv-edit';
+          editBtn.setAttribute('aria-label', I18n.t('btn.edit'));
+          editBtn.textContent = I18n.t('btn.edit');
+          editBtn.onclick = function() { isEditing = true; renderNoteView(); };
+          bottomFooter.appendChild(cancelBtn);
+          bottomFooter.appendChild(editBtn);
+
+          nvOverlay.appendChild(topFooter);
+          nvOverlay.appendChild(body);
+          nvOverlay.appendChild(bottomFooter);
+        }
+      }
+
+      function closeNoteView() {
+        if (noteViewEscHandler) {
+          document.removeEventListener('keydown', noteViewEscHandler);
+          noteViewEscHandler = null;
+        }
+        if (nvOverlay) {
+          nvOverlay.classList.remove('on');
+          setTimeout(function() {
+            if (nvOverlay && nvOverlay.parentNode) {
+              try { nvOverlay.parentNode.removeChild(nvOverlay); } catch (_) {}
+            }
+            nvOverlay = null;
+          }, Config.get('noteViewAnimationDelay', 200));
+        }
+      }
+
+      noteViewEscHandler = function(e) {
+        if (e.key === 'Escape') closeNoteView();
+      };
+      document.addEventListener('keydown', noteViewEscHandler);
+      renderNoteView();
+    }).catch(function(err) {
+      Toast.show('err', String(err && err.message || err) || 'Load note failed');
+    });
+  }
+
+  function exportData() {
+    DB.all().then(function(notes) {
+      if (!notes || notes.length === 0) { Toast.show('err', '0'); return; }
+      var capsule = { app: 'noomium', format: 'v1', version: 1, exportedAt: Date.now(), notes: notes };
+      var blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'noomium-' + new Date().toISOString().slice(0, 10) + '.json';
+      document.body.appendChild(anchor);
+      anchor.click();
+      URL.revokeObjectURL(url);
+      anchor.remove();
+      Toast.show('ok', '✓ ' + notes.length);
+    }).catch(function(err) {
+      Toast.show('err', String(err && err.message || err) || 'Export failed');
+    });
+  }
+
+  function importData() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.onchange = function() {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function() {
+        try {
+          var data = JSON.parse(String(reader.result || '{}'));
+          var notes = Array.isArray(data) ? data : (data.notes || []);
+          if (!Array.isArray(notes)) throw new Error('bad format');
+          var clean = [];
+          for (var i = 0; i < notes.length; i++) {
+            var note = notes[i];
+            if (!note || typeof note.text !== 'string' || !note.text.trim()) continue;
+            clean.push({
+              id: note.id || ('i' + Math.random().toString(36).slice(2, 10)),
+              text: note.text.trim(),
+              vector: Array.isArray(note.vector) ? note.vector : null,
+              shared: !!note.shared,
+              createdAt: typeof note.createdAt === 'number' ? note.createdAt : Date.now()
+            });
+          }
+          DB.bulkPut(clean).then(function() {
+            Toast.show('ok', '✓ ' + clean.length);
+            allNotesCache = null;
+            if (StateManager.getState().view === 'base') renderBase();
+            try { Bus.emit('state:lists-changed'); } catch (_) {}
+          }).catch(function(err) {
+            Toast.show('err', String(err && err.message || err) || 'Import failed');
+          });
+        } catch (err) {
+          Toast.show('err', String(err && err.message || err) || 'Import parse failed');
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }
+
+  function bindDOMEvents() {
+    var baseContainer = document.getElementById('ws-base');
+    if (baseContainer) {
+      baseContainer.addEventListener('click', function(e) {
+        var bi = e.target.closest('.bi');
+        if (bi) {
+          var id = bi.getAttribute('data-id');
+          if (id) openNoteView(id);
+        }
+      });
+    }
+    var baseSearchInput = document.getElementById('base-q');
+    if (baseSearchInput) {
+      baseSearchInput.addEventListener('input', function() {
+        if (baseSearchTimer) clearTimeout(baseSearchTimer);
+        baseSearchTimer = setTimeout(renderBase, Config.get('baseSearchDebounce', 200));
+      });
+    }
+    var baseSortSelect = document.getElementById('base-sort');
+    if (baseSortSelect) baseSortSelect.onchange = renderBase;
+  }
+
+  function init() {
+    bindDOMEvents();
+
+    i18nHandler = function() {
+      var baseSearch = document.getElementById('base-q');
+      if (baseSearch) baseSearch.placeholder = I18n.t('base.search');
+      var sort = document.getElementById('base-sort');
+      if (sort) {
+        var opts = sort.querySelectorAll('option');
+        if (opts[0]) opts[0].textContent = I18n.t('base.sort.new');
+        if (opts[1]) opts[1].textContent = I18n.t('base.sort.old');
+        if (opts[2]) opts[2].textContent = I18n.t('base.sort.az');
+      }
+      if (StateManager.getState().view === 'base') renderBase();
+    };
+    Bus.on('i18n:change', i18nHandler);
+
+    listsChangedHandler = function() {
+      allNotesCache = null;
+      if (StateManager.getState().view === 'base') renderBase();
+    };
+    Bus.on('state:lists-changed', listsChangedHandler);
+
+    viewChangedHandler = function(payload) {
+      if (payload && payload.view === 'base') renderBase();
+    };
+    Bus.on('view:changed', viewChangedHandler);
+
+    if (StateManager.getState().view === 'base') renderBase();
+  }
+
+  function destroy() {
+    if (noteViewEscHandler) {
+      document.removeEventListener('keydown', noteViewEscHandler);
+      noteViewEscHandler = null;
+    }
+    if (baseSearchTimer) { clearTimeout(baseSearchTimer); baseSearchTimer = null; }
+    if (i18nHandler) { try { Bus.off('i18n:change', i18nHandler); } catch (_) {} i18nHandler = null; }
+    if (listsChangedHandler) { try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) {} listsChangedHandler = null; }
+    if (viewChangedHandler) { try { Bus.off('view:changed', viewChangedHandler); } catch (_) {} viewChangedHandler = null; }
+  }
+
+  return {
+    init: init,
+    destroy: destroy,
+    renderBase: renderBase,
+    exportData: exportData,
+    importData: importData
+  };
+}, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'AI', 'Toast']);
+<!-- NOOMIUM_MODULE_END BaseViewComponent -->
   
 <!-- NOOMIUM_MODULE_START App.State -->
   var Logger = DI.resolve('Logger');
@@ -3059,29 +3564,11 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
   var EditorComponent = DI.resolve('EditorComponent');
 
   var uiState = {
-    baseSearchTimer: null,
     windowHandlers: { resize: null, focusin: null, focusout: null, orientationchange: null, beforeunload: null },
-    noteViewEscHandler: null,
     progressHandler: null,
     editorSearchHandler: null,
     editorSendHandler: null
   };
-
-  var allNotesCache = null;
-  var allNotesCacheTime = 0;
-  var ALL_NOTES_TTL = 5 * 60 * 1000;
-
-  function getAllNotesCached() {
-    var now = Date.now();
-    if (allNotesCache && (now - allNotesCacheTime < ALL_NOTES_TTL)) {
-      return Promise.resolve(allNotesCache);
-    }
-    return DB.all().then(function(notes) {
-      allNotesCache = notes;
-      allNotesCacheTime = now;
-      return notes;
-    });
-  }
 
   function translate(key, params, fallback) { return I18n.t(key, params, fallback); }
   function toast(msg, type) { if (Toast && Toast.show) Toast.show(type || 'info', msg); }
@@ -3110,7 +3597,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     var baseEl = document.getElementById('ws-base');
     if (streamEl) streamEl.style.display = viewName === 'stream' ? 'flex' : 'none';
     if (baseEl) baseEl.style.display = viewName === 'base' ? 'flex' : 'none';
-    if (viewName === 'base') renderBase();
+    try { Bus.emit('view:changed', { view: viewName }); } catch (_) {}
   }
 
   function refreshUI() {
@@ -3148,6 +3635,12 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       streamView.init();
     } catch (_) {}
 
+    try {
+      var baseView = DI.resolve('BaseViewComponent');
+      baseView.destroy();
+      baseView.init();
+    } catch (_) {}
+
     switchView(savedView);
 
     if (AI.ready()) {
@@ -3161,8 +3654,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     applyTheme: applyTheme,
     executeSearch: executeSearch,
     switchView: switchView,
-    refreshUI: refreshUI,
-    getAllNotesCached: getAllNotesCached
+    refreshUI: refreshUI
   };
 <!-- NOOMIUM_MODULE_END App.State -->
   
@@ -3231,493 +3723,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
            buildBottomTabMarkup();
   }
 <!-- NOOMIUM_MODULE_END UI.Layout -->
-
-<!-- NOOMIUM_MODULE_START UI.Base -->
-  var StateManager = DI.resolve('StateManager');
-  
-  var baseOffset = 0;
-  var baseIsLoading = false;
-  var baseHasMore = true;
-  var baseTotalNotes = 0;
-
-  function onBaseScroll(e) {
-    var el = e.target;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
-      loadBaseNotesChunked();
-    }
-  }
-
-  /**
-   * Создать DOM-элемент карточки статистики
-   * @param {number|string} value - Значение
-   * @param {string} label - Подпись
-   * @returns {HTMLElement}
-   */
-  function buildStatCard(value, label) {
-    var card = document.createElement('div');
-    card.className = 'stat';
-    
-    var valueEl = document.createElement('div');
-    valueEl.className = 'stat-v';
-    valueEl.textContent = String(value);
-    card.appendChild(valueEl);
-    
-    var labelEl = document.createElement('div');
-    labelEl.className = 'stat-l';
-    labelEl.textContent = label;
-    card.appendChild(labelEl);
-    
-    return card;
-  }
-
-  /**
-   * Создать DOM-элемент пустого состояния
-   * @param {string} icon - Иконка
-   * @param {string} title - Заголовок
-   * @param {string} description - Описание
-   * @returns {HTMLElement}
-   */
-  function buildEmptyState(icon, title, description) {
-    var emptyDiv = document.createElement('div');
-    emptyDiv.className = 'feed-empty';
-    
-    var icEl = document.createElement('div');
-    icEl.className = 'feed-empty-ic';
-    icEl.textContent = icon;
-    emptyDiv.appendChild(icEl);
-    
-    var titleEl = document.createElement('div');
-    titleEl.className = 'feed-empty-t';
-    titleEl.textContent = title;
-    emptyDiv.appendChild(titleEl);
-    
-    var descEl = document.createElement('div');
-    descEl.className = 'feed-empty-d';
-    descEl.textContent = description;
-    emptyDiv.appendChild(descEl);
-    
-    return emptyDiv;
-  }
-
-  function loadBaseNotesChunked() {
-    if (baseIsLoading || !baseHasMore) return;
-    baseIsLoading = true;
-    
-    var chunkSize = Config.get('baseChunkSize', 20);
-    var container = document.getElementById('base-list');
-    var queryInput = document.getElementById('base-q');
-    var sortSelect = document.getElementById('base-sort');
-    var queryValue = queryInput ? queryInput.value.trim().toLowerCase() : '';
-    var sortValue = sortSelect ? sortSelect.value : 'new';
-    
-    DB.getAllPaginated(baseOffset, chunkSize).then(function(chunk) {
-      baseIsLoading = false;
-      if (!chunk || chunk.length === 0) {
-        baseHasMore = false;
-        if (baseOffset === 0 && container) {
-          var emptyTitle = translate('empty.base.t');
-          var emptyDesc = baseTotalNotes === 0 ? translate('empty.base.d') : translate('empty.base.empty');
-          while (container.firstChild) {
-            container.removeChild(container.firstChild);
-          }
-          container.appendChild(buildEmptyState('▤', emptyTitle, emptyDesc));
-        }
-        return;
-      }
-      
-      if (chunk.length < chunkSize) {
-        baseHasMore = false;
-      }
-      
-      var filtered = chunk;
-      if (queryValue) {
-        filtered = filtered.filter(function(n) { return n.text && n.text.toLowerCase().indexOf(queryValue) >= 0; });
-      }
-      if (sortValue === 'old') {
-        filtered.sort(function(a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
-      } else if (sortValue === 'az') {
-        filtered.sort(function(a, b) { return (a.text || '').localeCompare(b.text || '', I18n.getLang() === 'en' ? 'en' : 'ru'); });
-      } else {
-        filtered.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
-      }
-      
-      var fragment = document.createDocumentFragment();
-      var truncateLength = Config.get('truncateTextLength', 120);
-      
-      for (var i = 0; i < filtered.length; i++) {
-        var note = filtered[i];
-        var div = document.createElement('div');
-        div.className = 'bi' + (note.shared ? ' shared' : '');
-        div.setAttribute('data-id', note.id);
-        
-        var textEl = document.createElement('div');
-        textEl.className = 'bi-t' + (note.text && note.text.length > truncateLength ? ' truncated' : '');
-        textEl.textContent = note.text || '';
-        div.appendChild(textEl);
-        
-        var foot = document.createElement('div');
-        foot.className = 'bi-f';
-        
-        var meta = document.createElement('div');
-        meta.className = 'bi-meta';
-        
-        var tagEl = document.createElement('span');
-        tagEl.className = 'bi-tag';
-        tagEl.textContent = note.shared ? translate('base.tag.shared') : translate('base.tag.private');
-        meta.appendChild(tagEl);
-        
-        var dateEl = document.createElement('span');
-        dateEl.className = 'bi-date';
-        dateEl.textContent = Utils.fmtDate(note.createdAt, I18n.getLang());
-        meta.appendChild(dateEl);
-        
-        foot.appendChild(meta);
-        div.appendChild(foot);
-        fragment.appendChild(div);
-      }
-      
-      if (container) container.appendChild(fragment);
-      
-      baseOffset += chunk.length;
-      
-      if (filtered.length === 0 && baseHasMore) {
-        loadBaseNotesChunked();
-      }
-      
-    }).catch(function(err) {
-      baseIsLoading = false;
-      toast(String(err && err.message || err) || 'Chunk load failed', 'err');
-    });
-  }
-
-  function updateCounts() {
-    var state = StateManager.getState();
-    ['local', 'world', 'seren'].forEach(function(key) {
-      var el = document.getElementById('c-' + key);
-      if (el) el.textContent = state.lists[key].length;
-    });
-  }
-
-  function renderBase() {
-    var container = document.getElementById('base-list');
-    if (container) {
-      container.removeEventListener('scroll', onBaseScroll);
-      container.addEventListener('scroll', onBaseScroll);
-      
-      // Безопасная очистка контейнера
-      while (container.firstChild) {
-        container.removeChild(container.firstChild);
-      }
-    }
-    
-    baseOffset = 0;
-    baseHasMore = true;
-    baseIsLoading = false;
-
-    getAllNotesCached().then(function(allNotes) {
-      var statsEl = document.getElementById('base-stats');
-      if (statsEl) {
-        // Очистка статистики
-        while (statsEl.firstChild) {
-          statsEl.removeChild(statsEl.firstChild);
-        }
-        
-        var sharedCount = 0;
-        for (var i = 0; i < allNotes.length; i++) {
-          if (allNotes[i] && allNotes[i].shared) sharedCount++;
-        }
-        
-        statsEl.appendChild(buildStatCard(allNotes.length, translate('base.stat.total')));
-        statsEl.appendChild(buildStatCard(sharedCount, translate('base.stat.open')));
-        statsEl.appendChild(buildStatCard(allNotes.length - sharedCount, translate('base.stat.priv')));
-      }
-      
-      baseTotalNotes = allNotes.length;
-      loadBaseNotesChunked();
-    }).catch(function(err) {
-      toast(String(err && err.message || err) || 'Base load failed', 'err');
-      if (Logger) Logger.warn('renderBase error', String(err && err.message || err));
-    });
-  }
-
-  function openNoteView(id) {
-    DB.get(id).then(function(record) {
-      if (!record) return;
-
-      var isEditing = false;
-      var nvOverlay = null;
-
-      if (uiState.noteViewEscHandler) {
-        document.removeEventListener('keydown', uiState.noteViewEscHandler);
-        uiState.noteViewEscHandler = null;
-      }
-
-      /**
-       * Построить содержимое модального окна просмотра/редактирования
-       */
-      function renderNoteView() {
-        // Создание overlay при первом вызове
-        if (!nvOverlay) {
-          nvOverlay = document.createElement('div');
-          nvOverlay.className = 'nv on';
-          document.body.appendChild(nvOverlay);
-        }
-        
-        // Очистка предыдущего содержимого
-        while (nvOverlay.firstChild) {
-          nvOverlay.removeChild(nvOverlay.firstChild);
-        }
-
-        var dateStr = Utils.fmtDate(record.createdAt, I18n.getLang());
-        var tagLabel = record.shared ? translate('base.tag.shared') : translate('base.tag.private');
-
-        if (isEditing) {
-          // Режим редактирования
-          var body = document.createElement('div');
-          body.className = 'nv-b';
-          
-          var ta = document.createElement('textarea');
-          ta.className = 'nv-ta';
-          ta.id = 'nv-ta';
-          ta.value = record.text || '';
-          body.appendChild(ta);
-          
-          var bottomFooter = document.createElement('div');
-          bottomFooter.className = 'nv-f-bottom';
-          
-          var cancelBtn = document.createElement('button');
-          cancelBtn.className = 'nv-act';
-          cancelBtn.id = 'nv-cancel';
-          cancelBtn.textContent = translate('btn.cancel');
-          cancelBtn.onclick = function() {
-            isEditing = false;
-            renderNoteView();
-          };
-          
-          var saveBtn = document.createElement('button');
-          saveBtn.className = 'nv-act primary';
-          saveBtn.id = 'nv-save';
-          saveBtn.textContent = translate('btn.save');
-          saveBtn.onclick = function() {
-            var newText = ta.value.trim();
-            if (!newText) { toast(translate('toast.empty'), 'err'); return; }
-            record.text = newText;
-            AI.embed(newText).then(function(v) {
-              record.vector = v;
-              return DB.put(record);
-            }).then(function() {
-              toast(translate('toast.edit.saved'), 'ok');
-              isEditing = false;
-              renderNoteView();
-              renderBase();
-              executeSearch();
-            }).catch(function(err) {
-              toast(String(err && err.message || err) || 'Edit failed', 'err');
-            });
-          };
-          
-          bottomFooter.appendChild(cancelBtn);
-          bottomFooter.appendChild(saveBtn);
-          
-          nvOverlay.appendChild(body);
-          nvOverlay.appendChild(bottomFooter);
-          
-        } else {
-          // Режим просмотра
-          var topFooter = document.createElement('div');
-          topFooter.className = 'nv-f';
-          
-          var delBtn = document.createElement('button');
-          delBtn.className = 'nv-act danger';
-          delBtn.id = 'nv-del';
-          delBtn.setAttribute('aria-label', translate('btn.del'));
-          delBtn.textContent = translate('btn.del');
-          delBtn.onclick = function() {
-            if (!confirm(translate('nv.delete.confirm'))) return;
-            DB.del(id).then(function() {
-              toast(translate('toast.deleted'), 'ok');
-              closeNoteView();
-              renderBase();
-              executeSearch();
-            }).catch(function(err) {
-              toast(String(err && err.message || err) || 'Delete failed', 'err');
-            });
-          };
-          
-          var copyBtn = document.createElement('button');
-          copyBtn.className = 'nv-act';
-          copyBtn.id = 'nv-copy';
-          copyBtn.setAttribute('aria-label', translate('btn.copy'));
-          copyBtn.textContent = translate('btn.copy');
-          copyBtn.onclick = function() {
-            copyToClipboard(record.text);
-          };
-          
-          var toggleBtn = document.createElement('button');
-          toggleBtn.className = 'nv-act';
-          toggleBtn.id = 'nv-toggle';
-          toggleBtn.setAttribute('aria-label', record.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub'));
-          toggleBtn.textContent = record.shared ? translate('btn.toggle.priv') : translate('btn.toggle.pub');
-          toggleBtn.onclick = function() {
-            record.shared = !record.shared;
-            DB.put(record).then(function() {
-              toast(record.shared ? translate('toast.saved.public') : translate('toast.saved.private'), 'ok');
-              renderNoteView();
-              renderBase();
-              executeSearch();
-            }).catch(function(err) {
-              toast(String(err && err.message || err) || 'Toggle failed', 'err');
-            });
-          };
-          
-          topFooter.appendChild(delBtn);
-          topFooter.appendChild(copyBtn);
-          topFooter.appendChild(toggleBtn);
-          
-          var body = document.createElement('div');
-          body.className = 'nv-b';
-          
-          var infoRow = document.createElement('div');
-          infoRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:12px';
-          
-          var tagEl = document.createElement('span');
-          tagEl.className = 'bi-tag';
-          tagEl.textContent = tagLabel;
-          infoRow.appendChild(tagEl);
-          
-          var dateEl = document.createElement('span');
-          dateEl.style.cssText = 'font-size:11px;color:var(--text-3);font-family:var(--mono)';
-          dateEl.textContent = dateStr;
-          infoRow.appendChild(dateEl);
-          
-          body.appendChild(infoRow);
-          
-          var textDiv = document.createElement('div');
-          textDiv.className = 'nv-text';
-          textDiv.textContent = record.text || '';
-          body.appendChild(textDiv);
-          
-          var bottomFooter = document.createElement('div');
-          bottomFooter.className = 'nv-f-bottom';
-          
-          var cancelBtn = document.createElement('button');
-          cancelBtn.className = 'nv-act';
-          cancelBtn.id = 'nv-cancel';
-          cancelBtn.setAttribute('aria-label', translate('btn.cancel'));
-          cancelBtn.textContent = translate('btn.cancel');
-          cancelBtn.onclick = function() {
-            closeNoteView();
-          };
-          
-          var editBtn = document.createElement('button');
-          editBtn.className = 'nv-act primary';
-          editBtn.id = 'nv-edit';
-          editBtn.setAttribute('aria-label', translate('btn.edit'));
-          editBtn.textContent = translate('btn.edit');
-          editBtn.onclick = function() {
-            isEditing = true;
-            renderNoteView();
-          };
-          
-          bottomFooter.appendChild(cancelBtn);
-          bottomFooter.appendChild(editBtn);
-          
-          nvOverlay.appendChild(topFooter);
-          nvOverlay.appendChild(body);
-          nvOverlay.appendChild(bottomFooter);
-        }
-      }
-
-      function closeNoteView() {
-        if (uiState.noteViewEscHandler) {
-          document.removeEventListener('keydown', uiState.noteViewEscHandler);
-          uiState.noteViewEscHandler = null;
-        }
-        if (nvOverlay) {
-          nvOverlay.classList.remove('on');
-          setTimeout(function() {
-            if (nvOverlay && nvOverlay.parentNode) {
-              try { nvOverlay.parentNode.removeChild(nvOverlay); } catch (_) { /* ignore */ }
-            }
-            nvOverlay = null;
-          }, Config.get('noteViewAnimationDelay', 200));
-        }
-      }
-
-      uiState.noteViewEscHandler = function(e) {
-        if (e.key === 'Escape') {
-          closeNoteView();
-        }
-      };
-      document.addEventListener('keydown', uiState.noteViewEscHandler);
-
-      renderNoteView();
-    }).catch(function(err) {
-      toast(String(err && err.message || err) || 'Load note failed', 'err');
-    });
-  }
-
-  function exportData() {
-    DB.all().then(function(notes) {
-      if (!notes || notes.length === 0) { toast('0', 'err'); return; }
-      var capsule = { app: 'noomium', format: 'v1', version: 1, exportedAt: Date.now(), notes: notes };
-      var blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
-      var url = URL.createObjectURL(blob);
-      var anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = 'noomium-' + new Date().toISOString().slice(0, 10) + '.json';
-      document.body.appendChild(anchor);
-      anchor.click();
-      URL.revokeObjectURL(url);
-      anchor.remove();
-      toast('✓ ' + notes.length, 'ok');
-    }).catch(function(err) {
-      toast(String(err && err.message || err) || 'Export failed', 'err');
-    });
-  }
-
-  function importData() {
-    var input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'application/json,.json';
-    input.onchange = function() {
-      var file = input.files && input.files[0];
-      if (!file) return;
-      var reader = new FileReader();
-      reader.onload = function() {
-        try {
-          var data = JSON.parse(String(reader.result || '{}'));
-          var notes = Array.isArray(data) ? data : (data.notes || []);
-          if (!Array.isArray(notes)) throw new Error('bad format');
-          var clean = [];
-          for (var i = 0; i < notes.length; i++) {
-            var note = notes[i];
-            if (!note || typeof note.text !== 'string' || !note.text.trim()) continue;
-            clean.push({
-              id: note.id || ('i' + Math.random().toString(36).slice(2, 10)),
-              text: note.text.trim(),
-              vector: Array.isArray(note.vector) ? note.vector : null,
-              shared: !!note.shared,
-              createdAt: typeof note.createdAt === 'number' ? note.createdAt : Date.now()
-            });
-          }
-          DB.bulkPut(clean).then(function() {
-            toast('✓ ' + clean.length, 'ok');
-            var state = StateManager.getState();
-            if (state.view === 'base') renderBase();
-            executeSearch();
-          }).catch(function(err) {
-            toast(String(err && err.message || err) || 'Import failed', 'err');
-          });
-        } catch (err) {
-          toast(String(err && err.message || err) || 'Import parse failed', 'err');
-        }
-      };
-      reader.readAsText(file);
-    };
-    input.click();
-  }
-<!-- NOOMIUM_MODULE_END UI.Base -->
   
 <!-- NOOMIUM_MODULE_START UI.Menu -->
   function openMenu() {
@@ -3852,14 +3857,28 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     exportBtn.className = 'tog';
     exportBtn.style.marginTop = '4px';
     exportBtn.innerHTML = '<span class="tog-ic">↓</span><span class="tog-lbl">' + translate('menu.export') + '</span><span class="tog-arr">→</span>';
-    exportBtn.onclick = function() { Modal.close(); setTimeout(exportData, 200); };
+    exportBtn.onclick = function() {
+      Modal.close();
+      setTimeout(function() {
+        try { DI.resolve('BaseViewComponent').exportData(); } catch (err) {
+          Toast.show('err', String(err && err.message || err) || 'Export failed');
+        }
+      }, 200);
+    };
     dataSection.appendChild(exportBtn);
 
     var importBtn = document.createElement('button');
     importBtn.className = 'tog';
     importBtn.style.marginTop = '4px';
     importBtn.innerHTML = '<span class="tog-ic">↑</span><span class="tog-lbl">' + translate('menu.import') + '</span><span class="tog-arr">→</span>';
-    importBtn.onclick = function() { Modal.close(); setTimeout(importData, 200); };
+    importBtn.onclick = function() {
+      Modal.close();
+      setTimeout(function() {
+        try { DI.resolve('BaseViewComponent').importData(); } catch (err) {
+          Toast.show('err', String(err && err.message || err) || 'Import failed');
+        }
+      }, 200);
+    };
     dataSection.appendChild(importBtn);
     body.appendChild(dataSection);
 
@@ -3894,17 +3913,14 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     wipeBtn.onclick = function() {
       if (!confirm(translate('base.wipe.confirm'))) return;
       try {
-        localStorage.removeItem('noomium:sk');
-        localStorage.removeItem('noomium:cfg');
-        localStorage.removeItem('noomium:appVersion');
-        localStorage.removeItem('noomium:lang');
-      } catch (e) { /* ignore */ }
-      DB.reset().then(function() {
-        toast(translate('toast.base.wiped'), 'ok');
+        var AuthService = DI.resolve('AuthService');
+        AuthService.resetStorage().then(function() {
+          toast(translate('toast.base.wiped'), 'ok');
+          setTimeout(function() { location.reload(); }, 500);
+        });
+      } catch (e) {
         setTimeout(function() { location.reload(); }, 500);
-      }).catch(function() {
-        setTimeout(function() { location.reload(); }, 500);
-      });
+      }
     };
     dangerSection.appendChild(wipeBtn);
     body.appendChild(dangerSection);
@@ -3994,28 +4010,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       b.onclick = function() { switchView(b.getAttribute('data-v')); };
     });
 
-    var baseContainer = document.getElementById('ws-base');
-    if (baseContainer) {
-      baseContainer.addEventListener('click', function(e) {
-        var bi = e.target.closest('.bi');
-        if (bi) {
-          var id = bi.getAttribute('data-id');
-          if (id) openNoteView(id);
-        }
-      });
-    }
-
-    var baseSearchInput = document.getElementById('base-q');
-    if (baseSearchInput) {
-      baseSearchInput.addEventListener('input', function() {
-        if (uiState.baseSearchTimer) clearTimeout(uiState.baseSearchTimer);
-        uiState.baseSearchTimer = setTimeout(renderBase, Config.get('baseSearchDebounce', 200));
-      });
-    }
-
-    var baseSortSelect = document.getElementById('base-sort');
-    if (baseSortSelect) baseSortSelect.onchange = renderBase;
-
     var menuBtn = document.getElementById('btn-menu');
     if (menuBtn) menuBtn.onclick = openMenu;
 
@@ -4029,10 +4023,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         }
       }
     });
-
-    var dbChangeHandler = function() { allNotesCache = null; };
-    Bus.on('db:change', dbChangeHandler);
-    busHandlers.push({event: 'db:change', fn: dbChangeHandler});
 
     var i18nHandler = function() { refreshUI(); };
     Bus.on('i18n:change', i18nHandler);
@@ -4054,10 +4044,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     busHandlers.push({event: 'editor:search-request', fn: uiState.editorSearchHandler});
 
     uiState.editorSendHandler = function() {
-      executeSearch().then(function() {
-        var state = StateManager.getState();
-        if (state.view === 'base') renderBase();
-      });
+      executeSearch();
     };
     Bus.on('editor:send-complete', uiState.editorSendHandler);
     busHandlers.push({event: 'editor:send-complete', fn: uiState.editorSendHandler});
@@ -4103,11 +4090,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
   }
 
   function cleanup() {
-    if (uiState.noteViewEscHandler) {
-      document.removeEventListener('keydown', uiState.noteViewEscHandler);
-      uiState.noteViewEscHandler = null;
-    }
-    if (uiState.baseSearchTimer) { clearTimeout(uiState.baseSearchTimer); uiState.baseSearchTimer = null; }
     if (uiState.progressHandler) {
       AI.offProgress(uiState.progressHandler);
       uiState.progressHandler = null;
@@ -4329,6 +4311,9 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       }
       try { DI.resolve('StreamViewComponent').init(); } catch (e) {
         if (Logger) Logger.warn('StreamViewComponent init failed', String(e));
+      }
+      try { DI.resolve('BaseViewComponent').init(); } catch (e) {
+        if (Logger) Logger.warn('BaseViewComponent init failed', String(e));
       }
 
       bootApp();
