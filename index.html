@@ -4284,14 +4284,1352 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END OfflineBarComponent -->
 
 <!-- NOOMIUM_MODULE_START StreamViewComponent -->
-  DI.register('StreamViewComponent', function() {
-    return {};
+  /**
+   * @typedef {Object} CarouselUIState
+   * @description Внутреннее состояние компонента карусели.
+   * @property {number} currentPage - Текущая страница (0-based).
+   * @property {Array<SearchResult[]>} pages - Двумерный массив страниц.
+   * @property {number} totalPages - Общее количество страниц.
+   * @property {number} activeIndex - Индекс активной карточки на текущей странице.
+   * @property {HTMLElement | null} carouselEl - DOM-элемент карусели.
+   * @property {HTMLElement | null} dotsContainer - Контейнер с точками пагинации.
+   * @property {HTMLElement | null} counterEl - Элемент счётчика (X / Y).
+   * @property {HTMLButtonElement | null} prevBtn - Кнопка предыдущей страницы.
+   * @property {HTMLButtonElement | null} nextBtn - Кнопка следующей страницы.
+   * @property {number | null} scrollRAF - ID requestAnimationFrame для скролла.
+   */
+
+  DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent) {
+
+    /** @type {number} Количество карточек на одной странице */
+    var PAGE_SIZE = 10;
+
+    /** @type {CarouselUIState} */
+    var uiState = {
+      currentPage: 0,
+      pages: [],
+      totalPages: 0,
+      activeIndex: 0,
+      carouselEl: null,
+      dotsContainer: null,
+      counterEl: null,
+      prevBtn: null,
+      nextBtn: null,
+      scrollRAF: null
+    };
+
+    /** @type {string | null} Кэшированный поисковый запрос для подсветки */
+    var cachedQuery = null;
+
+    /** @type {RegExp | null} Скомпилированное RegExp для подсветки */
+    var cachedRegex = null;
+
+    /** @type {function(): void | null} */
+    var i18nHandler = null;
+
+    /** @type {function(): void | null} */
+    var listsChangedHandler = null;
+
+    /**
+     * Создаёт DocumentFragment с подсвеченными совпадениями поискового запроса.
+     * @param {string} text - Исходный текст карточки.
+     * @param {string} query - Поисковый запрос из редактора.
+     * @returns {DocumentFragment} Фрагмент с текстовыми узлами и тегами <mark>.
+     */
+    function highlightText(text, query) {
+      var fragment = document.createDocumentFragment();
+      if (!text) return fragment;
+      
+      if (!query) {
+        fragment.appendChild(document.createTextNode(String(text)));
+        return fragment;
+      }
+      
+      if (query !== cachedQuery) {
+        var words = query.toLowerCase().split(/\s+/).filter(function(w) { return w.length > 2; });
+        if (words.length === 0) {
+          cachedRegex = null;
+        } else {
+          var escapedWords = words.map(function(w) { return Utils.escRe(w); });
+          cachedRegex = new RegExp('(' + escapedWords.join('|') + ')', 'gi');
+        }
+        cachedQuery = query;
+      }
+      
+      if (!cachedRegex) {
+        fragment.appendChild(document.createTextNode(String(text)));
+        return fragment;
+      }
+      
+      var parts = String(text).split(cachedRegex);
+      for (var i = 0; i < parts.length; i++) {
+        if (parts[i] === '') continue;
+        if (i % 2 === 1) {
+          var mark = document.createElement('mark');
+          mark.textContent = parts[i];
+          fragment.appendChild(mark);
+        } else {
+          fragment.appendChild(document.createTextNode(parts[i]));
+        }
+      }
+      return fragment;
+    }
+
+    /**
+     * Проверяет, принадлежит ли заметка текущему пользователю.
+     * @param {SearchResult} item - Объект карточки.
+     * @returns {boolean} true, если это локальная заметка (нет поля peer).
+     */
+    function isOwnItem(item) {
+      return !item.peer;
+    }
+
+    /**
+     * Генерирует DOM-структуру карточки (fi) для переданного элемента.
+     * @param {SearchResult} item - Данные для отрисовки.
+     * @returns {HTMLDivElement} Корневой элемент карточки.
+     */
+    function renderItemHTML(item) {
+      if (!item) return document.createElement('div');
+      
+      var state = StateManager.getState();
+      var seg = state.seg;
+      var own = isOwnItem(item);
+      
+      var card = document.createElement('div');
+      card.className = 'fi t-' + seg;
+      card.setAttribute('data-id', item.id);
+
+      var header = document.createElement('div');
+      header.className = 'fi-h';
+      
+      var badge = document.createElement('span');
+      badge.className = 'fi-badge';
+      var typeLabel = own
+        ? (item.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private'))
+        : ('· ' + item.peer);
+      badge.textContent = typeLabel;
+      header.appendChild(badge);
+
+      var scoreNum = typeof item.score === 'number' ? Math.round(item.score * 100) : null;
+      if (scoreNum !== null) {
+        var scoreWrap = document.createElement('span');
+        scoreWrap.className = 'fi-score';
+        
+        var scoreLabel = document.createElement('span');
+        scoreLabel.className = 'fi-score-label';
+        scoreLabel.textContent = I18n.t('sim.score');
+        scoreWrap.appendChild(scoreLabel);
+        
+        var scoreValue = document.createElement('span');
+        scoreValue.className = 'fi-score-value';
+        scoreValue.textContent = String(scoreNum) + '%';
+        scoreWrap.appendChild(scoreValue);
+        
+        header.appendChild(scoreWrap);
+      }
+      card.appendChild(header);
+
+      var body = document.createElement('div');
+      body.className = 'fi-body';
+      body.appendChild(highlightText(item.text, EditorComponent.getValue()));
+      card.appendChild(body);
+
+      var footer = document.createElement('div');
+      footer.className = 'fi-foot';
+      
+      if (own) {
+        var btnEdit = document.createElement('button');
+        btnEdit.className = 'fi-act primary';
+        btnEdit.setAttribute('data-act', 'edit');
+        btnEdit.setAttribute('data-id', item.id);
+        btnEdit.setAttribute('aria-label', I18n.t('btn.edit'));
+        btnEdit.textContent = I18n.t('btn.edit');
+        footer.appendChild(btnEdit);
+
+        var btnToggle = document.createElement('button');
+        btnToggle.className = 'fi-act';
+        btnToggle.setAttribute('data-act', 'toggle');
+        btnToggle.setAttribute('data-id', item.id);
+        btnToggle.setAttribute('aria-label', item.shared ? I18n.t('btn.toggle.priv') : I18n.t('btn.toggle.pub'));
+        btnToggle.textContent = item.shared ? I18n.t('btn.toggle.priv') : I18n.t('btn.toggle.pub');
+        footer.appendChild(btnToggle);
+
+        var btnCopy = document.createElement('button');
+        btnCopy.className = 'fi-act';
+        btnCopy.setAttribute('data-act', 'copy');
+        btnCopy.setAttribute('data-id', item.id);
+        btnCopy.setAttribute('aria-label', I18n.t('btn.copy'));
+        btnCopy.textContent = I18n.t('btn.copy');
+        footer.appendChild(btnCopy);
+
+        var btnDel = document.createElement('button');
+        btnDel.className = 'fi-act danger';
+        btnDel.setAttribute('data-act', 'del');
+        btnDel.setAttribute('data-id', item.id);
+        btnDel.setAttribute('aria-label', I18n.t('btn.del'));
+        btnDel.textContent = I18n.t('btn.del');
+        footer.appendChild(btnDel);
+      }
+      card.appendChild(footer);
+      return card;
+    }
+
+    /**
+     * Разбивает плоский массив результатов на страницы по PAGE_SIZE.
+     * @param {SearchResult[]} list - Массив результатов поиска.
+     * @returns {void}
+     */
+    function paginate(list) {
+      uiState.pages = [];
+      if (!list || list.length === 0) {
+        uiState.totalPages = 0;
+        return;
+      }
+      for (var i = 0; i < list.length; i += PAGE_SIZE) {
+        uiState.pages.push(list.slice(i, i + PAGE_SIZE));
+      }
+      uiState.totalPages = uiState.pages.length;
+    }
+
+    /**
+     * Обновляет disabled-статус кнопок пагинации в зависимости от текущей страницы.
+     * @returns {void}
+     */
+    function updatePaginationButtons() {
+      if (uiState.prevBtn) uiState.prevBtn.disabled = (uiState.currentPage === 0);
+      if (uiState.nextBtn) uiState.nextBtn.disabled = (uiState.currentPage >= uiState.totalPages - 1);
+    }
+
+    /**
+     * Полностью перерисовывает карусель для указанной страницы.
+     * @param {number} pageIndex - Индекс страницы для отображения.
+     * @returns {void}
+     */
+    function renderPage(pageIndex) {
+      if (!uiState.carouselEl || !uiState.dotsContainer || !uiState.counterEl) return;
+
+      while (uiState.carouselEl.firstChild) {
+        uiState.carouselEl.removeChild(uiState.carouselEl.firstChild);
+      }
+
+      var pageItems = uiState.pages[pageIndex] || [];
+
+      if (pageItems.length === 0) {
+        while (uiState.dotsContainer.firstChild) {
+          uiState.dotsContainer.removeChild(uiState.dotsContainer.firstChild);
+        }
+        uiState.counterEl.textContent = '0 / 0';
+        updatePaginationButtons();
+        return;
+      }
+
+      for (var i = 0; i < pageItems.length; i++) {
+        var itemEl = document.createElement('div');
+        itemEl.className = 'carousel-item';
+        itemEl.appendChild(renderItemHTML(pageItems[i]));
+        uiState.carouselEl.appendChild(itemEl);
+      }
+
+      while (uiState.dotsContainer.firstChild) {
+        uiState.dotsContainer.removeChild(uiState.dotsContainer.firstChild);
+      }
+      for (var j = 0; j < pageItems.length; j++) {
+        var dot = document.createElement('span');
+        dot.className = 'carousel-dot' + (j === 0 ? ' active' : '');
+        uiState.dotsContainer.appendChild(dot);
+      }
+
+      uiState.counterEl.textContent = '1 / ' + pageItems.length;
+      uiState.activeIndex = 0;
+      uiState.carouselEl.scrollLeft = 0;
+
+      updatePaginationButtons();
+    }
+
+    /**
+     * Обработчик скролла карусели (тролтлится через requestAnimationFrame).
+     * Вычисляет активную карточку и обновляет точки/счётчик.
+     * @returns {void}
+     */
+    function onCarouselScroll() {
+      if (uiState.scrollRAF) return;
+      uiState.scrollRAF = requestAnimationFrame(function() {
+        uiState.scrollRAF = null;
+        if (!uiState.carouselEl) return;
+        
+        var itemWidth = uiState.carouselEl.clientWidth;
+        if (itemWidth <= 0) return;
+        
+        var idx = Math.round(uiState.carouselEl.scrollLeft / itemWidth);
+        var pageItems = uiState.pages[uiState.currentPage] || [];
+        var maxIdx = Math.max(0, pageItems.length - 1);
+        
+        if (idx < 0) idx = 0;
+        if (idx > maxIdx) idx = maxIdx;
+        
+        if (idx !== uiState.activeIndex) {
+          uiState.activeIndex = idx;
+          var dots = uiState.dotsContainer.querySelectorAll('.carousel-dot');
+          for (var i = 0; i < dots.length; i++) {
+            dots[i].classList.toggle('active', i === idx);
+          }
+          if (uiState.counterEl) {
+            uiState.counterEl.textContent = (idx + 1) + ' / ' + pageItems.length;
+          }
+        }
+      });
+    }
+
+    /**
+     * Плавно прокручивает карусель к карточке с указанным индексом.
+     * @param {number} idx - Индекс карточки.
+     * @returns {void}
+     */
+    function scrollToIndex(idx) {
+      if (!uiState.carouselEl) return;
+      var itemWidth = uiState.carouselEl.clientWidth;
+      uiState.carouselEl.scrollTo({
+        left: idx * itemWidth,
+        behavior: 'smooth'
+      });
+    }
+
+    /**
+     * Инициализирует или пересобирает карусель на основе текущего состояния StateManager.
+     * Показывает empty-state, если данных нет.
+     * @returns {void}
+     */
+    function initCarousel() {
+      uiState.carouselEl = document.getElementById('carousel');
+      uiState.dotsContainer = document.getElementById('carousel-dots');
+      uiState.counterEl = document.getElementById('carousel-counter');
+      uiState.prevBtn = document.getElementById('pagination-prev');
+      uiState.nextBtn = document.getElementById('pagination-next');
+      var controls = document.getElementById('pagination-controls');
+
+      var state = StateManager.getState();
+      var list = state.lists[state.seg];
+
+      paginate(list);
+
+      if (uiState.totalPages === 0) {
+        if (uiState.carouselEl) uiState.carouselEl.style.display = 'none';
+        if (controls) controls.style.display = 'none';
+
+        var wrap = document.getElementById('carousel-wrap');
+        if (wrap) {
+          var existingEmpty = wrap.querySelector('.feed-empty');
+          if (existingEmpty) existingEmpty.remove();
+
+          var emptyMessages = {
+            local: { t: I18n.t('empty.local.t'), d: I18n.t('empty.local.d') },
+            world: { t: I18n.t('empty.world.t'), d: I18n.t('empty.world.d') },
+            seren: { t: I18n.t('empty.seren.t'), d: I18n.t('empty.seren.d') }
+          };
+          var msg = emptyMessages[state.seg];
+          
+          var emptyDiv = document.createElement('div');
+          emptyDiv.className = 'feed-empty';
+          
+          var emptyIc = document.createElement('div');
+          emptyIc.className = 'feed-empty-ic';
+          emptyIc.textContent = '◇';
+          emptyDiv.appendChild(emptyIc);
+          
+          var emptyT = document.createElement('div');
+          emptyT.className = 'feed-empty-t';
+          emptyT.textContent = msg.t;
+          emptyDiv.appendChild(emptyT);
+          
+          var emptyD = document.createElement('div');
+          emptyD.className = 'feed-empty-d';
+          emptyD.textContent = msg.d;
+          emptyDiv.appendChild(emptyD);
+          
+          wrap.appendChild(emptyDiv);
+        }
+
+        updatePaginationButtons();
+        return;
+      }
+
+      if (uiState.carouselEl) uiState.carouselEl.style.display = '';
+      if (controls) controls.style.display = '';
+
+      var wrap = document.getElementById('carousel-wrap');
+      if (wrap) {
+        var existingEmpty = wrap.querySelector('.feed-empty');
+        if (existingEmpty) existingEmpty.remove();
+      }
+
+      if (uiState.currentPage >= uiState.totalPages) {
+        uiState.currentPage = Math.max(0, uiState.totalPages - 1);
+      }
+
+      renderPage(uiState.currentPage);
+    }
+
+    /**
+     * Обновляет счётчики (бейджи) над сегментами карусели.
+     * @returns {void}
+     */
+    function updateCounts() {
+      var state = StateManager.getState();
+      ['local', 'world', 'seren'].forEach(function(key) {
+        var el = document.getElementById('c-' + key);
+        if (el) el.textContent = state.lists[key].length;
+      });
+    }
+
+    /**
+     * Переключает активный сегмент (local/world/seren) и перерисовывает карусель.
+     * @param {Segment} segKey - Ключ сегмента.
+     * @returns {void}
+     */
+    function setSegment(segKey) {
+      StateManager.setState({ seg: segKey });
+      document.querySelectorAll('.seg-b').forEach(function(b) {
+        b.classList.toggle('on', b.getAttribute('data-k') === segKey);
+      });
+      cachedQuery = null;
+      cachedRegex = null;
+      uiState.currentPage = 0;
+      initCarousel();
+    }
+
+    /**
+     * Копирует текст в буфер обмена с фоллбэком на execCommand.
+     * @param {string} text - Текст для копирования.
+     * @returns {void}
+     */
+    function copyToClipboard(text) {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(
+            function() { Toast.show('ok', I18n.t('toast.copied')); },
+            function() { Toast.show('err', I18n.t('toast.copy.fail')); }
+          );
+        } else {
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.top = '-9999px';
+          document.body.appendChild(ta);
+          ta.select();
+          try {
+            document.execCommand('copy');
+            Toast.show('ok', I18n.t('toast.copied'));
+          } catch (err) {
+            Toast.show('err', I18n.t('toast.copy.fail'));
+          }
+          document.body.removeChild(ta);
+        }
+      } catch (err) {
+        Toast.show('err', I18n.t('toast.copy.fail'));
+      }
+    }
+
+    /**
+     * Ищет элемент в массиве по его ID.
+     * @param {string} id - Идентификатор.
+     * @param {SearchResult[]} list - Массив для поиска.
+     * @returns {SearchResult | null}
+     */
+    function findItemById(id, list) {
+      for (var i = 0; i < list.length; i++) {
+        if (list[i].id === id) return list[i];
+      }
+      return null;
+    }
+
+    /**
+     * Обрабатывает клики по действиям внутри карточки (edit, copy, del, toggle).
+     * @param {string} action - Имя действия (из data-act).
+     * @param {HTMLElement} element - DOM-элемент кнопки.
+     * @returns {void}
+     */
+    function handleItemAction(action, element) {
+      if (!element) return;
+      var id = element.getAttribute('data-id');
+      var state = StateManager.getState();
+
+      if (action === 'edit') {
+        try { Bus.emit('editor:edit-note', { id: id }); } catch (_) { /* ignore */ }
+        return;
+      }
+      
+      if (action === 'copy') {
+        var item = findItemById(id, state.lists[state.seg]);
+        if (item) copyToClipboard(item.text);
+        return;
+      }
+      
+      if (action === 'del') {
+        if (!confirm(I18n.t('del.confirm'))) return;
+        DB.del(id).then(function() {
+          Toast.show('ok', I18n.t('toast.deleted'));
+          try { Bus.emit('editor:search-request', { force: true }); } catch (_) { /* ignore */ }
+        }).catch(function(err) {
+          Toast.show('err', String(err && err.message || err) || 'Delete failed');
+        });
+        return;
+      }
+      
+      if (action === 'toggle') {
+        DB.get(id).then(function(record) {
+          if (!record) return;
+          record.shared = !record.shared;
+          return DB.put(record).then(function() {
+            Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
+            try { Bus.emit('editor:search-request', { force: true }); } catch (_) { /* ignore */ }
+          });
+        }).catch(function(err) {
+          Toast.show('err', String(err && err.message || err) || 'Toggle failed');
+        });
+        return;
+      }
+    }
+
+    /**
+     * Делегированный обработчик кликов по обёртке карусели (стрелки и действия карточек).
+     * @param {MouseEvent} e - Событие клика.
+     * @returns {void}
+     */
+    function handleWrapClick(e) {
+      var prevBtn = e.target.closest('#pagination-prev');
+      if (prevBtn && !prevBtn.disabled) {
+        if (uiState.currentPage > 0) {
+          uiState.currentPage--;
+          renderPage(uiState.currentPage);
+        }
+        return;
+      }
+      
+      var nextBtn = e.target.closest('#pagination-next');
+      if (nextBtn && !nextBtn.disabled) {
+        if (uiState.currentPage < uiState.totalPages - 1) {
+          uiState.currentPage++;
+          renderPage(uiState.currentPage);
+        }
+        return;
+      }
+      
+      var actionEl = e.target.closest('[data-act]');
+      if (actionEl) {
+        handleItemAction(actionEl.getAttribute('data-act'), actionEl);
+      }
+    }
+
+    /**
+     * Привязывает первичные DOM-события (клики по сегментам и обёртке).
+     * @returns {void}
+     */
+    function bindDOMEvents() {
+      document.querySelectorAll('.seg-b').forEach(function(b) {
+        b.onclick = function() { setSegment(b.getAttribute('data-k')); };
+      });
+
+      var wrap = document.getElementById('carousel-wrap');
+      if (wrap) {
+        wrap.addEventListener('click', handleWrapClick);
+      }
+    }
+
+    /**
+     * Инициализирует компонент: привязывает события, подписывается на шину, рендерит UI.
+     * @returns {void}
+     */
+    function init() {
+      bindDOMEvents();
+
+      var state = StateManager.getState();
+      document.querySelectorAll('.seg-b').forEach(function(b) {
+        b.classList.toggle('on', b.getAttribute('data-k') === state.seg);
+      });
+
+      var carouselEl = document.getElementById('carousel');
+      if (carouselEl) {
+        carouselEl.addEventListener('scroll', onCarouselScroll, { passive: true });
+        carouselEl.addEventListener('keydown', function(e) {
+          var currentList = uiState.pages[uiState.currentPage] || [];
+          if (!currentList || currentList.length === 0) return;
+          if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            var nextIdx = Math.min(uiState.activeIndex + 1, currentList.length - 1);
+            scrollToIndex(nextIdx);
+          } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            var prevIdx = Math.max(uiState.activeIndex - 1, 0);
+            scrollToIndex(prevIdx);
+          }
+        });
+      }
+
+      i18nHandler = function() {
+        var s = StateManager.getState();
+        document.querySelectorAll('.seg-b').forEach(function(b) {
+          var lbl = b.querySelector('.lbl');
+          var k = b.getAttribute('data-k');
+          if (lbl && k === 'local') lbl.textContent = I18n.t('seg.local');
+          else if (lbl && k === 'world') lbl.textContent = I18n.t('seg.world');
+          else if (lbl && k === 'seren') lbl.textContent = I18n.t('seg.seren');
+        });
+        updateCounts();
+        cachedQuery = null;
+        cachedRegex = null;
+        initCarousel();
+      };
+      Bus.on('i18n:change', i18nHandler);
+
+      listsChangedHandler = function() {
+        updateCounts();
+        cachedQuery = null;
+        cachedRegex = null;
+        uiState.currentPage = 0;
+        initCarousel();
+      };
+      Bus.on('state:lists-changed', listsChangedHandler);
+
+      updateCounts();
+      initCarousel();
+    }
+
+    /**
+     * Уничтожает компонент: очищает таймеры, снимает обработчики, отписывается от шины.
+     * @returns {void}
+     */
+    function destroy() {
+      if (uiState.scrollRAF) {
+        cancelAnimationFrame(uiState.scrollRAF);
+        uiState.scrollRAF = null;
+      }
+      var carouselEl = document.getElementById('carousel');
+      if (carouselEl) {
+        carouselEl.removeEventListener('scroll', onCarouselScroll);
+      }
+      var wrap = document.getElementById('carousel-wrap');
+      if (wrap) {
+        wrap.removeEventListener('click', handleWrapClick);
+      }
+      uiState.carouselEl = null;
+      uiState.dotsContainer = null;
+      uiState.counterEl = null;
+      uiState.prevBtn = null;
+      uiState.nextBtn = null;
+      uiState.pages = [];
+      
+      if (i18nHandler) {
+        try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
+        i18nHandler = null;
+      }
+      if (listsChangedHandler) {
+        try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) { /* ignore */ }
+        listsChangedHandler = null;
+      }
+    }
+
+    return {
+      init: init,
+      destroy: destroy
+    };
   }, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'Toast', 'EditorComponent']);
 <!-- NOOMIUM_MODULE_END StreamViewComponent -->
 
 <!-- NOOMIUM_MODULE_START BaseViewComponent -->
-  DI.register('BaseViewComponent', function() {
-    return {};
+  /**
+   * @typedef {Object} PoolItem
+   * @description Элемент пула для виртуального скролла базы.
+   * @property {HTMLDivElement} element - DOM-узел строки.
+   * @property {number} dataIndex - Индекс данных, который сейчас отображается в этом узле (-1 если пуст).
+   */
+
+  DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast, SearchService) {
+
+    /** @type {number} Высота одной строки в пикселях */
+    var ITEM_HEIGHT = 100;
+
+    /** @type {number} Вертикальный отступ между строками */
+    var ITEM_GAP = 8;
+
+    /** @type {number} Полный шаг строки (высота + отступ) */
+    var ROW_SIZE = ITEM_HEIGHT + ITEM_GAP;
+
+    /** @type {number} Количество DOM-элементов в пуле виртуального скролла */
+    var POOL_SIZE = 15;
+
+    /** @type {function(KeyboardEvent): void | null} Обработчик Escape для NoteView */
+    var noteViewEscHandler = null;
+
+    /** @type {number | null} ID requestAnimationFrame для скролла списка */
+    var scrollRAF = null;
+
+    /** @type {Note[]} Отфильтрованный и отсортированный массив заметок */
+    var filteredNotes = [];
+
+    /** @type {PoolItem[]} Массив объектов пула DOM-элементов */
+    var poolItems = [];
+
+    /** @type {HTMLElement | null} Контейнер списка базы */
+    var listContainer = null;
+
+    /** @type {function(): void | null} */
+    var i18nHandler = null;
+
+    /** @type {function(): void | null} */
+    var listsChangedHandler = null;
+
+    /** @type {function(Object): void | null} */
+    var viewChangedHandler = null;
+
+    /** @type {function(Object): void | null} */
+    var editNoteHandler = null;
+
+    /**
+     * Создаёт DOM-элемент карточки статистики.
+     * @param {number | string} value - Значение.
+     * @param {string} label - Подпись.
+     * @returns {HTMLDivElement}
+     */
+    function buildStatCard(value, label) {
+      var card = document.createElement('div');
+      card.className = 'stat';
+      
+      var valueEl = document.createElement('div');
+      valueEl.className = 'stat-v';
+      valueEl.textContent = String(value);
+      card.appendChild(valueEl);
+      
+      var labelEl = document.createElement('div');
+      labelEl.className = 'stat-l';
+      labelEl.textContent = label;
+      card.appendChild(labelEl);
+      
+      return card;
+    }
+
+    /**
+     * Создаёт DOM-структуру пустого состояния (empty state).
+     * @param {string} icon - Символ иконки.
+     * @param {string} title - Заголовок.
+     * @param {string} description - Описание.
+     * @returns {HTMLDivElement}
+     */
+    function buildEmptyState(icon, title, description) {
+      var emptyDiv = document.createElement('div');
+      emptyDiv.className = 'feed-empty';
+      
+      var icEl = document.createElement('div');
+      icEl.className = 'feed-empty-ic';
+      icEl.textContent = icon;
+      emptyDiv.appendChild(icEl);
+      
+      var titleEl = document.createElement('div');
+      titleEl.className = 'feed-empty-t';
+      titleEl.textContent = title;
+      emptyDiv.appendChild(titleEl);
+      
+      var descEl = document.createElement('div');
+      descEl.className = 'feed-empty-d';
+      descEl.textContent = description;
+      emptyDiv.appendChild(descEl);
+      
+      return emptyDiv;
+    }
+
+    /**
+     * Заполняет DOM-элемент пула данными конкретной заметки.
+     * @param {HTMLDivElement} element - Целевой DOM-узел.
+     * @param {Note} note - Данные заметки.
+     * @returns {void}
+     */
+    function fillBaseItem(element, note) {
+      while (element.firstChild) element.removeChild(element.firstChild);
+      element.className = 'bi' + (note.shared ? ' shared' : '');
+      element.setAttribute('data-id', note.id);
+
+      var truncateLength = Config.get('truncateTextLength', 120);
+      var textEl = document.createElement('div');
+      textEl.className = 'bi-t' + (note.text && note.text.length > truncateLength ? ' truncated' : '');
+      textEl.textContent = note.text || '';
+      element.appendChild(textEl);
+
+      var foot = document.createElement('div');
+      foot.className = 'bi-f';
+      
+      var meta = document.createElement('div');
+      meta.className = 'bi-meta';
+      
+      var tagEl = document.createElement('span');
+      tagEl.className = 'bi-tag';
+      tagEl.textContent = note.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
+      meta.appendChild(tagEl);
+      
+      var dateEl = document.createElement('span');
+      dateEl.className = 'bi-date';
+      var lang = I18n.getLang();
+      if (note.updatedAt && note.updatedAt > note.createdAt) {
+        dateEl.textContent = (lang === 'ru' ? 'Ред. ' : 'Edit. ') +
+          Utils.fmtTime(note.updatedAt, lang) + ' ' + Utils.fmtDate(note.updatedAt, lang);
+      } else {
+        dateEl.textContent = Utils.fmtTime(note.createdAt, lang) + ' ' + Utils.fmtDate(note.createdAt, lang);
+      }
+      meta.appendChild(dateEl);
+      
+      foot.appendChild(meta);
+      element.appendChild(foot);
+    }
+
+    /**
+     * Вычисляет видимую область и обновляет содержимое/позицию элементов пула.
+     * @returns {void}
+     */
+    function updateVisibleItems() {
+      if (!listContainer || poolItems.length === 0) return;
+      
+      var scrollTop = listContainer.scrollTop;
+      var startIdx = Math.floor(scrollTop / ROW_SIZE);
+      var maxStart = Math.max(0, filteredNotes.length - POOL_SIZE);
+      if (startIdx > maxStart) startIdx = maxStart;
+
+      for (var i = 0; i < poolItems.length; i++) {
+        var poolItem = poolItems[i];
+        var dataIdx = startIdx + i;
+
+        if (dataIdx >= 0 && dataIdx < filteredNotes.length) {
+          if (poolItem.dataIndex !== dataIdx) {
+            fillBaseItem(poolItem.element, filteredNotes[dataIdx]);
+            poolItem.dataIndex = dataIdx;
+          }
+          poolItem.element.style.transform = 'translateY(' + (dataIdx * ROW_SIZE) + 'px)';
+        } else {
+          if (poolItem.dataIndex !== -1) {
+            while (poolItem.element.firstChild) poolItem.element.removeChild(poolItem.element.firstChild);
+            poolItem.element.className = 'bi';
+            poolItem.element.removeAttribute('data-id');
+            poolItem.dataIndex = -1;
+          }
+          poolItem.element.style.transform = 'translateY(-9999px)';
+        }
+      }
+    }
+
+    /**
+     * Обработчик скролла списка (тролтлится через requestAnimationFrame).
+     * @returns {void}
+     */
+    function onListScroll() {
+      if (scrollRAF) return;
+      scrollRAF = requestAnimationFrame(function() {
+        updateVisibleItems();
+        scrollRAF = null;
+      });
+    }
+
+    /**
+     * Полностью перерисовывает вкладку "База": статистику, фильтры и виртуальный список.
+     * @returns {void}
+     */
+    function renderBase() {
+      listContainer = document.getElementById('base-list');
+      if (!listContainer) return;
+
+      listContainer.removeEventListener('scroll', onListScroll);
+      if (scrollRAF) {
+        cancelAnimationFrame(scrollRAF);
+        scrollRAF = null;
+      }
+
+      var queryInput = document.getElementById('base-q');
+      var sortSelect = document.getElementById('base-sort');
+      var queryValue = queryInput ? queryInput.value.trim().toLowerCase() : '';
+      var sortValue = sortSelect ? sortSelect.value : 'new';
+
+      SearchService.invalidateNotesCache();
+
+      SearchService.getAllNotesCached().then(function(allNotes) {
+        var statsEl = document.getElementById('base-stats');
+        if (statsEl) {
+          while (statsEl.firstChild) statsEl.removeChild(statsEl.firstChild);
+          var sharedCount = 0;
+          for (var i = 0; i < allNotes.length; i++) {
+            if (allNotes[i] && allNotes[i].shared) sharedCount++;
+          }
+          statsEl.appendChild(buildStatCard(allNotes.length, I18n.t('base.stat.total')));
+          statsEl.appendChild(buildStatCard(sharedCount, I18n.t('base.stat.open')));
+          statsEl.appendChild(buildStatCard(allNotes.length - sharedCount, I18n.t('base.stat.priv')));
+        }
+
+        filteredNotes = allNotes.slice();
+        if (queryValue) {
+          filteredNotes = filteredNotes.filter(function(n) {
+            return n.text && n.text.toLowerCase().indexOf(queryValue) >= 0;
+          });
+        }
+        if (sortValue === 'old') {
+          filteredNotes.sort(function(a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+        } else if (sortValue === 'az') {
+          filteredNotes.sort(function(a, b) {
+            return (a.text || '').localeCompare(b.text || '', I18n.getLang() === 'en' ? 'en' : 'ru');
+          });
+        } else {
+          filteredNotes.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+        }
+
+        while (listContainer.firstChild) listContainer.removeChild(listContainer.firstChild);
+
+        if (filteredNotes.length === 0) {
+          var emptyTitle = I18n.t('empty.base.t');
+          var emptyDesc = allNotes.length === 0 ? I18n.t('empty.base.d') : I18n.t('empty.base.empty');
+          listContainer.appendChild(buildEmptyState('▤', emptyTitle, emptyDesc));
+          poolItems = [];
+          return;
+        }
+
+        var spacer = document.createElement('div');
+        spacer.className = 'base-spacer';
+        spacer.style.height = (filteredNotes.length * ROW_SIZE) + 'px';
+        listContainer.appendChild(spacer);
+
+        var itemsContainer = document.createElement('div');
+        itemsContainer.className = 'base-items';
+        listContainer.appendChild(itemsContainer);
+        itemsContainer.style.height = (filteredNotes.length * ROW_SIZE) + 'px';
+
+        poolItems = [];
+        for (var i = 0; i < POOL_SIZE; i++) {
+          var item = document.createElement('div');
+          item.className = 'bi';
+          itemsContainer.appendChild(item);
+          poolItems.push({ element: item, dataIndex: -1 });
+        }
+
+        listContainer.addEventListener('scroll', onListScroll, { passive: true });
+        listContainer.scrollTop = 0;
+        updateVisibleItems();
+      }).catch(function(err) {
+        Toast.show('err', String(err && err.message || err) || 'Base load failed');
+      });
+    }
+
+    /**
+     * Копирует текст в буфер обмена.
+     * @param {string} text - Текст.
+     * @returns {void}
+     */
+    function copyToClipboard(text) {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(
+            function() { Toast.show('ok', I18n.t('toast.copied')); },
+            function() { Toast.show('err', I18n.t('toast.copy.fail')); }
+          );
+        } else {
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.top = '-9999px';
+          document.body.appendChild(ta);
+          ta.select();
+          try {
+            document.execCommand('copy');
+            Toast.show('ok', I18n.t('toast.copied'));
+          } catch (err) {
+            Toast.show('err', I18n.t('toast.copy.fail'));
+          }
+          document.body.removeChild(ta);
+        }
+      } catch (err) {
+        Toast.show('err', I18n.t('toast.copy.fail'));
+      }
+    }
+
+    /**
+     * Открывает полноэкранное модальное окно просмотра/редактирования заметки (NoteView).
+     * @param {string} id - ID заметки.
+     * @returns {void}
+     */
+    function openNoteView(id) {
+      DB.get(id).then(function(record) {
+        if (!record) return;
+        var isEditing = false;
+        var nvOverlay = null;
+
+        if (noteViewEscHandler) {
+          document.removeEventListener('keydown', noteViewEscHandler);
+          noteViewEscHandler = null;
+        }
+
+        /**
+         * Рендерит или обновляет содержимое NoteView в зависимости от флага isEditing.
+         * @returns {void}
+         */
+        function renderNoteView() {
+          if (!nvOverlay) {
+            nvOverlay = document.createElement('div');
+            nvOverlay.className = 'nv on';
+            document.body.appendChild(nvOverlay);
+          }
+          while (nvOverlay.firstChild) nvOverlay.removeChild(nvOverlay.firstChild);
+
+          var dateStr = Utils.fmtDate(record.createdAt, I18n.getLang());
+          var tagLabel = record.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
+
+          if (isEditing) {
+            var body = document.createElement('div');
+            body.className = 'nv-b';
+            
+            var ta = document.createElement('textarea');
+            ta.className = 'nv-ta';
+            ta.id = 'nv-ta';
+            ta.value = record.text || '';
+            body.appendChild(ta);
+            
+            var bottomFooter = document.createElement('div');
+            bottomFooter.className = 'nv-f-bottom';
+            
+            var cancelBtn = document.createElement('button');
+            cancelBtn.className = 'nv-act';
+            cancelBtn.id = 'nv-cancel';
+            cancelBtn.textContent = I18n.t('btn.cancel');
+            cancelBtn.onclick = function() { isEditing = false; renderNoteView(); };
+            
+            var saveBtn = document.createElement('button');
+            saveBtn.className = 'nv-act primary';
+            saveBtn.id = 'nv-save';
+            saveBtn.textContent = I18n.t('btn.save');
+            saveBtn.onclick = function() {
+              var newText = ta.value.trim();
+              if (!newText) { Toast.show('err', I18n.t('toast.empty')); return; }
+              record.text = newText;
+              record.updatedAt = Date.now();
+              AI.embed(newText).then(function(v) {
+                record.vector = v;
+                return DB.put(record);
+              }).then(function() {
+                Toast.show('ok', I18n.t('toast.edit.saved'));
+                isEditing = false;
+                renderNoteView();
+                renderBase();
+                try { Bus.emit('editor:search-request', { force: true }); } catch (_) { /* ignore */ }
+                try { Bus.emit('state:lists-changed'); } catch (_) { /* ignore */ }
+              }).catch(function(err) {
+                Toast.show('err', String(err && err.message || err) || 'Edit failed');
+              });
+            };
+            
+            bottomFooter.appendChild(cancelBtn);
+            bottomFooter.appendChild(saveBtn);
+            nvOverlay.appendChild(body);
+            nvOverlay.appendChild(bottomFooter);
+          } else {
+            var topFooter = document.createElement('div');
+            topFooter.className = 'nv-f';
+            
+            var delBtn = document.createElement('button');
+            delBtn.className = 'nv-act danger';
+            delBtn.id = 'nv-del';
+            delBtn.setAttribute('aria-label', I18n.t('btn.del'));
+            delBtn.textContent = I18n.t('btn.del');
+            delBtn.onclick = function() {
+              if (!confirm(I18n.t('nv.delete.confirm'))) return;
+              DB.del(id).then(function() {
+                Toast.show('ok', I18n.t('toast.deleted'));
+                closeNoteView();
+                renderBase();
+                try { Bus.emit('editor:search-request', { force: true }); } catch (_) { /* ignore */ }
+                try { Bus.emit('state:lists-changed'); } catch (_) { /* ignore */ }
+              }).catch(function(err) {
+                Toast.show('err', String(err && err.message || err) || 'Delete failed');
+              });
+            };
+            
+            var copyBtn = document.createElement('button');
+            copyBtn.className = 'nv-act';
+            copyBtn.id = 'nv-copy';
+            copyBtn.setAttribute('aria-label', I18n.t('btn.copy'));
+            copyBtn.textContent = I18n.t('btn.copy');
+            copyBtn.onclick = function() { copyToClipboard(record.text); };
+            
+            var toggleBtn = document.createElement('button');
+            toggleBtn.className = 'nv-act';
+            toggleBtn.id = 'nv-toggle';
+            toggleBtn.setAttribute('aria-label', record.shared ? I18n.t('btn.toggle.priv') : I18n.t('btn.toggle.pub'));
+            toggleBtn.textContent = record.shared ? I18n.t('btn.toggle.priv') : I18n.t('btn.toggle.pub');
+            toggleBtn.onclick = function() {
+              record.shared = !record.shared;
+              DB.put(record).then(function() {
+                Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
+                renderNoteView();
+                renderBase();
+                try { Bus.emit('editor:search-request', { force: true }); } catch (_) { /* ignore */ }
+                try { Bus.emit('state:lists-changed'); } catch (_) { /* ignore */ }
+              }).catch(function(err) {
+                Toast.show('err', String(err && err.message || err) || 'Toggle failed');
+              });
+            };
+            
+            topFooter.appendChild(delBtn);
+            topFooter.appendChild(copyBtn);
+            topFooter.appendChild(toggleBtn);
+
+            var body = document.createElement('div');
+            body.className = 'nv-b';
+            
+            var infoRow = document.createElement('div');
+            infoRow.className = 'info-row';
+            
+            var tagEl = document.createElement('span');
+            tagEl.className = 'bi-tag';
+            tagEl.textContent = tagLabel;
+            infoRow.appendChild(tagEl);
+            
+            var dateEl = document.createElement('span');
+            dateEl.className = 'note-date';
+            dateEl.textContent = dateStr;
+            infoRow.appendChild(dateEl);
+            
+            body.appendChild(infoRow);
+            
+            var textDiv = document.createElement('div');
+            textDiv.className = 'nv-text';
+            textDiv.textContent = record.text || '';
+            body.appendChild(textDiv);
+
+            var bottomFooter = document.createElement('div');
+            bottomFooter.className = 'nv-f-bottom';
+            
+            var cancelBtn = document.createElement('button');
+            cancelBtn.className = 'nv-act';
+            cancelBtn.id = 'nv-cancel';
+            cancelBtn.setAttribute('aria-label', I18n.t('btn.cancel'));
+            cancelBtn.textContent = I18n.t('btn.cancel');
+            cancelBtn.onclick = function() { closeNoteView(); };
+            
+            var editBtn = document.createElement('button');
+            editBtn.className = 'nv-act primary';
+            editBtn.id = 'nv-edit';
+            editBtn.setAttribute('aria-label', I18n.t('btn.edit'));
+            editBtn.textContent = I18n.t('btn.edit');
+            editBtn.onclick = function() { isEditing = true; renderNoteView(); };
+            
+            bottomFooter.appendChild(cancelBtn);
+            bottomFooter.appendChild(editBtn);
+
+            nvOverlay.appendChild(topFooter);
+            nvOverlay.appendChild(body);
+            nvOverlay.appendChild(bottomFooter);
+          }
+        }
+
+        /**
+         * Закрывает NoteView и удаляет его из DOM с задержкой для анимации.
+         * @returns {void}
+         */
+        function closeNoteView() {
+          if (noteViewEscHandler) {
+            document.removeEventListener('keydown', noteViewEscHandler);
+            noteViewEscHandler = null;
+          }
+          if (nvOverlay) {
+            nvOverlay.classList.remove('on');
+            setTimeout(function() {
+              if (nvOverlay && nvOverlay.parentNode) {
+                try { nvOverlay.parentNode.removeChild(nvOverlay); } catch (_) { /* ignore */ }
+              }
+              nvOverlay = null;
+            }, Config.get('noteViewAnimationDelay', 200));
+          }
+        }
+
+        noteViewEscHandler = function(e) {
+          if (e.key === 'Escape') closeNoteView();
+        };
+        document.addEventListener('keydown', noteViewEscHandler);
+        renderNoteView();
+      }).catch(function(err) {
+        Toast.show('err', String(err && err.message || err) || 'Load note failed');
+      });
+    }
+
+    /**
+     * Экспортирует все заметки в JSON-файл и инициирует скачивание.
+     * @returns {void}
+     */
+    function exportData() {
+      DB.all().then(function(notes) {
+        if (!notes || notes.length === 0) { Toast.show('err', '0'); return; }
+        var capsule = { app: 'noomium', format: 'v1', version: 1, exportedAt: Date.now(), notes: notes };
+        var blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
+        var url = URL.createObjectURL(blob);
+        var anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = 'noomium-' + new Date().toISOString().slice(0, 10) + '.json';
+        document.body.appendChild(anchor);
+        anchor.click();
+        URL.revokeObjectURL(url);
+        anchor.remove();
+        Toast.show('ok', '✓ ' + notes.length);
+      }).catch(function(err) {
+        Toast.show('err', String(err && err.message || err) || 'Export failed');
+      });
+    }
+
+    /**
+     * Открывает диалог выбора файла, парсит JSON и импортирует заметки в базу.
+     * @returns {void}
+     */
+    function importData() {
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/json,.json';
+      input.onchange = function() {
+        var file = input.files && input.files[0];
+        if (!file) return;
+        var reader = new FileReader();
+        reader.onload = function() {
+          try {
+            var data = JSON.parse(String(reader.result || '{}'));
+            var notes = Array.isArray(data) ? data : (data.notes || []);
+            if (!Array.isArray(notes)) throw new Error('bad format');
+            var clean = [];
+            for (var i = 0; i < notes.length; i++) {
+              var note = notes[i];
+              if (!note || typeof note.text !== 'string' || !note.text.trim()) continue;
+              clean.push({
+                id: note.id || ('i' + Math.random().toString(36).slice(2, 10)),
+                text: note.text.trim(),
+                vector: Array.isArray(note.vector) ? note.vector : null,
+                shared: !!note.shared,
+                createdAt: typeof note.createdAt === 'number' ? note.createdAt : Date.now()
+              });
+            }
+            DB.bulkPut(clean).then(function() {
+              Toast.show('ok', '✓ ' + clean.length);
+              if (StateManager.getState().view === 'base') renderBase();
+              try { Bus.emit('editor:search-request', { force: true }); } catch (_) { /* ignore */ }
+              try { Bus.emit('state:lists-changed'); } catch (_) { /* ignore */ }
+            }).catch(function(err) {
+              Toast.show('err', String(err && err.message || err) || 'Import failed');
+            });
+          } catch (err) {
+            Toast.show('err', String(err && err.message || err) || 'Import parse failed');
+          }
+        };
+        reader.readAsText(file);
+      };
+      input.click();
+    }
+
+    /**
+     * Привязывает события к элементам вкладки "База" (клики по строкам, поиск, сортировка).
+     * @returns {void}
+     */
+    function bindDOMEvents() {
+      var baseContainer = document.getElementById('ws-base');
+      if (baseContainer) {
+        baseContainer.addEventListener('click', function(e) {
+          var bi = e.target.closest('.bi');
+          if (bi) {
+            var id = bi.getAttribute('data-id');
+            if (id) openNoteView(id);
+          }
+        });
+      }
+      var baseSearchInput = document.getElementById('base-q');
+      if (baseSearchInput) {
+        baseSearchInput.addEventListener('input', function() {
+          renderBase();
+        });
+      }
+      var baseSortSelect = document.getElementById('base-sort');
+      if (baseSortSelect) baseSortSelect.onchange = renderBase;
+    }
+
+    /**
+     * Инициализирует компонент: привязывает события, подписывается на шину.
+     * @returns {void}
+     */
+    function init() {
+      bindDOMEvents();
+
+      i18nHandler = function() {
+        var baseSearch = document.getElementById('base-q');
+        if (baseSearch) baseSearch.placeholder = I18n.t('base.search');
+        var sort = document.getElementById('base-sort');
+        if (sort) {
+          var opts = sort.querySelectorAll('option');
+          if (opts[0]) opts[0].textContent = I18n.t('base.sort.new');
+          if (opts[1]) opts[1].textContent = I18n.t('base.sort.old');
+          if (opts[2]) opts[2].textContent = I18n.t('base.sort.az');
+        }
+        if (StateManager.getState().view === 'base') renderBase();
+      };
+      Bus.on('i18n:change', i18nHandler);
+
+      listsChangedHandler = function() {
+        if (StateManager.getState().view === 'base') renderBase();
+      };
+      Bus.on('state:lists-changed', listsChangedHandler);
+
+      viewChangedHandler = function(payload) {
+        if (payload && payload.view === 'base') renderBase();
+      };
+      Bus.on('view:changed', viewChangedHandler);
+
+      editNoteHandler = function(payload) {
+        if (payload && payload.id) openNoteView(payload.id);
+      };
+      Bus.on('editor:edit-note', editNoteHandler);
+
+      if (StateManager.getState().view === 'base') renderBase();
+    }
+
+    /**
+     * Уничтожает компонент: очищает таймеры, снимает обработчики, отписывается от шины.
+     * @returns {void}
+     */
+    function destroy() {
+      if (noteViewEscHandler) {
+        document.removeEventListener('keydown', noteViewEscHandler);
+        noteViewEscHandler = null;
+      }
+      if (scrollRAF) {
+        cancelAnimationFrame(scrollRAF);
+        scrollRAF = null;
+      }
+      if (listContainer) {
+        listContainer.removeEventListener('scroll', onListScroll);
+        listContainer = null;
+      }
+      poolItems = [];
+      filteredNotes = [];
+      
+      if (i18nHandler) {
+        try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
+        i18nHandler = null;
+      }
+      if (listsChangedHandler) {
+        try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) { /* ignore */ }
+        listsChangedHandler = null;
+      }
+      if (viewChangedHandler) {
+        try { Bus.off('view:changed', viewChangedHandler); } catch (_) { /* ignore */ }
+        viewChangedHandler = null;
+      }
+      if (editNoteHandler) {
+        try { Bus.off('editor:edit-note', editNoteHandler); } catch (_) { /* ignore */ }
+        editNoteHandler = null;
+      }
+    }
+
+    return {
+      init: init,
+      destroy: destroy,
+      renderBase: renderBase,
+      exportData: exportData,
+      importData: importData
+    };
   }, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'AI', 'Toast', 'SearchService']);
 <!-- NOOMIUM_MODULE_END BaseViewComponent -->
 
