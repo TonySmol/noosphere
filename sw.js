@@ -11,6 +11,7 @@
  * Извлекается из query-параметра `v` URL-адреса регистрации SW.
  * @type {string}
  */
+const APP_VERSION = '1.3.9';
 const CACHE_NAME = 'noomium-v' + new URL(self.location).searchParams.get('v');
 
 /**
