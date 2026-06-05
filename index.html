@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.4">
+<meta name="app-version" content="1.3.5">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -4404,6 +4404,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
 <!-- NOOMIUM_MODULE_START OfflineBarComponent -->
   /**
+   * @typedef {Object} NetStatusPayload
+   * @description Payload события net:status.
+   * @property {'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'failed'} status - Статус сети.
+   */
+
+  /**
    * @typedef {Object} NetOutboxPayload
    * @description Payload события net:outbox.
    * @property {number} count - Количество событий в очереди.
@@ -4421,7 +4427,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     var i18nHandler = null;
 
     /**
-     * Обновляет видимость и текст офлайн-бара.
+     * Обновляет видимость и текст офлайн-бара с учётом состояния сети и outbox.
+     * Логика отображения:
+     * - disconnected: плашка скрыта (нет соединения — нет смысла показывать очередь).
+     * - connected + outbox > 0: показывается как «Офлайн-очередь» с количеством.
+     * - connected + outbox = 0: плашка скрыта.
+     * - reconnecting/failed: показывается как «Нет сети», с количеством очереди если есть.
      * DOM-элементы берутся при каждом вызове для корректной работы после refreshUI.
      * @returns {void}
      */
@@ -4435,11 +4446,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       var status = Net ? Net.getStatus() : 'disconnected';
       var outboxLength = Net ? Net.getOutboxLength() : 0;
 
+      // Если disconnected – полностью скрываем плашку
       if (status === 'disconnected') {
         bar.style.display = 'none';
         return;
       }
 
+      // Если connected – показываем только при наличии очереди
       if (status === 'connected') {
         if (outboxLength > 0) {
           bar.style.display = 'block';
@@ -4452,8 +4465,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return;
       }
 
+      // Остальные статусы (connecting, reconnecting, failed) – нет сети
       bar.style.display = 'block';
-      textEl.textContent = I18n.t('offline.bar');
+      textEl.textContent = I18n.t('offline.disconnected');
       if (outboxLength > 0) {
         queueEl.style.display = 'inline';
         queueEl.textContent = '(' + I18n.t('offline.queue', { count: outboxLength }) + ')';
@@ -6868,7 +6882,8 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     'help.keys': 'Горячие клавиши', 'help.k1': 'Ctrl+Enter — отправить',
     'help.k2': '/ — фокус на поле ввода',
     'help.gestures': 'Свайпы влево/вправо по карточкам. Переключатель «Мир/Личное» выбирает, куда послать мысль.',
-    'offline.bar': 'Нет сети',
+    'offline.bar': 'Офлайн-очередь',
+    'offline.disconnected': 'Нет сети',
     'offline.queue': 'Ожидают: {count}'
   });
 
@@ -6925,7 +6940,8 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     'help.philosophy': "Others' thoughts cannot be saved. Read, understand, write your own.",
     'help.keys': 'Hotkeys', 'help.k1': 'Ctrl+Enter — send', 'help.k2': '/ — focus editor',
     'help.gestures': 'Swipe cards left/right. Toggle World/Private chooses destination.',
-    'offline.bar': 'Offline',
+    'offline.bar': 'Offline queue',
+    'offline.disconnected': 'Offline',
     'offline.queue': 'Pending: {count}'
   });
 
