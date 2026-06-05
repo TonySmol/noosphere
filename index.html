@@ -802,11 +802,149 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END Store -->
 
 <!-- NOOMIUM_MODULE_START I18n -->
-  DI.register('I18n', function() {
-    return {};
+  /**
+   * @typedef {Object<string, string>} I18nDict
+   * @description Словарь переводов: ключ -> переведённая строка.
+   */
+
+  DI.register('I18n', function(store, bus) {
+
+    /**
+     * Ключ для сохранения выбранного языка в Store.
+     * @type {string}
+     */
+    var KEY = 'lang';
+
+    /**
+     * Реестр словарей по языкам.
+     * @type {Object<string, I18nDict>}
+     */
+    var dicts = Object.create(null);
+
+    /**
+     * Текущий активный язык.
+     * @type {string}
+     */
+    var current = 'ru';
+
+    /**
+     * Список подписчиков на смену языка.
+     * @type {Array<function(string): void>}
+     */
+    var listeners = [];
+
+    /**
+     * Подставляет параметры в строку перевода по шаблону {key}.
+     * @param {string} str - Строка с шаблонами.
+     * @param {Object<string, *>} [params] - Объект параметров для подстановки.
+     * @returns {string} Результирующая строка.
+     */
+    function format(str, params) {
+      var s = String(str == null ? '' : str);
+      if (!params) return s;
+      return s.replace(/\{(\w+)\}/g, function(match, k) {
+        return (params[k] !== undefined && params[k] !== null) ? String(params[k]) : match;
+      });
+    }
+
+    /**
+     * Устанавливает активный язык, сохраняет его в Store,
+     * уведомляет подписчиков и публикует событие i18n:change.
+     * @param {string} lang - Код языка ('ru' | 'en').
+     * @returns {void}
+     */
+    function setLang(lang) {
+      current = String(lang || 'ru');
+      try {
+        if (store) store.set(KEY, current);
+      } catch (_) {
+        /* ignore */
+      }
+      for (var i = 0; i < listeners.length; i++) {
+        try {
+          listeners[i](current);
+        } catch (_) {
+          /* ignore */
+        }
+      }
+      if (bus && bus.emit) {
+        try {
+          bus.emit('i18n:change', { lang: current });
+        } catch (_) {
+          /* ignore */
+        }
+      }
+    }
+
+    /**
+     * Возвращает код текущего активного языка.
+     * @returns {string}
+     */
+    function getLang() {
+      return current;
+    }
+
+    /**
+     * Добавляет или расширяет словарь для указанного языка.
+     * @param {string} lang - Код языка ('ru' | 'en').
+     * @param {I18nDict} dict - Словарь переводов.
+     * @returns {void}
+     */
+    function addDict(lang, dict) {
+      dicts[String(lang)] = Object.assign(dicts[String(lang)] || {}, dict || {});
+    }
+
+    /**
+     * Возвращает перевод по ключу с подстановкой параметров.
+     * Если перевода нет в текущем языке, ищет в английском.
+     * Если и там нет — возвращает fallback или сам ключ.
+     * @param {string} key - Ключ перевода.
+     * @param {Object<string, *>} [params] - Параметры для подстановки.
+     * @param {string} [fallback] - Значение по умолчанию, если ключ не найден.
+     * @returns {string} Переведённая строка.
+     */
+    function t(key, params, fallback) {
+      var d = dicts[current] || {};
+      var val = Object.prototype.hasOwnProperty.call(d, key) ? d[key] : undefined;
+      if (val === undefined) {
+        var en = dicts['en'] || {};
+        val = Object.prototype.hasOwnProperty.call(en, key) ? en[key] : undefined;
+      }
+      var out = val !== undefined ? val : (fallback !== undefined ? fallback : String(key));
+      return format(out, params);
+    }
+
+    /**
+     * Регистрирует подписчика на смену языка.
+     * @param {function(string): void} fn - Обработчик, принимающий новый код языка.
+     * @returns {void}
+     */
+    function onChange(fn) {
+      if (typeof fn === 'function') listeners.push(fn);
+    }
+
+    try {
+      var saved = store ? store.get(KEY, null) : null;
+      if (saved && (saved === 'ru' || saved === 'en')) {
+        current = saved;
+      } else {
+        var pref = (navigator.language || 'ru').toLowerCase();
+        current = pref.indexOf('ru') === 0 ? 'ru' : 'en';
+      }
+    } catch (_) {
+      /* ignore */
+    }
+
+    return {
+      t: t,
+      setLang: setLang,
+      getLang: getLang,
+      addDict: addDict,
+      onChange: onChange
+    };
   }, ['Store', 'Bus']);
 <!-- NOOMIUM_MODULE_END I18n -->
-
+  
 <!-- NOOMIUM_MODULE_START Config -->
   DI.register('Config', function() {
     return {};
