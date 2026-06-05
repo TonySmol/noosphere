@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.41">
+<meta name="app-version" content="1.2.42">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2673,20 +2673,45 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
 
 <!-- NOOMIUM_MODULE_START StreamViewComponent -->
 DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent) {
-  var POOL_SIZE = 7;
+  var PAGE_SIZE = 10;
+
   var uiState = {
-    activeIdx: { local: 0, world: 0, seren: 0 },
-    poolItems: [],
-    carouselEl: null,
-    scrollRAF: null,
-    lastCenterIndex: -1
+    currentPage: 0,
+    wrapEl: null,
+    stylesInjected: false
   };
+
   var cachedQuery = null;
   var cachedRegex = null;
 
   var i18nHandler = null;
   var listsChangedHandler = null;
+  var wrapClickHandler = null;
 
+  /**
+   * Инъекция CSS для пагинации.
+   * Выполняется один раз при первом init(), чтобы не трогать глобальный <style>.
+   */
+  function injectStyles() {
+    if (uiState.stylesInjected) return;
+    try {
+      var style = document.createElement('style');
+      style.textContent =
+        '.carousel-dots-list{display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:center}' +
+        '.page-arrow{width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;' +
+        'background:var(--surface-2);border:1px solid var(--line);border-radius:50%;color:var(--text-2);' +
+        'cursor:pointer;font-size:16px;transition:background .15s var(--ease);flex-shrink:0;padding:0;' +
+        'font-family:inherit;outline:none}' +
+        '.page-arrow:active:not([disabled]){background:var(--surface-3)}' +
+        '.page-arrow[disabled]{opacity:0.3;cursor:default}';
+      document.head.appendChild(style);
+      uiState.stylesInjected = true;
+    } catch (e) { /* ignore injection errors */ }
+  }
+
+  /**
+   * Подсветка совпадений в тексте (без изменений, бизнес-логика).
+   */
   function highlightText(text, query) {
     var fragment = document.createDocumentFragment();
     if (!text) return fragment;
@@ -2724,6 +2749,9 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
 
   function isOwnItem(item) { return !item.peer; }
 
+  /**
+   * Построение DOM-элемента карточки (без изменений).
+   */
   function renderItemHTML(item) {
     if (!item) return document.createElement('div');
     var state = StateManager.getState();
@@ -2803,106 +2831,93 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     return card;
   }
 
-  function updateCarouselDots(idx, total) {
-    var dots = document.querySelectorAll('#carousel-dots .carousel-dot');
-    for (var i = 0; i < dots.length; i++) {
-      dots[i].classList.toggle('active', i === idx);
-    }
-    var counter = document.getElementById('carousel-counter');
-    if (counter) counter.textContent = (idx + 1) + ' / ' + total;
+  function getPageCount(list) {
+    if (!list || list.length === 0) return 0;
+    return Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   }
 
-  function renderDots(total) {
-    var dotsWrap = document.getElementById('carousel-dots');
-    if (!dotsWrap) return;
-    while (dotsWrap.firstChild) dotsWrap.removeChild(dotsWrap.firstChild);
+  function getCurrentPageItems(list) {
+    if (!list || list.length === 0) return [];
+    var start = uiState.currentPage * PAGE_SIZE;
+    var end = start + PAGE_SIZE;
+    return list.slice(start, end);
+  }
 
-    for (var j = 0; j < total; j++) {
+  /**
+   * Переход на указанную страницу с защитой от выхода за границы.
+   */
+  function goToPage(page) {
+    var state = StateManager.getState();
+    var list = state.lists[state.seg];
+    var pageCount = getPageCount(list);
+    if (pageCount === 0) return;
+    var newPage = Math.max(0, Math.min(pageCount - 1, page));
+    if (newPage === uiState.currentPage) return;
+    uiState.currentPage = newPage;
+    renderCarousel();
+  }
+
+  /**
+   * Рендер блока пагинации: стрелки, точки, счётчик.
+   */
+  function renderPagination(pageCount, currentPage, container) {
+    while (container.firstChild) container.removeChild(container.firstChild);
+    if (pageCount === 0) return;
+
+    var prevBtn = document.createElement('button');
+    prevBtn.className = 'page-arrow';
+    prevBtn.setAttribute('data-dir', 'prev');
+    prevBtn.setAttribute('aria-label', 'Previous page');
+    prevBtn.textContent = '◀';
+    if (currentPage === 0) prevBtn.disabled = true;
+    container.appendChild(prevBtn);
+
+    var dotsList = document.createElement('div');
+    dotsList.className = 'carousel-dots-list';
+    for (var j = 0; j < pageCount; j++) {
       var dot = document.createElement('span');
-      dot.className = 'carousel-dot' + (j === 0 ? ' active' : '');
+      dot.className = 'carousel-dot' + (j === currentPage ? ' active' : '');
       dot.setAttribute('data-i', String(j));
-      dotsWrap.appendChild(dot);
+      dotsList.appendChild(dot);
     }
+    container.appendChild(dotsList);
+
     var counter = document.createElement('span');
     counter.className = 'carousel-counter';
     counter.id = 'carousel-counter';
-    counter.textContent = total > 0 ? '1 / ' + total : '0 / 0';
-    dotsWrap.appendChild(counter);
+    counter.textContent = (currentPage + 1) + ' / ' + pageCount;
+    container.appendChild(counter);
+
+    var nextBtn = document.createElement('button');
+    nextBtn.className = 'page-arrow';
+    nextBtn.setAttribute('data-dir', 'next');
+    nextBtn.setAttribute('aria-label', 'Next page');
+    nextBtn.textContent = '▶';
+    if (currentPage >= pageCount - 1) nextBtn.disabled = true;
+    container.appendChild(nextBtn);
   }
 
-  function getItemWidth() {
-    if (!uiState.carouselEl) return 0;
-    return uiState.carouselEl.clientWidth;
-  }
-
-  function getCenterIndex() {
-    if (!uiState.carouselEl) return 0;
-    var itemWidth = getItemWidth();
-    if (itemWidth <= 0) return 0;
-    return Math.round(uiState.carouselEl.scrollLeft / itemWidth);
-  }
-
-  function renderVisibleItems() {
-    var state = StateManager.getState();
-    var list = state.lists[state.seg];
-    if (!list || list.length === 0) {
-      for (var i = 0; i < uiState.poolItems.length; i++) {
-        var p = uiState.poolItems[i];
-        if (p.dataIndex !== -1) {
-          while (p.element.firstChild) p.element.removeChild(p.element.firstChild);
-          p.dataIndex = -1;
-        }
-      }
-      return;
-    }
-
-    var centerIndex = getCenterIndex();
-    var halfPool = Math.floor(POOL_SIZE / 2);
-    var startIdx = Math.max(0, centerIndex - halfPool);
-    var endIdx = Math.min(list.length - 1, startIdx + POOL_SIZE - 1);
-    startIdx = Math.max(0, endIdx - POOL_SIZE + 1);
-
-    for (var i = 0; i < uiState.poolItems.length; i++) {
-      var poolItem = uiState.poolItems[i];
-      var dataIndex = startIdx + i;
-
-      if (dataIndex > endIdx || dataIndex < 0 || dataIndex >= list.length) {
-        if (poolItem.dataIndex !== -1) {
-          while (poolItem.element.firstChild) poolItem.element.removeChild(poolItem.element.firstChild);
-          poolItem.dataIndex = -1;
-        }
-        continue;
-      }
-
-      if (poolItem.dataIndex !== dataIndex) {
-        while (poolItem.element.firstChild) poolItem.element.removeChild(poolItem.element.firstChild);
-        poolItem.element.appendChild(renderItemHTML(list[dataIndex]));
-        poolItem.dataIndex = dataIndex;
-      }
-    }
-
-    if (centerIndex !== uiState.lastCenterIndex) {
-      uiState.lastCenterIndex = centerIndex;
-      uiState.activeIdx[state.seg] = centerIndex;
-      updateCarouselDots(centerIndex, list.length);
-    }
-  }
-
-  function onCarouselScroll() {
-    if (uiState.scrollRAF) return;
-    uiState.scrollRAF = requestAnimationFrame(function() {
-      renderVisibleItems();
-      uiState.scrollRAF = null;
-    });
-  }
-
-  function initCarousel() {
-    var wrap = document.getElementById('carousel-wrap');
+  /**
+   * Полный рендер карусели и пагинации для текущей страницы.
+   * Автоматически корректирует currentPage при уменьшении списка.
+   */
+  function renderCarousel() {
+    var wrap = uiState.wrapEl || document.getElementById('carousel-wrap');
     if (!wrap) return;
+    uiState.wrapEl = wrap;
+
     while (wrap.firstChild) wrap.removeChild(wrap.firstChild);
 
     var state = StateManager.getState();
     var list = state.lists[state.seg];
+    var pageCount = getPageCount(list);
+
+    // Корректировка currentPage, если список стал короче
+    if (pageCount === 0) {
+      uiState.currentPage = 0;
+    } else if (uiState.currentPage >= pageCount) {
+      uiState.currentPage = pageCount - 1;
+    }
 
     if (!list || list.length === 0) {
       var emptyMessages = {
@@ -2926,8 +2941,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       emptyD.textContent = msg.d;
       emptyDiv.appendChild(emptyD);
       wrap.appendChild(emptyDiv);
-      uiState.carouselEl = null;
-      uiState.poolItems = [];
       return;
     }
 
@@ -2935,15 +2948,13 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     carousel.className = 'carousel';
     carousel.id = 'carousel';
     carousel.setAttribute('tabindex', '0');
-    uiState.carouselEl = carousel;
 
-    uiState.poolItems = [];
-    for (var i = 0; i < POOL_SIZE; i++) {
+    var pageItems = getCurrentPageItems(list);
+    for (var i = 0; i < pageItems.length; i++) {
       var item = document.createElement('div');
       item.className = 'carousel-item';
-      item.setAttribute('data-idx', String(i));
+      item.appendChild(renderItemHTML(pageItems[i]));
       carousel.appendChild(item);
-      uiState.poolItems.push({ element: item, dataIndex: -1 });
     }
     wrap.appendChild(carousel);
 
@@ -2951,43 +2962,8 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     dotsWrap.className = 'carousel-dots';
     dotsWrap.id = 'carousel-dots';
     wrap.appendChild(dotsWrap);
-    renderDots(list.length);
 
-    carousel.addEventListener('scroll', onCarouselScroll, { passive: true });
-
-    carousel.addEventListener('keydown', function(e) {
-      var currentState = StateManager.getState();
-      var currentList = currentState.lists[currentState.seg];
-      if (!currentList || currentList.length === 0) return;
-
-      if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        var nextIdx = Math.min(getCenterIndex() + 1, currentList.length - 1);
-        scrollToIndex(nextIdx);
-      } else if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        var prevIdx = Math.max(getCenterIndex() - 1, 0);
-        scrollToIndex(prevIdx);
-      }
-    });
-
-    carousel.addEventListener('click', function(e) {
-      var el = e.target.closest('[data-act]');
-      if (el) handleItemAction(el.getAttribute('data-act'), el);
-    });
-
-    uiState.lastCenterIndex = -1;
-    carousel.scrollLeft = 0;
-    renderVisibleItems();
-  }
-
-  function scrollToIndex(idx) {
-    if (!uiState.carouselEl) return;
-    var itemWidth = getItemWidth();
-    uiState.carouselEl.scrollTo({
-      left: idx * itemWidth,
-      behavior: 'smooth'
-    });
+    renderPagination(pageCount, uiState.currentPage, dotsWrap);
   }
 
   function updateCounts() {
@@ -3005,7 +2981,8 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     });
     cachedQuery = null;
     cachedRegex = null;
-    initCarousel();
+    uiState.currentPage = 0;
+    renderCarousel();
   }
 
   function copyToClipboard(text) {
@@ -3044,7 +3021,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     var state = StateManager.getState();
 
     if (action === 'edit') {
-      // Слабая связность: эмитим событие, которое слушает BaseViewComponent
       try { Bus.emit('editor:edit-note', { id: id }); } catch (_) {}
       return;
     }
@@ -3063,14 +3039,9 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         var newLists = Object.assign({}, currentState.lists);
         newLists[currentState.seg] = newList;
         StateManager.setState({ lists: newLists });
-        if (uiState.activeIdx[currentState.seg] >= newList.length) {
-          uiState.activeIdx[currentState.seg] = Math.max(0, newList.length - 1);
-        }
         cachedQuery = null;
         cachedRegex = null;
-        initCarousel();
-        // Слабая связность: запрашиваем перестройку списков через событие
-        // App.Events → executeSearch → SearchService.search → state:lists-changed
+        renderCarousel();
         try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
       }).catch(function(err) {
         Toast.show('err', String(err && err.message || err) || 'Delete failed');
@@ -3083,13 +3054,38 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         record.shared = !record.shared;
         return DB.put(record).then(function() {
           Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
-          // Слабая связность: запрашиваем перестройку списков через событие
           try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
         });
       }).catch(function(err) {
         Toast.show('err', String(err && err.message || err) || 'Toggle failed');
       });
       return;
+    }
+  }
+
+  /**
+   * Единый делегированный обработчик кликов на #carousel-wrap.
+   * Обрабатывает: стрелки пагинации, точки, действия карточек.
+   */
+  function onWrapClick(e) {
+    var arrow = e.target.closest('.page-arrow');
+    if (arrow && !arrow.disabled) {
+      var dir = arrow.getAttribute('data-dir');
+      if (dir === 'prev') goToPage(uiState.currentPage - 1);
+      else if (dir === 'next') goToPage(uiState.currentPage + 1);
+      return;
+    }
+
+    var dot = e.target.closest('.carousel-dot');
+    if (dot) {
+      var pageIdx = parseInt(dot.getAttribute('data-i'), 10);
+      if (!isNaN(pageIdx)) goToPage(pageIdx);
+      return;
+    }
+
+    var actEl = e.target.closest('[data-act]');
+    if (actEl) {
+      handleItemAction(actEl.getAttribute('data-act'), actEl);
     }
   }
 
@@ -3101,6 +3097,13 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
 
   function init() {
     bindDOMEvents();
+    injectStyles();
+
+    uiState.wrapEl = document.getElementById('carousel-wrap');
+    if (uiState.wrapEl) {
+      wrapClickHandler = onWrapClick;
+      uiState.wrapEl.addEventListener('click', wrapClickHandler);
+    }
 
     var state = StateManager.getState();
     document.querySelectorAll('.seg-b').forEach(function(b) {
@@ -3108,7 +3111,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     });
 
     i18nHandler = function() {
-      var s = StateManager.getState();
       document.querySelectorAll('.seg-b').forEach(function(b) {
         var lbl = b.querySelector('.lbl');
         var k = b.getAttribute('data-k');
@@ -3119,7 +3121,8 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       updateCounts();
       cachedQuery = null;
       cachedRegex = null;
-      initCarousel();
+      uiState.currentPage = 0;
+      renderCarousel();
     };
     Bus.on('i18n:change', i18nHandler);
 
@@ -3127,26 +3130,30 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       updateCounts();
       cachedQuery = null;
       cachedRegex = null;
-      initCarousel();
+      uiState.currentPage = 0;
+      renderCarousel();
     };
     Bus.on('state:lists-changed', listsChangedHandler);
 
     updateCounts();
-    initCarousel();
+    renderCarousel();
   }
 
   function destroy() {
-    if (uiState.scrollRAF) {
-      cancelAnimationFrame(uiState.scrollRAF);
-      uiState.scrollRAF = null;
+    if (uiState.wrapEl && wrapClickHandler) {
+      try { uiState.wrapEl.removeEventListener('click', wrapClickHandler); } catch (_) {}
     }
-    if (uiState.carouselEl) {
-      uiState.carouselEl.removeEventListener('scroll', onCarouselScroll);
-      uiState.carouselEl = null;
+    wrapClickHandler = null;
+    uiState.wrapEl = null;
+
+    if (i18nHandler) {
+      try { Bus.off('i18n:change', i18nHandler); } catch (_) {}
+      i18nHandler = null;
     }
-    uiState.poolItems = [];
-    if (i18nHandler) { try { Bus.off('i18n:change', i18nHandler); } catch (_) {} i18nHandler = null; }
-    if (listsChangedHandler) { try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) {} listsChangedHandler = null; }
+    if (listsChangedHandler) {
+      try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) {}
+      listsChangedHandler = null;
+    }
   }
 
   return { init: init, destroy: destroy };
