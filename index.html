@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.5">
+<meta name="app-version" content="1.3.6">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1021,7 +1021,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       relays: ['wss://offchain.pub', 'wss://relay.nostr.info', 'wss://nostr.mom'],
       kQuery: 21000,
       kAnswer: 21001,
-      model: 'Xenova/multilingual-e5-small',
+      model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
       dim: 384,
       debounce: 800,
       peerTTL: 60000,
@@ -1129,7 +1129,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Store', 'Logger']);
 <!-- NOOMIUM_MODULE_END Config -->
-
+  
 <!-- NOOMIUM_MODULE_START DB -->
   /**
    * @typedef {Object} IDBMockRequest
@@ -1739,7 +1739,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           }
         } else if (msg.type === 'ready') {
           mode = 'model';
-          if (log) log.info('AI loaded in Worker: ' + cfg.get('model', 'Xenova/multilingual-e5-small'));
+          if (log) log.info('AI loaded in Worker: ' + cfg.get('model', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2'));
           if (bus && bus.emit) {
             try { bus.emit('ai:status', { mode: 'model' }); } catch (_) { /* ignore */ }
           }
@@ -1828,7 +1828,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
       worker.postMessage({
         type: 'load',
-        modelName: cfg.get('model', 'Xenova/multilingual-e5-small'),
+        modelName: cfg.get('model', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2'),
         options: {}
       });
 
@@ -2029,7 +2029,25 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       },
 
       /**
-       * Вычисляет косинусное сходство между двумя векторами.
+       * Вычисляет косинусную близость (dot product) между двумя нормализованными векторами.
+       * В отличие от `cosine`, не обнуляет малые значения и использует строгую проверку типов.
+       * @param {Vector} a - Первый вектор.
+       * @param {Vector} b - Второй вектор.
+       * @returns {number} Значение близости (или 0 при невалидных данных).
+       */
+      cosineSimilarity: function(a, b) {
+        if (!Array.isArray(a) || !Array.isArray(b) || a.length === 0 || a.length !== b.length) {
+          return 0;
+        }
+        var sum = 0;
+        for (var i = 0; i < a.length; i++) {
+          sum += a[i] * b[i];
+        }
+        return sum;
+      },
+
+      /**
+       * Вычисляет косинусное сходство между двумя векторами (Legacy).
        * @param {Vector} a - Первый вектор.
        * @param {Vector} b - Второй вектор.
        * @returns {number} Значение сходства от -1 до 1 (или 0 при ошибке/нулевых векторах).
