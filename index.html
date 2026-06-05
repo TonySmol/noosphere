@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.3">
+<meta name="app-version" content="1.3.4">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1470,6 +1470,16 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
    * @property {number} timer - ID таймаута для принудительного завершения.
    */
 
+  /**
+   * @typedef {Object} BatchCallback
+   * @description Внутренняя структура для отслеживания batch-запросов косинусного сходства.
+   * @property {function(Array<{id: string, score: number}>): void} resolve - Разрешение Promise.
+   * @property {function(Error): void} reject - Отклонение Promise.
+   * @property {number} timer - ID таймаута.
+   * @property {Vector} queryVector - Вектор запроса (для fallback).
+   * @property {Array<{id: string, vector: Vector}>} items - Массив элементов (для fallback).
+   */
+
   DI.register('AI', function(cfg, log, bus) {
 
     /**
@@ -1500,7 +1510,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       '}',
       '',
       'self.onmessage = async function(e) {',
-      '  const msg = e.data;',
+      '  var msg = e.data;',
       '  if (msg.type === "load") {',
       '    try {',
       '      await loadModel(msg.modelName, msg.options);',
@@ -1515,9 +1525,30 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       '  }',
       '  if (msg.type === "embed") {',
       '    try {',
-      '      const output = await extractor(msg.text, { pooling: "mean", normalize: true });',
-      '      const vec = Array.from(output.data);',
+      '      var output = await extractor(msg.text, { pooling: "mean", normalize: true });',
+      '      var vec = Array.from(output.data);',
       '      self.postMessage({ type: "result", id: msg.id, vector: vec });',
+      '    } catch (err) {',
+      '      self.postMessage({ type: "error", id: msg.id, message: err.message || String(err) });',
+      '    }',
+      '  }',
+      '  if (msg.type === "cosineBatch") {',
+      '    try {',
+      '      var scores = [];',
+      '      var qv = msg.queryVector;',
+      '      var vectors = msg.vectors;',
+      '      for (var i = 0; i < vectors.length; i++) {',
+      '        var item = vectors[i];',
+      '        var v = item.vector;',
+      '        var sum = 0;',
+      '        var len = Math.min(qv.length, v.length);',
+      '        for (var j = 0; j < len; j++) {',
+      '          sum += qv[j] * v[j];',
+      '        }',
+      '        var score = Math.abs(sum) < 1e-8 ? 0 : sum;',
+      '        scores.push({ id: item.id, score: score });',
+      '      }',
+      '      self.postMessage({ type: "cosineBatchResult", id: msg.id, scores: scores });',
       '    } catch (err) {',
       '      self.postMessage({ type: "error", id: msg.id, message: err.message || String(err) });',
       '    }',
@@ -1555,6 +1586,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /** @type {Map<number, EmbedCallback>} */
     var embedCallbacks = new Map();
 
+    /** @type {Map<number, BatchCallback>} */
+    var batchCallbacks = new Map();
+
     /** @type {number} */
     var nextId = 0;
 
@@ -1591,10 +1625,47 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
+     * Безопасно добавляет вектор в LRU-кэш, удаляя самый старый элемент при переполнении.
+     * @param {string} text - Ключ кэша (исходный текст).
+     * @param {Vector} vector - Вектор для сохранения.
+     * @returns {void}
+     */
+    function cacheSet(text, vector) {
+      if (cache.size >= cacheLimit) {
+        var oldestKey = cache.keys().next().value;
+        cache.delete(oldestKey);
+      }
+      cache.set(text, vector);
+    }
+
+    /**
+     * Очищает все pending-запросы (embed и batch) при падении Worker'а.
+     * Для embed-запросов вычисляет fallback hashEmbed и разрешает промис.
+     * Для batch-запросов разрешает пустым массивом.
+     * @returns {void}
+     */
+    function rejectAllPending() {
+      embedCallbacks.forEach(function(cb) {
+        clearTimeout(cb.timer);
+        var hashVec = hashEmbed(cb.text);
+        cacheSet(cb.text, hashVec);
+        cb.resolve(hashVec);
+      });
+      embedCallbacks.clear();
+
+      batchCallbacks.forEach(function(cb) {
+        clearTimeout(cb.timer);
+        cb.resolve([]);
+      });
+      batchCallbacks.clear();
+    }
+
+    /**
      * Принудительно завершает Web Worker и освобождает Object URL.
      * @returns {void}
      */
     function cleanupWorker() {
+      rejectAllPending();
       if (worker) {
         try { worker.terminate(); } catch (_) { /* ignore */ }
         worker = null;
@@ -1603,6 +1674,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         try { URL.revokeObjectURL(workerUrl); } catch (_) { /* ignore */ }
         workerUrl = null;
       }
+      nextId = 0;
     }
 
     /**
@@ -1638,6 +1710,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
       worker.onerror = function(err) {
         if (log) log.warn('Worker error, fallback to demo mode', String(err && err.message || err));
+        rejectAllPending();
         cleanupWorker();
         mode = 'demo';
         if (bus && bus.emit) {
@@ -1697,6 +1770,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             }, delay);
           } else {
             if (log) log.warn('AI load failed in Worker, fallback to demo mode', msg.message);
+            rejectAllPending();
             cleanupWorker();
             mode = 'demo';
             if (bus && bus.emit) {
@@ -1713,22 +1787,41 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           if (cb) {
             clearTimeout(cb.timer);
             embedCallbacks.delete(msg.id);
-            cache.set(cb.text, msg.vector);
-            if (cache.size > cacheLimit) {
-              var oldestKey = cache.keys().next().value;
-              cache.delete(oldestKey);
-            }
+            cacheSet(cb.text, msg.vector);
             cb.resolve(msg.vector);
           }
+        } else if (msg.type === 'cosineBatchResult') {
+          var batchCb = batchCallbacks.get(msg.id);
+          if (batchCb) {
+            clearTimeout(batchCb.timer);
+            batchCallbacks.delete(msg.id);
+            batchCb.resolve(msg.scores);
+          }
         } else if (msg.type === 'error' && msg.id !== null) {
-          var cb = embedCallbacks.get(msg.id);
-          if (cb) {
-            clearTimeout(cb.timer);
+          var batchCbErr = batchCallbacks.get(msg.id);
+          if (batchCbErr) {
+            clearTimeout(batchCbErr.timer);
+            batchCallbacks.delete(msg.id);
+            if (log) log.warn('AI batch error, fallback to sync for id=' + msg.id, msg.message);
+            var scores = [];
+            for (var i = 0; i < batchCbErr.items.length; i++) {
+              var v = batchCbErr.items[i].vector;
+              var sum = 0;
+              var len = Math.min(batchCbErr.queryVector.length, v.length);
+              for (var j = 0; j < len; j++) sum += batchCbErr.queryVector[j] * v[j];
+              scores.push({ id: batchCbErr.items[i].id, score: Math.abs(sum) < 1e-8 ? 0 : sum });
+            }
+            batchCbErr.resolve(scores);
+            return;
+          }
+          var embedCb = embedCallbacks.get(msg.id);
+          if (embedCb) {
+            clearTimeout(embedCb.timer);
             embedCallbacks.delete(msg.id);
             if (log) log.warn('AI embed error, fallback to hash for id=' + msg.id, msg.message);
-            var hashVec = hashEmbed(cb.text);
-            cache.set(cb.text, hashVec);
-            cb.resolve(hashVec);
+            var hashVec = hashEmbed(embedCb.text);
+            cacheSet(embedCb.text, hashVec);
+            embedCb.resolve(hashVec);
           }
         }
       };
@@ -1743,6 +1836,24 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         loadResolve = resolve;
         loadReject = reject;
       });
+    }
+
+    /**
+     * Синхронное вычисление косинусного сходства (fallback).
+     * @param {Vector} queryVector - Вектор запроса.
+     * @param {Array<{id: string, vector: Vector}>} items - Массив элементов.
+     * @returns {Array<{id: string, score: number}>}
+     */
+    function syncCosineBatch(queryVector, items) {
+      var scores = [];
+      for (var i = 0; i < items.length; i++) {
+        var v = items[i].vector;
+        var sum = 0;
+        var len = Math.min(queryVector.length, v.length);
+        for (var j = 0; j < len; j++) sum += queryVector[j] * v[j];
+        scores.push({ id: items[i].id, score: Math.abs(sum) < 1e-8 ? 0 : sum });
+      }
+      return scores;
     }
 
     return {
@@ -1815,17 +1926,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (cache.has(t)) {
           var val = cache.get(t);
           cache.delete(t);
-          cache.set(t, val);
+          cacheSet(t, val);
           return Promise.resolve(val);
         }
 
         if (mode === 'demo' || !worker) {
           var hashVec = hashEmbed(t);
-          cache.set(t, hashVec);
-          if (cache.size > cacheLimit) {
-            var oldestKey = cache.keys().next().value;
-            cache.delete(oldestKey);
-          }
+          cacheSet(t, hashVec);
           return Promise.resolve(hashVec);
         }
 
@@ -1839,13 +1946,85 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               embedCallbacks.delete(id);
               if (log) log.warn('AI embed timeout for id=' + id + ', fallback to hash');
               var hashVec = hashEmbed(cb.text);
-              cache.set(cb.text, hashVec);
+              cacheSet(cb.text, hashVec);
               cb.resolve(hashVec);
             }
           }, timeout);
 
           embedCallbacks.set(id, { resolve: resolve, reject: reject, text: t, timer: timer });
           worker.postMessage({ type: 'embed', id: id, text: t });
+        });
+      },
+
+      /**
+       * Пакетное вычисление косинусного сходства между вектором запроса и массивом векторов.
+       * Использует Web Worker для offloading вычислений с главного потока.
+       * При таймауте, ошибке или недоступности Worker делает fallback на синхронный расчёт.
+       * @param {Vector} queryVector - Вектор запроса.
+       * @param {Array<{id: string, vector: Vector}>} items - Массив объектов с id и vector.
+       * @param {AbortSignal} [signal] - Опциональный сигнал для отмены операции.
+       * @returns {Promise<Array<{id: string, score: number}>>} Promise с массивом результатов.
+       */
+      cosineBatch: function(queryVector, items, signal) {
+        if (!queryVector || !items || items.length === 0) {
+          return Promise.resolve([]);
+        }
+
+        if (signal && signal.aborted) {
+          return Promise.reject(new Error('Aborted'));
+        }
+
+        if (mode === 'demo' || !worker) {
+          return Promise.resolve(syncCosineBatch(queryVector, items));
+        }
+
+        var id = nextId++;
+        var timeout = cfg.get('aiEmbedTimeout', 15000);
+
+        return new Promise(function(resolve, reject) {
+          var onAbort = function() {
+            var cb = batchCallbacks.get(id);
+            if (cb) {
+              clearTimeout(cb.timer);
+              batchCallbacks.delete(id);
+              if (signal) signal.removeEventListener('abort', onAbort);
+              if (log) log.warn('AI cosineBatch aborted for id=' + id);
+              reject(new Error('Aborted'));
+            }
+          };
+
+          if (signal) {
+            signal.addEventListener('abort', onAbort);
+          }
+
+          var timer = setTimeout(function() {
+            var cb = batchCallbacks.get(id);
+            if (cb) {
+              clearTimeout(cb.timer);
+              batchCallbacks.delete(id);
+              if (signal) signal.removeEventListener('abort', onAbort);
+              if (log) log.warn('AI cosineBatch timeout for id=' + id + ', fallback to sync');
+              resolve(syncCosineBatch(cb.queryVector, cb.items));
+            }
+          }, timeout);
+
+          batchCallbacks.set(id, {
+            resolve: function(scores) {
+              if (signal) signal.removeEventListener('abort', onAbort);
+              resolve(scores);
+            },
+            reject: reject,
+            timer: timer,
+            queryVector: queryVector,
+            items: items
+          });
+
+          worker.postMessage({
+            type: 'cosineBatch',
+            id: id,
+            queryVector: queryVector,
+            vectors: items
+          });
         });
       },
 
@@ -3348,7 +3527,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /**
      * Выполняет семантический поиск по локальной базе и ответам из сети.
-     * Вычисляет косинусное сходство и раскладывает результаты по сегментам (local, world, seren).
+     * Делегирует вычисление косинусного сходства в Web Worker для избежания блокировки UI.
      * @param {string} text - Поисковый запрос (текст из редактора).
      * @param {boolean} [force=false] - Принудительная отправка запроса в сеть, даже если вектор не изменился.
      * @returns {Promise<void>}
@@ -3356,6 +3535,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     function search(text, force) {
       if (!text || !AI.ready()) {
         StateManager.setState({ lists: { local: [], world: [], seren: [] } });
+        if (Bus && Bus.emit) {
+          try { Bus.emit('state:lists-changed'); } catch (_) {}
+        }
         return Promise.resolve();
       }
 
@@ -3387,51 +3569,89 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return getAllNotesCached().then(function(notes) {
           if (signal.aborted) return;
 
-          var localScored = [];
+          var candidates = [];
+          var dataMap = new Map();
+
           for (var i = 0; i < notes.length; i++) {
             var note = notes[i];
             if (note && note.vector) {
-              localScored.push({
-                id: note.id,
-                text: note.text,
-                vector: note.vector,
-                score: AI.cosine(vec, note.vector),
-                shared: note.shared,
-                peer: note.peer,
-                createdAt: note.createdAt
-              });
+              candidates.push({ id: note.id, vector: note.vector });
+              dataMap.set(note.id, { type: 'local', data: note });
             }
           }
 
           var state = StateManager.getState();
           var worldAnswers = state.netAuthorized ? Net.activeAnswers() : [];
-          var worldScored = [];
-          for (var i = 0; i < worldAnswers.length; i++) {
-            worldScored.push({
-              id: worldAnswers[i].id,
-              text: worldAnswers[i].text,
-              vector: worldAnswers[i].vector,
-              score: AI.cosine(vec, worldAnswers[i].vector),
-              shared: worldAnswers[i].shared,
-              peer: worldAnswers[i].peer,
-              createdAt: worldAnswers[i].createdAt
-            });
+          for (var j = 0; j < worldAnswers.length; j++) {
+            var answer = worldAnswers[j];
+            if (answer && answer.vector) {
+              candidates.push({ id: answer.id, vector: answer.vector });
+              dataMap.set(answer.id, { type: 'world', data: answer });
+            }
           }
 
-          var threshold = Config.get('threshold', 0.30);
-          var serendipityDelta = Config.get('serendipity', 0.15);
+          if (candidates.length === 0) {
+            StateManager.setState({ lists: { local: [], world: [], seren: [] } });
+            if (Bus && Bus.emit) {
+              try { Bus.emit('state:lists-changed'); } catch (_) {}
+            }
+            return;
+          }
 
-          var newLists = {
-            local: localScored.filter(function(n) { return n.score >= threshold; })
-              .sort(function(a, b) { return b.score - a.score; }),
-            world: worldScored.filter(function(n) { return n.score >= threshold; })
-              .sort(function(a, b) { return b.score - a.score; }),
-            seren: localScored.concat(worldScored)
-              .filter(function(n) { return n.score >= (threshold - serendipityDelta) && n.score < threshold; })
-              .sort(function(a, b) { return b.score - a.score; })
-          };
+          return AI.cosineBatch(vec, candidates, signal).then(function(scores) {
+            if (signal.aborted) return;
 
-          StateManager.setState({ lists: newLists });
+            var localScored = [];
+            var worldScored = [];
+
+            for (var k = 0; k < scores.length; k++) {
+              var s = scores[k];
+              var entry = dataMap.get(s.id);
+              if (!entry) continue;
+
+              if (entry.type === 'local') {
+                var note = entry.data;
+                localScored.push({
+                  id: note.id,
+                  text: note.text,
+                  vector: note.vector,
+                  score: s.score,
+                  shared: note.shared,
+                  peer: note.peer,
+                  createdAt: note.createdAt
+                });
+              } else {
+                var answer = entry.data;
+                worldScored.push({
+                  id: answer.id,
+                  text: answer.text,
+                  vector: answer.vector,
+                  score: s.score,
+                  shared: answer.shared,
+                  peer: answer.peer,
+                  createdAt: answer.createdAt
+                });
+              }
+            }
+
+            var threshold = Config.get('threshold', 0.30);
+            var serendipityDelta = Config.get('serendipity', 0.15);
+
+            var newLists = {
+              local: localScored.filter(function(n) { return n.score >= threshold; })
+                .sort(function(a, b) { return b.score - a.score; }),
+              world: worldScored.filter(function(n) { return n.score >= threshold; })
+                .sort(function(a, b) { return b.score - a.score; }),
+              seren: localScored.concat(worldScored)
+                .filter(function(n) { return n.score >= (threshold - serendipityDelta) && n.score < threshold; })
+                .sort(function(a, b) { return b.score - a.score; })
+            };
+
+            StateManager.setState({ lists: newLists });
+            if (Bus && Bus.emit) {
+              try { Bus.emit('state:lists-changed'); } catch (_) {}
+            }
+          });
         });
       }).catch(function(err) {
         if (signal.aborted) return;
