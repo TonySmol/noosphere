@@ -3275,20 +3275,739 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END StateManager -->
 
 <!-- NOOMIUM_MODULE_START SearchService -->
-  DI.register('SearchService', function() {
-    return {};
+  DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I18n, Toast, Logger, Utils) {
+
+    /** @type {Vector | null} Вектор последнего выполненного поискового запроса */
+    var lastVec = null;
+
+    /** @type {number} Timestamp последнего поискового запроса */
+    var lastQuery = 0;
+
+    /** @type {AbortController | null} Контроллер для отмены предыдущего поиска */
+    var searchAbortController = null;
+
+    /** @type {Note[] | null} Кэш всех локальных заметок */
+    var allNotesCache = null;
+
+    /** @type {number} Timestamp последнего обновления кэша заметок */
+    var allNotesCacheTime = 0;
+
+    /** @type {number} Время жизни кэша всех заметок (5 минут) */
+    var ALL_NOTES_TTL = 5 * 60 * 1000;
+
+    /**
+     * Возвращает все заметки из базы, используя кэш для оптимизации.
+     * Если кэш истёк, запрашивает свежие данные из DB.
+     * @returns {Promise<Note[]>} Promise с массивом всех заметок.
+     */
+    function getAllNotesCached() {
+      var now = Date.now();
+      if (allNotesCache && (now - allNotesCacheTime < ALL_NOTES_TTL)) {
+        return Promise.resolve(allNotesCache);
+      }
+      return DB.all().then(function(notes) {
+        allNotesCache = notes;
+        allNotesCacheTime = now;
+        return notes;
+      });
+    }
+
+    /**
+     * Принудительно сбрасывает кэш всех заметок.
+     * Вызывается после редактирования/удаления для гарантии актуальности данных.
+     * @returns {void}
+     */
+    function invalidateNotesCache() {
+      allNotesCache = null;
+    }
+
+    /**
+     * Возвращает текущий режим отправки (Личное/Мир) из StateManager.
+     * @returns {SendMode}
+     */
+    function getSendMode() {
+      return StateManager.getState().sendMode;
+    }
+
+    /**
+     * Устанавливает режим отправки в StateManager.
+     * @param {SendMode} mode - Новый режим.
+     * @returns {void}
+     */
+    function setSendMode(mode) {
+      StateManager.setState({ sendMode: mode });
+    }
+
+    /**
+     * Проверяет, заблокирована ли сейчас кнопка отправки (идёт ли процесс сохранения).
+     * @returns {boolean}
+     */
+    function isSending() {
+      return StateManager.getState().sendLock;
+    }
+
+    /**
+     * Выполняет семантический поиск по локальной базе и ответам из сети.
+     * Вычисляет косинусное сходство и раскладывает результаты по сегментам (local, world, seren).
+     * @param {string} text - Поисковый запрос (текст из редактора).
+     * @param {boolean} [force=false] - Принудительная отправка запроса в сеть, даже если вектор не изменился.
+     * @returns {Promise<void>}
+     */
+    function search(text, force) {
+      if (!text || !AI.ready()) {
+        StateManager.setState({ lists: { local: [], world: [], seren: [] } });
+        return Promise.resolve();
+      }
+
+      if (searchAbortController) {
+        searchAbortController.abort();
+      }
+      var controller = new AbortController();
+      searchAbortController = controller;
+      var signal = controller.signal;
+
+      return AI.embed(text).then(function(vec) {
+        if (signal.aborted) return;
+        if (!vec) return;
+
+        var shouldSendToNet = false;
+        if (!lastVec || AI.cosine(vec, lastVec) < Config.get('vectorSimilarityThreshold', 0.98) || force) {
+          lastVec = vec;
+          lastQuery = Date.now();
+          shouldSendToNet = true;
+        }
+
+        if (shouldSendToNet && AI.getMode() === 'model') {
+          var state = StateManager.getState();
+          if (state.netAuthorized && Net && typeof Net.send === 'function') {
+            Net.send(vec);
+          }
+        }
+
+        return getAllNotesCached().then(function(notes) {
+          if (signal.aborted) return;
+
+          var localScored = [];
+          for (var i = 0; i < notes.length; i++) {
+            var note = notes[i];
+            if (note && note.vector) {
+              localScored.push({
+                id: note.id,
+                text: note.text,
+                vector: note.vector,
+                score: AI.cosine(vec, note.vector),
+                shared: note.shared,
+                peer: note.peer,
+                createdAt: note.createdAt
+              });
+            }
+          }
+
+          var state = StateManager.getState();
+          var worldAnswers = state.netAuthorized ? Net.activeAnswers() : [];
+          var worldScored = [];
+          for (var i = 0; i < worldAnswers.length; i++) {
+            worldScored.push({
+              id: worldAnswers[i].id,
+              text: worldAnswers[i].text,
+              vector: worldAnswers[i].vector,
+              score: AI.cosine(vec, worldAnswers[i].vector),
+              shared: worldAnswers[i].shared,
+              peer: worldAnswers[i].peer,
+              createdAt: worldAnswers[i].createdAt
+            });
+          }
+
+          var threshold = Config.get('threshold', 0.30);
+          var serendipityDelta = Config.get('serendipity', 0.15);
+
+          var newLists = {
+            local: localScored.filter(function(n) { return n.score >= threshold; })
+              .sort(function(a, b) { return b.score - a.score; }),
+            world: worldScored.filter(function(n) { return n.score >= threshold; })
+              .sort(function(a, b) { return b.score - a.score; }),
+            seren: localScored.concat(worldScored)
+              .filter(function(n) { return n.score >= (threshold - serendipityDelta) && n.score < threshold; })
+              .sort(function(a, b) { return b.score - a.score; })
+          };
+
+          StateManager.setState({ lists: newLists });
+        });
+      }).catch(function(err) {
+        if (signal.aborted) return;
+        Toast.show('err', String(err && err.message || err) || 'Search failed');
+        Logger.warn('SearchService.search error', String(err && err.message || err));
+      }).finally(function() {
+        searchAbortController = null;
+      });
+    }
+
+    /**
+     * Сохраняет новую мысль в локальную базу и опционально публикует в сеть.
+     * Блокирует повторные вызовы через sendLock.
+     * @param {string} text - Текст мысли.
+     * @param {SendMode} mode - Режим отправки ('private' или 'world').
+     * @returns {Promise<void>}
+     */
+    function send(text, mode) {
+      if (StateManager.getState().sendLock) return Promise.resolve();
+
+      var trimmedText = (text || '').trim();
+      if (!trimmedText) {
+        Toast.show('warn', I18n.t('toast.empty'));
+        return Promise.resolve();
+      }
+
+      if (!AI.ready()) {
+        Toast.show('err', I18n.t('toast.ai.notready'));
+        return Promise.resolve();
+      }
+
+      var state = StateManager.getState();
+      if (mode === 'world' && !state.netAuthorized) {
+        if (state.requestNetworkAuth) {
+          state.requestNetworkAuth(function() {
+            send(trimmedText, mode);
+          });
+        }
+        return Promise.resolve();
+      }
+
+      var isWorld = mode === 'world';
+      StateManager.setState({ sendLock: true });
+
+      return AI.embed(trimmedText)
+        .then(function(vector) {
+          return DB.put({
+            id: 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            text: trimmedText,
+            vector: vector,
+            shared: !!isWorld,
+            createdAt: Date.now()
+          });
+        })
+        .then(function() {
+          lastVec = null;
+          Toast.show('ok', isWorld ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
+        })
+        .catch(function(err) {
+          Toast.show('err', String(err && err.message || err) || 'Send failed');
+        })
+        .finally(function() {
+          StateManager.setState({ sendLock: false });
+        });
+    }
+
+    /**
+     * Инициализирует сервис: подписывается на изменения базы для сброса кэша.
+     * @returns {void}
+     */
+    function init() {
+      Bus.on('db:change', function() {
+        allNotesCache = null;
+      });
+    }
+
+    return {
+      search: search,
+      send: send,
+      getSendMode: getSendMode,
+      setSendMode: setSendMode,
+      isSending: isSending,
+      getAllNotesCached: getAllNotesCached,
+      invalidateNotesCache: invalidateNotesCache,
+      init: init
+    };
   }, ['AI', 'DB', 'Net', 'Config', 'Bus', 'StateManager', 'I18n', 'Toast', 'Logger', 'Utils']);
 <!-- NOOMIUM_MODULE_END SearchService -->
 
 <!-- NOOMIUM_MODULE_START EditorComponent -->
-  DI.register('EditorComponent', function() {
-    return {};
+  DI.register('EditorComponent', function(Bus, I18n, Utils, SearchService, Config, StateManager) {
+
+    /** @type {HTMLTextAreaElement | null} */
+    var editor = null;
+
+    /** @type {HTMLElement | null} */
+    var counter = null;
+
+    /** @type {HTMLButtonElement | null} */
+    var sendBtn = null;
+
+    /** @type {HTMLElement | null} */
+    var modeToggle = null;
+
+    /** @type {number | null} ID таймера debounce для поиска */
+    var searchTimer = null;
+
+    /** @type {function(): void | null} Обработчик смены языка */
+    var i18nHandler = null;
+
+    /** @type {function(): void | null} Ссылка на обработчик ввода текста */
+    var onInput = null;
+
+    /** @type {function(): void | null} Ссылка на обработчик клика по кнопке отправки */
+    var onSendClick = null;
+
+    /** @type {function(MouseEvent): void | null} Ссылка на обработчик переключения режима */
+    var onModeClick = null;
+
+    /**
+     * Обновляет ссылки на DOM-элементы.
+     * Вызывается при каждом обращении, так как DOM может быть пересоздан после refreshUI.
+     * @returns {void}
+     */
+    function refreshDOM() {
+      editor = document.getElementById('ed-ta');
+      counter = document.getElementById('ed-cnt');
+      sendBtn = document.getElementById('btn-send');
+      modeToggle = document.getElementById('mode-toggle');
+    }
+
+    /**
+     * Возвращает текущий текст из поля ввода.
+     * @returns {string}
+     */
+    function getValue() {
+      if (!editor) refreshDOM();
+      return editor ? editor.value : '';
+    }
+
+    /**
+     * Устанавливает текст в поле ввода и обновляет счётчик символов.
+     * @param {string} val - Новый текст.
+     * @returns {void}
+     */
+    function setValue(val) {
+      if (!editor) refreshDOM();
+      if (editor) {
+        editor.value = val;
+        updateCounter();
+      }
+    }
+
+    /**
+     * Очищает поле ввода.
+     * @returns {void}
+     */
+    function clear() {
+      setValue('');
+    }
+
+    /**
+     * Пересчитывает и отображает количество символов в UI.
+     * @returns {void}
+     */
+    function updateCounter() {
+      if (!counter) refreshDOM();
+      if (counter) {
+        var value = getValue();
+        counter.textContent = Utils.word('symbols', value.length, I18n.getLang());
+      }
+    }
+
+    /**
+     * Обновляет визуальное состояние переключателя режима отправки (Личное/Мир).
+     * @param {SendMode} mode - Активный режим.
+     * @returns {void}
+     */
+    function updateSendMode(mode) {
+      SearchService.setSendMode(mode);
+      if (!modeToggle) refreshDOM();
+      if (!modeToggle) return;
+      
+      modeToggle.setAttribute('data-mode', mode);
+      var opts = modeToggle.querySelectorAll('.tog-sw-opt');
+      for (var i = 0; i < opts.length; i++) {
+        var opt = opts[i];
+        if (opt.getAttribute('data-v') === mode) {
+          opt.classList.add('on');
+        } else {
+          opt.classList.remove('on');
+        }
+      }
+    }
+
+    /**
+     * Переключает визуальное состояние кнопки отправки (обычное / спиннер).
+     * @param {boolean} isSending - true, если идёт процесс отправки.
+     * @returns {void}
+     */
+    function setSendingState(isSending) {
+      if (!sendBtn) refreshDOM();
+      if (!sendBtn) return;
+      
+      if (isSending) {
+        sendBtn.classList.add('sending');
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = SPINNER_SVG;
+      } else {
+        sendBtn.classList.remove('sending');
+        sendBtn.disabled = false;
+        sendBtn.innerHTML = PAPER_PLANE_SVG;
+      }
+    }
+
+    /**
+     * Применяет переводы к элементам редактора (placeholder, кнопки).
+     * @returns {void}
+     */
+    function applyI18n() {
+      if (!editor) refreshDOM();
+      if (editor) {
+        editor.placeholder = I18n.t('ed.placeholder');
+      }
+      updateCounter();
+      
+      if (!modeToggle) refreshDOM();
+      if (modeToggle) {
+        var opts = modeToggle.querySelectorAll('.tog-sw-opt');
+        for (var i = 0; i < opts.length; i++) {
+          var opt = opts[i];
+          var v = opt.getAttribute('data-v');
+          if (v === 'private') opt.textContent = I18n.t('btn.private');
+          else if (v === 'world') opt.textContent = I18n.t('btn.public');
+        }
+      }
+      
+      if (sendBtn) {
+        sendBtn.setAttribute('aria-label', I18n.t('btn.send'));
+      }
+    }
+
+    /**
+     * Обрабатывает клик по кнопке отправки: запускает сохранение и очистку поля.
+     * @returns {void}
+     */
+    function handleSend() {
+      var text = getValue().trim();
+      var mode = SearchService.getSendMode();
+
+      setSendingState(true);
+
+      SearchService.send(text, mode)
+        .then(function() {
+          clear();
+          if (Bus && Bus.emit) {
+            try { Bus.emit('editor:send-complete'); } catch (_) { /* ignore */ }
+          }
+        })
+        .catch(function() {
+          /* Ошибки уже обработаны в SearchService через Toast */
+        })
+        .finally(function() {
+          setSendingState(false);
+        });
+    }
+
+    /**
+     * Навешивает обработчики событий на DOM-элементы редактора.
+     * @returns {void}
+     */
+    function bindDOMEvents() {
+      refreshDOM();
+
+      if (editor) {
+        onInput = function() {
+          updateCounter();
+          if (searchTimer) clearTimeout(searchTimer);
+          searchTimer = setTimeout(function() {
+            if (Bus && Bus.emit) {
+              try { Bus.emit('editor:search-request', { force: false }); } catch (_) { /* ignore */ }
+            }
+          }, Config.get('debounce', 800));
+        };
+        editor.addEventListener('input', onInput);
+      }
+
+      if (sendBtn) {
+        onSendClick = function() { handleSend(); };
+        sendBtn.addEventListener('click', onSendClick);
+      }
+
+      if (modeToggle) {
+        onModeClick = function(e) {
+          var opt = e.target.closest('.tog-sw-opt');
+          if (opt) {
+            var value = opt.getAttribute('data-v');
+            if (value) updateSendMode(value);
+          }
+        };
+        modeToggle.addEventListener('click', onModeClick);
+      }
+    }
+
+    /**
+     * Снимает обработчики событий и обнуляет ссылки на DOM.
+     * @returns {void}
+     */
+    function unbindDOMEvents() {
+      if (editor && onInput) {
+        try { editor.removeEventListener('input', onInput); } catch (_) { /* ignore */ }
+      }
+      if (sendBtn && onSendClick) {
+        try { sendBtn.removeEventListener('click', onSendClick); } catch (_) { /* ignore */ }
+      }
+      if (modeToggle && onModeClick) {
+        try { modeToggle.removeEventListener('click', onModeClick); } catch (_) { /* ignore */ }
+      }
+      editor = counter = sendBtn = modeToggle = null;
+      onInput = onSendClick = onModeClick = null;
+      if (searchTimer) {
+        clearTimeout(searchTimer);
+        searchTimer = null;
+      }
+    }
+
+    /**
+     * Инициализирует компонент: привязывает события и применяет начальные переводы.
+     * @returns {void}
+     */
+    function init() {
+      bindDOMEvents();
+
+      i18nHandler = function() { applyI18n(); };
+      Bus.on('i18n:change', i18nHandler);
+
+      var currentMode = SearchService.getSendMode();
+      updateSendMode(currentMode);
+      applyI18n();
+    }
+
+    /**
+     * Уничтожает компонент: отвязывает события и отписывается от шины.
+     * @returns {void}
+     */
+    function destroy() {
+      unbindDOMEvents();
+      if (i18nHandler) {
+        try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
+        i18nHandler = null;
+      }
+    }
+
+    return {
+      init: init,
+      destroy: destroy,
+      getValue: getValue,
+      setValue: setValue,
+      clear: clear,
+      updateCounter: updateCounter,
+      updateSendMode: updateSendMode,
+      setSendingState: setSendingState
+    };
   }, ['Bus', 'I18n', 'Utils', 'SearchService', 'Config', 'StateManager']);
 <!-- NOOMIUM_MODULE_END EditorComponent -->
 
 <!-- NOOMIUM_MODULE_START AuthService -->
-  DI.register('AuthService', function() {
-    return {};
+  DI.register('AuthService', function(Config, Logger, Bus, DB) {
+
+    /** @type {string} Ключ для хранения секретного ключа Nostr */
+    var SK_KEY = 'noomium:sk';
+
+    /** @type {string} Ключ для хранения конфигурации */
+    var CFG_KEY = 'noomium:cfg';
+
+    /** @type {string} Ключ для хранения версии приложения */
+    var VER_KEY = 'noomium:appVersion';
+
+    /** @type {string} Ключ для хранения выбранного языка */
+    var LANG_KEY = 'noomium:lang';
+
+    /** @type {number} Максимально допустимое количество попыток ввода пароля */
+    var maxAttempts = Config.get('maxPasswordAttempts', 3);
+
+    /** @type {number} Текущий счётчик неудачных попыток */
+    var currentAttempts = 0;
+
+    /**
+     * Выводит ключ AES-GCM из пароля через PBKDF2 (100k итераций, SHA-256).
+     * @param {string} password - Пароль пользователя.
+     * @param {Uint8Array} salt - Соль для PBKDF2.
+     * @returns {Promise<CryptoKey>}
+     */
+    function deriveKey(password, salt) {
+      var enc = new TextEncoder();
+      return crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']).then(function(keyMaterial) {
+        return crypto.subtle.deriveKey(
+          { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
+          keyMaterial,
+          { name: 'AES-GCM', length: 256 },
+          false,
+          ['encrypt', 'decrypt']
+        );
+      });
+    }
+
+    /**
+     * Шифрует hex-ключ паролем с использованием AES-GCM.
+     * @param {string} hexKey - Секретный ключ в hex-формате.
+     * @param {string} password - Пароль.
+     * @returns {Promise<string>} Base64-строка (salt + iv + ciphertext).
+     */
+    function encryptKey(hexKey, password) {
+      var salt = crypto.getRandomValues(new Uint8Array(16));
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      return deriveKey(password, salt).then(function(key) {
+        var enc = new TextEncoder();
+        return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(hexKey)).then(function(ciphertext) {
+          var combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
+          combined.set(salt, 0);
+          combined.set(iv, salt.length);
+          combined.set(new Uint8Array(ciphertext), salt.length + iv.length);
+          return btoa(String.fromCharCode.apply(null, combined));
+        });
+      });
+    }
+
+    /**
+     * Расшифровывает hex-ключ из Base64-строки с использованием пароля.
+     * @param {string} base64Str - Зашифрованная строка.
+     * @param {string} password - Пароль.
+     * @returns {Promise<string>} Расшифрованный hex-ключ.
+     */
+    function decryptKey(base64Str, password) {
+      var combined = Uint8Array.from(atob(base64Str), function(c) { return c.charCodeAt(0); });
+      var salt = combined.slice(0, 16);
+      var iv = combined.slice(16, 28);
+      var ciphertext = combined.slice(28);
+      return deriveKey(password, salt).then(function(key) {
+        return crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext).then(function(dec) {
+          return new TextDecoder().decode(dec);
+        });
+      });
+    }
+
+    /**
+     * Читает сырое значение секретного ключа из localStorage.
+     * @returns {string | null}
+     */
+    function getStoredKey() {
+      try { return localStorage.getItem(SK_KEY); } catch (e) { return null; }
+    }
+
+    /**
+     * Проверяет, существует ли ключ и зашифрован ли он (не в сыром hex-формате).
+     * @returns {boolean}
+     */
+    function hasEncryptedKey() {
+      var stored = getStoredKey();
+      return !!(stored && !/^[0-9a-f]{64}$/i.test(stored));
+    }
+
+    /**
+     * Проверяет, отсутствует ли ключ вообще (первый запуск приложения).
+     * @returns {boolean}
+     */
+    function needsNewKey() {
+      return !getStoredKey();
+    }
+
+    /**
+     * Сбрасывает счётчик неудачных попыток ввода пароля.
+     * @returns {void}
+     */
+    function resetAttempts() {
+      currentAttempts = 0;
+    }
+
+    /**
+     * Пытается расшифровать существующий ключ с помощью введённого пароля.
+     * @param {string} password - Введённый пароль.
+     * @param {function(): void} onSuccess - Вызывается при успешной расшифровке.
+     * @param {function(Error): void} onWrongPassword - Вызывается при неверном пароле (пока есть попытки).
+     * @param {function(): void} onMaxAttempts - Вызывается при превышении лимита попыток.
+     * @returns {void}
+     */
+    function unlock(password, onSuccess, onWrongPassword, onMaxAttempts) {
+      var stored = getStoredKey();
+      if (!stored) {
+        if (typeof onWrongPassword === 'function') onWrongPassword(new Error('NO_KEY'));
+        return;
+      }
+
+      if (/^[0-9a-f]{64}$/i.test(stored)) {
+        resetAttempts();
+        if (typeof onSuccess === 'function') onSuccess();
+        return;
+      }
+
+      decryptKey(stored, password).then(function() {
+        resetAttempts();
+        if (typeof onSuccess === 'function') onSuccess();
+      }).catch(function(err) {
+        currentAttempts++;
+        if (Logger) Logger.warn('AuthService: wrong password attempt ' + currentAttempts + '/' + maxAttempts);
+
+        if (currentAttempts >= maxAttempts) {
+          if (Bus && Bus.emit) { try { Bus.emit('auth:locked'); } catch (_) { /* ignore */ } }
+          if (typeof onMaxAttempts === 'function') onMaxAttempts();
+        } else {
+          if (typeof onWrongPassword === 'function') onWrongPassword(err);
+        }
+      });
+    }
+
+    /**
+     * Генерирует новый секретный ключ Nostr и сохраняет его в зашифрованном виде.
+     * @param {string} password - Пароль для шифрования.
+     * @param {function(): void} onSuccess - Вызывается после успешного сохранения.
+     * @returns {void}
+     */
+    function createNew(password, onSuccess) {
+      var raw = crypto.getRandomValues(new Uint8Array(32));
+      var keyHex = Array.from(raw).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+
+      encryptKey(keyHex, password).then(function(encrypted) {
+        try { localStorage.setItem(SK_KEY, encrypted); } catch (e) {
+          if (Logger) Logger.warn('AuthService: failed to save key', String(e));
+        }
+        resetAttempts();
+        if (typeof onSuccess === 'function') onSuccess();
+      }).catch(function(err) {
+        if (Logger) Logger.error('AuthService: createNew failed', String(err && err.message || err));
+      });
+    }
+
+    /**
+     * Полностью сбрасывает хранилище: удаляет ключи, конфиг и очищает IndexedDB.
+     * @returns {Promise<void>}
+     */
+    function resetStorage() {
+      try {
+        localStorage.removeItem(SK_KEY);
+        localStorage.removeItem(CFG_KEY);
+        localStorage.removeItem(VER_KEY);
+        localStorage.removeItem(LANG_KEY);
+      } catch (e) {
+        if (Logger) Logger.warn('AuthService: localStorage cleanup failed', String(e));
+      }
+
+      resetAttempts();
+
+      return DB.reset().catch(function(err) {
+        if (Logger) Logger.warn('AuthService: DB reset failed', String(err && err.message || err));
+      });
+    }
+
+    return {
+      hasEncryptedKey: hasEncryptedKey,
+      needsNewKey: needsNewKey,
+      unlock: unlock,
+      createNew: createNew,
+      resetStorage: resetStorage,
+
+      /**
+       * Возвращает текущее количество неудачных попыток ввода пароля.
+       * @returns {number}
+       */
+      getAttempts: function() { return currentAttempts; },
+
+      /**
+       * Возвращает максимальное допустимое количество попыток.
+       * @returns {number}
+       */
+      getMaxAttempts: function() { return maxAttempts; }
+    };
   }, ['Config', 'Logger', 'Bus', 'DB']);
 <!-- NOOMIUM_MODULE_END AuthService -->
 
