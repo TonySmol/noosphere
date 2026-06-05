@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.43">
+<meta name="app-version" content="1.2.44">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -874,11 +874,66 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
 <!-- NOOMIUM_MODULE_START AI -->
   DI.register('AI', function(cfg, log, bus) {
-    var extractor = null, mode = 'loading';
-    var cache = new Map(); 
+    var workerCode = [
+      'let extractor = null;',
+      'let ready = false;',
+      '',
+      'async function loadModel(modelName, options) {',
+      '  const { pipeline, env } = await import("https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2");',
+      '  if (env) {',
+      '    env.allowLocalModels = false;',
+      '    env.useBrowserCache = true;',
+      '  }',
+      '  extractor = await pipeline("feature-extraction", modelName, {',
+      '    quantized: true,',
+      '    progress_callback: function(p) {',
+      '      if (p.status === "progress" && p.total > 0) {',
+      '        const pct = p.loaded / p.total * 100;',
+      '        self.postMessage({ type: "progress", pct: pct });',
+      '      }',
+      '    }',
+      '  });',
+      '  ready = true;',
+      '  self.postMessage({ type: "ready" });',
+      '}',
+      '',
+      'self.onmessage = async function(e) {',
+      '  const msg = e.data;',
+      '  if (msg.type === "load") {',
+      '    try {',
+      '      await loadModel(msg.modelName, msg.options);',
+      '    } catch (err) {',
+      '      self.postMessage({ type: "error", id: null, message: err.message || String(err) });',
+      '    }',
+      '    return;',
+      '  }',
+      '  if (!ready) {',
+      '    self.postMessage({ type: "error", id: msg.id, message: "Model not loaded" });',
+      '    return;',
+      '  }',
+      '  if (msg.type === "embed") {',
+      '    try {',
+      '      const output = await extractor(msg.text, { pooling: "mean", normalize: true });',
+      '      const vec = Array.from(output.data);',
+      '      self.postMessage({ type: "result", id: msg.id, vector: vec });',
+      '    } catch (err) {',
+      '      self.postMessage({ type: "error", id: msg.id, message: err.message || String(err) });',
+      '    }',
+      '  }',
+      '};'
+    ].join('\n');
+
+    var worker = null;
+    var workerUrl = null;
+    var mode = 'loading';
+    var cache = new Map();
     var cacheLimit = cfg.get('aiCacheLimit', 300);
     var progressFns = [];
     var loadPromise = null;
+    var loadResolve = null;
+    var loadReject = null;
+    var embedCallbacks = new Map();
+    var nextId = 0;
 
     function hashEmbed(text) {
       var DIM = cfg.get('dim', 384);
@@ -899,48 +954,123 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       return Array.from(vec);
     }
 
+    function cleanupWorker() {
+      if (worker) {
+        try { worker.terminate(); } catch (_) {}
+        worker = null;
+      }
+      if (workerUrl) {
+        try { URL.revokeObjectURL(workerUrl); } catch (_) {}
+        workerUrl = null;
+      }
+    }
+
     function doLoad(onProgress, attempt) {
       attempt = attempt || 0;
-      var MODEL = cfg.get('model', 'Xenova/multilingual-e5-small');
-      return import('https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2').then(function(mod) {
-        var pipelineFn = (mod.pipeline || (mod.default && mod.default.pipeline));
-        if (!pipelineFn) throw new Error('transformers: pipeline not found');
-        if (mod.env) { mod.env.allowLocalModels = false; mod.env.useBrowserCache = true; }
-        return pipelineFn('feature-extraction', MODEL, {
-          quantized: true,
-          progress_callback: function(p) {
-            if (p.status === 'progress' && p.total > 0) {
-              var pct = p.loaded / p.total * 100;
-              if (typeof onProgress === 'function') onProgress(pct);
-              for (var i = 0; i < progressFns.length; i++) {
-                try { progressFns[i](pct); } catch (_) { /* ignore */ }
-              }
-              if (bus && bus.emit) {
-                try { bus.emit('ai:progress', { pct: pct }); } catch (_) {}
-                try { bus.emit('ai:status', { mode: 'loading', percent: pct }); } catch (_) {}
-              }
-            }
-          }
-        });
-      }).then(function(pipe) {
-        extractor = pipe;
-        mode = 'model';
-        if (log) log.info('AI loaded: ' + MODEL);
-        if (bus && bus.emit) { try { bus.emit('ai:status', { mode: 'model' }); } catch (_) {} }
-      }).catch(function(err) {
-        if (attempt < cfg.get('aiLoadRetries', 2)) {
-          var delay = Math.min(cfg.get('aiLoadMaxBackoff', 30000), 2000 * Math.pow(2, attempt));
-          if (log) log.warn('AI load fail, retry ' + (attempt + 1) + ' in ' + delay + 'ms', String(err && err.message || err));
-          return new Promise(function(r) { setTimeout(r, delay); }).then(function() { return doLoad(onProgress, attempt + 1); });
-        }
-        if (log) log.warn('AI load failed, hash mode', String(err && err.message || err));
+
+      if (typeof Worker === 'undefined') {
+        if (log) log.warn('Web Worker not supported, fallback to demo mode');
         mode = 'demo';
         if (bus && bus.emit) { try { bus.emit('ai:status', { mode: 'demo' }); } catch (_) {} }
+        return Promise.resolve();
+      }
+
+      try {
+        var blob = new Blob([workerCode], { type: 'application/javascript' });
+        workerUrl = URL.createObjectURL(blob);
+        worker = new Worker(workerUrl, { type: 'module' });
+      } catch (err) {
+        if (log) log.warn('Failed to create Worker, fallback to demo mode', String(err && err.message || err));
+        mode = 'demo';
+        if (bus && bus.emit) { try { bus.emit('ai:status', { mode: 'demo' }); } catch (_) {} }
+        return Promise.resolve();
+      }
+
+      worker.onerror = function(err) {
+        if (log) log.warn('Worker error, fallback to demo mode', String(err && err.message || err));
+        cleanupWorker();
+        mode = 'demo';
+        if (bus && bus.emit) { try { bus.emit('ai:status', { mode: 'demo' }); } catch (_) {} }
+        if (loadReject) { loadReject(err); loadReject = null; loadResolve = null; }
+      };
+
+      worker.onmessage = function(e) {
+        var msg = e.data;
+        
+        if (msg.type === 'progress') {
+          if (typeof onProgress === 'function') {
+            try { onProgress(msg.pct); } catch (_) {}
+          }
+          for (var i = 0; i < progressFns.length; i++) {
+            try { progressFns[i](msg.pct); } catch (_) {}
+          }
+          if (bus && bus.emit) {
+            try { bus.emit('ai:progress', { pct: msg.pct }); } catch (_) {}
+            try { bus.emit('ai:status', { mode: 'loading', percent: msg.pct }); } catch (_) {}
+          }
+        } else if (msg.type === 'ready') {
+          mode = 'model';
+          if (log) log.info('AI loaded in Worker: ' + cfg.get('model', 'Xenova/multilingual-e5-small'));
+          if (bus && bus.emit) { try { bus.emit('ai:status', { mode: 'model' }); } catch (_) {} }
+          if (loadResolve) { loadResolve(); loadResolve = null; loadReject = null; }
+        } else if (msg.type === 'error' && msg.id === null) {
+          if (attempt < cfg.get('aiLoadRetries', 2)) {
+            var delay = Math.min(cfg.get('aiLoadMaxBackoff', 30000), 2000 * Math.pow(2, attempt));
+            if (log) log.warn('AI load fail in Worker, retry ' + (attempt + 1) + ' in ' + delay + 'ms', msg.message);
+            cleanupWorker();
+            setTimeout(function() {
+              doLoad(onProgress, attempt + 1).then(function() {
+                if (loadResolve) { loadResolve(); loadResolve = null; loadReject = null; }
+              }).catch(function(err) {
+                if (loadReject) { loadReject(err); loadReject = null; loadResolve = null; }
+              });
+            }, delay);
+          } else {
+            if (log) log.warn('AI load failed in Worker, fallback to demo mode', msg.message);
+            cleanupWorker();
+            mode = 'demo';
+            if (bus && bus.emit) { try { bus.emit('ai:status', { mode: 'demo' }); } catch (_) {} }
+            if (loadResolve) { loadResolve(); loadResolve = null; loadReject = null; }
+          }
+        } else if (msg.type === 'result') {
+          var cb = embedCallbacks.get(msg.id);
+          if (cb) {
+            clearTimeout(cb.timer);
+            embedCallbacks.delete(msg.id);
+            cache.set(cb.text, msg.vector);
+            if (cache.size > cacheLimit) {
+              var oldestKey = cache.keys().next().value;
+              cache.delete(oldestKey);
+            }
+            cb.resolve(msg.vector);
+          }
+        } else if (msg.type === 'error' && msg.id !== null) {
+          var cb = embedCallbacks.get(msg.id);
+          if (cb) {
+            clearTimeout(cb.timer);
+            embedCallbacks.delete(msg.id);
+            if (log) log.warn('AI embed error, fallback to hash for id=' + msg.id, msg.message);
+            var hashVec = hashEmbed(cb.text);
+            cache.set(cb.text, hashVec);
+            cb.resolve(hashVec);
+          }
+        }
+      };
+
+      worker.postMessage({
+        type: 'load',
+        modelName: cfg.get('model', 'Xenova/multilingual-e5-small'),
+        options: {}
+      });
+
+      return new Promise(function(resolve, reject) {
+        loadResolve = resolve;
+        loadReject = reject;
       });
     }
 
     return {
-      ready: function() { return extractor !== null || mode === 'demo'; },
+      ready: function() { return mode === 'model' || mode === 'demo'; },
       getMode: function() { return mode; },
       onProgress: function(fn) { if (typeof fn === 'function') progressFns.push(fn); },
       offProgress: function(fn) {
@@ -948,45 +1078,54 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (idx > -1) progressFns.splice(idx, 1);
       },
       load: function(onProgress) {
-        if (extractor || mode === 'demo') return Promise.resolve();
+        if (mode === 'model' || mode === 'demo') return Promise.resolve();
         if (loadPromise) return loadPromise;
-        loadPromise = doLoad(onProgress).catch(function() { mode = 'demo'; loadPromise = null; return Promise.resolve(); });
+        loadPromise = doLoad(onProgress).catch(function(err) {
+          mode = 'demo';
+          loadPromise = null;
+          if (log) log.warn('AI load failed, fallback to demo mode', String(err && err.message || err));
+          return Promise.resolve();
+        });
         return loadPromise;
       },
       embed: function(text) {
         var t = (text || '').trim();
         if (!t) return Promise.resolve(null);
-        
+
         if (cache.has(t)) {
           var val = cache.get(t);
           cache.delete(t);
           cache.set(t, val);
           return Promise.resolve(val);
         }
-        
-        var promise;
-        if (extractor) {
-          promise = Promise.resolve().then(function() {
-            return Promise.race([
-              extractor(t, { pooling: 'mean', normalize: true }),
-              new Promise(function(_, reject) { setTimeout(function() { reject(new Error('embed timeout')); }, cfg.get('aiEmbedTimeout', 15000)); })
-            ]);
-          }).then(function(out) {
-            return Array.from(out.data);
-          }).catch(function(err) {
-            if (log) log.warn('embed fail, hash', String(err && err.message || err));
-            return hashEmbed(t);
-          });
-        } else {
-          promise = Promise.resolve(hashEmbed(t));
-        }
-        return promise.then(function(v) { 
-          cache.set(t, v);
+
+        if (mode === 'demo' || !worker) {
+          var hashVec = hashEmbed(t);
+          cache.set(t, hashVec);
           if (cache.size > cacheLimit) {
             var oldestKey = cache.keys().next().value;
             cache.delete(oldestKey);
           }
-          return v; 
+          return Promise.resolve(hashVec);
+        }
+
+        var id = nextId++;
+        var timeout = cfg.get('aiEmbedTimeout', 15000);
+
+        return new Promise(function(resolve, reject) {
+          var timer = setTimeout(function() {
+            var cb = embedCallbacks.get(id);
+            if (cb) {
+              embedCallbacks.delete(id);
+              if (log) log.warn('AI embed timeout for id=' + id + ', fallback to hash');
+              var hashVec = hashEmbed(cb.text);
+              cache.set(cb.text, hashVec);
+              cb.resolve(hashVec);
+            }
+          }, timeout);
+
+          embedCallbacks.set(id, { resolve: resolve, reject: reject, text: t, timer: timer });
+          worker.postMessage({ type: 'embed', id: id, text: t });
         });
       },
       cosine: function(a, b) {
