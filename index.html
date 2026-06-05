@@ -2756,9 +2756,206 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END Net -->
 
 <!-- NOOMIUM_MODULE_START Modal -->
-  DI.register('Modal', function() {
-    return {};
-  }, []);
+  /**
+   * @typedef {Object} ModalButton
+   * @description Конфигурация кнопки в футере модального окна.
+   * @property {string} text - Текст кнопки.
+   * @property {boolean} [primary=false] - Флаг основной кнопки (стиль btn-send).
+   * @property {boolean} [danger=false] - Флаг опасной кнопки (красный стиль).
+   * @property {boolean} [disabled=false] - Флаг блокировки кнопки.
+   * @property {function(): void} [onClick] - Обработчик клика.
+   */
+
+  /**
+   * @typedef {Object} ModalOptions
+   * @description Параметры открытия модального окна.
+   * @property {string} [title] - Заголовок окна.
+   * @property {string | Node} [body] - Содержимое тела (строка или DOM-узел).
+   * @property {ModalButton[]} [buttons] - Массив кнопок в футере.
+   */
+
+  DI.register('Modal', function(Config) {
+
+    /** @type {HTMLDivElement | null} Overlay модального окна */
+    var overlay = null;
+
+    /** @type {HTMLDivElement | null} Контейнер модального окна (.md) */
+    var container = null;
+
+    /** @type {Element | null} Элемент, имевший фокус до открытия (для возврата) */
+    var lastFocus = null;
+
+    /** @type {function(KeyboardEvent): void | null} Обработчик Escape */
+    var escHandler = null;
+
+    /** @type {function(KeyboardEvent): void | null} Обработчик Tab (focus trap) */
+    var trapHandler = null;
+
+    /**
+     * Создаёт DOM-структуру модального окна при первом обращении.
+     * @returns {void}
+     */
+    function ensureDOM() {
+      if (overlay) return;
+      overlay = document.createElement('div');
+      overlay.className = 'mo';
+      container = document.createElement('div');
+      container.className = 'md';
+      overlay.appendChild(container);
+      document.body.appendChild(overlay);
+      overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) closeModal();
+      });
+    }
+
+    /**
+     * Открывает модальное окно с заданными параметрами.
+     * Устанавливает aria-атрибуты, создаёт кнопки, настраивает focus trap.
+     * @param {ModalOptions} opts - Параметры модального окна.
+     * @returns {void}
+     */
+    function openModal(opts) {
+      ensureDOM();
+      container.innerHTML = '';
+      lastFocus = document.activeElement;
+
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+
+      var header = document.createElement('div');
+      header.className = 'md-h';
+      var title = document.createElement('div');
+      title.className = 'md-t';
+      title.textContent = (opts && opts.title) || '';
+
+      if (opts && opts.title) {
+        title.id = 'md-title-' + Date.now();
+        overlay.setAttribute('aria-labelledby', title.id);
+      } else {
+        overlay.setAttribute('aria-label', 'Dialog');
+      }
+
+      var closeBtn = document.createElement('button');
+      closeBtn.className = 'md-x';
+      closeBtn.textContent = '×';
+      closeBtn.setAttribute('aria-label', 'Close');
+      closeBtn.onclick = closeModal;
+      header.appendChild(title);
+      header.appendChild(closeBtn);
+
+      var body = document.createElement('div');
+      body.className = 'md-b';
+      if (opts && opts.body) {
+        if (opts.body.nodeType) {
+          body.appendChild(opts.body);
+        } else {
+          body.textContent = String(opts.body);
+        }
+      }
+
+      container.appendChild(header);
+      container.appendChild(body);
+
+      if (opts && opts.buttons && opts.buttons.length > 0) {
+        var footer = document.createElement('div');
+        footer.className = 'md-f';
+        opts.buttons.forEach(function(btn) {
+          var el = document.createElement('button');
+          if (btn.primary) {
+            el.className = 'btn-send';
+          } else {
+            el.className = 'md-btn md-btn-default';
+          }
+          if (btn.danger) el.classList.add('danger');
+          el.textContent = btn.text || 'OK';
+          if (btn.disabled) el.disabled = true;
+          el.onclick = function() {
+            if (btn.onClick) btn.onClick();
+          };
+          footer.appendChild(el);
+        });
+        container.appendChild(footer);
+      }
+
+      overlay.classList.add('on');
+
+      if (escHandler) {
+        document.removeEventListener('keydown', escHandler);
+        escHandler = null;
+      }
+      escHandler = function(e) {
+        if (overlay && overlay.classList.contains('on') && e.key === 'Escape') {
+          closeModal();
+        }
+      };
+      document.addEventListener('keydown', escHandler);
+
+      if (trapHandler) {
+        overlay.removeEventListener('keydown', trapHandler);
+      }
+      trapHandler = function(e) {
+        if (e.key !== 'Tab') return;
+        var focusable = container.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
+        if (focusable.length === 0) return;
+        var first = focusable[0];
+        var last = focusable[focusable.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      };
+      overlay.addEventListener('keydown', trapHandler);
+
+      setTimeout(function() {
+        var focusable = container.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
+        if (focusable.length > 0) focusable[0].focus();
+      }, Config.get('modalFocusDelay', 50));
+    }
+
+    /**
+     * Закрывает модальное окно, снимает обработчики и возвращает фокус.
+     * @returns {void}
+     */
+    function closeModal() {
+      if (overlay) overlay.classList.remove('on');
+      if (escHandler) {
+        document.removeEventListener('keydown', escHandler);
+        escHandler = null;
+      }
+      if (trapHandler && overlay) {
+        overlay.removeEventListener('keydown', trapHandler);
+        trapHandler = null;
+      }
+      try {
+        if (lastFocus && lastFocus.focus) lastFocus.focus();
+      } catch (_) {
+        /* ignore */
+      }
+    }
+
+    return {
+
+      /**
+       * Открывает модальное окно (публичный API).
+       * @param {ModalOptions} opts - Параметры окна.
+       * @returns {void}
+       */
+      open: openModal,
+
+      /**
+       * Закрывает текущее модальное окно (публичный API).
+       * @returns {void}
+       */
+      close: closeModal
+    };
+  }, ['Config']);
 <!-- NOOMIUM_MODULE_END Modal -->
 
 <!-- NOOMIUM_MODULE_START Toast -->
