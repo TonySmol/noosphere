@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.4">
+<meta name="app-version" content="1.3.3">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1555,7 +1555,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /** @type {Map<number, EmbedCallback>} */
     var embedCallbacks = new Map();
 
-    /** @type {number} Монотонно возрастающий ID запросов (сбрасывается при пересоздании Worker'а) */
+    /** @type {number} */
     var nextId = 0;
 
     /**
@@ -1591,52 +1591,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Единая точка записи в LRU-кэш.
-     * При превышении лимита удаляет самый старый элемент (первый ключ Map).
-     * @param {string} text - Ключ кэша (исходный текст).
-     * @param {Vector} vector - Вектор для сохранения.
-     * @returns {void}
-     */
-    function cacheSet(text, vector) {
-      if (cache.size >= cacheLimit) {
-        var oldestKey = cache.keys().next().value;
-        cache.delete(oldestKey);
-      }
-      cache.set(text, vector);
-    }
-
-    /**
-     * Завершает все pending-запросы к Worker'у с fallback на хеш-вектор.
-     * Вызывается при падении Worker'а, ошибке загрузки модели или его принудительном завершении.
-     * Гарантирует, что ни один Promise от embed() не останется в состоянии pending.
-     * @param {string} reason - Причина отклонения (для логирования).
-     * @returns {void}
-     */
-    function rejectAllPending(reason) {
-      if (embedCallbacks.size === 0) return;
-      if (log) log.warn('AI: rejecting all pending embeds, reason=' + reason + ', count=' + embedCallbacks.size);
-      
-      embedCallbacks.forEach(function(cb) {
-        try {
-          clearTimeout(cb.timer);
-          var hashVec = hashEmbed(cb.text);
-          cacheSet(cb.text, hashVec);
-          cb.resolve(hashVec);
-        } catch (err) {
-          if (log) log.warn('AI: error while rejecting pending', String(err && err.message || err));
-        }
-      });
-      embedCallbacks.clear();
-    }
-
-    /**
-     * Принудительно завершает Web Worker, сбрасывает счетчик ID и освобождает Object URL.
-     * Перед уничтожением Worker'а вызывает rejectAllPending для безопасного завершения всех запросов.
+     * Принудительно завершает Web Worker и освобождает Object URL.
      * @returns {void}
      */
     function cleanupWorker() {
-      rejectAllPending('worker terminated');
-      nextId = 0;
       if (worker) {
         try { worker.terminate(); } catch (_) { /* ignore */ }
         worker = null;
@@ -1680,7 +1638,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
       worker.onerror = function(err) {
         if (log) log.warn('Worker error, fallback to demo mode', String(err && err.message || err));
-        // cleanupWorker internally calls rejectAllPending before destroying worker
         cleanupWorker();
         mode = 'demo';
         if (bus && bus.emit) {
@@ -1740,8 +1697,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             }, delay);
           } else {
             if (log) log.warn('AI load failed in Worker, fallback to demo mode', msg.message);
-            // Reject all pending embeds before transitioning to demo mode
-            rejectAllPending('load failed');
             cleanupWorker();
             mode = 'demo';
             if (bus && bus.emit) {
@@ -1758,7 +1713,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           if (cb) {
             clearTimeout(cb.timer);
             embedCallbacks.delete(msg.id);
-            cacheSet(cb.text, msg.vector);
+            cache.set(cb.text, msg.vector);
+            if (cache.size > cacheLimit) {
+              var oldestKey = cache.keys().next().value;
+              cache.delete(oldestKey);
+            }
             cb.resolve(msg.vector);
           }
         } else if (msg.type === 'error' && msg.id !== null) {
@@ -1768,7 +1727,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             embedCallbacks.delete(msg.id);
             if (log) log.warn('AI embed error, fallback to hash for id=' + msg.id, msg.message);
             var hashVec = hashEmbed(cb.text);
-            cacheSet(cb.text, hashVec);
+            cache.set(cb.text, hashVec);
             cb.resolve(hashVec);
           }
         }
@@ -1845,7 +1804,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       /**
        * Вычисляет вектор эмбеддинга для заданного текста.
        * Проверяет кэш, при промахе отправляет запрос в Worker.
-       * При таймауте, отсутствии Worker'а или ошибке автоматически делает fallback на hashEmbed.
+       * При таймауте или ошибке автоматически делает fallback на hashEmbed.
        * @param {string} text - Текст для векторизации.
        * @returns {Promise<Vector | null>} Promise с вектором или null, если текст пуст.
        */
@@ -1853,7 +1812,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         var t = (text || '').trim();
         if (!t) return Promise.resolve(null);
 
-        // LRU touch on read: move to end of Map
         if (cache.has(t)) {
           var val = cache.get(t);
           cache.delete(t);
@@ -1861,10 +1819,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           return Promise.resolve(val);
         }
 
-        // Guard: if Worker is not available or we are in demo mode, use hash immediately
-        if (!worker || mode === 'demo') {
+        if (mode === 'demo' || !worker) {
           var hashVec = hashEmbed(t);
-          cacheSet(t, hashVec);
+          cache.set(t, hashVec);
+          if (cache.size > cacheLimit) {
+            var oldestKey = cache.keys().next().value;
+            cache.delete(oldestKey);
+          }
           return Promise.resolve(hashVec);
         }
 
@@ -1878,7 +1839,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               embedCallbacks.delete(id);
               if (log) log.warn('AI embed timeout for id=' + id + ', fallback to hash');
               var hashVec = hashEmbed(cb.text);
-              cacheSet(cb.text, hashVec);
+              cache.set(cb.text, hashVec);
               cb.resolve(hashVec);
             }
           }, timeout);
