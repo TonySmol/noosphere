@@ -1456,8 +1456,412 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END DB -->
 
 <!-- NOOMIUM_MODULE_START AI -->
-  DI.register('AI', function() {
-    return {};
+  /**
+   * @typedef {'loading' | 'model' | 'demo'} AIMode
+   * @description Состояние модуля AI: загрузка, готова модель или fallback на хеш.
+   */
+
+  /**
+   * @typedef {Object} EmbedCallback
+   * @description Внутренняя структура для отслеживания pending-запросов к Worker'у.
+   * @property {function(Vector): void} resolve - Функция разрешения Promise.
+   * @property {function(Error): void} reject - Функция отклонения Promise.
+   * @property {string} text - Оригинальный текст (для fallback на хеш).
+   * @property {number} timer - ID таймаута для принудительного завершения.
+   */
+
+  DI.register('AI', function(cfg, log, bus) {
+
+    /**
+     * Исходный код Web Worker'а для изолированной загрузки и выполнения ML-модели.
+     * @type {string}
+     */
+    var workerCode = [
+      'let extractor = null;',
+      'let ready = false;',
+      '',
+      'async function loadModel(modelName, options) {',
+      '  const { pipeline, env } = await import("https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2");',
+      '  if (env) {',
+      '    env.allowLocalModels = false;',
+      '    env.useBrowserCache = true;',
+      '  }',
+      '  extractor = await pipeline("feature-extraction", modelName, {',
+      '    quantized: true,',
+      '    progress_callback: function(p) {',
+      '      if (p.status === "progress" && p.total > 0) {',
+      '        const pct = p.loaded / p.total * 100;',
+      '        self.postMessage({ type: "progress", pct: pct });',
+      '      }',
+      '    }',
+      '  });',
+      '  ready = true;',
+      '  self.postMessage({ type: "ready" });',
+      '}',
+      '',
+      'self.onmessage = async function(e) {',
+      '  const msg = e.data;',
+      '  if (msg.type === "load") {',
+      '    try {',
+      '      await loadModel(msg.modelName, msg.options);',
+      '    } catch (err) {',
+      '      self.postMessage({ type: "error", id: null, message: err.message || String(err) });',
+      '    }',
+      '    return;',
+      '  }',
+      '  if (!ready) {',
+      '    self.postMessage({ type: "error", id: msg.id, message: "Model not loaded" });',
+      '    return;',
+      '  }',
+      '  if (msg.type === "embed") {',
+      '    try {',
+      '      const output = await extractor(msg.text, { pooling: "mean", normalize: true });',
+      '      const vec = Array.from(output.data);',
+      '      self.postMessage({ type: "result", id: msg.id, vector: vec });',
+      '    } catch (err) {',
+      '      self.postMessage({ type: "error", id: msg.id, message: err.message || String(err) });',
+      '    }',
+      '  }',
+      '};'
+    ].join('\n');
+
+    /** @type {Worker | null} */
+    var worker = null;
+
+    /** @type {string | null} */
+    var workerUrl = null;
+
+    /** @type {AIMode} */
+    var mode = 'loading';
+
+    /** @type {Map<string, Vector>} LRU-кэш вычисленных векторов */
+    var cache = new Map();
+
+    /** @type {number} */
+    var cacheLimit = cfg.get('aiCacheLimit', 300);
+
+    /** @type {Array<function(number): void>} */
+    var progressFns = [];
+
+    /** @type {Promise<void> | null} */
+    var loadPromise = null;
+
+    /** @type {function(): void | null} */
+    var loadResolve = null;
+
+    /** @type {function(Error): void | null} */
+    var loadReject = null;
+
+    /** @type {Map<number, EmbedCallback>} */
+    var embedCallbacks = new Map();
+
+    /** @type {number} */
+    var nextId = 0;
+
+    /**
+     * Генерирует псевдо-вектор (хеш-эмбеддинг) на основе FNV-1a.
+     * Используется как быстрый fallback, если ML-модель недоступна.
+     * @param {string} text - Входной текст.
+     * @returns {Vector} Нормализованный вектор размерности `dim`.
+     */
+    function hashEmbed(text) {
+      var DIM = cfg.get('dim', 384);
+      var vec = new Float32Array(DIM);
+      var tokens = (text || '').toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
+      
+      for (var t = 0; t < tokens.length; t++) {
+        var tok = tokens[t];
+        var h = 2166136261;
+        for (var i = 0; i < tok.length; i++) {
+          h ^= tok.charCodeAt(i);
+          h = Math.imul(h, 16777619);
+        }
+        vec[Math.abs(h) % DIM] += 1;
+        
+        var h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
+        vec[Math.abs(h2) % DIM] += 0.5;
+      }
+      
+      var norm = 0;
+      for (var i = 0; i < DIM; i++) norm += vec[i] * vec[i];
+      norm = Math.sqrt(norm) || 1;
+      
+      for (var i = 0; i < DIM; i++) vec[i] /= norm;
+      return Array.from(vec);
+    }
+
+    /**
+     * Принудительно завершает Web Worker и освобождает Object URL.
+     * @returns {void}
+     */
+    function cleanupWorker() {
+      if (worker) {
+        try { worker.terminate(); } catch (_) { /* ignore */ }
+        worker = null;
+      }
+      if (workerUrl) {
+        try { URL.revokeObjectURL(workerUrl); } catch (_) { /* ignore */ }
+        workerUrl = null;
+      }
+    }
+
+    /**
+     * Инициализирует Worker и запускает загрузку модели с поддержкой retry.
+     * @param {function(number): void} [onProgress] - Колбэк прогресса загрузки.
+     * @param {number} [attempt=0] - Текущий номер попытки (для backoff).
+     * @returns {Promise<void>}
+     */
+    function doLoad(onProgress, attempt) {
+      attempt = attempt || 0;
+
+      if (typeof Worker === 'undefined') {
+        if (log) log.warn('Web Worker not supported, fallback to demo mode');
+        mode = 'demo';
+        if (bus && bus.emit) {
+          try { bus.emit('ai:status', { mode: 'demo' }); } catch (_) { /* ignore */ }
+        }
+        return Promise.resolve();
+      }
+
+      try {
+        var blob = new Blob([workerCode], { type: 'application/javascript' });
+        workerUrl = URL.createObjectURL(blob);
+        worker = new Worker(workerUrl, { type: 'module' });
+      } catch (err) {
+        if (log) log.warn('Failed to create Worker, fallback to demo mode', String(err && err.message || err));
+        mode = 'demo';
+        if (bus && bus.emit) {
+          try { bus.emit('ai:status', { mode: 'demo' }); } catch (_) { /* ignore */ }
+        }
+        return Promise.resolve();
+      }
+
+      worker.onerror = function(err) {
+        if (log) log.warn('Worker error, fallback to demo mode', String(err && err.message || err));
+        cleanupWorker();
+        mode = 'demo';
+        if (bus && bus.emit) {
+          try { bus.emit('ai:status', { mode: 'demo' }); } catch (_) { /* ignore */ }
+        }
+        if (loadReject) {
+          loadReject(err);
+          loadReject = null;
+          loadResolve = null;
+        }
+      };
+
+      worker.onmessage = function(e) {
+        var msg = e.data;
+
+        if (msg.type === 'progress') {
+          if (typeof onProgress === 'function') {
+            try { onProgress(msg.pct); } catch (_) { /* ignore */ }
+          }
+          for (var i = 0; i < progressFns.length; i++) {
+            try { progressFns[i](msg.pct); } catch (_) { /* ignore */ }
+          }
+          if (bus && bus.emit) {
+            try { bus.emit('ai:progress', { pct: msg.pct }); } catch (_) { /* ignore */ }
+            try { bus.emit('ai:status', { mode: 'loading', percent: msg.pct }); } catch (_) { /* ignore */ }
+          }
+        } else if (msg.type === 'ready') {
+          mode = 'model';
+          if (log) log.info('AI loaded in Worker: ' + cfg.get('model', 'Xenova/multilingual-e5-small'));
+          if (bus && bus.emit) {
+            try { bus.emit('ai:status', { mode: 'model' }); } catch (_) { /* ignore */ }
+          }
+          if (loadResolve) {
+            loadResolve();
+            loadResolve = null;
+            loadReject = null;
+          }
+        } else if (msg.type === 'error' && msg.id === null) {
+          if (attempt < cfg.get('aiLoadRetries', 2)) {
+            var delay = Math.min(cfg.get('aiLoadMaxBackoff', 30000), 2000 * Math.pow(2, attempt));
+            if (log) log.warn('AI load fail in Worker, retry ' + (attempt + 1) + ' in ' + delay + 'ms', msg.message);
+            cleanupWorker();
+            setTimeout(function() {
+              doLoad(onProgress, attempt + 1).then(function() {
+                if (loadResolve) {
+                  loadResolve();
+                  loadResolve = null;
+                  loadReject = null;
+                }
+              }).catch(function(err) {
+                if (loadReject) {
+                  loadReject(err);
+                  loadReject = null;
+                  loadResolve = null;
+                }
+              });
+            }, delay);
+          } else {
+            if (log) log.warn('AI load failed in Worker, fallback to demo mode', msg.message);
+            cleanupWorker();
+            mode = 'demo';
+            if (bus && bus.emit) {
+              try { bus.emit('ai:status', { mode: 'demo' }); } catch (_) { /* ignore */ }
+            }
+            if (loadResolve) {
+              loadResolve();
+              loadResolve = null;
+              loadReject = null;
+            }
+          }
+        } else if (msg.type === 'result') {
+          var cb = embedCallbacks.get(msg.id);
+          if (cb) {
+            clearTimeout(cb.timer);
+            embedCallbacks.delete(msg.id);
+            cache.set(cb.text, msg.vector);
+            if (cache.size > cacheLimit) {
+              var oldestKey = cache.keys().next().value;
+              cache.delete(oldestKey);
+            }
+            cb.resolve(msg.vector);
+          }
+        } else if (msg.type === 'error' && msg.id !== null) {
+          var cb = embedCallbacks.get(msg.id);
+          if (cb) {
+            clearTimeout(cb.timer);
+            embedCallbacks.delete(msg.id);
+            if (log) log.warn('AI embed error, fallback to hash for id=' + msg.id, msg.message);
+            var hashVec = hashEmbed(cb.text);
+            cache.set(cb.text, hashVec);
+            cb.resolve(hashVec);
+          }
+        }
+      };
+
+      worker.postMessage({
+        type: 'load',
+        modelName: cfg.get('model', 'Xenova/multilingual-e5-small'),
+        options: {}
+      });
+
+      return new Promise(function(resolve, reject) {
+        loadResolve = resolve;
+        loadReject = reject;
+      });
+    }
+
+    return {
+
+      /**
+       * Проверяет, готов ли модуль к векторизации (модель загружена или работает fallback).
+       * @returns {boolean}
+       */
+      ready: function() {
+        return mode === 'model' || mode === 'demo';
+      },
+
+      /**
+       * Возвращает текущий режим работы модуля.
+       * @returns {AIMode}
+       */
+      getMode: function() {
+        return mode;
+      },
+
+      /**
+       * Подписывает функцию на события прогресса загрузки модели.
+       * @param {function(number): void} fn - Обработчик, принимающий процент (0-100).
+       * @returns {void}
+       */
+      onProgress: function(fn) {
+        if (typeof fn === 'function') progressFns.push(fn);
+      },
+
+      /**
+       * Отписывает функцию от событий прогресса.
+       * @param {function(number): void} fn - Тот же ссылочный обработчик.
+       * @returns {void}
+       */
+      offProgress: function(fn) {
+        var idx = progressFns.indexOf(fn);
+        if (idx > -1) progressFns.splice(idx, 1);
+      },
+
+      /**
+       * Инициирует создание Worker'а и загрузку ML-модели.
+       * Повторные вызовы возвращают существующий Promise или разрешаются мгновенно.
+       * @param {function(number): void} [onProgress] - Опциональный колбэк прогресса.
+       * @returns {Promise<void>}
+       */
+      load: function(onProgress) {
+        if (mode === 'model' || mode === 'demo') return Promise.resolve();
+        if (loadPromise) return loadPromise;
+        
+        loadPromise = doLoad(onProgress).catch(function(err) {
+          mode = 'demo';
+          loadPromise = null;
+          if (log) log.warn('AI load failed, fallback to demo mode', String(err && err.message || err));
+          return Promise.resolve();
+        });
+        return loadPromise;
+      },
+
+      /**
+       * Вычисляет вектор эмбеддинга для заданного текста.
+       * Проверяет кэш, при промахе отправляет запрос в Worker.
+       * При таймауте или ошибке автоматически делает fallback на hashEmbed.
+       * @param {string} text - Текст для векторизации.
+       * @returns {Promise<Vector | null>} Promise с вектором или null, если текст пуст.
+       */
+      embed: function(text) {
+        var t = (text || '').trim();
+        if (!t) return Promise.resolve(null);
+
+        if (cache.has(t)) {
+          var val = cache.get(t);
+          cache.delete(t);
+          cache.set(t, val);
+          return Promise.resolve(val);
+        }
+
+        if (mode === 'demo' || !worker) {
+          var hashVec = hashEmbed(t);
+          cache.set(t, hashVec);
+          if (cache.size > cacheLimit) {
+            var oldestKey = cache.keys().next().value;
+            cache.delete(oldestKey);
+          }
+          return Promise.resolve(hashVec);
+        }
+
+        var id = nextId++;
+        var timeout = cfg.get('aiEmbedTimeout', 15000);
+
+        return new Promise(function(resolve, reject) {
+          var timer = setTimeout(function() {
+            var cb = embedCallbacks.get(id);
+            if (cb) {
+              embedCallbacks.delete(id);
+              if (log) log.warn('AI embed timeout for id=' + id + ', fallback to hash');
+              var hashVec = hashEmbed(cb.text);
+              cache.set(cb.text, hashVec);
+              cb.resolve(hashVec);
+            }
+          }, timeout);
+
+          embedCallbacks.set(id, { resolve: resolve, reject: reject, text: t, timer: timer });
+          worker.postMessage({ type: 'embed', id: id, text: t });
+        });
+      },
+
+      /**
+       * Вычисляет косинусное сходство между двумя векторами.
+       * @param {Vector} a - Первый вектор.
+       * @param {Vector} b - Второй вектор.
+       * @returns {number} Значение сходства от -1 до 1 (или 0 при ошибке/нулевых векторах).
+       */
+      cosine: function(a, b) {
+        if (!a || !b || a.length !== b.length) return 0;
+        var sum = 0;
+        for (var i = 0; i < a.length; i++) sum += a[i] * b[i];
+        return Math.abs(sum) < 1e-8 ? 0 : sum;
+      }
+    };
   }, ['Config', 'Logger', 'Bus']);
 <!-- NOOMIUM_MODULE_END AI -->
 
