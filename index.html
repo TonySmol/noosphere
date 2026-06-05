@@ -6794,9 +6794,125 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END App -->
 
 <!-- NOOMIUM_MODULE_START Bootstrap -->
+  /**
+   * Точка входа приложения NOOmium.
+   * Резолвит корневой модуль App через DI-контейнер и вызывает mount().
+   *
+   * При возникновении критической ошибки на этапе инициализации
+   * отображает fallback-экран с сообщением об ошибке и кнопкой перезагрузки,
+   * чтобы пользователь мог восстановить работоспособность приложения.
+   *
+   * @returns {void}
+   */
+  function bootstrap() {
+    try {
+      const app = DI.resolve('App');
+      app.mount();
+    } catch (err) {
+      console.error('Bootstrap failed:', err);
+
+      let root = document.getElementById('app-root');
+      if (!root) {
+        root = document.createElement('div');
+        root.id = 'app-root';
+        document.body.appendChild(root);
+      }
+
+      root.textContent = '';
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'startup-wrapper';
+
+      const heading = document.createElement('h2');
+      heading.textContent = 'Startup failed';
+
+      const message = document.createElement('p');
+      message.className = 'startup-message';
+      message.textContent = String(err && err.message || err);
+
+      const reloadBtn = document.createElement('button');
+      reloadBtn.className = 'startup-reload';
+      reloadBtn.textContent = 'Reload';
+      reloadBtn.onclick = function() { location.reload(); };
+
+      wrapper.appendChild(heading);
+      wrapper.appendChild(message);
+      wrapper.appendChild(reloadBtn);
+      root.appendChild(wrapper);
+
+      document.body.classList.add('show-app');
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrap);
+  } else {
+    bootstrap();
+  }
 <!-- NOOMIUM_MODULE_END Bootstrap -->
 
 <!-- NOOMIUM_MODULE_START SW -->
+  /**
+   * @typedef {Object} SWMessage
+   * @description Сообщение, отправляемое Service Worker'у для управления его жизненным циклом.
+   * @property {'SKIP_WAITING'} type - Тип команды.
+   */
+
+  /**
+   * Логика управления Service Worker'ом для PWA-обновлений.
+   *
+   * **Жизненный цикл обновления:**
+   * 1. При загрузке страницы регистрируется SW с версией из meta-тега `app-version`
+   *    (кеш-бастинг для форсирования обновления при смене версии).
+   * 2. Если уже есть ожидающий SW (от предыдущей сессии) — ему отправляется
+   *    команда SKIP_WAITING для немедленной активации.
+   * 3. При обнаружении новой версии SW (updatefound):
+   *    - Дожидаемся его установки (state === 'installed')
+   *    - Если есть активный контроллер, отправляем SKIP_WAITING
+   *    - Перезагружаем страницу для применения новой версии
+   * 4. Обработчик `controllerchange` перезагружает страницу, когда новый SW
+   *    берёт контроль над клиентом (защита от работы со старой версией кеша).
+   *
+   * Регистрация SW может не сработать в приватном режиме или при открытии
+   * через `file://` — это не критично, приложение продолжает работать.
+   *
+   * @returns {void}
+   */
+  (function() {
+    if (!('serviceWorker' in navigator)) return;
+
+    var appVersionMeta = document.querySelector('meta[name="app-version"]');
+    var appVersion = appVersionMeta ? appVersionMeta.getAttribute('content') : '0';
+
+    navigator.serviceWorker.register('/sw.js?v=' + encodeURIComponent(appVersion))
+      .then(function(reg) {
+        if (reg.waiting) {
+          reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        }
+
+        reg.addEventListener('updatefound', function() {
+          var installing = reg.installing;
+          if (installing) {
+            installing.addEventListener('statechange', function() {
+              if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+                installing.postMessage({ type: 'SKIP_WAITING' });
+                window.location.reload();
+              }
+            });
+          }
+        });
+      })
+      .catch(function(err) {
+        console.warn('SW registration failed:', err);
+      });
+
+    var refreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function() {
+      if (refreshing) return;
+      refreshing = true;
+      window.location.reload();
+    });
+  })();
 <!-- NOOMIUM_MODULE_END SW -->
 })();
 </script>
