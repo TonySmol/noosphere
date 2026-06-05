@@ -946,14 +946,512 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END I18n -->
   
 <!-- NOOMIUM_MODULE_START Config -->
-  DI.register('Config', function() {
-    return {};
+  /**
+   * @typedef {Object} AppConfig
+   * @description Полный объект конфигурации приложения NOOmium.
+   * @property {string} room - Nostr-комната (тег #t) для обмена мыслями.
+   * @property {number} threshold - Порог косинусного сходства для попадания в local/world.
+   * @property {number} serendipity - Дельта ниже threshold для сегмента seren (озарения).
+   * @property {string[]} relays - Список WebSocket-адресов Nostr-релеев.
+   * @property {number} kQuery - Kind Nostr-события для поискового запроса.
+   * @property {number} kAnswer - Kind Nostr-события для ответа на запрос.
+   * @property {string} model - Идентификатор HuggingFace-модели для эмбеддингов.
+   * @property {number} dim - Размерность вектора эмбеддинга.
+   * @property {number} debounce - Задержка debounce для поиска (мс).
+   * @property {number} peerTTL - Время жизни пира в сети (мс).
+   * @property {number} heartbeat - Интервал heartbeat для очистки пиров (мс).
+   * @property {number} subWindow - Окно подписки на события Nostr (сек).
+   * @property {number} queryRateLimit - Минимальный интервал между запросами в сеть (мс).
+   * @property {string} dbName - Имя базы IndexedDB.
+   * @property {string} storeName - Имя объектного хранилища в IDB.
+   * @property {'dark'|'light'} theme - Активная цветовая тема.
+   * @property {boolean} onboarded - Флаг прохождения онбординга.
+   * @property {number} publishCooldown - Задержка между публикациями (мс).
+   * @property {number} maxAnswersPerQuery - Макс. ответов на один запрос.
+   * @property {number} aiCacheLimit - Макс. размер LRU-кэша векторов.
+   * @property {number} aiEmbedTimeout - Таймаут запроса эмбеддинга в Worker (мс).
+   * @property {number} aiLoadRetries - Кол-во попыток загрузки модели.
+   * @property {number} aiLoadMaxBackoff - Макс. задержка между попытками (мс).
+   * @property {number} sharedCacheTTL - TTL кэша shared-векторов (мс).
+   * @property {number} seenMaxSize - Макс. размер SetSeen дубликатов.
+   * @property {number} seenKeepSize - Сколько последних ID сохранять при переполнении.
+   * @property {number} outboxBatchSize - Размер батча отправки из outbox.
+   * @property {number} relayErrorThreshold - Кол-во ошибок до circuit-break релея.
+   * @property {number} relayCircuitBreakTime - Время блокировки релея (мс).
+   * @property {number} relayBackoff1 - Первый уровень backoff для релея (мс).
+   * @property {number} relayBackoff2 - Второй уровень backoff для релея (мс).
+   * @property {number} maxAnswersCache - Макс. размер кэша входящих ответов.
+   * @property {number} answersTTL - TTL ответа в кэше (мс).
+   * @property {number} answerStaggerDelay - Задержка между ответами (мс).
+   * @property {number} reconnectMaxAttempts - Макс. попыток переподключения.
+   * @property {number} reconnectBaseDelay - Базовая задержка reconnect (мс).
+   * @property {number} reconnectMaxDelay - Макс. задержка reconnect (мс).
+   * @property {number} carouselIntersectionThreshold - Порог IntersectionObserver.
+   * @property {number} baseChunkSize - Размер чанка при пагинации IDB.
+   * @property {number} truncateTextLength - Макс. длина текста в списке базы.
+   * @property {number} noteViewAnimationDelay - Задержка анимации NoteView (мс).
+   * @property {number} vectorSimilarityThreshold - Порог схожести для дедупликации запросов.
+   * @property {number} baseSearchDebounce - Debounce текстового поиска в базе (мс).
+   * @property {number} maxPasswordAttempts - Макс. попыток ввода пароля.
+   * @property {number} toastMaxVisible - Макс. одновременно видимых тостов.
+   * @property {number} toastDefaultDuration - Длительность тоста по умолчанию (мс).
+   * @property {number} progressFocusDelay - Задержка фокуса в Progress (мс).
+   * @property {number} modalFocusDelay - Задержка фокуса в Modal (мс).
+   * @property {number} maxAnswerTextLength - Макс. длина текста ответа из сети.
+   * @property {number} offlineQueueMaxSize - Макс. размер offline-очереди.
+   * @property {number} offlineFlushInterval - Интервал flush offline-очереди (мс).
+   */
+
+  DI.register('Config', function(store, log) {
+
+    /**
+     * Ключ для сохранения конфигурации в Store.
+     * @type {string}
+     */
+    var KEY = 'cfg';
+
+    /**
+     * Значения по умолчанию для всех параметров приложения.
+     * @type {AppConfig}
+     */
+    var defaults = {
+      room: 'noomium-main',
+      threshold: 0.30,
+      serendipity: 0.15,
+      relays: ['wss://offchain.pub', 'wss://relay.nostr.info', 'wss://nostr.mom'],
+      kQuery: 21000,
+      kAnswer: 21001,
+      model: 'Xenova/multilingual-e5-small',
+      dim: 384,
+      debounce: 800,
+      peerTTL: 60000,
+      heartbeat: 30000,
+      subWindow: 300,
+      queryRateLimit: 3000,
+      dbName: 'noomium_v8',
+      storeName: 'notes',
+      theme: 'dark',
+      onboarded: false,
+      publishCooldown: 1500,
+      maxAnswersPerQuery: 5,
+      aiCacheLimit: 300,
+      aiEmbedTimeout: 15000,
+      aiLoadRetries: 2,
+      aiLoadMaxBackoff: 30000,
+      sharedCacheTTL: 60000,
+      seenMaxSize: 1000,
+      seenKeepSize: 500,
+      outboxBatchSize: 2,
+      relayErrorThreshold: 5,
+      relayCircuitBreakTime: 120000,
+      relayBackoff1: 15000,
+      relayBackoff2: 30000,
+      maxAnswersCache: 100,
+      answersTTL: 300000,
+      answerStaggerDelay: 500,
+      reconnectMaxAttempts: 10,
+      reconnectBaseDelay: 1000,
+      reconnectMaxDelay: 60000,
+      carouselIntersectionThreshold: 0.55,
+      baseChunkSize: 20,
+      truncateTextLength: 120,
+      noteViewAnimationDelay: 200,
+      vectorSimilarityThreshold: 0.98,
+      baseSearchDebounce: 200,
+      maxPasswordAttempts: 3,
+      toastMaxVisible: 3,
+      toastDefaultDuration: 2200,
+      progressFocusDelay: 50,
+      modalFocusDelay: 50,
+      maxAnswerTextLength: 10000,
+      offlineQueueMaxSize: 100,
+      offlineFlushInterval: 30000
+    };
+
+    /**
+     * Текущее состояние конфигурации (defaults + сохранённые значения).
+     * @type {AppConfig}
+     */
+    var state = Object.assign({}, defaults);
+
+    try {
+      var saved = store ? store.get(KEY, null) : null;
+      if (saved && typeof saved === 'object') {
+        Object.assign(state, saved);
+      }
+    } catch (e) {
+      if (log) log.warn('Config load failed', String(e));
+    }
+
+    return {
+
+      /**
+       * Возвращает копию объекта значений по умолчанию.
+       * @returns {AppConfig} Клон defaults.
+       */
+      defaults: function() {
+        return Object.assign({}, defaults);
+      },
+
+      /**
+       * Читает значение параметра конфигурации.
+       * @template T
+       * @param {keyof AppConfig} k - Имя параметра.
+       * @param {T} [def] - Значение по умолчанию, если ключа нет в state.
+       * @returns {AppConfig[keyof AppConfig] | T} Значение параметра или def.
+       */
+      get: function(k, def) {
+        return state.hasOwnProperty(k) ? state[k] : def;
+      },
+
+      /**
+       * Устанавливает значение параметра в runtime-состоянии.
+       * Не сохраняет в Store автоматически — нужен явный вызов save().
+       * @param {keyof AppConfig} k - Имя параметра.
+       * @param {*} v - Новое значение.
+       * @returns {void}
+       */
+      set: function(k, v) {
+        state[k] = v;
+      },
+
+      /**
+       * Сохраняет текущее состояние конфигурации в Store (localStorage).
+       * @returns {void}
+       */
+      save: function() {
+        try {
+          if (store) store.set(KEY, state);
+        } catch (e) {
+          if (log) log.warn('Config save failed', String(e));
+        }
+      }
+    };
   }, ['Store', 'Logger']);
 <!-- NOOMIUM_MODULE_END Config -->
 
 <!-- NOOMIUM_MODULE_START DB -->
-  DI.register('DB', function() {
-    return {};
+  /**
+   * @typedef {Object} IDBMockRequest
+   * @description Мок-объект запроса для fallback на Map при недоступности IndexedDB.
+   * @property {*} result - Результат операции.
+   * @property {function(): void} [onsuccess] - Колбэк успеха.
+   * @property {function(*): void} [onerror] - Колбэк ошибки.
+   */
+
+  DI.register('DB', function(cfg, log, bus) {
+
+    /**
+     * Инстанс открытой IndexedDB (null, если IDB недоступен).
+     * @type {IDBDatabase | null}
+     */
+    var db = null;
+
+    /**
+     * In-memory fallback-хранилище (используется, если IDB недоступен).
+     * @type {Map<string, Note> | null}
+     */
+    var mem = null;
+
+    /**
+     * Возвращает имя базы данных из конфигурации.
+     * @returns {string}
+     */
+    function dbName() {
+      return cfg.get('dbName', 'noomium_v8');
+    }
+
+    /**
+     * Возвращает имя объектного хранилища из конфигурации.
+     * @returns {string}
+     */
+    function storeName() {
+      return cfg.get('storeName', 'notes');
+    }
+
+    /**
+     * Публикует событие db:change через Bus после любой мутации данных.
+     * @returns {void}
+     */
+    function emitChange() {
+      if (bus && bus.emit) {
+        try {
+          bus.emit('db:change');
+        } catch (_) {
+          /* ignore */
+        }
+      }
+    }
+
+    /**
+     * Открывает соединение с IndexedDB (или создаёт in-memory fallback).
+     * Кэширует результат в переменной db для повторных вызовов.
+     * @returns {Promise<IDBDatabase | null>} Разрешается инстансом IDB или null (fallback).
+     */
+    function open() {
+      return new Promise(function(resolve, reject) {
+        if (db) return resolve(db);
+        if (!window.indexedDB) {
+          mem = new Map();
+          return resolve(null);
+        }
+        try {
+          var req = indexedDB.open(dbName(), 1);
+          req.onupgradeneeded = function(e) {
+            var d = e.target.result;
+            var s = storeName();
+            if (!d.objectStoreNames.contains(s)) {
+              d.createObjectStore(s, { keyPath: 'id' });
+            }
+          };
+          req.onsuccess = function(e) {
+            db = e.target.result;
+            resolve(db);
+          };
+          req.onerror = function() {
+            if (log) log.warn('IDB open error', String(req.error));
+            mem = new Map();
+            resolve(null);
+          };
+          req.onblocked = function() {
+            mem = new Map();
+            resolve(null);
+          };
+        } catch (err) {
+          if (log) log.warn('IDB unsupported', String(err));
+          mem = new Map();
+          resolve(null);
+        }
+      });
+    }
+
+    /**
+     * Выполняет операцию внутри IDB-транзакции (или в in-memory fallback).
+     * @param {'readonly' | 'readwrite'} mode - Режим транзакции.
+     * @param {function(IDBObjectStore | Object): IDBRequest | IDBMockRequest | *} fn -
+     *   Функция, принимающая objectStore и возвращающая запрос или результат.
+     * @returns {Promise<*>} Promise с результатом операции.
+     */
+    function tx(mode, fn) {
+      return open().then(function(d) {
+        return new Promise(function(resolve, reject) {
+          try {
+            if (!d) {
+              var mockStore = {
+                get: function(k) {
+                  return { result: mem.get(k) };
+                },
+                put: function(v) {
+                  mem.set(v.id, v);
+                  return {};
+                },
+                delete: function(k) {
+                  mem.delete(k);
+                  return {};
+                },
+                getAll: function() {
+                  return { result: Array.from(mem.values()) };
+                }
+              };
+              var req = { result: null, onsuccess: null, onerror: null };
+              try {
+                var r = fn(mockStore);
+                if (!r || typeof r.onsuccess !== 'function') {
+                  resolve(r && r.result !== undefined ? r.result : r);
+                  return;
+                }
+                req.result = r.result !== undefined ? r.result : r;
+                req.onsuccess = function() { resolve(req.result); };
+                req.onerror = function(e) { reject(e); };
+                setTimeout(function() {
+                  if (req.onsuccess) req.onsuccess();
+                }, 0);
+              } catch (e) {
+                req.onerror = function() { reject(e); };
+                setTimeout(function() {
+                  if (req.onerror) req.onerror();
+                }, 0);
+              }
+              return;
+            }
+            var transaction = d.transaction(storeName(), mode);
+            var store = transaction.objectStore(storeName());
+            var r = fn(store);
+            r.onsuccess = function() { resolve(r.result); };
+            r.onerror = function() {
+              if (log) log.warn('DB op error', String(r.error));
+              reject(r.error);
+            };
+          } catch (err) {
+            if (log) log.warn('DB tx error', String(err));
+            reject(err);
+          }
+        });
+      });
+    }
+
+    return {
+
+      /**
+       * Создаёт или обновляет заметку в хранилище.
+       * @param {Note} note - Объект заметки с обязательным полем id.
+       * @returns {Promise<*>} Promise, разрешающийся после записи.
+       */
+      put: function(note) {
+        return tx('readwrite', function(s) {
+          return s.put(note);
+        }).then(function(res) {
+          emitChange();
+          return res;
+        });
+      },
+
+      /**
+       * Читает одну заметку по её идентификатору.
+       * @param {string} id - Уникальный ID заметки.
+       * @returns {Promise<Note | undefined>} Promise с заметкой или undefined.
+       */
+      get: function(id) {
+        return tx('readonly', function(s) {
+          return s.get(id);
+        });
+      },
+
+      /**
+       * Удаляет заметку по идентификатору.
+       * @param {string} id - Уникальный ID заметки.
+       * @returns {Promise<*>} Promise, разрешающийся после удаления.
+       */
+      del: function(id) {
+        return tx('readwrite', function(s) {
+          return s.delete(id);
+        }).then(function(res) {
+          emitChange();
+          return res;
+        });
+      },
+
+      /**
+       * Возвращает все заметки из хранилища.
+       * @returns {Promise<Note[]>} Promise с массивом всех заметок.
+       */
+      all: function() {
+        return tx('readonly', function(s) {
+          return s.getAll();
+        });
+      },
+
+      /**
+       * Возвращает порцию заметок через IDB-курсор (для экономии памяти).
+       * В fallback-режиме использует slice на массиве.
+       * @param {number} offset - Количество пропускаемых записей.
+       * @param {number} limit - Макс. количество возвращаемых записей.
+       * @returns {Promise<Note[]>} Promise с массивом заметок.
+       */
+      getAllPaginated: function(offset, limit) {
+        return open().then(function(d) {
+          return new Promise(function(resolve, reject) {
+            if (!d) {
+              var all = mem ? Array.from(mem.values()) : [];
+              resolve(all.slice(offset, offset + limit));
+              return;
+            }
+            var transaction = d.transaction(storeName(), 'readonly');
+            var store = transaction.objectStore(storeName());
+            var request = store.openCursor();
+            var result = [];
+            var advanced = false;
+
+            request.onsuccess = function(event) {
+              var cursor = event.target.result;
+              if (!cursor) {
+                resolve(result);
+                return;
+              }
+              if (!advanced && offset > 0) {
+                advanced = true;
+                try {
+                  cursor.advance(offset);
+                } catch (e) {
+                  resolve(result);
+                }
+                return;
+              }
+              result.push(cursor.value);
+              if (result.length >= limit) {
+                resolve(result);
+                return;
+              }
+              cursor.continue();
+            };
+
+            request.onerror = function() {
+              if (log) log.warn('DB cursor error', String(request.error));
+              reject(request.error);
+            };
+          });
+        });
+      },
+
+      /**
+       * Массовая вставка/обновление заметок в одной транзакции.
+       * @param {Note[]} notes - Массив заметок для записи.
+       * @returns {Promise<number>} Promise с количеством записанных заметок.
+       */
+      bulkPut: function(notes) {
+        return open().then(function(d) {
+          return new Promise(function(resolve, reject) {
+            try {
+              if (!d) {
+                for (var i = 0; i < notes.length; i++) {
+                  mem.set(notes[i].id, notes[i]);
+                }
+                emitChange();
+                return resolve(notes.length);
+              }
+              var transaction = d.transaction(storeName(), 'readwrite');
+              var store = transaction.objectStore(storeName());
+              for (var i = 0; i < notes.length; i++) {
+                store.put(notes[i]);
+              }
+              transaction.oncomplete = function() {
+                emitChange();
+                resolve(notes.length);
+              };
+              transaction.onerror = function() {
+                reject(transaction.error);
+              };
+            } catch (err) {
+              reject(err);
+            }
+          });
+        });
+      },
+
+      /**
+       * Полностью удаляет базу данных и очищает in-memory fallback.
+       * @returns {Promise<void>} Promise, разрешающийся после удаления.
+       */
+      reset: function() {
+        if (db) {
+          try { db.close(); } catch (_) { /* ignore */ }
+          db = null;
+        }
+        if (mem) mem.clear();
+        return new Promise(function(resolve) {
+          try {
+            var req = indexedDB.deleteDatabase(dbName());
+            req.onsuccess = req.onerror = req.onblocked = function() {
+              emitChange();
+              resolve();
+            };
+          } catch (_) {
+            emitChange();
+            resolve();
+          }
+        });
+      }
+    };
   }, ['Config', 'Logger', 'Bus']);
 <!-- NOOMIUM_MODULE_END DB -->
 
