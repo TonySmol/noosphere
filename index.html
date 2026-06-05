@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.4">
+<meta name="app-version" content="1.3.3">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1470,14 +1470,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
    * @property {number} timer - ID таймаута для принудительного завершения.
    */
 
-  /**
-   * @typedef {Object} BatchCallback
-   * @description Внутренняя структура для отслеживания pending batch-запросов к Worker'у.
-   * @property {function(Array<{id: string, score: number}>): void} resolve - Функция разрешения Promise.
-   * @property {function(Error): void} reject - Функция отклонения Promise.
-   * @property {number} timer - ID таймаута для принудительного завершения.
-   */
-
   DI.register('AI', function(cfg, log, bus) {
 
     /**
@@ -1485,39 +1477,36 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
      * @type {string}
      */
     var workerCode = [
-      'var extractor = null;',
-      'var ready = false;',
+      'let extractor = null;',
+      'let ready = false;',
       '',
-      'function loadModel(modelName, options) {',
-      '  return import("https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2").then(function(mod) {',
-      '    var pipeline = mod.pipeline;',
-      '    var env = mod.env;',
-      '    if (env) {',
-      '      env.allowLocalModels = false;',
-      '      env.useBrowserCache = true;',
-      '    }',
-      '    return pipeline("feature-extraction", modelName, {',
-      '      quantized: true,',
-      '      progress_callback: function(p) {',
-      '        if (p.status === "progress" && p.total > 0) {',
-      '          var pct = p.loaded / p.total * 100;',
-      '          self.postMessage({ type: "progress", pct: pct });',
-      '        }',
+      'async function loadModel(modelName, options) {',
+      '  const { pipeline, env } = await import("https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2");',
+      '  if (env) {',
+      '    env.allowLocalModels = false;',
+      '    env.useBrowserCache = true;',
+      '  }',
+      '  extractor = await pipeline("feature-extraction", modelName, {',
+      '    quantized: true,',
+      '    progress_callback: function(p) {',
+      '      if (p.status === "progress" && p.total > 0) {',
+      '        const pct = p.loaded / p.total * 100;',
+      '        self.postMessage({ type: "progress", pct: pct });',
       '      }',
-      '    });',
-      '  }).then(function(ext) {',
-      '    extractor = ext;',
-      '    ready = true;',
-      '    self.postMessage({ type: "ready" });',
+      '    }',
       '  });',
+      '  ready = true;',
+      '  self.postMessage({ type: "ready" });',
       '}',
       '',
-      'self.onmessage = function(e) {',
-      '  var msg = e.data;',
+      'self.onmessage = async function(e) {',
+      '  const msg = e.data;',
       '  if (msg.type === "load") {',
-      '    loadModel(msg.modelName, msg.options).catch(function(err) {',
+      '    try {',
+      '      await loadModel(msg.modelName, msg.options);',
+      '    } catch (err) {',
       '      self.postMessage({ type: "error", id: null, message: err.message || String(err) });',
-      '    });',
+      '    }',
       '    return;',
       '  }',
       '  if (!ready) {',
@@ -1525,24 +1514,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       '    return;',
       '  }',
       '  if (msg.type === "embed") {',
-      '    extractor(msg.text, { pooling: "mean", normalize: true }).then(function(output) {',
-      '      var vec = Array.from(output.data);',
+      '    try {',
+      '      const output = await extractor(msg.text, { pooling: "mean", normalize: true });',
+      '      const vec = Array.from(output.data);',
       '      self.postMessage({ type: "result", id: msg.id, vector: vec });',
-      '    }).catch(function(err) {',
+      '    } catch (err) {',
       '      self.postMessage({ type: "error", id: msg.id, message: err.message || String(err) });',
-      '    });',
-      '  }',
-      '  if (msg.type === "cosineBatch") {',
-      '    var scores = [];',
-      '    for (var i = 0; i < msg.vectors.length; i++) {',
-      '      var item = msg.vectors[i];',
-      '      var sum = 0;',
-      '      for (var j = 0; j < msg.queryVector.length; j++) {',
-      '        sum += msg.queryVector[j] * item.vector[j];',
-      '      }',
-      '      scores.push({ id: item.id, score: sum });',
       '    }',
-      '    self.postMessage({ type: "cosineBatchResult", id: msg.id, scores: scores });',
       '  }',
       '};'
     ].join('\n');
@@ -1576,9 +1554,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /** @type {Map<number, EmbedCallback>} */
     var embedCallbacks = new Map();
-
-    /** @type {Map<number, BatchCallback>} */
-    var batchCallbacks = new Map();
 
     /** @type {number} */
     var nextId = 0;
@@ -1755,13 +1730,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             cache.set(cb.text, hashVec);
             cb.resolve(hashVec);
           }
-        } else if (msg.type === 'cosineBatchResult') {
-          var cb = batchCallbacks.get(msg.id);
-          if (cb) {
-            clearTimeout(cb.timer);
-            batchCallbacks.delete(msg.id);
-            cb.resolve(msg.scores);
-          }
         }
       };
 
@@ -1892,77 +1860,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         var sum = 0;
         for (var i = 0; i < a.length; i++) sum += a[i] * b[i];
         return Math.abs(sum) < 1e-8 ? 0 : sum;
-      },
-
-      /**
-       * Пакетно вычисляет косинусное сходство между queryVector и массивом векторов.
-       * Отправляет запрос в Worker для избежания блокировки главного потока.
-       * При таймауте или недоступности Worker выполняет синхронный расчет.
-       * @param {Vector} queryVector - Вектор запроса.
-       * @param {Array<{id: string, vector: Vector}>} items - Массив объектов с id и vector.
-       * @param {AbortSignal} [signal] - Опциональный сигнал для отмены операции.
-       * @returns {Promise<Array<{id: string, score: number}>>} Promise с массивом результатов.
-       */
-      cosineBatch: function(queryVector, items, signal) {
-        if (!queryVector || !items || items.length === 0) {
-          return Promise.resolve([]);
-        }
-
-        if (signal && signal.aborted) {
-          return Promise.reject(new Error('Aborted'));
-        }
-
-        // Fallback: синхронный расчет при отсутствии Worker
-        if (mode === 'demo' || !worker) {
-          var scores = [];
-          for (var i = 0; i < items.length; i++) {
-            var item = items[i];
-            if (item && item.vector) {
-              scores.push({ id: item.id, score: this.cosine(queryVector, item.vector) });
-            }
-          }
-          return Promise.resolve(scores);
-        }
-
-        var id = nextId++;
-        var timeout = cfg.get('aiEmbedTimeout', 15000);
-
-        return new Promise(function(resolve, reject) {
-          var timer = setTimeout(function() {
-            batchCallbacks.delete(id);
-            if (log) log.warn('AI cosineBatch timeout for id=' + id + ', fallback to sync');
-            // Fallback на синхронный расчет
-            var scores = [];
-            for (var i = 0; i < items.length; i++) {
-              var item = items[i];
-              if (item && item.vector) {
-                var sum = 0;
-                for (var j = 0; j < queryVector.length; j++) {
-                  sum += queryVector[j] * item.vector[j];
-                }
-                scores.push({ id: item.id, score: sum });
-              }
-            }
-            resolve(scores);
-          }, timeout);
-
-          batchCallbacks.set(id, { resolve: resolve, reject: reject, timer: timer });
-
-          if (signal) {
-            signal.addEventListener('abort', function() {
-              clearTimeout(timer);
-              batchCallbacks.delete(id);
-              reject(new Error('Aborted'));
-            });
-          }
-
-          worker.postMessage({ 
-            type: 'cosineBatch', 
-            id: id, 
-            queryVector: queryVector, 
-            vectors: items 
-          });
-        });
       }
     };
   }, ['Config', 'Logger', 'Bus']);
@@ -3451,7 +3348,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /**
      * Выполняет семантический поиск по локальной базе и ответам из сети.
-     * Вычисляет косинусное сходство через Worker и раскладывает результаты по сегментам (local, world, seren).
+     * Вычисляет косинусное сходство и раскладывает результаты по сегментам (local, world, seren).
      * @param {string} text - Поисковый запрос (текст из редактора).
      * @param {boolean} [force=false] - Принудительная отправка запроса в сеть, даже если вектор не изменился.
      * @returns {Promise<void>}
@@ -3490,93 +3387,51 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return getAllNotesCached().then(function(notes) {
           if (signal.aborted) return;
 
-          var state = StateManager.getState();
-          var worldAnswers = state.netAuthorized ? Net.activeAnswers() : [];
-
-          // Формируем массив кандидатов и dataMap для быстрого доступа к полным данным
-          var candidates = [];
-          var dataMap = new Map();
-
+          var localScored = [];
           for (var i = 0; i < notes.length; i++) {
             var note = notes[i];
             if (note && note.vector) {
-              candidates.push({ id: note.id, vector: note.vector });
-              dataMap.set(note.id, {
+              localScored.push({
                 id: note.id,
                 text: note.text,
                 vector: note.vector,
+                score: AI.cosine(vec, note.vector),
                 shared: note.shared,
                 peer: note.peer,
-                createdAt: note.createdAt,
-                source: 'local'
+                createdAt: note.createdAt
               });
             }
           }
 
+          var state = StateManager.getState();
+          var worldAnswers = state.netAuthorized ? Net.activeAnswers() : [];
+          var worldScored = [];
           for (var i = 0; i < worldAnswers.length; i++) {
-            var ans = worldAnswers[i];
-            if (ans && ans.vector) {
-              candidates.push({ id: ans.id, vector: ans.vector });
-              dataMap.set(ans.id, {
-                id: ans.id,
-                text: ans.text,
-                vector: ans.vector,
-                shared: ans.shared,
-                peer: ans.peer,
-                createdAt: ans.createdAt,
-                source: 'world'
-              });
-            }
+            worldScored.push({
+              id: worldAnswers[i].id,
+              text: worldAnswers[i].text,
+              vector: worldAnswers[i].vector,
+              score: AI.cosine(vec, worldAnswers[i].vector),
+              shared: worldAnswers[i].shared,
+              peer: worldAnswers[i].peer,
+              createdAt: worldAnswers[i].createdAt
+            });
           }
 
-          // Вызываем пакетное вычисление сходства в Worker
-          return AI.cosineBatch(vec, candidates, signal).then(function(scores) {
-            if (signal.aborted) return;
+          var threshold = Config.get('threshold', 0.30);
+          var serendipityDelta = Config.get('serendipity', 0.15);
 
-            var localScored = [];
-            var worldScored = [];
+          var newLists = {
+            local: localScored.filter(function(n) { return n.score >= threshold; })
+              .sort(function(a, b) { return b.score - a.score; }),
+            world: worldScored.filter(function(n) { return n.score >= threshold; })
+              .sort(function(a, b) { return b.score - a.score; }),
+            seren: localScored.concat(worldScored)
+              .filter(function(n) { return n.score >= (threshold - serendipityDelta) && n.score < threshold; })
+              .sort(function(a, b) { return b.score - a.score; })
+          };
 
-            for (var i = 0; i < scores.length; i++) {
-              var s = scores[i];
-              var data = dataMap.get(s.id);
-              if (!data) continue;
-
-              var result = {
-                id: data.id,
-                text: data.text,
-                vector: data.vector,
-                score: s.score,
-                shared: data.shared,
-                peer: data.peer,
-                createdAt: data.createdAt
-              };
-
-              if (data.source === 'local') {
-                localScored.push(result);
-              } else {
-                worldScored.push(result);
-              }
-            }
-
-            var threshold = Config.get('threshold', 0.30);
-            var serendipityDelta = Config.get('serendipity', 0.15);
-
-            var newLists = {
-              local: localScored.filter(function(n) { return n.score >= threshold; })
-                .sort(function(a, b) { return b.score - a.score; }),
-              world: worldScored.filter(function(n) { return n.score >= threshold; })
-                .sort(function(a, b) { return b.score - a.score; }),
-              seren: localScored.concat(worldScored)
-                .filter(function(n) { return n.score >= (threshold - serendipityDelta) && n.score < threshold; })
-                .sort(function(a, b) { return b.score - a.score; })
-            };
-
-            StateManager.setState({ lists: newLists });
-
-            if (Bus && Bus.emit) {
-              try { Bus.emit('state:lists-changed'); } catch (_) { /* ignore */ }
-            }
-          });
+          StateManager.setState({ lists: newLists });
         });
       }).catch(function(err) {
         if (signal.aborted) return;
