@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.6">
+<meta name="app-version" content="1.3.7">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1016,8 +1016,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
      */
     var defaults = {
       room: 'noomium-main',
-      threshold: 0.30,
-      serendipity: 0.15,
+      threshold: 0.7,
+      serendipity: 0.3,
       relays: ['wss://offchain.pub', 'wss://relay.nostr.info', 'wss://nostr.mom'],
       kQuery: 21000,
       kAnswer: 21001,
@@ -2081,6 +2081,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
    * @property {string} id - ID Nostr-события.
    * @property {string} text - Текст ответа.
    * @property {Vector} vector - Вектор эмбеддинга.
+   * @property {number} score - Сырой косинус.
+   * @property {number} [z_score] - Z-score (опционально).
    * @property {string} peer - Короткий ID пира (первые 6 символов pubkey).
    * @property {string} fullPubkey - Полный публичный ключ автора.
    * @property {number} createdAt - Timestamp получения ответа.
@@ -2291,41 +2293,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Загружает shared-векторы из базы с пагинацией и кэшированием.
-     * @returns {Promise<Array<{id: string, text: string, vector: Vector}>>} Promise с массивом shared-заметок.
-     */
-    function getSharedVectors() {
-      var now = Date.now();
-      if (sharedCacheComplete && (now - sharedCacheTime < CACHE_TTL)) {
-        return Promise.resolve(sharedCache);
-      }
-      if (now - sharedCacheTime >= CACHE_TTL) {
-        sharedCache = [];
-        sharedCacheOffset = 0;
-        sharedCacheComplete = false;
-      }
-      var chunkSize = cfg.get('baseChunkSize', 20);
-      return DB.getAllPaginated(sharedCacheOffset, chunkSize).then(function(chunk) {
-        if (!chunk || chunk.length === 0) {
-          sharedCacheComplete = true;
-        } else {
-          for (var i = 0; i < chunk.length; i++) {
-            var n = chunk[i];
-            if (n && n.shared && n.vector) {
-              sharedCache.push({ id: n.id, text: n.text, vector: n.vector });
-            }
-          }
-          sharedCacheOffset += chunk.length;
-          if (chunk.length < chunkSize) {
-            sharedCacheComplete = true;
-          }
-        }
-        sharedCacheTime = Date.now();
-        return sharedCache;
-      });
-    }
-
-    /**
      * Инвалидирует кэш shared-векторов (вызывается при изменении базы).
      * @returns {void}
      */
@@ -2497,7 +2464,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             return;
           }
 
-          getSharedVectors().then(function(sharedNotes) {
+          DB.all().then(function(allNotes) {
             var checkRelays = cfg.get('relays', []);
             var nowCheck = Date.now();
             var hasActiveRelay = false;
@@ -2507,22 +2474,67 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             }
             if (!hasActiveRelay) return;
 
-            var floor = cfg.get('threshold', 0.30) - cfg.get('serendipity', 0.15);
-            var toSend = [];
-            for (var i = 0; i < sharedNotes.length; i++) {
-              var n = sharedNotes[i];
-              if (AI.cosine(q.vector, n.vector) >= floor) toSend.push(n);
+            var sharedNotes = [];
+            for (var i = 0; i < allNotes.length; i++) {
+              var n = allNotes[i];
+              if (n && n.shared && n.vector) {
+                sharedNotes.push(n);
+              }
             }
-            toSend.sort(function(a, b) { return AI.cosine(q.vector, b.vector) - AI.cosine(q.vector, a.vector); });
+
+            if (sharedNotes.length === 0) return;
+
+            var rawScores = [];
+            for (var i = 0; i < sharedNotes.length; i++) {
+              rawScores.push(AI.cosineSimilarity(q.vector, sharedNotes[i].vector));
+            }
+
+            var count = rawScores.length;
+            var mean = 0;
+            for (var i = 0; i < count; i++) mean += rawScores[i];
+            mean /= count;
+
+            var stddev = 0;
+            if (count > 1) {
+              var sumSq = 0;
+              for (var i = 0; i < count; i++) {
+                var diff = rawScores[i] - mean;
+                sumSq += diff * diff;
+              }
+              stddev = Math.sqrt(sumSq / (count - 1));
+            }
+
+            var candidates = [];
+            for (var i = 0; i < count; i++) {
+              var raw = rawScores[i];
+              var z = stddev > 0 ? (raw - mean) / stddev : 0;
+              if (z >= 1) {
+                candidates.push({
+                  id: sharedNotes[i].id,
+                  text: sharedNotes[i].text,
+                  vector: sharedNotes[i].vector,
+                  score: raw,
+                  z_score: z
+                });
+              }
+            }
+
+            candidates.sort(function(a, b) { return b.score - a.score; });
             var maxAnswers = cfg.get('maxAnswersPerQuery', 5);
-            var limited = toSend.slice(0, maxAnswers);
+            var limited = candidates.slice(0, maxAnswers);
+
             for (var j = 0; j < limited.length; j++) {
               try {
                 var ans = nostr.finalizeEvent({
                   kind: KA,
                   created_at: Math.floor(Date.now() / 1000),
                   tags: [['t', room], ['e', ev.id]],
-                  content: JSON.stringify({ text: limited[j].text, vector: limited[j].vector })
+                  content: JSON.stringify({
+                    text: limited[j].text,
+                    vector: limited[j].vector,
+                    score: limited[j].score,
+                    z_score: limited[j].z_score
+                  })
                 }, sk);
                 (function(answer, delay) {
                   setTimeout(function() { safePublish(answer); }, delay);
@@ -2532,7 +2544,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               }
             }
           }).catch(function(e) {
-            if (log) log.warn('getSharedVectors fail', String(e));
+            if (log) log.warn('DB.all fail', String(e));
           });
         }
 
@@ -2550,23 +2562,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               return;
             }
 
-            var dKeys = Object.keys(data);
-            if (dKeys.length !== 2) {
-              return;
-            }
-
-            var hasText = false, hasVector = false;
-            for (var i = 0; i < dKeys.length; i++) {
-              if (dKeys[i] === 'text') hasText = true;
-              else if (dKeys[i] === 'vector') hasVector = true;
-              else { return; }
-            }
-
-            if (!hasText || !hasVector) {
-              return;
-            }
-
-            if (typeof data.text !== 'string') {
+            if (typeof data.text !== 'string' || !data.text) {
               return;
             }
 
@@ -2593,6 +2589,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               return;
             }
 
+            if (typeof data.score !== 'number') {
+              return;
+            }
+
+            var zScore = (typeof data.z_score === 'number') ? data.z_score : undefined;
+
             var isDupAnswer = false;
             for (var j = 0; j < answers.length; j++) {
               if (answers[j].id === ev.id) { isDupAnswer = true; break; }
@@ -2603,6 +2605,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                 id: ev.id,
                 text: data.text,
                 vector: data.vector,
+                score: data.score,
+                z_score: zScore,
                 peer: ev.pubkey.slice(0, 6),
                 fullPubkey: ev.pubkey,
                 createdAt: Date.now()
@@ -2893,7 +2897,18 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       activeAnswers: function() {
         var out = [];
         for (var i = 0; i < answers.length; i++) {
-          if (peers.has(answers[i].fullPubkey)) out.push(answers[i]);
+          if (peers.has(answers[i].fullPubkey)) {
+            out.push({
+              id: answers[i].id,
+              text: answers[i].text,
+              vector: answers[i].vector,
+              score: answers[i].score,
+              z_score: answers[i].z_score,
+              peer: answers[i].peer,
+              fullPubkey: answers[i].fullPubkey,
+              createdAt: answers[i].createdAt
+            });
+          }
         }
         return out;
       },
@@ -2951,7 +2966,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'DB', 'AI', 'Logger', 'Bus']);
 <!-- NOOMIUM_MODULE_END Net -->
-
 <!-- NOOMIUM_MODULE_START Modal -->
   /**
    * @typedef {Object} ModalButton
@@ -3587,73 +3601,62 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return getAllNotesCached().then(function(notes) {
           if (signal.aborted) return;
 
-          var candidates = [];
-          var dataMap = new Map();
+          var localCandidates = [];
+          var localDataMap = new Map();
 
           for (var i = 0; i < notes.length; i++) {
             var note = notes[i];
             if (note && note.vector) {
-              candidates.push({ id: note.id, vector: note.vector });
-              dataMap.set(note.id, { type: 'local', data: note });
+              localCandidates.push({ id: note.id, vector: note.vector });
+              localDataMap.set(note.id, note);
             }
           }
 
           var state = StateManager.getState();
           var worldAnswers = state.netAuthorized ? Net.activeAnswers() : [];
-          for (var j = 0; j < worldAnswers.length; j++) {
-            var answer = worldAnswers[j];
-            if (answer && answer.vector) {
-              candidates.push({ id: answer.id, vector: answer.vector });
-              dataMap.set(answer.id, { type: 'world', data: answer });
-            }
-          }
 
-          if (candidates.length === 0) {
-            StateManager.setState({ lists: { local: [], world: [], seren: [] } });
-            if (Bus && Bus.emit) {
-              try { Bus.emit('state:lists-changed'); } catch (_) {}
-            }
-            return;
-          }
+          var processLocal = localCandidates.length > 0 
+            ? AI.cosineBatch(vec, localCandidates, signal) 
+            : Promise.resolve([]);
 
-          return AI.cosineBatch(vec, candidates, signal).then(function(scores) {
+          return processLocal.then(function(localScores) {
             if (signal.aborted) return;
 
             var localScored = [];
-            var worldScored = [];
-
-            for (var k = 0; k < scores.length; k++) {
-              var s = scores[k];
-              var entry = dataMap.get(s.id);
-              if (!entry) continue;
-
-              if (entry.type === 'local') {
-                var note = entry.data;
+            for (var k = 0; k < localScores.length; k++) {
+              var s = localScores[k];
+              var note = localDataMap.get(s.id);
+              if (note) {
                 localScored.push({
                   id: note.id,
                   text: note.text,
                   vector: note.vector,
                   score: s.score,
                   shared: note.shared,
-                  peer: note.peer,
                   createdAt: note.createdAt
                 });
-              } else {
-                var answer = entry.data;
+              }
+            }
+
+            var worldScored = [];
+            for (var j = 0; j < worldAnswers.length; j++) {
+              var answer = worldAnswers[j];
+              if (answer && typeof answer.score === 'number') {
                 worldScored.push({
                   id: answer.id,
                   text: answer.text,
                   vector: answer.vector,
-                  score: s.score,
-                  shared: answer.shared,
+                  score: answer.score,
+                  shared: true,
                   peer: answer.peer,
                   createdAt: answer.createdAt
                 });
               }
             }
 
-            var threshold = Config.get('threshold', 0.30);
-            var serendipityDelta = Config.get('serendipity', 0.15);
+            var threshold = Config.get('threshold', 0.7);
+            var serendipityDelta = Config.get('serendipity', 0.3);
+            var serenMin = threshold - serendipityDelta;
 
             var newLists = {
               local: localScored.filter(function(n) { return n.score >= threshold; })
@@ -3661,7 +3664,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               world: worldScored.filter(function(n) { return n.score >= threshold; })
                 .sort(function(a, b) { return b.score - a.score; }),
               seren: localScored.concat(worldScored)
-                .filter(function(n) { return n.score >= (threshold - serendipityDelta) && n.score < threshold; })
+                .filter(function(n) { return n.score >= serenMin && n.score < threshold; })
                 .sort(function(a, b) { return b.score - a.score; })
             };
 
