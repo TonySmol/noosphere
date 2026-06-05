@@ -6228,14 +6228,568 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END UI.Help -->
 
 <!-- NOOMIUM_MODULE_START App.Events -->
+  /**
+   * @typedef {Object} BusHandlerRecord
+   * @description Запись о зарегистрированном обработчике шины для последующей отписки.
+   * @property {string} event - Имя события.
+   * @property {function(*): void} fn - Ссылка на функцию-обработчик.
+   */
+
+  /**
+   * Массив всех обработчиков шины, зарегистрированных в App.Events,
+   * для массового удаления при cleanup().
+   * @type {BusHandlerRecord[]}
+   */
+  var busHandlers = [];
+
+  /**
+   * Привязывает первичные DOM-события и глобальные горячие клавиши,
+   * подписывается на ключевые события шины (i18n:change, ai:progress,
+   * editor:search-request, editor:send-complete).
+   * @returns {void}
+   */
+  function bindEvents() {
+    document.querySelectorAll('.btab-b').forEach(function(b) {
+      b.onclick = function() { switchView(b.getAttribute('data-v')); };
+    });
+
+    var menuBtn = document.getElementById('btn-menu');
+    if (menuBtn) menuBtn.onclick = openMenu;
+
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') Modal.close();
+      if (e.key === '/') {
+        var editor = document.getElementById('ed-ta');
+        if (editor && document.activeElement !== editor) {
+          e.preventDefault();
+          editor.focus();
+        }
+      }
+    });
+
+    var i18nHandler = function() { refreshUI(); };
+    Bus.on('i18n:change', i18nHandler);
+    busHandlers.push({ event: 'i18n:change', fn: i18nHandler });
+
+    var aiProgressHandler = function(payload) {
+      if (Progress && payload && typeof payload.pct === 'number') {
+        Progress.update(payload.pct);
+      }
+    };
+    Bus.on('ai:progress', aiProgressHandler);
+    busHandlers.push({ event: 'ai:progress', fn: aiProgressHandler });
+
+    uiState.editorSearchHandler = function(payload) {
+      var force = payload && payload.force === true;
+      executeSearch(force);
+    };
+    Bus.on('editor:search-request', uiState.editorSearchHandler);
+    busHandlers.push({ event: 'editor:search-request', fn: uiState.editorSearchHandler });
+
+    uiState.editorSendHandler = function() {
+      executeSearch();
+    };
+    Bus.on('editor:send-complete', uiState.editorSendHandler);
+    busHandlers.push({ event: 'editor:send-complete', fn: uiState.editorSendHandler });
+  }
+
+  /**
+   * Устанавливает глобальные обработчики окна:
+   * resize, focusin, focusout, orientationchange (для корректной высоты vh на мобильных)
+   * и beforeunload (предупреждение при закрытии с несохранённым текстом).
+   * Предварительно снимает старые обработчики для избежания дублирования.
+   * @returns {void}
+   */
+  function setupWindowListeners() {
+    var handlers = uiState.windowHandlers;
+
+    if (handlers.resize) window.removeEventListener('resize', handlers.resize);
+    if (handlers.focusin) window.removeEventListener('focusin', handlers.focusin);
+    if (handlers.focusout) window.removeEventListener('focusout', handlers.focusout);
+    if (handlers.orientationchange) window.removeEventListener('orientationchange', handlers.orientationchange);
+    if (handlers.beforeunload) window.removeEventListener('beforeunload', handlers.beforeunload);
+
+    var setVH = function() {
+      var vh = window.innerHeight * 0.01;
+      document.documentElement.style.setProperty('--vh', vh + 'px');
+    };
+
+    handlers.resize = setVH;
+    handlers.focusin = setVH;
+    handlers.focusout = setVH;
+    handlers.orientationchange = function() { setTimeout(setVH, 100); };
+
+    handlers.beforeunload = function(e) {
+      try {
+        var EC = DI.resolve('EditorComponent');
+        var text = EC.getValue();
+        if (text && text.trim().length > 0) {
+          e.preventDefault();
+          e.returnValue = '';
+        }
+      } catch (_) { /* ignore */ }
+    };
+
+    window.addEventListener('resize', handlers.resize);
+    window.addEventListener('focusin', handlers.focusin);
+    window.addEventListener('focusout', handlers.focusout);
+    window.addEventListener('orientationchange', handlers.orientationchange);
+    window.addEventListener('beforeunload', handlers.beforeunload);
+
+    setVH();
+  }
+
+  /**
+   * Снимает все глобальные обработчики окна и шины событий.
+   * Вызывается перед refreshUI() или при уничтожении приложения.
+   * @returns {void}
+   */
+  function cleanup() {
+    if (uiState.progressHandler) {
+      AI.offProgress(uiState.progressHandler);
+      uiState.progressHandler = null;
+    }
+    var handlers = uiState.windowHandlers;
+    if (handlers.resize) window.removeEventListener('resize', handlers.resize);
+    if (handlers.focusin) window.removeEventListener('focusin', handlers.focusin);
+    if (handlers.focusout) window.removeEventListener('focusout', handlers.focusout);
+    if (handlers.orientationchange) window.removeEventListener('orientationchange', handlers.orientationchange);
+    if (handlers.beforeunload) window.removeEventListener('beforeunload', handlers.beforeunload);
+
+    handlers.resize = null;
+    handlers.focusin = null;
+    handlers.focusout = null;
+    handlers.orientationchange = null;
+    handlers.beforeunload = null;
+
+    for (var i = 0; i < busHandlers.length; i++) {
+      Bus.off(busHandlers[i].event, busHandlers[i].fn);
+    }
+    busHandlers = [];
+    uiState.editorSearchHandler = null;
+    uiState.editorSendHandler = null;
+  }
 <!-- NOOMIUM_MODULE_END App.Events -->
 
 <!-- NOOMIUM_MODULE_START App.Boot -->
+  var AuthService = DI.resolve('AuthService');
+
+  /**
+   * Главная функция загрузки приложения:
+   * 1. Показывает прогресс-бар загрузки AI.
+   * 2. Загружает ML-модель в Worker'е.
+   * 3. Запрашивает пароль у пользователя (создание нового ключа или расшифровка).
+   * 4. Инициализирует сеть Nostr.
+   * 5. При первом запуске показывает онбординг.
+   * @returns {void}
+   */
+  function bootApp() {
+    I18n.addDict('ru', { 'btn.forgot': 'Забыли пароль?' });
+    I18n.addDict('en', { 'btn.forgot': 'Forgot password?' });
+
+    Progress.show();
+
+    var aiLoaded = false;
+    var netInitialized = false;
+
+    /**
+     * Проверяет, завершены ли загрузка AI и инициализация сети,
+     * и показывает онбординг при первом запуске.
+     * @returns {void}
+     */
+    function checkOnboarding() {
+      if (aiLoaded && netInitialized && !Config.get('onboarded', false)) {
+        openHelp(true);
+      }
+    }
+
+    AI.load().then(function() {
+      Progress.hide();
+      aiLoaded = true;
+      requestAuth();
+      checkOnboarding();
+    }).catch(function(err) {
+      Progress.hide();
+      if (Logger) Logger.error('AI', String(err && err.message || err));
+      aiLoaded = true;
+      checkOnboarding();
+    });
+
+    /**
+     * Пытается инициализировать сеть с заданным паролем.
+     * @param {string} password - Пароль для расшифровки ключа.
+     * @returns {Promise<void>}
+     */
+    function tryInit(password) {
+      return Net.init(function() { executeSearch(); }, password).then(function() {
+        netInitialized = true;
+        StateManager.setState({ netAuthorized: true });
+        checkOnboarding();
+      }).catch(function(err) {
+        if (Logger) Logger.error('Net', String(err && err.message || err));
+      });
+    }
+
+    /**
+     * Запрашивает у пользователя пароль (создание нового или ввод существующего).
+     * Рекурсивно вызывает себя при неверном пароле.
+     * @param {function(): void} [onSuccess] - Колбэк после успешной авторизации.
+     * @returns {void}
+     */
+    function requestAuth(onSuccess) {
+      if (AuthService.needsNewKey()) {
+        promptNewPassword(function(pwd) {
+          AuthService.createNew(pwd, function() {
+            tryInit(pwd).then(function() {
+              if (typeof onSuccess === 'function') onSuccess();
+            });
+          });
+        });
+      } else {
+        promptExistingPassword(function(pwd) {
+          AuthService.unlock(pwd,
+            function() {
+              tryInit(pwd).then(function() {
+                if (typeof onSuccess === 'function') onSuccess();
+              });
+            },
+            function() {
+              toast('Неверный пароль', 'err');
+              requestAuth(onSuccess);
+            },
+            function() {
+              showResetModal();
+            }
+          );
+        });
+      }
+    }
+
+    /**
+     * Показывает модалку сброса данных при превышении лимита попыток ввода пароля.
+     * @returns {void}
+     */
+    function showResetModal() {
+      var body = document.createElement('div');
+      body.innerHTML = '<p class="reset-modal-text">Превышено количество попыток. Необходимо сбросить данные.</p>';
+      Modal.open({
+        title: 'Ошибка доступа',
+        body: body,
+        buttons: [
+          {
+            text: 'Сбросить данные',
+            danger: true,
+            primary: true,
+            onClick: function() {
+              AuthService.resetStorage().then(function() {
+                location.reload(true);
+              });
+            }
+          }
+        ]
+      });
+    }
+
+    /**
+     * Показывает модалку создания нового пароля (первый запуск).
+     * @param {function(string): void} callback - Вызывается с введённым паролем.
+     * @returns {void}
+     */
+    function promptNewPassword(callback) {
+      var body = document.createElement('div');
+      body.innerHTML = '<div class="fg"><label class="fl">Придумайте пароль</label><input type="password" class="fi-input" id="pwd1" /></div>' +
+                       '<div class="fg"><label class="fl">Подтвердите пароль</label><input type="password" class="fi-input" id="pwd2" /></div>';
+      var errorEl = document.createElement('div');
+      errorEl.className = 'danger-text fs-12 mt-8';
+      body.appendChild(errorEl);
+
+      Modal.open({
+        title: 'Защита данных',
+        body: body,
+        buttons: [
+          {
+            text: 'Сохранить',
+            primary: true,
+            onClick: function() {
+              var p1 = document.getElementById('pwd1').value;
+              var p2 = document.getElementById('pwd2').value;
+              if (!p1) { errorEl.textContent = 'Пароль не может быть пустым'; return; }
+              if (p1 !== p2) { errorEl.textContent = 'Пароли не совпадают'; return; }
+              Modal.close();
+              callback(p1);
+            }
+          }
+        ]
+      });
+    }
+
+    /**
+     * Показывает модалку ввода пароля (повторный запуск).
+     * Содержит кнопку сброса хранилища при забытом пароле.
+     * @param {function(string): void} callback - Вызывается с введённым паролем.
+     * @returns {void}
+     */
+    function promptExistingPassword(callback) {
+      var body = document.createElement('div');
+      body.innerHTML = '<div class="fg"><label class="fl">Введите пароль</label><input type="password" class="fi-input" id="pwd1" /></div>';
+
+      var forgotBtn = document.createElement('button');
+      forgotBtn.type = 'button';
+      forgotBtn.className = 'nv-act danger full-width mt-10 inline-flex-center';
+      forgotBtn.textContent = translate('btn.reset_storage');
+      forgotBtn.onclick = function() {
+        if (!confirm(translate('reset_storage.confirm'))) return;
+        Modal.close();
+        AuthService.resetStorage().then(function() {
+          location.reload(true);
+        });
+      };
+      body.appendChild(forgotBtn);
+
+      var errorEl = document.createElement('div');
+      errorEl.className = 'danger-text fs-12 mt-8';
+      body.appendChild(errorEl);
+
+      Modal.open({
+        title: 'Доступ к данным',
+        body: body,
+        buttons: [
+          {
+            text: 'Войти',
+            primary: true,
+            onClick: function() {
+              var p1 = document.getElementById('pwd1').value;
+              if (!p1) { errorEl.textContent = 'Введите пароль'; return; }
+              Modal.close();
+              callback(p1);
+            }
+          }
+        ]
+      });
+    }
+
+    /**
+     * Колбэк для запроса авторизации сети из SearchService (при попытке отправить в world).
+     * @param {function(): void} onSuccess - Вызывается после успешной авторизации.
+     * @returns {void}
+     */
+    function requestNetworkAuth(onSuccess) {
+      if (StateManager.getState().netAuthorized) {
+        if (typeof onSuccess === 'function') onSuccess();
+        return;
+      }
+      requestAuth(onSuccess);
+    }
+
+    StateManager.setState({ requestNetworkAuth: requestNetworkAuth });
+  }
+
+  /**
+   * Точка монтирования приложения: создаёт корневой элемент,
+   * рендерит разметку, инициализирует все UI-компоненты и запускает bootApp().
+   * При ошибке показывает экран с кнопкой перезагрузки.
+   * @returns {void}
+   */
+  function mountApp() {
+    try {
+      cleanup();
+
+      var root = document.getElementById('app-root');
+      if (!root) {
+        root = document.createElement('div');
+        root.id = 'app-root';
+        document.body.appendChild(root);
+      }
+      document.body.classList.add('show-app');
+      root.innerHTML = buildMarkup();
+      setupWindowListeners();
+      bindEvents();
+
+      try { DI.resolve('HeaderStatusComponent').init(); } catch (e) {
+        if (Logger) Logger.warn('HeaderStatusComponent init failed', String(e));
+      }
+      try { DI.resolve('OfflineBarComponent').init(); } catch (e) {
+        if (Logger) Logger.warn('OfflineBarComponent init failed', String(e));
+      }
+      try { EditorComponent.init(); } catch (e) {
+        if (Logger) Logger.warn('EditorComponent init failed', String(e));
+      }
+      try { DI.resolve('StreamViewComponent').init(); } catch (e) {
+        if (Logger) Logger.warn('StreamViewComponent init failed', String(e));
+      }
+      try { DI.resolve('BaseViewComponent').init(); } catch (e) {
+        if (Logger) Logger.warn('BaseViewComponent init failed', String(e));
+      }
+
+      try { SearchService.init(); } catch (e) {
+        if (Logger) Logger.warn('SearchService init failed', String(e));
+      }
+
+      bootApp();
+      if (Logger) Logger.info('App mounted');
+    } catch (err) {
+      console.error('App mount failed:', err);
+      var root = document.getElementById('app-root');
+      if (root) {
+        root.textContent = '';
+        var wrapper = document.createElement('div');
+        wrapper.className = 'error-wrapper';
+
+        var heading = document.createElement('h2');
+        heading.className = 'error-heading';
+        heading.textContent = 'NOOmium failed to start';
+
+        var message = document.createElement('p');
+        message.className = 'error-message';
+        message.textContent = String(err && err.message || err);
+
+        var reloadBtn = document.createElement('button');
+        reloadBtn.className = 'error-reload-btn';
+        reloadBtn.textContent = 'Reload';
+        reloadBtn.onclick = function() { location.reload(); };
+
+        wrapper.appendChild(heading);
+        wrapper.appendChild(message);
+        wrapper.appendChild(reloadBtn);
+        root.appendChild(wrapper);
+        document.body.classList.add('show-app');
+      }
+    }
+  }
 <!-- NOOMIUM_MODULE_END App.Boot -->
 
 <!-- NOOMIUM_MODULE_START App -->
-  DI.register('App', function() {
-    return {};
+  I18n.addDict('ru', {
+    'app.name': 'NOOmium',
+    'st.net': 'сеть', 'st.ai.loading': 'модель', 'st.ai.ready': 'ии', 'st.ai.demo': 'ии/хеш',
+    'st.net.online': 'онлайн', 'st.net.listen': 'слушаю', 'st.net.connecting': 'соединение',
+    'st.net.reconnecting': 'пересоединение', 'st.net.failed': 'нет сети',
+    'ed.placeholder': 'О чём думаешь?', 'ed.chars': 'симв.',
+    'btn.private': 'Личное', 'btn.public': 'Мир', 'btn.send': 'Послать', 'btn.sending': 'Отправка...',
+    'btn.save': 'Сохранить', 'btn.cancel': 'Отмена', 'btn.close': 'Закрыть', 'btn.edit': 'Развить',
+    'btn.del': 'Удалить', 'btn.copy': 'Копия', 'btn.toggle.priv': 'Скрыть', 'btn.toggle.pub': 'Открыть',
+    'btn.back': 'Назад', 'btn.gotit': 'Понятно', 'btn.forgot': 'Забыли пароль?',
+    'btn.reset_storage': 'Сброс хранилища',
+    'reset_storage.confirm': 'Все данные будут удалены безвозвратно. Продолжить?',
+    'sim.score': 'похожа на',
+    'seg.local': 'Моё', 'seg.world': 'Мир', 'seg.seren': 'Озарения',
+    'tab.stream': 'Поток', 'tab.base': 'База',
+    'empty.local.t': 'Пока нет мыслей', 'empty.local.d': 'Начните печатать в поле выше',
+    'empty.world.t': 'Никто не думает так же', 'empty.world.d': 'Ждём открытые мысли других',
+    'empty.seren.t': 'Озарений нет', 'empty.seren.d': 'Попробуйте другую формулировку',
+    'empty.base.t': 'База пуста', 'empty.base.d': 'Запишите первую мысль',
+    'empty.base.empty': 'Под фильтр ничего не подошло',
+    'base.stat.total': 'всего', 'base.stat.open': 'открыто', 'base.stat.priv': 'лично',
+    'base.search': 'поиск...', 'base.sort.new': 'новые', 'base.sort.old': 'старые', 'base.sort.az': 'а-я',
+    'base.tag.private': 'лично', 'base.tag.shared': 'открыто',
+    'base.wipe': 'Стереть базу',
+    'base.wipe.confirm': 'Удалить все ваши мысли навсегда?',
+    'del.confirm': 'Удалить эту мысль навсегда?',
+    'nv.delete.confirm': 'Удалить эту заметку навсегда?',
+    'onb.dontshow': 'Больше не показывать',
+    'toast.saved.private': 'сохранено лично', 'toast.saved.public': 'опубликовано',
+    'toast.copied': 'скопировано', 'toast.deleted': 'удалено',
+    'toast.copy.fail': 'не удалось',
+    'toast.empty': 'напишите что-нибудь', 'toast.ai.notready': 'ии не готов',
+    'toast.net.restart': 'перезапуск сети...', 'toast.base.wiped': 'база стёрта',
+    'toast.edit.saved': 'сохранено',
+    'toast.sending': 'отправка...',
+    'toast.network.err': 'нет соединения',
+    'menu.settings': 'Настройки', 'menu.help': 'Как это работает', 'menu.theme': 'Тема',
+    'menu.lang': 'Язык', 'menu.theme.dark': 'Тёмная', 'menu.theme.light': 'Светлая',
+    'menu.export': 'Экспорт', 'menu.import': 'Импорт',
+    'set.title': 'Настройки', 'set.room': 'Комната', 'set.room.hint': 'Nostr-топик группы',
+    'set.threshold': 'Порог', 'set.threshold.hint': 'выше = строже',
+    'set.seren': 'Дельта озарений', 'set.seren.hint': 'ширина поиска',
+    'set.relays': 'Релеи', 'set.relays.hint': 'один wss:// на строку',
+    'set.advanced': 'Расширенные',
+    'set.data': 'Данные', 'set.danger': 'Опасная зона',
+    'help.title': 'Как это работает',
+    'help.intro': 'NOOmium превращает мысли в смысловые векторы и ищет созвучие в вашей базе и среди открытых мыслей.',
+    'help.local': 'Сильные совпадения в вашей базе',
+    'help.world': 'Открытые мысли других людей',
+    'help.seren': 'Близкие, но неожиданные — источник вдохновения',
+    'help.philosophy': 'Чужие мысли нельзя сохранить. Их можно прочитать, понять и написать своё.',
+    'help.keys': 'Горячие клавиши', 'help.k1': 'Ctrl+Enter — отправить',
+    'help.k2': '/ — фокус на поле ввода',
+    'help.gestures': 'Свайпы влево/вправо по карточкам. Переключатель «Мир/Личное» выбирает, куда послать мысль.',
+    'offline.bar': 'Нет сети',
+    'offline.queue': 'Ожидают: {count}'
+  });
+
+  I18n.addDict('en', {
+    'app.name': 'NOOmium',
+    'st.net': 'net', 'st.ai.loading': 'model', 'st.ai.ready': 'ai', 'st.ai.demo': 'ai/hash',
+    'st.net.online': 'online', 'st.net.listen': 'listening', 'st.net.connecting': 'connecting',
+    'st.net.reconnecting': 'reconnecting', 'st.net.failed': 'offline',
+    'ed.placeholder': 'What are you thinking?', 'ed.chars': 'chars',
+    'btn.private': 'Private', 'btn.public': 'World', 'btn.send': 'Send', 'btn.sending': 'Sending...',
+    'btn.save': 'Save', 'btn.cancel': 'Cancel', 'btn.close': 'Close', 'btn.edit': 'Develop',
+    'btn.del': 'Delete', 'btn.copy': 'Copy', 'btn.toggle.priv': 'Hide', 'btn.toggle.pub': 'Share',
+    'btn.back': 'Back', 'btn.gotit': 'Got it', 'btn.forgot': 'Forgot password?',
+    'btn.reset_storage': 'Reset Storage',
+    'reset_storage.confirm': 'All data will be permanently deleted. Continue?',
+    'sim.score': 'similarity',
+    'seg.local': 'Mine', 'seg.world': 'World', 'seg.seren': 'Insights',
+    'tab.stream': 'Stream', 'tab.base': 'Base',
+    'empty.local.t': 'No thoughts yet', 'empty.local.d': 'Start typing above',
+    'empty.world.t': 'Nobody thinks alike', 'empty.world.d': 'Waiting for open thoughts',
+    'empty.seren.t': 'No insights', 'empty.seren.d': 'Try different wording',
+    'empty.base.t': 'Base is empty', 'empty.base.d': 'Write your first thought',
+    'empty.base.empty': 'Nothing matches',
+    'base.stat.total': 'total', 'base.stat.open': 'open', 'base.stat.priv': 'private',
+    'base.search': 'search...', 'base.sort.new': 'newest', 'base.sort.old': 'oldest', 'base.sort.az': 'a-z',
+    'base.tag.private': 'private', 'base.tag.shared': 'open',
+    'base.wipe': 'Wipe base',
+    'base.wipe.confirm': 'Delete all thoughts forever?',
+    'del.confirm': 'Delete this thought forever?',
+    'nv.delete.confirm': 'Delete this note forever?',
+    'onb.dontshow': "Don't show again",
+    'toast.saved.private': 'saved privately', 'toast.saved.public': 'shared',
+    'toast.copied': 'copied', 'toast.deleted': 'deleted',
+    'toast.copy.fail': 'copy failed',
+    'toast.empty': 'write something', 'toast.ai.notready': 'ai not ready',
+    'toast.net.restart': 'restarting net...', 'toast.base.wiped': 'base wiped',
+    'toast.edit.saved': 'saved',
+    'toast.sending': 'sending...',
+    'toast.network.err': 'no connection',
+    'menu.settings': 'Settings', 'menu.help': 'How it works', 'menu.theme': 'Theme',
+    'menu.lang': 'Language', 'menu.theme.dark': 'Dark', 'menu.theme.light': 'Light',
+    'menu.export': 'Export', 'menu.import': 'Import',
+    'set.title': 'Settings', 'set.room': 'Room', 'set.room.hint': 'Nostr group topic',
+    'set.threshold': 'Threshold', 'set.threshold.hint': 'higher = stricter',
+    'set.seren': 'Insights delta', 'set.seren.hint': 'search width',
+    'set.relays': 'Relays', 'set.relays.hint': 'one wss:// per line',
+    'set.advanced': 'Advanced',
+    'set.data': 'Data', 'set.danger': 'Danger zone',
+    'help.title': 'How it works',
+    'help.intro': 'NOOmium turns thoughts into semantic vectors and finds resonance in your base and among others.',
+    'help.local': 'Strong matches in your base',
+    'help.world': 'Open thoughts from others',
+    'help.seren': 'Close but unexpected — source of inspiration',
+    'help.philosophy': "Others' thoughts cannot be saved. Read, understand, write your own.",
+    'help.keys': 'Hotkeys', 'help.k1': 'Ctrl+Enter — send', 'help.k2': '/ — focus editor',
+    'help.gestures': 'Swipe cards left/right. Toggle World/Private chooses destination.',
+    'offline.bar': 'Offline',
+    'offline.queue': 'Pending: {count}'
+  });
+
+  /**
+   * Корневой модуль приложения NOOmium.
+   * Регистрируется в DI последним, применяет сохранённую тему и возвращает метод mount.
+   */
+  DI.register('App', function(
+    Logger, Bus, Store, Config, Utils, DB, AI, Net, I18n, Modal, Toast, Progress
+  ) {
+    applyTheme(Config.get('theme', 'dark'));
+    return {
+
+      /**
+       * Публичный метод запуска приложения (вызывается из Bootstrap).
+       * @returns {void}
+       */
+      mount: mountApp
+    };
   }, ['Logger', 'Bus', 'Store', 'Config', 'Utils', 'DB', 'AI', 'Net', 'I18n', 'Modal', 'Toast', 'Progress']);
 <!-- NOOMIUM_MODULE_END App -->
 
