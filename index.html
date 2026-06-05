@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.5">
+<meta name="app-version" content="1.3.4">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1470,35 +1470,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
    * @property {number} timer - ID таймаута для принудительного завершения.
    */
 
-  /**
-   * @typedef {Object} CosineBatchItem
-   * @description Элемент для пакетного вычисления косинусного сходства.
-   * @property {string} id - Идентификатор элемента.
-   * @property {Vector} vector - Вектор для сравнения.
-   */
-
-  /**
-   * @typedef {Object} CosineBatchResult
-   * @description Результат пакетного вычисления.
-   * @property {string} id - Идентификатор элемента.
-   * @property {number} score - Значение косинусного сходства.
-   */
-
-  /**
-   * @typedef {Object} BatchCallback
-   * @description Структура для отслеживания pending batch-запросов.
-   * @property {function(CosineBatchResult[]): void} resolve - Функция разрешения Promise.
-   * @property {function(Error): void} reject - Функция отклонения Promise.
-   * @property {CosineBatchItem[]} items - Исходные элементы (для fallback).
-   * @property {Vector} queryVector - Вектор запроса (для fallback).
-   * @property {number} timer - ID таймаута.
-   */
-
   DI.register('AI', function(cfg, log, bus) {
 
     /**
      * Исходный код Web Worker'а для изолированной загрузки и выполнения ML-модели.
-     * Включает обработчики для embed и cosineBatch.
      * @type {string}
      */
     var workerCode = [
@@ -1546,21 +1521,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       '    } catch (err) {',
       '      self.postMessage({ type: "error", id: msg.id, message: err.message || String(err) });',
       '    }',
-      '    return;',
-      '  }',
-      '  if (msg.type === "cosineBatch") {',
-      '    try {',
-      '      var scores = msg.vectors.map(function(item) {',
-      '        var dot = 0;',
-      '        for (var i = 0; i < msg.queryVector.length; i++) {',
-      '          dot += msg.queryVector[i] * item.vector[i];',
-      '        }',
-      '        return { id: item.id, score: dot };',
-      '      });',
-      '      self.postMessage({ type: "cosineBatchResult", id: msg.id, scores: scores });',
-      '    } catch (err) {',
-      '      self.postMessage({ type: "error", id: msg.id, message: err.message || String(err) });',
-      '    }',
       '  }',
       '};'
     ].join('\n');
@@ -1594,9 +1554,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /** @type {Map<number, EmbedCallback>} */
     var embedCallbacks = new Map();
-
-    /** @type {Map<number, BatchCallback>} Pending batch-запросы */
-    var batchCallbacks = new Map();
 
     /** @type {number} Монотонно возрастающий ID запросов (сбрасывается при пересоздании Worker'а) */
     var nextId = 0;
@@ -1649,19 +1606,16 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Завершает все pending-запросы к Worker'у с fallback на хеш-вектор (для embed)
-     * и синхронный расчёт (для batch).
+     * Завершает все pending-запросы к Worker'у с fallback на хеш-вектор.
      * Вызывается при падении Worker'а, ошибке загрузки модели или его принудительном завершении.
+     * Гарантирует, что ни один Promise от embed() не останется в состоянии pending.
      * @param {string} reason - Причина отклонения (для логирования).
      * @returns {void}
      */
     function rejectAllPending(reason) {
-      var hasPending = embedCallbacks.size > 0 || batchCallbacks.size > 0;
-      if (!hasPending) return;
-      if (log) log.warn('AI: rejecting all pending, reason=' + reason + 
-        ', embeds=' + embedCallbacks.size + ', batches=' + batchCallbacks.size);
+      if (embedCallbacks.size === 0) return;
+      if (log) log.warn('AI: rejecting all pending embeds, reason=' + reason + ', count=' + embedCallbacks.size);
       
-      // Resolve pending embeds with hash vectors
       embedCallbacks.forEach(function(cb) {
         try {
           clearTimeout(cb.timer);
@@ -1669,24 +1623,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           cacheSet(cb.text, hashVec);
           cb.resolve(hashVec);
         } catch (err) {
-          if (log) log.warn('AI: error while rejecting pending embed', String(err && err.message || err));
+          if (log) log.warn('AI: error while rejecting pending', String(err && err.message || err));
         }
       });
       embedCallbacks.clear();
-      
-      // Resolve pending batches with synchronous cosine calculation
-      batchCallbacks.forEach(function(cb) {
-        try {
-          clearTimeout(cb.timer);
-          var scores = cb.items.map(function(item) {
-            return { id: item.id, score: cosine(cb.queryVector, item.vector) };
-          });
-          cb.resolve(scores);
-        } catch (err) {
-          if (log) log.warn('AI: error while rejecting pending batch', String(err && err.message || err));
-        }
-      });
-      batchCallbacks.clear();
     }
 
     /**
@@ -1740,6 +1680,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
       worker.onerror = function(err) {
         if (log) log.warn('Worker error, fallback to demo mode', String(err && err.message || err));
+        // cleanupWorker internally calls rejectAllPending before destroying worker
         cleanupWorker();
         mode = 'demo';
         if (bus && bus.emit) {
@@ -1799,6 +1740,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             }, delay);
           } else {
             if (log) log.warn('AI load failed in Worker, fallback to demo mode', msg.message);
+            // Reject all pending embeds before transitioning to demo mode
             rejectAllPending('load failed');
             cleanupWorker();
             mode = 'demo';
@@ -1819,34 +1761,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             cacheSet(cb.text, msg.vector);
             cb.resolve(msg.vector);
           }
-        } else if (msg.type === 'cosineBatchResult') {
-          var cb = batchCallbacks.get(msg.id);
+        } else if (msg.type === 'error' && msg.id !== null) {
+          var cb = embedCallbacks.get(msg.id);
           if (cb) {
             clearTimeout(cb.timer);
-            batchCallbacks.delete(msg.id);
-            cb.resolve(msg.scores || []);
-          }
-        } else if (msg.type === 'error' && msg.id !== null) {
-          // Error for embed or batch - check both maps
-          var embedCb = embedCallbacks.get(msg.id);
-          if (embedCb) {
-            clearTimeout(embedCb.timer);
             embedCallbacks.delete(msg.id);
             if (log) log.warn('AI embed error, fallback to hash for id=' + msg.id, msg.message);
-            var hashVec = hashEmbed(embedCb.text);
-            cacheSet(embedCb.text, hashVec);
-            embedCb.resolve(hashVec);
-            return;
-          }
-          var batchCb = batchCallbacks.get(msg.id);
-          if (batchCb) {
-            clearTimeout(batchCb.timer);
-            batchCallbacks.delete(msg.id);
-            if (log) log.warn('AI cosineBatch error, fallback to sync for id=' + msg.id, msg.message);
-            var syncScores = batchCb.items.map(function(item) {
-              return { id: item.id, score: cosine(batchCb.queryVector, item.vector) };
-            });
-            batchCb.resolve(syncScores);
+            var hashVec = hashEmbed(cb.text);
+            cacheSet(cb.text, hashVec);
+            cb.resolve(hashVec);
           }
         }
       };
@@ -1861,19 +1784,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         loadResolve = resolve;
         loadReject = reject;
       });
-    }
-
-    /**
-     * Вычисляет косинусное сходство между двумя векторами синхронно.
-     * @param {Vector} a - Первый вектор.
-     * @param {Vector} b - Второй вектор.
-     * @returns {number} Значение сходства от -1 до 1 (или 0 при ошибке/нулевых векторах).
-     */
-    function cosine(a, b) {
-      if (!a || !b || a.length !== b.length) return 0;
-      var sum = 0;
-      for (var i = 0; i < a.length; i++) sum += a[i] * b[i];
-      return Math.abs(sum) < 1e-8 ? 0 : sum;
     }
 
     return {
@@ -1979,67 +1889,17 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       },
 
       /**
-       * Пакетно вычисляет косинусное сходство между queryVector и массивом векторов.
-       * Отправляет вычисления в Worker для разгрузки основного потока.
-       * При таймауте или ошибке автоматически fallback на синхронный расчёт.
-       * @param {Vector} queryVector - Вектор запроса.
-       * @param {CosineBatchItem[]} items - Массив элементов {id, vector}.
-       * @returns {Promise<CosineBatchResult[]>} Promise с массивом {id, score}.
-       */
-      cosineBatch: function(queryVector, items) {
-        if (!queryVector || !Array.isArray(items) || items.length === 0) {
-          return Promise.resolve([]);
-        }
-
-        // Guard: sync calculation in demo mode or without worker
-        if (!worker || mode === 'demo') {
-          var syncScores = items.map(function(item) {
-            return { id: item.id, score: cosine(queryVector, item.vector) };
-          });
-          return Promise.resolve(syncScores);
-        }
-
-        var id = nextId++;
-        var timeout = cfg.get('aiEmbedTimeout', 15000);
-
-        return new Promise(function(resolve, reject) {
-          var timer = setTimeout(function() {
-            var cb = batchCallbacks.get(id);
-            if (cb) {
-              batchCallbacks.delete(id);
-              if (log) log.warn('AI cosineBatch timeout for id=' + id + ', fallback to sync');
-              var syncScores = cb.items.map(function(item) {
-                return { id: item.id, score: cosine(cb.queryVector, item.vector) };
-              });
-              cb.resolve(syncScores);
-            }
-          }, timeout);
-
-          batchCallbacks.set(id, {
-            resolve: resolve,
-            reject: reject,
-            items: items,
-            queryVector: queryVector,
-            timer: timer
-          });
-
-          worker.postMessage({
-            type: 'cosineBatch',
-            id: id,
-            queryVector: queryVector,
-            vectors: items
-          });
-        });
-      },
-
-      /**
-       * Вычисляет косинусное сходство между двумя векторами синхронно.
-       * Используется как fallback и для единичных сравнений.
+       * Вычисляет косинусное сходство между двумя векторами.
        * @param {Vector} a - Первый вектор.
        * @param {Vector} b - Второй вектор.
        * @returns {number} Значение сходства от -1 до 1 (или 0 при ошибке/нулевых векторах).
        */
-      cosine: cosine
+      cosine: function(a, b) {
+        if (!a || !b || a.length !== b.length) return 0;
+        var sum = 0;
+        for (var i = 0; i < a.length; i++) sum += a[i] * b[i];
+        return Math.abs(sum) < 1e-8 ? 0 : sum;
+      }
     };
   }, ['Config', 'Logger', 'Bus']);
 <!-- NOOMIUM_MODULE_END AI -->
@@ -3527,9 +3387,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /**
      * Выполняет семантический поиск по локальной базе и ответам из сети.
-     * Делегирует вычисление косинусного сходства в Worker через AI.cosineBatch,
-     * что значительно снижает нагрузку на основной поток при большом количестве заметок.
-     * 
+     * Вычисляет косинусное сходство и раскладывает результаты по сегментам (local, world, seren).
      * @param {string} text - Поисковый запрос (текст из редактора).
      * @param {boolean} [force=false] - Принудительная отправка запроса в сеть, даже если вектор не изменился.
      * @returns {Promise<void>}
@@ -3540,7 +3398,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return Promise.resolve();
       }
 
-      // Cancel previous search to prevent race conditions
       if (searchAbortController) {
         searchAbortController.abort();
       }
@@ -3569,112 +3426,51 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return getAllNotesCached().then(function(notes) {
           if (signal.aborted) return;
 
-          // Prepare lookup map for full note data (text, shared, peer, createdAt)
-          var lookupMap = Object.create(null);
-          var candidates = [];
-
-          // Add local notes to candidates
+          var localScored = [];
           for (var i = 0; i < notes.length; i++) {
             var note = notes[i];
             if (note && note.vector) {
-              lookupMap[note.id] = {
+              localScored.push({
                 id: note.id,
                 text: note.text,
                 vector: note.vector,
+                score: AI.cosine(vec, note.vector),
                 shared: note.shared,
-                peer: note.peer || null,
-                createdAt: note.createdAt,
-                isLocal: true
-              };
-              candidates.push({ id: note.id, vector: note.vector });
+                peer: note.peer,
+                createdAt: note.createdAt
+              });
             }
           }
 
-          // Add network answers to candidates
           var state = StateManager.getState();
           var worldAnswers = state.netAuthorized ? Net.activeAnswers() : [];
-          for (var j = 0; j < worldAnswers.length; j++) {
-            var ans = worldAnswers[j];
-            if (ans && ans.vector) {
-              lookupMap[ans.id] = {
-                id: ans.id,
-                text: ans.text,
-                vector: ans.vector,
-                shared: ans.shared,
-                peer: ans.peer || null,
-                createdAt: ans.createdAt,
-                isLocal: false
-              };
-              candidates.push({ id: ans.id, vector: ans.vector });
-            }
+          var worldScored = [];
+          for (var i = 0; i < worldAnswers.length; i++) {
+            worldScored.push({
+              id: worldAnswers[i].id,
+              text: worldAnswers[i].text,
+              vector: worldAnswers[i].vector,
+              score: AI.cosine(vec, worldAnswers[i].vector),
+              shared: worldAnswers[i].shared,
+              peer: worldAnswers[i].peer,
+              createdAt: worldAnswers[i].createdAt
+            });
           }
 
-          if (candidates.length === 0) {
-            StateManager.setState({ lists: { local: [], world: [], seren: [] } });
-            try { Bus.emit('state:lists-changed'); } catch (_) { /* ignore */ }
-            return;
-          }
+          var threshold = Config.get('threshold', 0.30);
+          var serendipityDelta = Config.get('serendipity', 0.15);
 
-          // Delegate cosine calculation to Worker
-          return AI.cosineBatch(vec, candidates).then(function(scores) {
-            if (signal.aborted) return;
+          var newLists = {
+            local: localScored.filter(function(n) { return n.score >= threshold; })
+              .sort(function(a, b) { return b.score - a.score; }),
+            world: worldScored.filter(function(n) { return n.score >= threshold; })
+              .sort(function(a, b) { return b.score - a.score; }),
+            seren: localScored.concat(worldScored)
+              .filter(function(n) { return n.score >= (threshold - serendipityDelta) && n.score < threshold; })
+              .sort(function(a, b) { return b.score - a.score; })
+          };
 
-            // Build score lookup: id -> score
-            var scoreMap = Object.create(null);
-            for (var k = 0; k < scores.length; k++) {
-              scoreMap[scores[k].id] = scores[k].score;
-            }
-
-            // Assemble final results with scores
-            var scored = [];
-            for (var id in lookupMap) {
-              if (Object.prototype.hasOwnProperty.call(lookupMap, id)) {
-                var item = lookupMap[id];
-                var score = scoreMap[id];
-                if (typeof score === 'number') {
-                  scored.push({
-                    id: item.id,
-                    text: item.text,
-                    vector: item.vector,
-                    score: score,
-                    shared: item.shared,
-                    peer: item.peer,
-                    createdAt: item.createdAt,
-                    isLocal: item.isLocal
-                  });
-                }
-              }
-            }
-
-            // Distribute into segments based on thresholds and origin
-            var threshold = Config.get('threshold', 0.30);
-            var serendipityDelta = Config.get('serendipity', 0.15);
-
-            var localScored = [];
-            var worldScored = [];
-            var serenScored = [];
-
-            for (var m = 0; m < scored.length; m++) {
-              var s = scored[m];
-              if (s.score >= threshold) {
-                if (s.isLocal) {
-                  localScored.push(s);
-                } else {
-                  worldScored.push(s);
-                }
-              } else if (s.score >= (threshold - serendipityDelta)) {
-                serenScored.push(s);
-              }
-            }
-
-            // Sort each segment by score descending
-            localScored.sort(function(a, b) { return b.score - a.score; });
-            worldScored.sort(function(a, b) { return b.score - a.score; });
-            serenScored.sort(function(a, b) { return b.score - a.score; });
-
-            StateManager.setState({ lists: { local: localScored, world: worldScored, seren: serenScored } });
-            try { Bus.emit('state:lists-changed'); } catch (_) { /* ignore */ }
-          });
+          StateManager.setState({ lists: newLists });
         });
       }).catch(function(err) {
         if (signal.aborted) return;
@@ -5904,14 +5700,15 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
 
   /**
    * Запускает поиск по текущему тексту из редактора.
-   * SearchService самостоятельно эмитит state:lists-changed после обновления списков,
-   * поэтому дополнительная эмиссия здесь не требуется.
+   * После завершения публикует событие state:lists-changed для обновления UI.
    * @param {boolean} [force=false] - Принудительная отправка запроса в сеть.
    * @returns {Promise<void>}
    */
   function executeSearch(force) {
     var text = EditorComponent.getValue();
-    return SearchService.search(text, force);
+    return SearchService.search(text, force).then(function() {
+      try { Bus.emit('state:lists-changed'); } catch (_) { /* ignore */ }
+    });
   }
 
   /**
