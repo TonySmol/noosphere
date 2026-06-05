@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.42">
+<meta name="app-version" content="1.2.43">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2674,44 +2674,17 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
 <!-- NOOMIUM_MODULE_START StreamViewComponent -->
 DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent) {
   var PAGE_SIZE = 10;
-
   var uiState = {
     currentPage: 0,
     wrapEl: null,
-    stylesInjected: false
+    clickHandler: null
   };
-
   var cachedQuery = null;
   var cachedRegex = null;
 
   var i18nHandler = null;
   var listsChangedHandler = null;
-  var wrapClickHandler = null;
 
-  /**
-   * Инъекция CSS для пагинации.
-   * Выполняется один раз при первом init(), чтобы не трогать глобальный <style>.
-   */
-  function injectStyles() {
-    if (uiState.stylesInjected) return;
-    try {
-      var style = document.createElement('style');
-      style.textContent =
-        '.carousel-dots-list{display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:center}' +
-        '.page-arrow{width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;' +
-        'background:var(--surface-2);border:1px solid var(--line);border-radius:50%;color:var(--text-2);' +
-        'cursor:pointer;font-size:16px;transition:background .15s var(--ease);flex-shrink:0;padding:0;' +
-        'font-family:inherit;outline:none}' +
-        '.page-arrow:active:not([disabled]){background:var(--surface-3)}' +
-        '.page-arrow[disabled]{opacity:0.3;cursor:default}';
-      document.head.appendChild(style);
-      uiState.stylesInjected = true;
-    } catch (e) { /* ignore injection errors */ }
-  }
-
-  /**
-   * Подсветка совпадений в тексте (без изменений, бизнес-логика).
-   */
   function highlightText(text, query) {
     var fragment = document.createDocumentFragment();
     if (!text) return fragment;
@@ -2749,9 +2722,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
 
   function isOwnItem(item) { return !item.peer; }
 
-  /**
-   * Построение DOM-элемента карточки (без изменений).
-   */
   function renderItemHTML(item) {
     if (!item) return document.createElement('div');
     var state = StateManager.getState();
@@ -2781,7 +2751,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       scoreWrap.appendChild(scoreLabel);
       var scoreValue = document.createElement('span');
       scoreValue.className = 'fi-score-value';
-      scoreValue.textContent = String(scoreNum) + '%';
+      scoreValue.textContent = String(scoreNum);
       scoreWrap.appendChild(scoreValue);
       header.appendChild(scoreWrap);
     }
@@ -2833,90 +2803,28 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
 
   function getPageCount(list) {
     if (!list || list.length === 0) return 0;
-    return Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+    return Math.ceil(list.length / PAGE_SIZE);
   }
 
-  function getCurrentPageItems(list) {
-    if (!list || list.length === 0) return [];
-    var start = uiState.currentPage * PAGE_SIZE;
-    var end = start + PAGE_SIZE;
-    return list.slice(start, end);
-  }
-
-  /**
-   * Переход на указанную страницу с защитой от выхода за границы.
-   */
-  function goToPage(page) {
-    var state = StateManager.getState();
-    var list = state.lists[state.seg];
-    var pageCount = getPageCount(list);
-    if (pageCount === 0) return;
-    var newPage = Math.max(0, Math.min(pageCount - 1, page));
-    if (newPage === uiState.currentPage) return;
-    uiState.currentPage = newPage;
-    renderCarousel();
-  }
-
-  /**
-   * Рендер блока пагинации: стрелки, точки, счётчик.
-   */
-  function renderPagination(pageCount, currentPage, container) {
-    while (container.firstChild) container.removeChild(container.firstChild);
-    if (pageCount === 0) return;
-
-    var prevBtn = document.createElement('button');
-    prevBtn.className = 'page-arrow';
-    prevBtn.setAttribute('data-dir', 'prev');
-    prevBtn.setAttribute('aria-label', 'Previous page');
-    prevBtn.textContent = '◀';
-    if (currentPage === 0) prevBtn.disabled = true;
-    container.appendChild(prevBtn);
-
-    var dotsList = document.createElement('div');
-    dotsList.className = 'carousel-dots-list';
-    for (var j = 0; j < pageCount; j++) {
-      var dot = document.createElement('span');
-      dot.className = 'carousel-dot' + (j === currentPage ? ' active' : '');
-      dot.setAttribute('data-i', String(j));
-      dotsList.appendChild(dot);
-    }
-    container.appendChild(dotsList);
-
-    var counter = document.createElement('span');
-    counter.className = 'carousel-counter';
-    counter.id = 'carousel-counter';
-    counter.textContent = (currentPage + 1) + ' / ' + pageCount;
-    container.appendChild(counter);
-
-    var nextBtn = document.createElement('button');
-    nextBtn.className = 'page-arrow';
-    nextBtn.setAttribute('data-dir', 'next');
-    nextBtn.setAttribute('aria-label', 'Next page');
-    nextBtn.textContent = '▶';
-    if (currentPage >= pageCount - 1) nextBtn.disabled = true;
-    container.appendChild(nextBtn);
-  }
-
-  /**
-   * Полный рендер карусели и пагинации для текущей страницы.
-   * Автоматически корректирует currentPage при уменьшении списка.
-   */
   function renderCarousel() {
-    var wrap = uiState.wrapEl || document.getElementById('carousel-wrap');
+    var wrap = document.getElementById('carousel-wrap');
     if (!wrap) return;
     uiState.wrapEl = wrap;
 
+    if (uiState.clickHandler) {
+      wrap.removeEventListener('click', uiState.clickHandler);
+      uiState.clickHandler = null;
+    }
     while (wrap.firstChild) wrap.removeChild(wrap.firstChild);
 
     var state = StateManager.getState();
     var list = state.lists[state.seg];
     var pageCount = getPageCount(list);
 
-    // Корректировка currentPage, если список стал короче
-    if (pageCount === 0) {
-      uiState.currentPage = 0;
-    } else if (uiState.currentPage >= pageCount) {
+    if (pageCount > 0 && uiState.currentPage >= pageCount) {
       uiState.currentPage = pageCount - 1;
+    } else if (pageCount === 0) {
+      uiState.currentPage = 0;
     }
 
     if (!list || list.length === 0) {
@@ -2949,21 +2857,69 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     carousel.id = 'carousel';
     carousel.setAttribute('tabindex', '0');
 
-    var pageItems = getCurrentPageItems(list);
+    var startIdx = uiState.currentPage * PAGE_SIZE;
+    var endIdx = Math.min(startIdx + PAGE_SIZE, list.length);
+    var pageItems = list.slice(startIdx, endIdx);
+
     for (var i = 0; i < pageItems.length; i++) {
-      var item = document.createElement('div');
-      item.className = 'carousel-item';
-      item.appendChild(renderItemHTML(pageItems[i]));
-      carousel.appendChild(item);
+      var itemEl = document.createElement('div');
+      itemEl.className = 'carousel-item';
+      itemEl.appendChild(renderItemHTML(pageItems[i]));
+      carousel.appendChild(itemEl);
     }
     wrap.appendChild(carousel);
 
     var dotsWrap = document.createElement('div');
     dotsWrap.className = 'carousel-dots';
     dotsWrap.id = 'carousel-dots';
+
+    var prevBtn = document.createElement('button');
+    prevBtn.className = 'page-arrow';
+    prevBtn.textContent = '◀';
+    prevBtn.setAttribute('data-dir', 'prev');
+    if (uiState.currentPage === 0) prevBtn.disabled = true;
+    dotsWrap.appendChild(prevBtn);
+
+    for (var j = 0; j < pageCount; j++) {
+      var dot = document.createElement('span');
+      dot.className = 'carousel-dot' + (j === uiState.currentPage ? ' active' : '');
+      dotsWrap.appendChild(dot);
+    }
+
+    var nextBtn = document.createElement('button');
+    nextBtn.className = 'page-arrow';
+    nextBtn.textContent = '▶';
+    nextBtn.setAttribute('data-dir', 'next');
+    if (uiState.currentPage >= pageCount - 1) nextBtn.disabled = true;
+    dotsWrap.appendChild(nextBtn);
+
+    var counter = document.createElement('span');
+    counter.className = 'carousel-counter';
+    counter.textContent = (uiState.currentPage + 1) + ' / ' + pageCount;
+    dotsWrap.appendChild(counter);
+
     wrap.appendChild(dotsWrap);
 
-    renderPagination(pageCount, uiState.currentPage, dotsWrap);
+    uiState.clickHandler = function(e) {
+      var arrow = e.target.closest('.page-arrow');
+      if (arrow && !arrow.disabled) {
+        var dir = arrow.getAttribute('data-dir');
+        if (dir === 'prev') {
+          uiState.currentPage = Math.max(0, uiState.currentPage - 1);
+          renderCarousel();
+        } else if (dir === 'next') {
+          uiState.currentPage = Math.min(pageCount - 1, uiState.currentPage + 1);
+          renderCarousel();
+        }
+        return;
+      }
+
+      var actEl = e.target.closest('[data-act]');
+      if (actEl) {
+        handleItemAction(actEl.getAttribute('data-act'), actEl);
+      }
+    };
+    wrap.addEventListener('click', uiState.clickHandler);
   }
 
   function updateCounts() {
@@ -2995,8 +2951,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       } else {
         var ta = document.createElement('textarea');
         ta.value = text;
-        ta.style.position = 'fixed';
-        ta.style.top = '-9999px';
+        ta.className = 'clipboard-fallback';
         document.body.appendChild(ta);
         ta.select();
         try { document.execCommand('copy'); Toast.show('ok', I18n.t('toast.copied')); }
@@ -3039,10 +2994,18 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         var newLists = Object.assign({}, currentState.lists);
         newLists[currentState.seg] = newList;
         StateManager.setState({ lists: newLists });
+        
+        var pageCount = getPageCount(newList);
+        if (pageCount > 0 && uiState.currentPage >= pageCount) {
+          uiState.currentPage = pageCount - 1;
+        }
+
         cachedQuery = null;
         cachedRegex = null;
         renderCarousel();
+        
         try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
+        try { Bus.emit('state:lists-changed'); } catch (_) {}
       }).catch(function(err) {
         Toast.show('err', String(err && err.message || err) || 'Delete failed');
       });
@@ -3063,32 +3026,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     }
   }
 
-  /**
-   * Единый делегированный обработчик кликов на #carousel-wrap.
-   * Обрабатывает: стрелки пагинации, точки, действия карточек.
-   */
-  function onWrapClick(e) {
-    var arrow = e.target.closest('.page-arrow');
-    if (arrow && !arrow.disabled) {
-      var dir = arrow.getAttribute('data-dir');
-      if (dir === 'prev') goToPage(uiState.currentPage - 1);
-      else if (dir === 'next') goToPage(uiState.currentPage + 1);
-      return;
-    }
-
-    var dot = e.target.closest('.carousel-dot');
-    if (dot) {
-      var pageIdx = parseInt(dot.getAttribute('data-i'), 10);
-      if (!isNaN(pageIdx)) goToPage(pageIdx);
-      return;
-    }
-
-    var actEl = e.target.closest('[data-act]');
-    if (actEl) {
-      handleItemAction(actEl.getAttribute('data-act'), actEl);
-    }
-  }
-
   function bindDOMEvents() {
     document.querySelectorAll('.seg-b').forEach(function(b) {
       b.onclick = function() { setSegment(b.getAttribute('data-k')); };
@@ -3097,13 +3034,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
 
   function init() {
     bindDOMEvents();
-    injectStyles();
-
-    uiState.wrapEl = document.getElementById('carousel-wrap');
-    if (uiState.wrapEl) {
-      wrapClickHandler = onWrapClick;
-      uiState.wrapEl.addEventListener('click', wrapClickHandler);
-    }
 
     var state = StateManager.getState();
     document.querySelectorAll('.seg-b').forEach(function(b) {
@@ -3121,7 +3051,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       updateCounts();
       cachedQuery = null;
       cachedRegex = null;
-      uiState.currentPage = 0;
       renderCarousel();
     };
     Bus.on('i18n:change', i18nHandler);
@@ -3140,20 +3069,14 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
   }
 
   function destroy() {
-    if (uiState.wrapEl && wrapClickHandler) {
-      try { uiState.wrapEl.removeEventListener('click', wrapClickHandler); } catch (_) {}
+    if (uiState.wrapEl && uiState.clickHandler) {
+      uiState.wrapEl.removeEventListener('click', uiState.clickHandler);
     }
-    wrapClickHandler = null;
+    uiState.clickHandler = null;
     uiState.wrapEl = null;
 
-    if (i18nHandler) {
-      try { Bus.off('i18n:change', i18nHandler); } catch (_) {}
-      i18nHandler = null;
-    }
-    if (listsChangedHandler) {
-      try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) {}
-      listsChangedHandler = null;
-    }
+    if (i18nHandler) { try { Bus.off('i18n:change', i18nHandler); } catch (_) {} i18nHandler = null; }
+    if (listsChangedHandler) { try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) {} listsChangedHandler = null; }
   }
 
   return { init: init, destroy: destroy };
