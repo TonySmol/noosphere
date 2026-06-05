@@ -1,6 +1,10 @@
 // Service Worker for NOOmium PWA
-// Version is passed via URL parameter ?v=<app-version>
+// Version is passed via URL parameter ?v=<app-version> for cache-busting
 const CACHE_NAME = 'noomium-v' + new URL(self.location).searchParams.get('v');
+
+// Домены, которые НЕ должны перехватываться SW.
+// Transformers.js и Nostr-tools сами управляют своим кэшем и CORS.
+const CDN_HOSTS = ['cdn.jsdelivr.net', 'huggingface.co'];
 
 // Install: immediately activate
 self.addEventListener('install', (e) => {
@@ -20,43 +24,64 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// Listen for skip-waiting message from main thread
+// Listen for skip-waiting message from main thread (App.Boot logic)
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
 });
 
-// Fetch: network-first for navigation, cache-first for assets
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
 
-  // Navigation requests: network-first with offline fallback
+  const url = new URL(e.request.url);
+
+  // 1. Pass-through для WebSocket и CDN.
+  // SW не должен вмешиваться в загрузку ML-моделей и ESM-библиотек.
+  if (
+    url.protocol === 'ws:' || 
+    url.protocol === 'wss:' || 
+    CDN_HOSTS.includes(url.hostname)
+  ) {
+    return; // Network-only
+  }
+
+  // 2. Navigation (index.html): Cache-First.
+  // Обеспечивает мгновенный старт приложения в offline.
+  // Обновление происходит за счет смены CACHE_NAME при деплое.
   if (e.request.mode === 'navigate') {
     e.respondWith(
-      fetch(e.request)
-        .then((res) => {
+      caches.match(e.request).then((cached) => {
+        return cached || fetch(e.request).then((res) => {
           if (res && res.status === 200) {
             const clone = res.clone();
             caches.open(CACHE_NAME).then((c) => c.put(e.request, clone));
           }
           return res;
-        })
-        .catch(() => caches.match(e.request).then((r) => r || caches.match('/')))
+        });
+      })
     );
     return;
   }
 
-  // All other assets: cache-first with network fallback
+  // 3. Local Assets (CSS, JS, fonts): Cache-First with Network fallback.
   e.respondWith(
-    caches.match(e.request).then((r) => {
-      return r || fetch(e.request).then((res) => {
-        if (res.status === 200) {
+    caches.match(e.request).then((cached) => {
+      return cached || fetch(e.request).then((res) => {
+        // Кэшируем только same-origin успешные ответы (type === 'basic')
+        if (res && res.status === 200 && res.type === 'basic') {
           const clone = res.clone();
           caches.open(CACHE_NAME).then((c) => c.put(e.request, clone));
         }
         return res;
-      }).catch(() => caches.match('/'));
+      }).catch(() => {
+        // Fallback на корень ТОЛЬКО для документов, не для ассетов
+        if (e.request.destination === 'document') {
+          return caches.match('/');
+        }
+        // Для картинок/шрифтов просто отдаем ошибку, чтобы браузер не сломался на HTML
+        return new Response('', { status: 408, statusText: 'Offline' });
+      });
     })
   );
 });
