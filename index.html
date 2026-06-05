@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.2.41">
+<meta name="app-version" content="1.2.42">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -418,6 +418,53 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 .startup-reload{margin-top:20px;padding:10px 20px;background:#8b7cff;color:white;border:none;border-radius:8px;cursor:pointer}
 .mb-5{margin-bottom:5px}
 .reset-modal-text{color:var(--text-2);margin-bottom:16px}
+/* Контейнер пагинации */
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-sm);
+  padding: 6px 12px 8px;
+  flex-shrink: 0;
+}
+
+/* Кнопки-стрелки */
+.pagination-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease), opacity 0.15s var(--ease);
+  flex-shrink: 0;
+}
+.pagination-btn:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.pagination-btn:active:not(:disabled) {
+  background: var(--brand-glow);
+  color: var(--brand);
+}
+.pagination-btn:disabled {
+  opacity: 0.25;
+  pointer-events: none;
+}
+
+/* Счетчик (уточнение позиционирования) */
+.carousel-counter {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  margin: 0 4px;
+}
 </style>
 <!-- NOOMIUM_MODULE_END CSS -->
 </head>
@@ -2673,19 +2720,25 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
 
 <!-- NOOMIUM_MODULE_START StreamViewComponent -->
 DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent) {
-  var POOL_SIZE = 7;
-  var uiState = {
-    activeIdx: { local: 0, world: 0, seren: 0 },
-    poolItems: [],
+  var PAGE_SIZE = 10;
+  var state = {
+    currentPage: 0,
+    totalPages: 0,
+    pages: [],
+    activeDotIndex: 0,
     carouselEl: null,
-    scrollRAF: null,
-    lastCenterIndex: -1
+    dotsContainer: null,
+    prevBtn: null,
+    nextBtn: null,
+    counterEl: null,
+    scrollRAF: null
   };
+  
   var cachedQuery = null;
   var cachedRegex = null;
-
   var i18nHandler = null;
   var listsChangedHandler = null;
+  var keydownHandler = null;
 
   function highlightText(text, query) {
     var fragment = document.createDocumentFragment();
@@ -2726,8 +2779,8 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
 
   function renderItemHTML(item) {
     if (!item) return document.createElement('div');
-    var state = StateManager.getState();
-    var seg = state.seg;
+    var stateData = StateManager.getState();
+    var seg = stateData.seg;
     var own = isOwnItem(item);
     var card = document.createElement('div');
     card.className = 'fi t-' + seg;
@@ -2803,198 +2856,151 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     return card;
   }
 
-  function updateCarouselDots(idx, total) {
-    var dots = document.querySelectorAll('#carousel-dots .carousel-dot');
-    for (var i = 0; i < dots.length; i++) {
-      dots[i].classList.toggle('active', i === idx);
-    }
-    var counter = document.getElementById('carousel-counter');
-    if (counter) counter.textContent = (idx + 1) + ' / ' + total;
-  }
-
-  function renderDots(total) {
-    var dotsWrap = document.getElementById('carousel-dots');
-    if (!dotsWrap) return;
-    while (dotsWrap.firstChild) dotsWrap.removeChild(dotsWrap.firstChild);
-
-    for (var j = 0; j < total; j++) {
-      var dot = document.createElement('span');
-      dot.className = 'carousel-dot' + (j === 0 ? ' active' : '');
-      dot.setAttribute('data-i', String(j));
-      dotsWrap.appendChild(dot);
-    }
-    var counter = document.createElement('span');
-    counter.className = 'carousel-counter';
-    counter.id = 'carousel-counter';
-    counter.textContent = total > 0 ? '1 / ' + total : '0 / 0';
-    dotsWrap.appendChild(counter);
-  }
-
-  function getItemWidth() {
-    if (!uiState.carouselEl) return 0;
-    return uiState.carouselEl.clientWidth;
-  }
-
-  function getCenterIndex() {
-    if (!uiState.carouselEl) return 0;
-    var itemWidth = getItemWidth();
-    if (itemWidth <= 0) return 0;
-    return Math.round(uiState.carouselEl.scrollLeft / itemWidth);
-  }
-
-  function renderVisibleItems() {
-    var state = StateManager.getState();
-    var list = state.lists[state.seg];
+  function paginate(list) {
+    var pages = [];
     if (!list || list.length === 0) {
-      for (var i = 0; i < uiState.poolItems.length; i++) {
-        var p = uiState.poolItems[i];
-        if (p.dataIndex !== -1) {
-          while (p.element.firstChild) p.element.removeChild(p.element.firstChild);
-          p.dataIndex = -1;
-        }
-      }
+      state.pages = pages;
+      state.totalPages = 0;
+      return;
+    }
+    for (var i = 0; i < list.length; i += PAGE_SIZE) {
+      pages.push(list.slice(i, i + PAGE_SIZE));
+    }
+    state.pages = pages;
+    state.totalPages = pages.length;
+  }
+
+  function updatePaginationButtons() {
+    if (state.prevBtn) state.prevBtn.disabled = (state.currentPage === 0);
+    if (state.nextBtn) state.nextBtn.disabled = (state.currentPage >= state.totalPages - 1);
+  }
+
+  function renderPage(pageIndex) {
+    if (!state.carouselEl || !state.dotsContainer || !state.counterEl) return;
+
+    while (state.carouselEl.firstChild) state.carouselEl.removeChild(state.carouselEl.firstChild);
+    
+    var pageItems = state.pages[pageIndex] || [];
+    
+    if (pageItems.length === 0) {
+      updatePaginationButtons();
       return;
     }
 
-    var centerIndex = getCenterIndex();
-    var halfPool = Math.floor(POOL_SIZE / 2);
-    var startIdx = Math.max(0, centerIndex - halfPool);
-    var endIdx = Math.min(list.length - 1, startIdx + POOL_SIZE - 1);
-    startIdx = Math.max(0, endIdx - POOL_SIZE + 1);
-
-    for (var i = 0; i < uiState.poolItems.length; i++) {
-      var poolItem = uiState.poolItems[i];
-      var dataIndex = startIdx + i;
-
-      if (dataIndex > endIdx || dataIndex < 0 || dataIndex >= list.length) {
-        if (poolItem.dataIndex !== -1) {
-          while (poolItem.element.firstChild) poolItem.element.removeChild(poolItem.element.firstChild);
-          poolItem.dataIndex = -1;
-        }
-        continue;
-      }
-
-      if (poolItem.dataIndex !== dataIndex) {
-        while (poolItem.element.firstChild) poolItem.element.removeChild(poolItem.element.firstChild);
-        poolItem.element.appendChild(renderItemHTML(list[dataIndex]));
-        poolItem.dataIndex = dataIndex;
-      }
+    for (var i = 0; i < pageItems.length; i++) {
+      var itemEl = document.createElement('div');
+      itemEl.className = 'carousel-item';
+      itemEl.appendChild(renderItemHTML(pageItems[i]));
+      state.carouselEl.appendChild(itemEl);
     }
 
-    if (centerIndex !== uiState.lastCenterIndex) {
-      uiState.lastCenterIndex = centerIndex;
-      uiState.activeIdx[state.seg] = centerIndex;
-      updateCarouselDots(centerIndex, list.length);
+    while (state.dotsContainer.firstChild) state.dotsContainer.removeChild(state.dotsContainer.firstChild);
+    for (var j = 0; j < pageItems.length; j++) {
+      var dot = document.createElement('span');
+      dot.className = 'carousel-dot' + (j === 0 ? ' active' : '');
+      dot.setAttribute('data-i', String(j));
+      state.dotsContainer.appendChild(dot);
     }
+
+    state.counterEl.textContent = '1 / ' + pageItems.length;
+    state.activeDotIndex = 0;
+    state.carouselEl.scrollLeft = 0;
+
+    updatePaginationButtons();
   }
 
   function onCarouselScroll() {
-    if (uiState.scrollRAF) return;
-    uiState.scrollRAF = requestAnimationFrame(function() {
-      renderVisibleItems();
-      uiState.scrollRAF = null;
+    if (!state.carouselEl || state.scrollRAF) return;
+    state.scrollRAF = requestAnimationFrame(function() {
+      if (!state.carouselEl) { state.scrollRAF = null; return; }
+      var itemWidth = state.carouselEl.clientWidth;
+      if (itemWidth <= 0) { state.scrollRAF = null; return; }
+      
+      var idx = Math.round(state.carouselEl.scrollLeft / itemWidth);
+      var pageItems = state.pages[state.currentPage] || [];
+      var maxIdx = Math.max(0, pageItems.length - 1);
+      
+      if (idx < 0) idx = 0;
+      if (idx > maxIdx) idx = maxIdx;
+
+      if (idx !== state.activeDotIndex) {
+        state.activeDotIndex = idx;
+        var dots = state.dotsContainer.querySelectorAll('.carousel-dot');
+        for (var i = 0; i < dots.length; i++) {
+          dots[i].classList.toggle('active', i === idx);
+        }
+        if (state.counterEl) {
+          state.counterEl.textContent = (idx + 1) + ' / ' + pageItems.length;
+        }
+      }
+      state.scrollRAF = null;
     });
+  }
+
+  function scrollToIndex(idx) {
+    if (!state.carouselEl) return;
+    var itemWidth = state.carouselEl.clientWidth;
+    state.carouselEl.scrollTo({ left: idx * itemWidth, behavior: 'smooth' });
   }
 
   function initCarousel() {
     var wrap = document.getElementById('carousel-wrap');
     if (!wrap) return;
-    while (wrap.firstChild) wrap.removeChild(wrap.firstChild);
 
-    var state = StateManager.getState();
-    var list = state.lists[state.seg];
+    state.carouselEl = document.getElementById('carousel');
+    state.dotsContainer = document.getElementById('carousel-dots');
+    state.counterEl = document.getElementById('carousel-counter');
+    state.prevBtn = document.getElementById('pagination-prev');
+    state.nextBtn = document.getElementById('pagination-next');
 
-    if (!list || list.length === 0) {
+    var stateData = StateManager.getState();
+    var list = stateData.lists[stateData.seg];
+
+    paginate(list);
+
+    if (state.currentPage >= state.totalPages) {
+      state.currentPage = Math.max(0, state.totalPages - 1);
+    }
+
+    if (state.totalPages === 0) {
+      if (state.carouselEl) state.carouselEl.style.display = 'none';
+      var controls = wrap.querySelector('.pagination-controls');
+      if (controls) controls.style.display = 'none';
+
+      var existingEmpty = wrap.querySelector('.feed-empty');
+      if (existingEmpty) existingEmpty.remove();
+
       var emptyMessages = {
         local: { t: I18n.t('empty.local.t'), d: I18n.t('empty.local.d') },
         world: { t: I18n.t('empty.world.t'), d: I18n.t('empty.world.d') },
         seren: { t: I18n.t('empty.seren.t'), d: I18n.t('empty.seren.d') }
       };
-      var msg = emptyMessages[state.seg];
+      var msg = emptyMessages[stateData.seg];
       var emptyDiv = document.createElement('div');
       emptyDiv.className = 'feed-empty';
-      var emptyIc = document.createElement('div');
-      emptyIc.className = 'feed-empty-ic';
-      emptyIc.textContent = '◇';
-      emptyDiv.appendChild(emptyIc);
-      var emptyT = document.createElement('div');
-      emptyT.className = 'feed-empty-t';
-      emptyT.textContent = msg.t;
-      emptyDiv.appendChild(emptyT);
-      var emptyD = document.createElement('div');
-      emptyD.className = 'feed-empty-d';
-      emptyD.textContent = msg.d;
-      emptyDiv.appendChild(emptyD);
+      emptyDiv.innerHTML = '<div class="feed-empty-ic">◇</div>' +
+                           '<div class="feed-empty-t">' + msg.t + '</div>' +
+                           '<div class="feed-empty-d">' + msg.d + '</div>';
       wrap.appendChild(emptyDiv);
-      uiState.carouselEl = null;
-      uiState.poolItems = [];
+      
+      updatePaginationButtons();
       return;
     }
 
-    var carousel = document.createElement('div');
-    carousel.className = 'carousel';
-    carousel.id = 'carousel';
-    carousel.setAttribute('tabindex', '0');
-    uiState.carouselEl = carousel;
+    var existingEmpty = wrap.querySelector('.feed-empty');
+    if (existingEmpty) existingEmpty.remove();
+    if (state.carouselEl) state.carouselEl.style.display = '';
+    var controls = wrap.querySelector('.pagination-controls');
+    if (controls) controls.style.display = '';
 
-    uiState.poolItems = [];
-    for (var i = 0; i < POOL_SIZE; i++) {
-      var item = document.createElement('div');
-      item.className = 'carousel-item';
-      item.setAttribute('data-idx', String(i));
-      carousel.appendChild(item);
-      uiState.poolItems.push({ element: item, dataIndex: -1 });
-    }
-    wrap.appendChild(carousel);
-
-    var dotsWrap = document.createElement('div');
-    dotsWrap.className = 'carousel-dots';
-    dotsWrap.id = 'carousel-dots';
-    wrap.appendChild(dotsWrap);
-    renderDots(list.length);
-
-    carousel.addEventListener('scroll', onCarouselScroll, { passive: true });
-
-    carousel.addEventListener('keydown', function(e) {
-      var currentState = StateManager.getState();
-      var currentList = currentState.lists[currentState.seg];
-      if (!currentList || currentList.length === 0) return;
-
-      if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        var nextIdx = Math.min(getCenterIndex() + 1, currentList.length - 1);
-        scrollToIndex(nextIdx);
-      } else if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        var prevIdx = Math.max(getCenterIndex() - 1, 0);
-        scrollToIndex(prevIdx);
-      }
-    });
-
-    carousel.addEventListener('click', function(e) {
-      var el = e.target.closest('[data-act]');
-      if (el) handleItemAction(el.getAttribute('data-act'), el);
-    });
-
-    uiState.lastCenterIndex = -1;
-    carousel.scrollLeft = 0;
-    renderVisibleItems();
-  }
-
-  function scrollToIndex(idx) {
-    if (!uiState.carouselEl) return;
-    var itemWidth = getItemWidth();
-    uiState.carouselEl.scrollTo({
-      left: idx * itemWidth,
-      behavior: 'smooth'
-    });
+    renderPage(state.currentPage);
   }
 
   function updateCounts() {
-    var state = StateManager.getState();
+    var stateData = StateManager.getState();
     ['local', 'world', 'seren'].forEach(function(key) {
       var el = document.getElementById('c-' + key);
-      if (el) el.textContent = state.lists[key].length;
+      if (el) el.textContent = stateData.lists[key].length;
     });
   }
 
@@ -3005,6 +3011,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     });
     cachedQuery = null;
     cachedRegex = null;
+    state.currentPage = 0;
     initCarousel();
   }
 
@@ -3041,15 +3048,14 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
   function handleItemAction(action, element) {
     if (!element) return;
     var id = element.getAttribute('data-id');
-    var state = StateManager.getState();
+    var stateData = StateManager.getState();
 
     if (action === 'edit') {
-      // Слабая связность: эмитим событие, которое слушает BaseViewComponent
       try { Bus.emit('editor:edit-note', { id: id }); } catch (_) {}
       return;
     }
     if (action === 'copy') {
-      var item = findItemById(id, state.lists[state.seg]);
+      var item = findItemById(id, stateData.lists[stateData.seg]);
       if (item) copyToClipboard(item.text);
       return;
     }
@@ -3057,20 +3063,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       if (!confirm(I18n.t('del.confirm'))) return;
       DB.del(id).then(function() {
         Toast.show('ok', I18n.t('toast.deleted'));
-        var currentState = StateManager.getState();
-        var currentList = currentState.lists[currentState.seg];
-        var newList = currentList.filter(function(n) { return n.id !== id; });
-        var newLists = Object.assign({}, currentState.lists);
-        newLists[currentState.seg] = newList;
-        StateManager.setState({ lists: newLists });
-        if (uiState.activeIdx[currentState.seg] >= newList.length) {
-          uiState.activeIdx[currentState.seg] = Math.max(0, newList.length - 1);
-        }
-        cachedQuery = null;
-        cachedRegex = null;
-        initCarousel();
-        // Слабая связность: запрашиваем перестройку списков через событие
-        // App.Events → executeSearch → SearchService.search → state:lists-changed
         try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
       }).catch(function(err) {
         Toast.show('err', String(err && err.message || err) || 'Delete failed');
@@ -3083,7 +3075,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         record.shared = !record.shared;
         return DB.put(record).then(function() {
           Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
-          // Слабая связность: запрашиваем перестройку списков через событие
           try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
         });
       }).catch(function(err) {
@@ -3097,15 +3088,61 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     document.querySelectorAll('.seg-b').forEach(function(b) {
       b.onclick = function() { setSegment(b.getAttribute('data-k')); };
     });
+
+    var wrap = document.getElementById('carousel-wrap');
+    if (wrap) {
+      wrap.addEventListener('click', function(e) {
+        var prevBtn = e.target.closest('#pagination-prev');
+        if (prevBtn && !prevBtn.disabled) {
+          if (state.currentPage > 0) {
+            state.currentPage--;
+            renderPage(state.currentPage);
+          }
+          return;
+        }
+        var nextBtn = e.target.closest('#pagination-next');
+        if (nextBtn && !nextBtn.disabled) {
+          if (state.currentPage < state.totalPages - 1) {
+            state.currentPage++;
+            renderPage(state.currentPage);
+          }
+          return;
+        }
+
+        var actionEl = e.target.closest('[data-act]');
+        if (actionEl) {
+          handleItemAction(actionEl.getAttribute('data-act'), actionEl);
+        }
+      });
+    }
   }
 
   function init() {
     bindDOMEvents();
 
-    var state = StateManager.getState();
+    var stateData = StateManager.getState();
     document.querySelectorAll('.seg-b').forEach(function(b) {
-      b.classList.toggle('on', b.getAttribute('data-k') === state.seg);
+      b.classList.toggle('on', b.getAttribute('data-k') === stateData.seg);
     });
+
+    var carouselEl = document.getElementById('carousel');
+    if (carouselEl) {
+      carouselEl.addEventListener('scroll', onCarouselScroll, { passive: true });
+      keydownHandler = function(e) {
+        var currentList = state.pages[state.currentPage] || [];
+        if (!currentList || currentList.length === 0) return;
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          var nextIdx = Math.min(state.activeDotIndex + 1, currentList.length - 1);
+          scrollToIndex(nextIdx);
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          var prevIdx = Math.max(state.activeDotIndex - 1, 0);
+          scrollToIndex(prevIdx);
+        }
+      };
+      carouselEl.addEventListener('keydown', keydownHandler);
+    }
 
     i18nHandler = function() {
       var s = StateManager.getState();
@@ -3136,15 +3173,23 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
   }
 
   function destroy() {
-    if (uiState.scrollRAF) {
-      cancelAnimationFrame(uiState.scrollRAF);
-      uiState.scrollRAF = null;
+    if (state.scrollRAF) {
+      cancelAnimationFrame(state.scrollRAF);
+      state.scrollRAF = null;
     }
-    if (uiState.carouselEl) {
-      uiState.carouselEl.removeEventListener('scroll', onCarouselScroll);
-      uiState.carouselEl = null;
+    var carouselEl = document.getElementById('carousel');
+    if (carouselEl) {
+      carouselEl.removeEventListener('scroll', onCarouselScroll);
+      if (keydownHandler) carouselEl.removeEventListener('keydown', keydownHandler);
     }
-    uiState.poolItems = [];
+    state.carouselEl = null;
+    state.dotsContainer = null;
+    state.counterEl = null;
+    state.prevBtn = null;
+    state.nextBtn = null;
+    state.pages = [];
+    keydownHandler = null;
+    
     if (i18nHandler) { try { Bus.off('i18n:change', i18nHandler); } catch (_) {} i18nHandler = null; }
     if (listsChangedHandler) { try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) {} listsChangedHandler = null; }
   }
@@ -3829,7 +3874,15 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
   }
 
   function buildCarouselWrapMarkup() {
-    return '<div class="carousel-wrap" id="carousel-wrap"></div>';
+    return '<div class="carousel-wrap" id="carousel-wrap">' +
+      '<div class="carousel" id="carousel"></div>' +
+      '<div class="pagination-controls">' +
+        '<button class="pagination-btn pagination-prev" id="pagination-prev" aria-label="Previous page" disabled>&#8249;</button>' +
+        '<div class="carousel-dots" id="carousel-dots"></div>' +
+        '<span class="carousel-counter" id="carousel-counter"></span>' +
+        '<button class="pagination-btn pagination-next" id="pagination-next" aria-label="Next page">&#8250;</button>' +
+      '</div>' +
+    '</div>';
   }
 
   function buildEditorMarkup() {
