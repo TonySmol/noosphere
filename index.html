@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.00">
+<meta name="app-version" content="1.3.1">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -4937,700 +4937,635 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END StreamViewComponent -->
 
 <!-- NOOMIUM_MODULE_START BaseViewComponent -->
+DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast, SearchService) {
+  var ITEM_HEIGHT = 100;
+  var ITEM_GAP = 8;
+  var ROW_SIZE = ITEM_HEIGHT + ITEM_GAP;
+  var POOL_SIZE = 15;
+
+  var noteViewEscHandler = null;
+  var scrollRAF = null;
+  var filteredNotes = [];
+  var poolItems = [];
+  var listContainer = null;
+
+  var i18nHandler = null;
+  var listsChangedHandler = null;
+  var viewChangedHandler = null;
+  var editNoteHandler = null;
+
   /**
-   * @typedef {Object} PoolItem
-   * @description Элемент пула для виртуального скролла базы.
-   * @property {HTMLDivElement} element - DOM-узел строки.
-   * @property {number} dataIndex - Индекс данных, который сейчас отображается в этом узле (-1 если пуст).
+   * Создаёт DOM-элемент карточки статистики.
+   * @param {number|string} value - Значение.
+   * @param {string} label - Подпись.
+   * @returns {HTMLDivElement}
    */
+  function buildStatCard(value, label) {
+    var card = document.createElement('div');
+    card.className = 'stat';
+    var valueEl = document.createElement('div');
+    valueEl.className = 'stat-v';
+    valueEl.textContent = String(value);
+    card.appendChild(valueEl);
+    var labelEl = document.createElement('div');
+    labelEl.className = 'stat-l';
+    labelEl.textContent = label;
+    card.appendChild(labelEl);
+    return card;
+  }
 
-  DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast, SearchService) {
+  /**
+   * Создаёт DOM-структуру пустого состояния (empty state).
+   * @param {string} icon - Символ иконки.
+   * @param {string} title - Заголовок.
+   * @param {string} description - Описание.
+   * @returns {HTMLDivElement}
+   */
+  function buildEmptyState(icon, title, description) {
+    var emptyDiv = document.createElement('div');
+    emptyDiv.className = 'feed-empty';
+    var icEl = document.createElement('div');
+    icEl.className = 'feed-empty-ic';
+    icEl.textContent = icon;
+    emptyDiv.appendChild(icEl);
+    var titleEl = document.createElement('div');
+    titleEl.className = 'feed-empty-t';
+    titleEl.textContent = title;
+    emptyDiv.appendChild(titleEl);
+    var descEl = document.createElement('div');
+    descEl.className = 'feed-empty-d';
+    descEl.textContent = description;
+    emptyDiv.appendChild(descEl);
+    return emptyDiv;
+  }
 
-    /** @type {number} Высота одной строки в пикселях */
-    var ITEM_HEIGHT = 100;
+  /**
+   * Заполняет DOM-элемент пула данными конкретной заметки.
+   * @param {HTMLDivElement} element - Целевой DOM-узел.
+   * @param {Note} note - Данные заметки.
+   * @returns {void}
+   */
+  function fillBaseItem(element, note) {
+    while (element.firstChild) element.removeChild(element.firstChild);
+    element.className = 'bi' + (note.shared ? ' shared' : '');
+    element.setAttribute('data-id', note.id);
 
-    /** @type {number} Вертикальный отступ между строками */
-    var ITEM_GAP = 8;
+    var truncateLength = Config.get('truncateTextLength', 120);
+    var textEl = document.createElement('div');
+    textEl.className = 'bi-t' + (note.text && note.text.length > truncateLength ? ' truncated' : '');
+    textEl.textContent = note.text || '';
+    element.appendChild(textEl);
 
-    /** @type {number} Полный шаг строки (высота + отступ) */
-    var ROW_SIZE = ITEM_HEIGHT + ITEM_GAP;
-
-    /** @type {number} Количество DOM-элементов в пуле виртуального скролла */
-    var POOL_SIZE = 15;
-
-    /** @type {function(KeyboardEvent): void | null} Обработчик Escape для NoteView */
-    var noteViewEscHandler = null;
-
-    /** @type {number | null} ID requestAnimationFrame для скролла списка */
-    var scrollRAF = null;
-
-    /** @type {Note[]} Отфильтрованный и отсортированный массив заметок */
-    var filteredNotes = [];
-
-    /** @type {PoolItem[]} Массив объектов пула DOM-элементов */
-    var poolItems = [];
-
-    /** @type {HTMLElement | null} Контейнер списка базы */
-    var listContainer = null;
-
-    /** @type {function(): void | null} */
-    var i18nHandler = null;
-
-    /** @type {function(): void | null} */
-    var listsChangedHandler = null;
-
-    /** @type {function(Object): void | null} */
-    var viewChangedHandler = null;
-
-    /** @type {function(Object): void | null} */
-    var editNoteHandler = null;
-
-    /**
-     * Создаёт DOM-элемент карточки статистики.
-     * @param {number | string} value - Значение.
-     * @param {string} label - Подпись.
-     * @returns {HTMLDivElement}
-     */
-    function buildStatCard(value, label) {
-      var card = document.createElement('div');
-      card.className = 'stat';
-      
-      var valueEl = document.createElement('div');
-      valueEl.className = 'stat-v';
-      valueEl.textContent = String(value);
-      card.appendChild(valueEl);
-      
-      var labelEl = document.createElement('div');
-      labelEl.className = 'stat-l';
-      labelEl.textContent = label;
-      card.appendChild(labelEl);
-      
-      return card;
+    var foot = document.createElement('div');
+    foot.className = 'bi-f';
+    var meta = document.createElement('div');
+    meta.className = 'bi-meta';
+    var tagEl = document.createElement('span');
+    tagEl.className = 'bi-tag';
+    tagEl.textContent = note.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
+    meta.appendChild(tagEl);
+    var dateEl = document.createElement('span');
+    dateEl.className = 'bi-date';
+    var lang = I18n.getLang();
+    if (note.updatedAt && note.updatedAt > note.createdAt) {
+      dateEl.textContent = (lang === 'ru' ? 'Ред. ' : 'Edit. ') + 
+        Utils.fmtTime(note.updatedAt, lang) + ' ' + Utils.fmtDate(note.updatedAt, lang);
+    } else {
+      dateEl.textContent = Utils.fmtTime(note.createdAt, lang) + ' ' + Utils.fmtDate(note.createdAt, lang);
     }
+    meta.appendChild(dateEl);
+    foot.appendChild(meta);
+    element.appendChild(foot);
+  }
 
-    /**
-     * Создаёт DOM-структуру пустого состояния (empty state).
-     * @param {string} icon - Символ иконки.
-     * @param {string} title - Заголовок.
-     * @param {string} description - Описание.
-     * @returns {HTMLDivElement}
-     */
-    function buildEmptyState(icon, title, description) {
-      var emptyDiv = document.createElement('div');
-      emptyDiv.className = 'feed-empty';
-      
-      var icEl = document.createElement('div');
-      icEl.className = 'feed-empty-ic';
-      icEl.textContent = icon;
-      emptyDiv.appendChild(icEl);
-      
-      var titleEl = document.createElement('div');
-      titleEl.className = 'feed-empty-t';
-      titleEl.textContent = title;
-      emptyDiv.appendChild(titleEl);
-      
-      var descEl = document.createElement('div');
-      descEl.className = 'feed-empty-d';
-      descEl.textContent = description;
-      emptyDiv.appendChild(descEl);
-      
-      return emptyDiv;
-    }
+  /**
+   * Вычисляет видимую область и обновляет содержимое/позицию элементов пула.
+   * @returns {void}
+   */
+  function updateVisibleItems() {
+    if (!listContainer || poolItems.length === 0) return;
+    var scrollTop = listContainer.scrollTop;
+    var startIdx = Math.floor(scrollTop / ROW_SIZE);
+    var maxStart = Math.max(0, filteredNotes.length - POOL_SIZE);
+    if (startIdx > maxStart) startIdx = maxStart;
 
-    /**
-     * Заполняет DOM-элемент пула данными конкретной заметки.
-     * @param {HTMLDivElement} element - Целевой DOM-узел.
-     * @param {Note} note - Данные заметки.
-     * @returns {void}
-     */
-    function fillBaseItem(element, note) {
-      while (element.firstChild) element.removeChild(element.firstChild);
-      element.className = 'bi' + (note.shared ? ' shared' : '');
-      element.setAttribute('data-id', note.id);
+    for (var i = 0; i < poolItems.length; i++) {
+      var poolItem = poolItems[i];
+      var dataIdx = startIdx + i;
 
-      var truncateLength = Config.get('truncateTextLength', 120);
-      var textEl = document.createElement('div');
-      textEl.className = 'bi-t' + (note.text && note.text.length > truncateLength ? ' truncated' : '');
-      textEl.textContent = note.text || '';
-      element.appendChild(textEl);
-
-      var foot = document.createElement('div');
-      foot.className = 'bi-f';
-      
-      var meta = document.createElement('div');
-      meta.className = 'bi-meta';
-      
-      var tagEl = document.createElement('span');
-      tagEl.className = 'bi-tag';
-      tagEl.textContent = note.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
-      meta.appendChild(tagEl);
-      
-      var dateEl = document.createElement('span');
-      dateEl.className = 'bi-date';
-      var lang = I18n.getLang();
-      if (note.updatedAt && note.updatedAt > note.createdAt) {
-        dateEl.textContent = (lang === 'ru' ? 'Ред. ' : 'Edit. ') +
-          Utils.fmtTime(note.updatedAt, lang) + ' ' + Utils.fmtDate(note.updatedAt, lang);
+      if (dataIdx >= 0 && dataIdx < filteredNotes.length) {
+        if (poolItem.dataIndex !== dataIdx) {
+          fillBaseItem(poolItem.element, filteredNotes[dataIdx]);
+          poolItem.dataIndex = dataIdx;
+        }
+        poolItem.element.style.transform = 'translateY(' + (dataIdx * ROW_SIZE) + 'px)';
       } else {
-        dateEl.textContent = Utils.fmtTime(note.createdAt, lang) + ' ' + Utils.fmtDate(note.createdAt, lang);
-      }
-      meta.appendChild(dateEl);
-      
-      foot.appendChild(meta);
-      element.appendChild(foot);
-    }
-
-    /**
-     * Вычисляет видимую область и обновляет содержимое/позицию элементов пула.
-     * @returns {void}
-     */
-    function updateVisibleItems() {
-      if (!listContainer || poolItems.length === 0) return;
-      
-      var scrollTop = listContainer.scrollTop;
-      var startIdx = Math.floor(scrollTop / ROW_SIZE);
-      var maxStart = Math.max(0, filteredNotes.length - POOL_SIZE);
-      if (startIdx > maxStart) startIdx = maxStart;
-
-      for (var i = 0; i < poolItems.length; i++) {
-        var poolItem = poolItems[i];
-        var dataIdx = startIdx + i;
-
-        if (dataIdx >= 0 && dataIdx < filteredNotes.length) {
-          if (poolItem.dataIndex !== dataIdx) {
-            fillBaseItem(poolItem.element, filteredNotes[dataIdx]);
-            poolItem.dataIndex = dataIdx;
-          }
-          poolItem.element.style.transform = 'translateY(' + (dataIdx * ROW_SIZE) + 'px)';
-        } else {
-          if (poolItem.dataIndex !== -1) {
-            while (poolItem.element.firstChild) poolItem.element.removeChild(poolItem.element.firstChild);
-            poolItem.element.className = 'bi';
-            poolItem.element.removeAttribute('data-id');
-            poolItem.dataIndex = -1;
-          }
-          poolItem.element.style.transform = 'translateY(-9999px)';
+        if (poolItem.dataIndex !== -1) {
+          while (poolItem.element.firstChild) poolItem.element.removeChild(poolItem.element.firstChild);
+          poolItem.element.className = 'bi';
+          poolItem.element.removeAttribute('data-id');
+          poolItem.dataIndex = -1;
         }
+        poolItem.element.style.transform = 'translateY(-9999px)';
       }
     }
+  }
 
-    /**
-     * Обработчик скролла списка (тролтлится через requestAnimationFrame).
-     * @returns {void}
-     */
-    function onListScroll() {
-      if (scrollRAF) return;
-      scrollRAF = requestAnimationFrame(function() {
-        updateVisibleItems();
-        scrollRAF = null;
-      });
-    }
+  /**
+   * Обработчик скролла списка (троллится через requestAnimationFrame).
+   * @returns {void}
+   */
+  function onListScroll() {
+    if (scrollRAF) return;
+    scrollRAF = requestAnimationFrame(function() {
+      updateVisibleItems();
+      scrollRAF = null;
+    });
+  }
 
-    /**
-     * Полностью перерисовывает вкладку "База": статистику, фильтры и виртуальный список.
-     * @returns {void}
-     */
-    function renderBase() {
-      listContainer = document.getElementById('base-list');
-      if (!listContainer) return;
+  /**
+   * Полностью перерисовывает вкладку "База": статистику, фильтры и виртуальный список.
+   * @returns {void}
+   */
+  function renderBase() {
+    listContainer = document.getElementById('base-list');
+    if (!listContainer) return;
 
-      listContainer.removeEventListener('scroll', onListScroll);
-      if (scrollRAF) {
-        cancelAnimationFrame(scrollRAF);
-        scrollRAF = null;
+    listContainer.removeEventListener('scroll', onListScroll);
+    if (scrollRAF) { cancelAnimationFrame(scrollRAF); scrollRAF = null; }
+
+    var queryInput = document.getElementById('base-q');
+    var sortSelect = document.getElementById('base-sort');
+    var queryValue = queryInput ? queryInput.value.trim().toLowerCase() : '';
+    var sortValue = sortSelect ? sortSelect.value : 'new';
+
+    SearchService.getAllNotesCached().then(function(allNotes) {
+      var statsEl = document.getElementById('base-stats');
+      if (statsEl) {
+        while (statsEl.firstChild) statsEl.removeChild(statsEl.firstChild);
+        var sharedCount = 0;
+        for (var i = 0; i < allNotes.length; i++) {
+          if (allNotes[i] && allNotes[i].shared) sharedCount++;
+        }
+        statsEl.appendChild(buildStatCard(allNotes.length, I18n.t('base.stat.total')));
+        statsEl.appendChild(buildStatCard(sharedCount, I18n.t('base.stat.open')));
+        statsEl.appendChild(buildStatCard(allNotes.length - sharedCount, I18n.t('base.stat.priv')));
       }
 
-      var queryInput = document.getElementById('base-q');
-      var sortSelect = document.getElementById('base-sort');
-      var queryValue = queryInput ? queryInput.value.trim().toLowerCase() : '';
-      var sortValue = sortSelect ? sortSelect.value : 'new';
+      filteredNotes = allNotes.slice();
+      if (queryValue) {
+        filteredNotes = filteredNotes.filter(function(n) {
+          return n.text && n.text.toLowerCase().indexOf(queryValue) >= 0;
+        });
+      }
+      if (sortValue === 'old') {
+        filteredNotes.sort(function(a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
+      } else if (sortValue === 'az') {
+        filteredNotes.sort(function(a, b) {
+          return (a.text || '').localeCompare(b.text || '', I18n.getLang() === 'en' ? 'en' : 'ru');
+        });
+      } else {
+        filteredNotes.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+      }
 
-      SearchService.invalidateNotesCache();
+      while (listContainer.firstChild) listContainer.removeChild(listContainer.firstChild);
 
-      SearchService.getAllNotesCached().then(function(allNotes) {
-        var statsEl = document.getElementById('base-stats');
-        if (statsEl) {
-          while (statsEl.firstChild) statsEl.removeChild(statsEl.firstChild);
-          var sharedCount = 0;
-          for (var i = 0; i < allNotes.length; i++) {
-            if (allNotes[i] && allNotes[i].shared) sharedCount++;
-          }
-          statsEl.appendChild(buildStatCard(allNotes.length, I18n.t('base.stat.total')));
-          statsEl.appendChild(buildStatCard(sharedCount, I18n.t('base.stat.open')));
-          statsEl.appendChild(buildStatCard(allNotes.length - sharedCount, I18n.t('base.stat.priv')));
-        }
-
-        filteredNotes = allNotes.slice();
-        if (queryValue) {
-          filteredNotes = filteredNotes.filter(function(n) {
-            return n.text && n.text.toLowerCase().indexOf(queryValue) >= 0;
-          });
-        }
-        if (sortValue === 'old') {
-          filteredNotes.sort(function(a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
-        } else if (sortValue === 'az') {
-          filteredNotes.sort(function(a, b) {
-            return (a.text || '').localeCompare(b.text || '', I18n.getLang() === 'en' ? 'en' : 'ru');
-          });
-        } else {
-          filteredNotes.sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
-        }
-
-        while (listContainer.firstChild) listContainer.removeChild(listContainer.firstChild);
-
-        if (filteredNotes.length === 0) {
-          var emptyTitle = I18n.t('empty.base.t');
-          var emptyDesc = allNotes.length === 0 ? I18n.t('empty.base.d') : I18n.t('empty.base.empty');
-          listContainer.appendChild(buildEmptyState('▤', emptyTitle, emptyDesc));
-          poolItems = [];
-          return;
-        }
-
-        var spacer = document.createElement('div');
-        spacer.className = 'base-spacer';
-        spacer.style.height = (filteredNotes.length * ROW_SIZE) + 'px';
-        listContainer.appendChild(spacer);
-
-        var itemsContainer = document.createElement('div');
-        itemsContainer.className = 'base-items';
-        listContainer.appendChild(itemsContainer);
-        itemsContainer.style.height = (filteredNotes.length * ROW_SIZE) + 'px';
-
+      if (filteredNotes.length === 0) {
+        var emptyTitle = I18n.t('empty.base.t');
+        var emptyDesc = allNotes.length === 0 ? I18n.t('empty.base.d') : I18n.t('empty.base.empty');
+        listContainer.appendChild(buildEmptyState('▤', emptyTitle, emptyDesc));
         poolItems = [];
-        for (var i = 0; i < POOL_SIZE; i++) {
-          var item = document.createElement('div');
-          item.className = 'bi';
-          itemsContainer.appendChild(item);
-          poolItems.push({ element: item, dataIndex: -1 });
-        }
-
-        listContainer.addEventListener('scroll', onListScroll, { passive: true });
-        listContainer.scrollTop = 0;
-        updateVisibleItems();
-      }).catch(function(err) {
-        Toast.show('err', String(err && err.message || err) || 'Base load failed');
-      });
-    }
-
-    /**
-     * Копирует текст в буфер обмена.
-     * @param {string} text - Текст.
-     * @returns {void}
-     */
-    function copyToClipboard(text) {
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(text).then(
-            function() { Toast.show('ok', I18n.t('toast.copied')); },
-            function() { Toast.show('err', I18n.t('toast.copy.fail')); }
-          );
-        } else {
-          var ta = document.createElement('textarea');
-          ta.value = text;
-          ta.style.position = 'fixed';
-          ta.style.top = '-9999px';
-          document.body.appendChild(ta);
-          ta.select();
-          try {
-            document.execCommand('copy');
-            Toast.show('ok', I18n.t('toast.copied'));
-          } catch (err) {
-            Toast.show('err', I18n.t('toast.copy.fail'));
-          }
-          document.body.removeChild(ta);
-        }
-      } catch (err) {
-        Toast.show('err', I18n.t('toast.copy.fail'));
+        return;
       }
-    }
 
-    /**
-     * Открывает полноэкранное модальное окно просмотра/редактирования заметки (NoteView).
-     * @param {string} id - ID заметки.
-     * @returns {void}
-     */
-    function openNoteView(id) {
-      DB.get(id).then(function(record) {
-        if (!record) return;
-        var isEditing = false;
-        var nvOverlay = null;
+      var spacer = document.createElement('div');
+      spacer.className = 'base-spacer';
+      spacer.style.height = (filteredNotes.length * ROW_SIZE) + 'px';
+      listContainer.appendChild(spacer);
 
-        if (noteViewEscHandler) {
-          document.removeEventListener('keydown', noteViewEscHandler);
-          noteViewEscHandler = null;
-        }
+      var itemsContainer = document.createElement('div');
+      itemsContainer.className = 'base-items';
+      listContainer.appendChild(itemsContainer);
+      itemsContainer.style.height = (filteredNotes.length * ROW_SIZE) + 'px';
 
-        /**
-         * Рендерит или обновляет содержимое NoteView в зависимости от флага isEditing.
-         * @returns {void}
-         */
-        function renderNoteView() {
-          if (!nvOverlay) {
-            nvOverlay = document.createElement('div');
-            nvOverlay.className = 'nv on';
-            document.body.appendChild(nvOverlay);
-          }
-          while (nvOverlay.firstChild) nvOverlay.removeChild(nvOverlay.firstChild);
-
-          var dateStr = Utils.fmtDate(record.createdAt, I18n.getLang());
-          var tagLabel = record.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
-
-          if (isEditing) {
-            var body = document.createElement('div');
-            body.className = 'nv-b';
-            
-            var ta = document.createElement('textarea');
-            ta.className = 'nv-ta';
-            ta.id = 'nv-ta';
-            ta.value = record.text || '';
-            body.appendChild(ta);
-            
-            var bottomFooter = document.createElement('div');
-            bottomFooter.className = 'nv-f-bottom';
-            
-            var cancelBtn = document.createElement('button');
-            cancelBtn.className = 'nv-act';
-            cancelBtn.id = 'nv-cancel';
-            cancelBtn.textContent = I18n.t('btn.cancel');
-            cancelBtn.onclick = function() { isEditing = false; renderNoteView(); };
-            
-            var saveBtn = document.createElement('button');
-            saveBtn.className = 'nv-act primary';
-            saveBtn.id = 'nv-save';
-            saveBtn.textContent = I18n.t('btn.save');
-            saveBtn.onclick = function() {
-              var newText = ta.value.trim();
-              if (!newText) { Toast.show('err', I18n.t('toast.empty')); return; }
-              record.text = newText;
-              record.updatedAt = Date.now();
-              AI.embed(newText).then(function(v) {
-                record.vector = v;
-                return DB.put(record);
-              }).then(function() {
-                Toast.show('ok', I18n.t('toast.edit.saved'));
-                isEditing = false;
-                renderNoteView();
-                renderBase();
-                try { Bus.emit('editor:search-request', { force: true }); } catch (_) { /* ignore */ }
-                try { Bus.emit('state:lists-changed'); } catch (_) { /* ignore */ }
-              }).catch(function(err) {
-                Toast.show('err', String(err && err.message || err) || 'Edit failed');
-              });
-            };
-            
-            bottomFooter.appendChild(cancelBtn);
-            bottomFooter.appendChild(saveBtn);
-            nvOverlay.appendChild(body);
-            nvOverlay.appendChild(bottomFooter);
-          } else {
-            var topFooter = document.createElement('div');
-            topFooter.className = 'nv-f';
-            
-            var delBtn = document.createElement('button');
-            delBtn.className = 'nv-act danger';
-            delBtn.id = 'nv-del';
-            delBtn.setAttribute('aria-label', I18n.t('btn.del'));
-            delBtn.textContent = I18n.t('btn.del');
-            delBtn.onclick = function() {
-              if (!confirm(I18n.t('nv.delete.confirm'))) return;
-              DB.del(id).then(function() {
-                Toast.show('ok', I18n.t('toast.deleted'));
-                closeNoteView();
-                renderBase();
-                try { Bus.emit('editor:search-request', { force: true }); } catch (_) { /* ignore */ }
-                try { Bus.emit('state:lists-changed'); } catch (_) { /* ignore */ }
-              }).catch(function(err) {
-                Toast.show('err', String(err && err.message || err) || 'Delete failed');
-              });
-            };
-            
-            var copyBtn = document.createElement('button');
-            copyBtn.className = 'nv-act';
-            copyBtn.id = 'nv-copy';
-            copyBtn.setAttribute('aria-label', I18n.t('btn.copy'));
-            copyBtn.textContent = I18n.t('btn.copy');
-            copyBtn.onclick = function() { copyToClipboard(record.text); };
-            
-            var toggleBtn = document.createElement('button');
-            toggleBtn.className = 'nv-act';
-            toggleBtn.id = 'nv-toggle';
-            toggleBtn.setAttribute('aria-label', record.shared ? I18n.t('btn.toggle.priv') : I18n.t('btn.toggle.pub'));
-            toggleBtn.textContent = record.shared ? I18n.t('btn.toggle.priv') : I18n.t('btn.toggle.pub');
-            toggleBtn.onclick = function() {
-              record.shared = !record.shared;
-              DB.put(record).then(function() {
-                Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
-                renderNoteView();
-                renderBase();
-                try { Bus.emit('editor:search-request', { force: true }); } catch (_) { /* ignore */ }
-                try { Bus.emit('state:lists-changed'); } catch (_) { /* ignore */ }
-              }).catch(function(err) {
-                Toast.show('err', String(err && err.message || err) || 'Toggle failed');
-              });
-            };
-            
-            topFooter.appendChild(delBtn);
-            topFooter.appendChild(copyBtn);
-            topFooter.appendChild(toggleBtn);
-
-            var body = document.createElement('div');
-            body.className = 'nv-b';
-            
-            var infoRow = document.createElement('div');
-            infoRow.className = 'info-row';
-            
-            var tagEl = document.createElement('span');
-            tagEl.className = 'bi-tag';
-            tagEl.textContent = tagLabel;
-            infoRow.appendChild(tagEl);
-            
-            var dateEl = document.createElement('span');
-            dateEl.className = 'note-date';
-            dateEl.textContent = dateStr;
-            infoRow.appendChild(dateEl);
-            
-            body.appendChild(infoRow);
-            
-            var textDiv = document.createElement('div');
-            textDiv.className = 'nv-text';
-            textDiv.textContent = record.text || '';
-            body.appendChild(textDiv);
-
-            var bottomFooter = document.createElement('div');
-            bottomFooter.className = 'nv-f-bottom';
-            
-            var cancelBtn = document.createElement('button');
-            cancelBtn.className = 'nv-act';
-            cancelBtn.id = 'nv-cancel';
-            cancelBtn.setAttribute('aria-label', I18n.t('btn.cancel'));
-            cancelBtn.textContent = I18n.t('btn.cancel');
-            cancelBtn.onclick = function() { closeNoteView(); };
-            
-            var editBtn = document.createElement('button');
-            editBtn.className = 'nv-act primary';
-            editBtn.id = 'nv-edit';
-            editBtn.setAttribute('aria-label', I18n.t('btn.edit'));
-            editBtn.textContent = I18n.t('btn.edit');
-            editBtn.onclick = function() { isEditing = true; renderNoteView(); };
-            
-            bottomFooter.appendChild(cancelBtn);
-            bottomFooter.appendChild(editBtn);
-
-            nvOverlay.appendChild(topFooter);
-            nvOverlay.appendChild(body);
-            nvOverlay.appendChild(bottomFooter);
-          }
-        }
-
-        /**
-         * Закрывает NoteView и удаляет его из DOM с задержкой для анимации.
-         * @returns {void}
-         */
-        function closeNoteView() {
-          if (noteViewEscHandler) {
-            document.removeEventListener('keydown', noteViewEscHandler);
-            noteViewEscHandler = null;
-          }
-          if (nvOverlay) {
-            nvOverlay.classList.remove('on');
-            setTimeout(function() {
-              if (nvOverlay && nvOverlay.parentNode) {
-                try { nvOverlay.parentNode.removeChild(nvOverlay); } catch (_) { /* ignore */ }
-              }
-              nvOverlay = null;
-            }, Config.get('noteViewAnimationDelay', 200));
-          }
-        }
-
-        noteViewEscHandler = function(e) {
-          if (e.key === 'Escape') closeNoteView();
-        };
-        document.addEventListener('keydown', noteViewEscHandler);
-        renderNoteView();
-      }).catch(function(err) {
-        Toast.show('err', String(err && err.message || err) || 'Load note failed');
-      });
-    }
-
-    /**
-     * Экспортирует все заметки в JSON-файл и инициирует скачивание.
-     * @returns {void}
-     */
-    function exportData() {
-      DB.all().then(function(notes) {
-        if (!notes || notes.length === 0) { Toast.show('err', '0'); return; }
-        var capsule = { app: 'noomium', format: 'v1', version: 1, exportedAt: Date.now(), notes: notes };
-        var blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
-        var url = URL.createObjectURL(blob);
-        var anchor = document.createElement('a');
-        anchor.href = url;
-        anchor.download = 'noomium-' + new Date().toISOString().slice(0, 10) + '.json';
-        document.body.appendChild(anchor);
-        anchor.click();
-        URL.revokeObjectURL(url);
-        anchor.remove();
-        Toast.show('ok', '✓ ' + notes.length);
-      }).catch(function(err) {
-        Toast.show('err', String(err && err.message || err) || 'Export failed');
-      });
-    }
-
-    /**
-     * Открывает диалог выбора файла, парсит JSON и импортирует заметки в базу.
-     * @returns {void}
-     */
-    function importData() {
-      var input = document.createElement('input');
-      input.type = 'file';
-      input.accept = 'application/json,.json';
-      input.onchange = function() {
-        var file = input.files && input.files[0];
-        if (!file) return;
-        var reader = new FileReader();
-        reader.onload = function() {
-          try {
-            var data = JSON.parse(String(reader.result || '{}'));
-            var notes = Array.isArray(data) ? data : (data.notes || []);
-            if (!Array.isArray(notes)) throw new Error('bad format');
-            var clean = [];
-            for (var i = 0; i < notes.length; i++) {
-              var note = notes[i];
-              if (!note || typeof note.text !== 'string' || !note.text.trim()) continue;
-              clean.push({
-                id: note.id || ('i' + Math.random().toString(36).slice(2, 10)),
-                text: note.text.trim(),
-                vector: Array.isArray(note.vector) ? note.vector : null,
-                shared: !!note.shared,
-                createdAt: typeof note.createdAt === 'number' ? note.createdAt : Date.now()
-              });
-            }
-            DB.bulkPut(clean).then(function() {
-              Toast.show('ok', '✓ ' + clean.length);
-              if (StateManager.getState().view === 'base') renderBase();
-              try { Bus.emit('editor:search-request', { force: true }); } catch (_) { /* ignore */ }
-              try { Bus.emit('state:lists-changed'); } catch (_) { /* ignore */ }
-            }).catch(function(err) {
-              Toast.show('err', String(err && err.message || err) || 'Import failed');
-            });
-          } catch (err) {
-            Toast.show('err', String(err && err.message || err) || 'Import parse failed');
-          }
-        };
-        reader.readAsText(file);
-      };
-      input.click();
-    }
-
-    /**
-     * Привязывает события к элементам вкладки "База" (клики по строкам, поиск, сортировка).
-     * @returns {void}
-     */
-    function bindDOMEvents() {
-      var baseContainer = document.getElementById('ws-base');
-      if (baseContainer) {
-        baseContainer.addEventListener('click', function(e) {
-          var bi = e.target.closest('.bi');
-          if (bi) {
-            var id = bi.getAttribute('data-id');
-            if (id) openNoteView(id);
-          }
-        });
+      poolItems = [];
+      for (var i = 0; i < POOL_SIZE; i++) {
+        var item = document.createElement('div');
+        item.className = 'bi';
+        itemsContainer.appendChild(item);
+        poolItems.push({ element: item, dataIndex: -1 });
       }
-      var baseSearchInput = document.getElementById('base-q');
-      if (baseSearchInput) {
-        baseSearchInput.addEventListener('input', function() {
-          renderBase();
-        });
+
+      listContainer.addEventListener('scroll', onListScroll, { passive: true });
+      listContainer.scrollTop = 0;
+      updateVisibleItems();
+    }).catch(function(err) {
+      Toast.show('err', String(err && err.message || err) || 'Base load failed');
+    });
+  }
+
+  /**
+   * Копирует текст в буфер обмена с фоллбэком на execCommand.
+   * @param {string} text - Текст для копирования.
+   * @returns {void}
+   */
+  function copyToClipboard(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(
+          function() { Toast.show('ok', I18n.t('toast.copied')); },
+          function() { Toast.show('err', I18n.t('toast.copy.fail')); }
+        );
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.top = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); Toast.show('ok', I18n.t('toast.copied')); }
+        catch (err) { Toast.show('err', I18n.t('toast.copy.fail')); }
+        document.body.removeChild(ta);
       }
-      var baseSortSelect = document.getElementById('base-sort');
-      if (baseSortSelect) baseSortSelect.onchange = renderBase;
+    } catch (err) {
+      Toast.show('err', I18n.t('toast.copy.fail'));
     }
+  }
 
-    /**
-     * Инициализирует компонент: привязывает события, подписывается на шину.
-     * @returns {void}
-     */
-    function init() {
-      bindDOMEvents();
+  /**
+   * Обрабатывает удаление заметки из NoteView.
+   * @param {string} id - ID заметки.
+   * @param {HTMLDivElement} nvOverlay - Оверлей NoteView.
+   * @returns {void}
+   */
+  function handleDelete(id, nvOverlay) {
+    if (!confirm(I18n.t('nv.delete.confirm'))) return;
+    DB.del(id).then(function() {
+      Toast.show('ok', I18n.t('toast.deleted'));
+      closeNoteView(nvOverlay);
+      renderBase();
+      try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
+      try { Bus.emit('state:lists-changed'); } catch (_) {}
+    }).catch(function(err) {
+      Toast.show('err', String(err && err.message || err) || 'Delete failed');
+    });
+  }
 
-      i18nHandler = function() {
-        var baseSearch = document.getElementById('base-q');
-        if (baseSearch) baseSearch.placeholder = I18n.t('base.search');
-        var sort = document.getElementById('base-sort');
-        if (sort) {
-          var opts = sort.querySelectorAll('option');
-          if (opts[0]) opts[0].textContent = I18n.t('base.sort.new');
-          if (opts[1]) opts[1].textContent = I18n.t('base.sort.old');
-          if (opts[2]) opts[2].textContent = I18n.t('base.sort.az');
+  /**
+   * Обрабатывает переключение видимости заметки (личное/открытое).
+   * @param {string} id - ID заметки.
+   * @param {Note} record - Объект заметки.
+   * @param {HTMLButtonElement} toggleBtn - Кнопка переключения.
+   * @returns {void}
+   */
+  function handleToggle(id, record, toggleBtn) {
+    record.shared = !record.shared;
+    DB.put(record).then(function() {
+      Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
+      toggleBtn.setAttribute('aria-label', record.shared ? I18n.t('btn.toggle.priv') : I18n.t('btn.toggle.pub'));
+      toggleBtn.textContent = record.shared ? I18n.t('btn.toggle.priv') : I18n.t('btn.toggle.pub');
+      renderBase();
+      try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
+      try { Bus.emit('state:lists-changed'); } catch (_) {}
+    }).catch(function(err) {
+      Toast.show('err', String(err && err.message || err) || 'Toggle failed');
+    });
+  }
+
+  /**
+   * Обрабатывает сохранение изменений заметки из NoteView.
+   * @param {string} id - ID заметки.
+   * @param {Note} record - Объект заметки.
+   * @param {HTMLTextAreaElement} ta - Текстовое поле с новым содержимым.
+   * @param {HTMLDivElement} nvOverlay - Оверлей NoteView.
+   * @returns {void}
+   */
+  function handleSave(id, record, ta, nvOverlay) {
+    var newText = ta.value.trim();
+    if (!newText) {
+      Toast.show('err', I18n.t('toast.empty'));
+      return;
+    }
+    record.text = newText;
+    record.updatedAt = Date.now();
+    AI.embed(newText).then(function(v) {
+      record.vector = v;
+      return DB.put(record);
+    }).then(function() {
+      Toast.show('ok', I18n.t('toast.edit.saved'));
+      closeNoteView(nvOverlay);
+      renderBase();
+      try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
+      try { Bus.emit('state:lists-changed'); } catch (_) {}
+    }).catch(function(err) {
+      Toast.show('err', String(err && err.message || err) || 'Edit failed');
+    });
+  }
+
+  /**
+   * Закрывает NoteView и удаляет его из DOM с задержкой для анимации.
+   * @param {HTMLDivElement} nvOverlay - Оверлей NoteView.
+   * @returns {void}
+   */
+  function closeNoteView(nvOverlay) {
+    if (noteViewEscHandler) {
+      document.removeEventListener('keydown', noteViewEscHandler);
+      noteViewEscHandler = null;
+    }
+    if (nvOverlay) {
+      nvOverlay.classList.remove('on');
+      setTimeout(function() {
+        if (nvOverlay && nvOverlay.parentNode) {
+          try { nvOverlay.parentNode.removeChild(nvOverlay); } catch (_) {}
         }
-        if (StateManager.getState().view === 'base') renderBase();
-      };
-      Bus.on('i18n:change', i18nHandler);
-
-      listsChangedHandler = function() {
-        if (StateManager.getState().view === 'base') renderBase();
-      };
-      Bus.on('state:lists-changed', listsChangedHandler);
-
-      viewChangedHandler = function(payload) {
-        if (payload && payload.view === 'base') renderBase();
-      };
-      Bus.on('view:changed', viewChangedHandler);
-
-      editNoteHandler = function(payload) {
-        if (payload && payload.id) openNoteView(payload.id);
-      };
-      Bus.on('editor:edit-note', editNoteHandler);
-
-      if (StateManager.getState().view === 'base') renderBase();
+      }, Config.get('noteViewAnimationDelay', 200));
     }
+  }
 
-    /**
-     * Уничтожает компонент: очищает таймеры, снимает обработчики, отписывается от шины.
-     * @returns {void}
-     */
-    function destroy() {
+  /**
+   * Открывает полноэкранное модальное окно редактирования заметки (NoteView).
+   * NoteView всегда открывается в режиме редактирования: пользователь сразу видит
+   * текстовое поле с содержимым заметки и может редактировать его.
+   * 
+   * Структура NoteView:
+   * - Верхний бар: тег (личное/открыто), дата, кнопки действий (Удалить, Копировать, Переключить)
+   * - Центральная область: текстовое поле для редактирования
+   * - Нижний бар: кнопки "Отмена" и "Сохранить"
+   * 
+   * @param {string} id - ID заметки для открытия.
+   * @returns {void}
+   */
+  function openNoteView(id) {
+    DB.get(id).then(function(record) {
+      if (!record) return;
+
       if (noteViewEscHandler) {
         document.removeEventListener('keydown', noteViewEscHandler);
         noteViewEscHandler = null;
       }
-      if (scrollRAF) {
-        cancelAnimationFrame(scrollRAF);
-        scrollRAF = null;
-      }
-      if (listContainer) {
-        listContainer.removeEventListener('scroll', onListScroll);
-        listContainer = null;
-      }
-      poolItems = [];
-      filteredNotes = [];
-      
-      if (i18nHandler) {
-        try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
-        i18nHandler = null;
-      }
-      if (listsChangedHandler) {
-        try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) { /* ignore */ }
-        listsChangedHandler = null;
-      }
-      if (viewChangedHandler) {
-        try { Bus.off('view:changed', viewChangedHandler); } catch (_) { /* ignore */ }
-        viewChangedHandler = null;
-      }
-      if (editNoteHandler) {
-        try { Bus.off('editor:edit-note', editNoteHandler); } catch (_) { /* ignore */ }
-        editNoteHandler = null;
-      }
-    }
 
-    return {
-      init: init,
-      destroy: destroy,
-      renderBase: renderBase,
-      exportData: exportData,
-      importData: importData
+      var nvOverlay = document.createElement('div');
+      nvOverlay.className = 'nv on';
+      document.body.appendChild(nvOverlay);
+
+      // Верхний бар с кнопками действий
+      var topFooter = document.createElement('div');
+      topFooter.className = 'nv-f';
+
+      var delBtn = document.createElement('button');
+      delBtn.className = 'nv-act danger';
+      delBtn.id = 'nv-del';
+      delBtn.setAttribute('aria-label', I18n.t('btn.del'));
+      delBtn.textContent = I18n.t('btn.del');
+      delBtn.onclick = function() { handleDelete(id, nvOverlay); };
+      topFooter.appendChild(delBtn);
+
+      var copyBtn = document.createElement('button');
+      copyBtn.className = 'nv-act';
+      copyBtn.id = 'nv-copy';
+      copyBtn.setAttribute('aria-label', I18n.t('btn.copy'));
+      copyBtn.textContent = I18n.t('btn.copy');
+      copyBtn.onclick = function() { copyToClipboard(record.text); };
+      topFooter.appendChild(copyBtn);
+
+      var toggleBtn = document.createElement('button');
+      toggleBtn.className = 'nv-act';
+      toggleBtn.id = 'nv-toggle';
+      toggleBtn.setAttribute('aria-label', record.shared ? I18n.t('btn.toggle.priv') : I18n.t('btn.toggle.pub'));
+      toggleBtn.textContent = record.shared ? I18n.t('btn.toggle.priv') : I18n.t('btn.toggle.pub');
+      toggleBtn.onclick = function() { handleToggle(id, record, toggleBtn); };
+      topFooter.appendChild(toggleBtn);
+
+      nvOverlay.appendChild(topFooter);
+
+      // Центральная область с информацией и текстовым полем
+      var body = document.createElement('div');
+      body.className = 'nv-b';
+
+      var infoRow = document.createElement('div');
+      infoRow.className = 'info-row';
+
+      var tagEl = document.createElement('span');
+      tagEl.className = 'bi-tag';
+      tagEl.textContent = record.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
+      infoRow.appendChild(tagEl);
+
+      var dateEl = document.createElement('span');
+      dateEl.className = 'note-date';
+      var lang = I18n.getLang();
+      if (record.updatedAt && record.updatedAt > record.createdAt) {
+        dateEl.textContent = (lang === 'ru' ? 'Ред. ' : 'Edit. ') + 
+          Utils.fmtTime(record.updatedAt, lang) + ' ' + Utils.fmtDate(record.updatedAt, lang);
+      } else {
+        dateEl.textContent = Utils.fmtTime(record.createdAt, lang) + ' ' + Utils.fmtDate(record.createdAt, lang);
+      }
+      infoRow.appendChild(dateEl);
+
+      body.appendChild(infoRow);
+
+      var ta = document.createElement('textarea');
+      ta.className = 'nv-ta';
+      ta.id = 'nv-ta';
+      ta.value = record.text || '';
+      body.appendChild(ta);
+
+      nvOverlay.appendChild(body);
+
+      // Нижний бар с кнопками управления
+      var bottomFooter = document.createElement('div');
+      bottomFooter.className = 'nv-f-bottom';
+
+      var cancelBtn = document.createElement('button');
+      cancelBtn.className = 'nv-act';
+      cancelBtn.id = 'nv-cancel';
+      cancelBtn.setAttribute('aria-label', I18n.t('btn.cancel'));
+      cancelBtn.textContent = I18n.t('btn.cancel');
+      cancelBtn.onclick = function() { closeNoteView(nvOverlay); };
+      bottomFooter.appendChild(cancelBtn);
+
+      var saveBtn = document.createElement('button');
+      saveBtn.className = 'nv-act primary';
+      saveBtn.id = 'nv-save';
+      saveBtn.textContent = I18n.t('btn.save');
+      saveBtn.onclick = function() { handleSave(id, record, ta, nvOverlay); };
+      bottomFooter.appendChild(saveBtn);
+
+      nvOverlay.appendChild(bottomFooter);
+
+      // Обработчик Escape
+      noteViewEscHandler = function(e) {
+        if (e.key === 'Escape') closeNoteView(nvOverlay);
+      };
+      document.addEventListener('keydown', noteViewEscHandler);
+
+    }).catch(function(err) {
+      Toast.show('err', String(err && err.message || err) || 'Load note failed');
+    });
+  }
+
+  /**
+   * Экспортирует все заметки в JSON-файл и инициирует скачивание.
+   * @returns {void}
+   */
+  function exportData() {
+    DB.all().then(function(notes) {
+      if (!notes || notes.length === 0) { Toast.show('err', '0'); return; }
+      var capsule = { app: 'noomium', format: 'v1', version: 1, exportedAt: Date.now(), notes: notes };
+      var blob = new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = 'noomium-' + new Date().toISOString().slice(0, 10) + '.json';
+      document.body.appendChild(anchor);
+      anchor.click();
+      URL.revokeObjectURL(url);
+      anchor.remove();
+      Toast.show('ok', '✓ ' + notes.length);
+    }).catch(function(err) {
+      Toast.show('err', String(err && err.message || err) || 'Export failed');
+    });
+  }
+
+  /**
+   * Открывает диалог выбора файла, парсит JSON и импортирует заметки в базу.
+   * @returns {void}
+   */
+  function importData() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.onchange = function() {
+      var file = input.files && input.files[0];
+      if (!file) return;
+      var reader = new FileReader();
+      reader.onload = function() {
+        try {
+          var data = JSON.parse(String(reader.result || '{}'));
+          var notes = Array.isArray(data) ? data : (data.notes || []);
+          if (!Array.isArray(notes)) throw new Error('bad format');
+          var clean = [];
+          for (var i = 0; i < notes.length; i++) {
+            var note = notes[i];
+            if (!note || typeof note.text !== 'string' || !note.text.trim()) continue;
+            clean.push({
+              id: note.id || ('i' + Math.random().toString(36).slice(2, 10)),
+              text: note.text.trim(),
+              vector: Array.isArray(note.vector) ? note.vector : null,
+              shared: !!note.shared,
+              createdAt: typeof note.createdAt === 'number' ? note.createdAt : Date.now()
+            });
+          }
+          DB.bulkPut(clean).then(function() {
+            Toast.show('ok', '✓ ' + clean.length);
+            if (StateManager.getState().view === 'base') renderBase();
+            try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
+            try { Bus.emit('state:lists-changed'); } catch (_) {}
+          }).catch(function(err) {
+            Toast.show('err', String(err && err.message || err) || 'Import failed');
+          });
+        } catch (err) {
+          Toast.show('err', String(err && err.message || err) || 'Import parse failed');
+        }
+      };
+      reader.readAsText(file);
     };
-  }, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'AI', 'Toast', 'SearchService']);
+    input.click();
+  }
+
+  /**
+   * Привязывает события к элементам вкладки "База" (клики по строкам, поиск, сортировка).
+   * @returns {void}
+   */
+  function bindDOMEvents() {
+    var baseContainer = document.getElementById('ws-base');
+    if (baseContainer) {
+      baseContainer.addEventListener('click', function(e) {
+        var bi = e.target.closest('.bi');
+        if (bi) {
+          var id = bi.getAttribute('data-id');
+          if (id) openNoteView(id);
+        }
+      });
+    }
+    var baseSearchInput = document.getElementById('base-q');
+    if (baseSearchInput) {
+      baseSearchInput.addEventListener('input', function() {
+        renderBase();
+      });
+    }
+    var baseSortSelect = document.getElementById('base-sort');
+    if (baseSortSelect) baseSortSelect.onchange = renderBase;
+  }
+
+  /**
+   * Инициализирует компонент: привязывает события, подписывается на шину.
+   * @returns {void}
+   */
+  function init() {
+    bindDOMEvents();
+
+    i18nHandler = function() {
+      var baseSearch = document.getElementById('base-q');
+      if (baseSearch) baseSearch.placeholder = I18n.t('base.search');
+      var sort = document.getElementById('base-sort');
+      if (sort) {
+        var opts = sort.querySelectorAll('option');
+        if (opts[0]) opts[0].textContent = I18n.t('base.sort.new');
+        if (opts[1]) opts[1].textContent = I18n.t('base.sort.old');
+        if (opts[2]) opts[2].textContent = I18n.t('base.sort.az');
+      }
+      if (StateManager.getState().view === 'base') renderBase();
+    };
+    Bus.on('i18n:change', i18nHandler);
+
+    listsChangedHandler = function() {
+      if (StateManager.getState().view === 'base') renderBase();
+    };
+    Bus.on('state:lists-changed', listsChangedHandler);
+
+    viewChangedHandler = function(payload) {
+      if (payload && payload.view === 'base') renderBase();
+    };
+    Bus.on('view:changed', viewChangedHandler);
+
+    editNoteHandler = function(payload) {
+      if (payload && payload.id) openNoteView(payload.id);
+    };
+    Bus.on('editor:edit-note', editNoteHandler);
+
+    if (StateManager.getState().view === 'base') renderBase();
+  }
+
+  /**
+   * Уничтожает компонент: очищает таймеры, снимает обработчики, отписывается от шины.
+   * @returns {void}
+   */
+  function destroy() {
+    if (noteViewEscHandler) {
+      document.removeEventListener('keydown', noteViewEscHandler);
+      noteViewEscHandler = null;
+    }
+    if (scrollRAF) { cancelAnimationFrame(scrollRAF); scrollRAF = null; }
+    if (listContainer) {
+      listContainer.removeEventListener('scroll', onListScroll);
+      listContainer = null;
+    }
+    poolItems = [];
+    filteredNotes = [];
+    if (i18nHandler) { try { Bus.off('i18n:change', i18nHandler); } catch (_) {} i18nHandler = null; }
+    if (listsChangedHandler) { try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) {} listsChangedHandler = null; }
+    if (viewChangedHandler) { try { Bus.off('view:changed', viewChangedHandler); } catch (_) {} viewChangedHandler = null; }
+    if (editNoteHandler) { try { Bus.off('editor:edit-note', editNoteHandler); } catch (_) {} editNoteHandler = null; }
+  }
+
+  return {
+    init: init,
+    destroy: destroy,
+    renderBase: renderBase,
+    exportData: exportData,
+    importData: importData
+  };
+}, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'AI', 'Toast', 'SearchService']);
 <!-- NOOMIUM_MODULE_END BaseViewComponent -->
 
 <!-- NOOMIUM_MODULE_START App.State -->
