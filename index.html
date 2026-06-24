@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.11">
+<meta name="app-version" content="1.3.12">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -3557,7 +3557,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END StateManager -->
 
 <!-- NOOMIUM_MODULE_START SearchService -->
-  DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I18n, Toast, Logger, Utils) {
+  DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I18n, Toast, Logger, Utils, EditorComponent) {
 
     /** @type {Vector | null} Вектор последнего выполненного поискового запроса */
     var lastVec = null;
@@ -3629,6 +3629,198 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
+     * Получает свежую мировую ленту опубликованных заметок.
+     * @param {number} offset - Смещение для пагинации.
+     * @param {number} limit - Количество записей.
+     * @returns {Promise<SearchResult[]>} Promise с массивом результатов.
+     */
+    function getWorldFreshFeed(offset, limit) {
+      return DB.getSharedNotes(offset, limit).then(function(notes) {
+        var results = [];
+        for (var i = 0; i < notes.length; i++) {
+          var note = notes[i];
+          results.push({
+            id: note.id,
+            text: note.text,
+            vector: note.vector,
+            score: 0,
+            shared: true,
+            createdAt: note.createdAt
+          });
+        }
+        return results;
+      });
+    }
+
+    /**
+     * Выполняет поиск по вектору закреплённой заметки (пина).
+     * Не отправляет новый сетевой запрос, использует только локальные заметки
+     * и кэшированные сетевые ответы.
+     * @param {SearchResult} pinnedNote - Закреплённая заметка с полем vector.
+     * @returns {Promise<void>}
+     */
+    function searchByPinnedVector(pinnedNote) {
+      if (!pinnedNote || !pinnedNote.vector) {
+        return Promise.resolve();
+      }
+
+      var vec = pinnedNote.vector;
+
+      return getAllNotesCached().then(function(notes) {
+        var localCandidates = [];
+        var localDataMap = new Map();
+
+        for (var i = 0; i < notes.length; i++) {
+          var note = notes[i];
+          if (note && note.vector) {
+            localCandidates.push({ id: note.id, vector: note.vector });
+            localDataMap.set(note.id, note);
+          }
+        }
+
+        var state = StateManager.getState();
+        var worldAnswers = state.netAuthorized && Net ? Net.activeAnswers() : [];
+
+        var allCandidates = localCandidates.slice();
+        for (var j = 0; j < worldAnswers.length; j++) {
+          var answer = worldAnswers[j];
+          if (answer && answer.vector) {
+            allCandidates.push({ id: answer.id, vector: answer.vector });
+          }
+        }
+
+        if (allCandidates.length === 0) {
+          StateManager.setState({ lists: { local: [], world: [], seren: [] } });
+          if (Bus && Bus.emit) {
+            try { Bus.emit('state:lists-changed'); } catch (_) {}
+          }
+          return;
+        }
+
+        return AI.cosineBatch(vec, allCandidates).then(function(scores) {
+          var localScored = [];
+          var worldScored = [];
+
+          for (var k = 0; k < scores.length; k++) {
+            var s = scores[k];
+            var note = localDataMap.get(s.id);
+            if (note) {
+              localScored.push({
+                id: note.id,
+                text: note.text,
+                vector: note.vector,
+                score: s.score,
+                shared: note.shared,
+                createdAt: note.createdAt
+              });
+            } else {
+              // Это сетевой ответ
+              var answer = null;
+              for (var m = 0; m < worldAnswers.length; m++) {
+                if (worldAnswers[m].id === s.id) {
+                  answer = worldAnswers[m];
+                  break;
+                }
+              }
+              if (answer) {
+                worldScored.push({
+                  id: answer.id,
+                  text: answer.text,
+                  vector: answer.vector,
+                  score: s.score,
+                  shared: true,
+                  peer: answer.peer,
+                  createdAt: answer.createdAt
+                });
+              }
+            }
+          }
+
+          var threshold = Config.get('threshold', 0.7);
+          var serendipityDelta = Config.get('serendipity', 0.3);
+          var serenMin = threshold - serendipityDelta;
+
+          var newLists = {
+            local: localScored.filter(function(n) { return n.score >= threshold; })
+              .sort(function(a, b) { return b.score - a.score; }),
+            world: worldScored.filter(function(n) { return n.score >= threshold; })
+              .sort(function(a, b) { return b.score - a.score; }),
+            seren: localScored.concat(worldScored)
+              .filter(function(n) { return n.score >= serenMin && n.score < threshold; })
+              .sort(function(a, b) { return b.score - a.score; })
+          };
+
+          StateManager.setState({ lists: newLists });
+          if (Bus && Bus.emit) {
+            try { Bus.emit('state:lists-changed'); } catch (_) {}
+          }
+        });
+      }).catch(function(err) {
+        Toast.show('err', String(err && err.message || err) || 'Pin search failed');
+        Logger.warn('SearchService.searchByPinnedVector error', String(err && err.message || err));
+      });
+    }
+
+    /**
+     * Активирует пин (закрепляет заметку как фильтр).
+     * @param {SearchResult} item - Заметка для закрепления.
+     * @returns {void}
+     */
+    function activatePin(item) {
+      if (!item) return;
+
+      StateManager.setState({
+        pinnedNote: item,
+        feedMode: 'pinned'
+      });
+
+      searchByPinnedVector(item);
+
+      if (EditorComponent && typeof EditorComponent.clear === 'function') {
+        EditorComponent.clear();
+      }
+
+      var state = StateManager.getState();
+      if (!state.editorFocused && EditorComponent && typeof EditorComponent.hideFooter === 'function') {
+        EditorComponent.hideFooter();
+      }
+    }
+
+    /**
+     * Деактивирует пин (снимает закрепление).
+     * @returns {void}
+     */
+    function deactivatePin() {
+      StateManager.setState({ pinnedNote: null });
+
+      var text = '';
+      if (EditorComponent && typeof EditorComponent.getValue === 'function') {
+        text = EditorComponent.getValue().trim();
+      }
+
+      if (text) {
+        StateManager.setState({ feedMode: 'authoring' });
+        search(text, false);
+      } else {
+        StateManager.setState({ feedMode: 'world_fresh' });
+        getWorldFreshFeed(0, 10).then(function(results) {
+          StateManager.setState({
+            lists: {
+              local: results,
+              world: [],
+              seren: []
+            }
+          });
+          if (Bus && Bus.emit) {
+            try { Bus.emit('state:lists-changed'); } catch (_) {}
+          }
+        }).catch(function(err) {
+          Logger.warn('SearchService.deactivatePin getWorldFreshFeed error', String(err && err.message || err));
+        });
+      }
+    }
+
+    /**
      * Выполняет семантический поиск по локальной базе и ответам из сети.
      * Делегирует вычисление косинусного сходства в Web Worker для избежания блокировки UI.
      * @param {string} text - Поисковый запрос (текст из редактора).
@@ -3636,10 +3828,28 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
      * @returns {Promise<void>}
      */
     function search(text, force) {
+      var currentState = StateManager.getState();
+
       if (!text || !AI.ready()) {
-        StateManager.setState({ lists: { local: [], world: [], seren: [] } });
-        if (Bus && Bus.emit) {
-          try { Bus.emit('state:lists-changed'); } catch (_) {}
+        if (!text && currentState.feedMode === 'authoring') {
+          StateManager.setState({ feedMode: 'world_fresh' });
+          getWorldFreshFeed(0, 10).then(function(results) {
+            StateManager.setState({
+              lists: {
+                local: results,
+                world: [],
+                seren: []
+              }
+            });
+            if (Bus && Bus.emit) {
+              try { Bus.emit('state:lists-changed'); } catch (_) {}
+            }
+          });
+        } else {
+          StateManager.setState({ lists: { local: [], world: [], seren: [] } });
+          if (Bus && Bus.emit) {
+            try { Bus.emit('state:lists-changed'); } catch (_) {}
+          }
         }
         return Promise.resolve();
       }
@@ -3828,9 +4038,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       isSending: isSending,
       getAllNotesCached: getAllNotesCached,
       invalidateNotesCache: invalidateNotesCache,
-      init: init
+      init: init,
+      getWorldFreshFeed: getWorldFreshFeed,
+      searchByPinnedVector: searchByPinnedVector,
+      activatePin: activatePin,
+      deactivatePin: deactivatePin
     };
-  }, ['AI', 'DB', 'Net', 'Config', 'Bus', 'StateManager', 'I18n', 'Toast', 'Logger', 'Utils']);
+  }, ['AI', 'DB', 'Net', 'Config', 'Bus', 'StateManager', 'I18n', 'Toast', 'Logger', 'Utils', 'EditorComponent']);
 <!-- NOOMIUM_MODULE_END SearchService -->
 
 <!-- NOOMIUM_MODULE_START EditorComponent -->
