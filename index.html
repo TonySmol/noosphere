@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.12">
+<meta name="app-version" content="1.3.13">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -3557,7 +3557,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END StateManager -->
 
 <!-- NOOMIUM_MODULE_START SearchService -->
-  DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I18n, Toast, Logger, Utils, EditorComponent) {
+  DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I18n, Toast, Logger, Utils) {
 
     /** @type {Vector | null} Вектор последнего выполненного поискового запроса */
     var lastVec = null;
@@ -3714,7 +3714,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                 createdAt: note.createdAt
               });
             } else {
-              // Это сетевой ответ
               var answer = null;
               for (var m = 0; m < worldAnswers.length; m++) {
                 if (worldAnswers[m].id === s.id) {
@@ -3776,13 +3775,14 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
       searchByPinnedVector(item);
 
-      if (EditorComponent && typeof EditorComponent.clear === 'function') {
-        EditorComponent.clear();
+      var EC = DI.resolve('EditorComponent');
+      if (EC && typeof EC.clear === 'function') {
+        EC.clear();
       }
 
       var state = StateManager.getState();
-      if (!state.editorFocused && EditorComponent && typeof EditorComponent.hideFooter === 'function') {
-        EditorComponent.hideFooter();
+      if (!state.editorFocused && EC && typeof EC.hideFooter === 'function') {
+        EC.hideFooter();
       }
     }
 
@@ -3794,8 +3794,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       StateManager.setState({ pinnedNote: null });
 
       var text = '';
-      if (EditorComponent && typeof EditorComponent.getValue === 'function') {
-        text = EditorComponent.getValue().trim();
+      var EC = DI.resolve('EditorComponent');
+      if (EC && typeof EC.getValue === 'function') {
+        text = EC.getValue().trim();
       }
 
       if (text) {
@@ -4044,9 +4045,251 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       activatePin: activatePin,
       deactivatePin: deactivatePin
     };
-  }, ['AI', 'DB', 'Net', 'Config', 'Bus', 'StateManager', 'I18n', 'Toast', 'Logger', 'Utils', 'EditorComponent']);
+  }, ['AI', 'DB', 'Net', 'Config', 'Bus', 'StateManager', 'I18n', 'Toast', 'Logger', 'Utils']);
 <!-- NOOMIUM_MODULE_END SearchService -->
 
+<!-- NOOMIUM_MODULE_START PinAnimation -->
+  DI.register('PinAnimation', function() {
+
+    /** @type {Animation | null} Текущая активная анимация */
+    var currentAnimation = null;
+
+    /** @type {HTMLElement | null} Текущий клон элемента */
+    var currentClone = null;
+
+    /** @type {HTMLElement | null} Текущий исходный элемент */
+    var currentSource = null;
+
+    /**
+     * Анимация перемещения карточки из карусели в область пина (FLIP-техника).
+     * Если предыдущая анимация ещё не завершена, она будет отменена.
+     * @param {HTMLElement} sourceElement - DOM-элемент карточки-источника.
+     * @param {HTMLElement} targetContainer - DOM-элемент целевого контейнера (#pinned-area).
+     * @returns {Promise<void>} Promise, разрешающийся после завершения анимации.
+     */
+    function flyToPinnedArea(sourceElement, targetContainer) {
+      // Отмена предыдущей анимации, если она активна
+      if (currentAnimation) {
+        try {
+          if (currentAnimation.playState !== 'finished' && typeof currentAnimation.cancel === 'function') {
+            currentAnimation.cancel();
+          }
+        } catch (_) { /* ignore */ }
+      }
+      if (currentClone && currentClone.parentNode) {
+        try { currentClone.parentNode.removeChild(currentClone); } catch (_) { /* ignore */ }
+      }
+      if (currentSource) {
+        try { currentSource.style.visibility = ''; } catch (_) { /* ignore */ }
+      }
+
+      currentAnimation = null;
+      currentClone = null;
+      currentSource = null;
+
+      if (!sourceElement || !targetContainer) {
+        return Promise.resolve();
+      }
+
+      var sourceRect;
+      var targetRect;
+      try {
+        sourceRect = sourceElement.getBoundingClientRect();
+        targetRect = targetContainer.getBoundingClientRect();
+      } catch (_) {
+        return Promise.resolve();
+      }
+
+      // Если целевой контейнер скрыт или имеет нулевые размеры, оцениваем позицию
+      if (!targetRect.width || !targetRect.height) {
+        targetRect = {
+          width: targetRect.width || sourceRect.width,
+          height: 60,
+          left: targetRect.left,
+          top: targetRect.top
+        };
+      }
+
+      if (typeof sourceElement.cloneNode !== 'function') {
+        return Promise.resolve();
+      }
+
+      var clone = sourceElement.cloneNode(true);
+      clone.style.cssText = 'position:fixed;left:' + sourceRect.left + 'px;top:' + sourceRect.top +
+        'px;width:' + sourceRect.width + 'px;height:' + sourceRect.height +
+        'px;margin:0;z-index:1000;transition:none;';
+      document.body.appendChild(clone);
+
+      try { sourceElement.style.visibility = 'hidden'; } catch (_) { /* ignore */ }
+
+      currentClone = clone;
+      currentSource = sourceElement;
+
+      // Fallback, если Web Animations API недоступен
+      if (typeof clone.animate !== 'function') {
+        if (clone.parentNode) {
+          try { clone.parentNode.removeChild(clone); } catch (_) { /* ignore */ }
+        }
+        try { sourceElement.style.visibility = ''; } catch (_) { /* ignore */ }
+        currentClone = null;
+        currentSource = null;
+        return Promise.resolve();
+      }
+
+      var tx = targetRect.left - sourceRect.left;
+      var ty = targetRect.top - sourceRect.top;
+      var sx = targetRect.width / sourceRect.width;
+      var sy = targetRect.height / sourceRect.height;
+      var finalTransform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + sx + ',' + sy + ')';
+
+      var animation;
+      try {
+        animation = clone.animate([
+          { transform: 'none', opacity: 1 },
+          { transform: finalTransform, opacity: 0.9 }
+        ], {
+          duration: 300,
+          easing: 'cubic-bezier(0.2,0.7,0.2,1)',
+          fill: 'forwards'
+        });
+      } catch (_) {
+        if (clone.parentNode) {
+          try { clone.parentNode.removeChild(clone); } catch (_) { /* ignore */ }
+        }
+        try { sourceElement.style.visibility = ''; } catch (_) { /* ignore */ }
+        currentClone = null;
+        currentSource = null;
+        return Promise.resolve();
+      }
+
+      currentAnimation = animation;
+
+      return new Promise(function(resolve) {
+        var finished = false;
+        var finish = function() {
+          if (finished) return;
+          finished = true;
+          if (clone.parentNode) {
+            try { clone.parentNode.removeChild(clone); } catch (_) { /* ignore */ }
+          }
+          try { sourceElement.style.visibility = ''; } catch (_) { /* ignore */ }
+          if (currentClone === clone) currentClone = null;
+          if (currentSource === sourceElement) currentSource = null;
+          if (currentAnimation === animation) currentAnimation = null;
+          resolve();
+        };
+
+        if (animation.finished && typeof animation.finished.then === 'function') {
+          animation.finished.then(finish).catch(finish);
+        } else {
+          animation.onfinish = finish;
+          animation.oncancel = finish;
+          // Страховочный таймаут, если события не сработают
+          setTimeout(finish, 350);
+        }
+      });
+    }
+
+    return {
+      flyToPinnedArea: flyToPinnedArea
+    };
+  }, []);
+<!-- NOOMIUM_MODULE_END PinAnimation -->
+
+<!-- NOOMIUM_MODULE_START PinnedAreaComponent -->
+  DI.register('PinnedAreaComponent', function(Bus, I18n, StateManager, SearchService, Utils) {
+
+    /** @type {function(): void | null} Функция отписки от StateManager */
+    var unsubState = null;
+
+    /** @type {function(): void | null} Обработчик смены языка */
+    var i18nHandler = null;
+
+    /**
+     * Перерисовывает содержимое области пина в зависимости от состояния.
+     * @returns {void}
+     */
+    function render() {
+      var container = document.getElementById('pinned-area');
+      if (!container) return;
+
+      var state = StateManager.getState();
+      var pinnedNote = state.pinnedNote;
+      var feedMode = state.feedMode;
+
+      while (container.firstChild) {
+        container.removeChild(container.firstChild);
+      }
+
+      if (pinnedNote !== null && pinnedNote !== undefined) {
+        var mini = document.createElement('div');
+        mini.className = 'pinned-mini';
+
+        var textSpan = document.createElement('span');
+        textSpan.className = 'pinned-mini-text';
+        var rawText = String(pinnedNote.text || '').substring(0, 100);
+        textSpan.textContent = rawText;
+
+        var removeBtn = document.createElement('button');
+        removeBtn.className = 'pinned-mini-remove';
+        removeBtn.innerHTML = '&times;';
+        removeBtn.setAttribute('aria-label', I18n.t('btn.cancel'));
+        removeBtn.onclick = function() {
+          if (SearchService && typeof SearchService.deactivatePin === 'function') {
+            SearchService.deactivatePin();
+          }
+        };
+
+        mini.appendChild(textSpan);
+        mini.appendChild(removeBtn);
+        container.appendChild(mini);
+        container.style.display = '';
+      } else if (feedMode === 'authoring') {
+        var authoring = document.createElement('div');
+        authoring.className = 'pinned-authoring';
+        authoring.textContent = I18n.t('pin.authoring');
+        container.appendChild(authoring);
+        container.style.display = '';
+      } else {
+        container.style.display = 'none';
+      }
+    }
+
+    /**
+     * Инициализирует компонент: подписывается на изменения состояния и смену языка.
+     * @returns {void}
+     */
+    function init() {
+      render();
+      unsubState = StateManager.subscribe(function() {
+        render();
+      });
+      i18nHandler = function() { render(); };
+      Bus.on('i18n:change', i18nHandler);
+    }
+
+    /**
+     * Уничтожает компонент: отписывается от всех событий.
+     * @returns {void}
+     */
+    function destroy() {
+      if (unsubState) {
+        try { unsubState(); } catch (_) { /* ignore */ }
+        unsubState = null;
+      }
+      if (i18nHandler) {
+        try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
+        i18nHandler = null;
+      }
+    }
+
+    return {
+      init: init,
+      destroy: destroy
+    };
+  }, ['Bus', 'I18n', 'StateManager', 'SearchService', 'Utils']);
+<!-- NOOMIUM_MODULE_END PinnedAreaComponent -->
+  
 <!-- NOOMIUM_MODULE_START EditorComponent -->
   DI.register('EditorComponent', function(Bus, I18n, Utils, SearchService, Config, StateManager) {
 
@@ -4061,6 +4304,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /** @type {HTMLElement | null} */
     var modeToggle = null;
+
+    /** @type {HTMLElement | null} */
+    var footerEl = null;
 
     /** @type {number | null} ID таймера debounce для поиска */
     var searchTimer = null;
@@ -4077,9 +4323,14 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /** @type {function(MouseEvent): void | null} Ссылка на обработчик переключения режима */
     var onModeClick = null;
 
+    /** @type {function(FocusEvent): void | null} Ссылка на обработчик focus */
+    var onFocus = null;
+
+    /** @type {function(FocusEvent): void | null} Ссылка на обработчик blur */
+    var onBlur = null;
+
     /**
      * Обновляет ссылки на DOM-элементы.
-     * Вызывается при каждом обращении, так как DOM может быть пересоздан после refreshUI.
      * @returns {void}
      */
     function refreshDOM() {
@@ -4087,6 +4338,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       counter = document.getElementById('ed-cnt');
       sendBtn = document.getElementById('btn-send');
       modeToggle = document.getElementById('mode-toggle');
+      footerEl = document.querySelector('.ed-foot');
     }
 
     /**
@@ -4100,6 +4352,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /**
      * Устанавливает текст в поле ввода и обновляет счётчик символов.
+     * Не триггерит событие input для избежания ложных срабатываний поиска.
      * @param {string} val - Новый текст.
      * @returns {void}
      */
@@ -4174,6 +4427,38 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
+     * Показывает футер редактора (кнопки и переключатель режима).
+     * @returns {void}
+     */
+    function showFooter() {
+      if (!footerEl) refreshDOM();
+      if (footerEl) {
+        footerEl.style.display = '';
+      }
+    }
+
+    /**
+     * Скрывает футер редактора.
+     * @returns {void}
+     */
+    function hideFooter() {
+      if (!footerEl) refreshDOM();
+      if (footerEl) {
+        footerEl.style.display = 'none';
+      }
+    }
+
+    /**
+     * Проверяет, видим ли футер редактора.
+     * @returns {boolean}
+     */
+    function isFooterVisible() {
+      if (!footerEl) refreshDOM();
+      if (!footerEl) return false;
+      return footerEl.style.display !== 'none';
+    }
+
+    /**
      * Применяет переводы к элементам редактора (placeholder, кнопки).
      * @returns {void}
      */
@@ -4235,6 +4520,28 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (editor) {
         onInput = function() {
           updateCounter();
+          var currentText = getValue().trim();
+          
+          // Управление режимами ленты
+          var state = StateManager.getState();
+          if (state.pinnedNote === null) {
+            if (currentText) {
+              if (state.feedMode !== 'authoring') {
+                StateManager.setState({ feedMode: 'authoring' });
+              }
+            } else {
+              if (state.feedMode === 'authoring') {
+                StateManager.setState({ feedMode: 'world_fresh' });
+                // Загрузка свежей ленты произойдёт в StreamViewComponent через state:lists-changed
+                // или через прямой вызов SearchService
+                if (SearchService && typeof SearchService.deactivatePin === 'function') {
+                  // deactivatePin сам проверит текст и загрузит ленту
+                  SearchService.deactivatePin();
+                }
+              }
+            }
+          }
+
           if (searchTimer) clearTimeout(searchTimer);
           searchTimer = setTimeout(function() {
             if (Bus && Bus.emit) {
@@ -4243,6 +4550,21 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           }, Config.get('debounce', 800));
         };
         editor.addEventListener('input', onInput);
+
+        onFocus = function() {
+          showFooter();
+          StateManager.setState({ editorFocused: true });
+        };
+        editor.addEventListener('focus', onFocus);
+
+        onBlur = function() {
+          var currentText = getValue().trim();
+          if (currentText === '') {
+            hideFooter();
+            StateManager.setState({ editorFocused: false });
+          }
+        };
+        editor.addEventListener('blur', onBlur);
       }
 
       if (sendBtn) {
@@ -4270,14 +4592,20 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (editor && onInput) {
         try { editor.removeEventListener('input', onInput); } catch (_) { /* ignore */ }
       }
+      if (editor && onFocus) {
+        try { editor.removeEventListener('focus', onFocus); } catch (_) { /* ignore */ }
+      }
+      if (editor && onBlur) {
+        try { editor.removeEventListener('blur', onBlur); } catch (_) { /* ignore */ }
+      }
       if (sendBtn && onSendClick) {
         try { sendBtn.removeEventListener('click', onSendClick); } catch (_) { /* ignore */ }
       }
       if (modeToggle && onModeClick) {
         try { modeToggle.removeEventListener('click', onModeClick); } catch (_) { /* ignore */ }
       }
-      editor = counter = sendBtn = modeToggle = null;
-      onInput = onSendClick = onModeClick = null;
+      editor = counter = sendBtn = modeToggle = footerEl = null;
+      onInput = onSendClick = onModeClick = onFocus = onBlur = null;
       if (searchTimer) {
         clearTimeout(searchTimer);
         searchTimer = null;
@@ -4297,6 +4625,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       var currentMode = SearchService.getSendMode();
       updateSendMode(currentMode);
       applyI18n();
+
+      // Скрываем футер по умолчанию, если поле пустое и не в фокусе
+      var initialText = getValue().trim();
+      if (initialText === '') {
+        hideFooter();
+        StateManager.setState({ editorFocused: false });
+      } else {
+        showFooter();
+      }
     }
 
     /**
@@ -4319,7 +4656,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       clear: clear,
       updateCounter: updateCounter,
       updateSendMode: updateSendMode,
-      setSendingState: setSendingState
+      setSendingState: setSendingState,
+      showFooter: showFooter,
+      hideFooter: hideFooter,
+      isFooterVisible: isFooterVisible
     };
   }, ['Bus', 'I18n', 'Utils', 'SearchService', 'Config', 'StateManager']);
 <!-- NOOMIUM_MODULE_END EditorComponent -->
@@ -4837,9 +5177,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
    * @property {HTMLButtonElement | null} prevBtn - Кнопка предыдущей страницы.
    * @property {HTMLButtonElement | null} nextBtn - Кнопка следующей страницы.
    * @property {number | null} scrollRAF - ID requestAnimationFrame для скролла.
+   * @property {number} worldOffset - Текущий offset для пагинации world_fresh.
    */
 
-  DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent) {
+  DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent, SearchService, PinAnimation) {
 
     /** @type {number} Количество карточек на одной странице */
     var PAGE_SIZE = 10;
@@ -4855,7 +5196,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       counterEl: null,
       prevBtn: null,
       nextBtn: null,
-      scrollRAF: null
+      scrollRAF: null,
+      worldOffset: 0
     };
 
     /** @type {string | null} Кэшированный поисковый запрос для подсветки */
@@ -4869,6 +5211,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /** @type {function(): void | null} */
     var listsChangedHandler = null;
+
+    /** @type {function(Object): void | null} */
+    var viewChangedHandler = null;
+
+    /** @type {function(Object): void | null} */
+    var stateChangedHandler = null;
 
     /**
      * Создаёт DocumentFragment с подсвеченными совпадениями поискового запроса.
@@ -4916,7 +5264,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Проверяет, принадлежит ли заметка текущему пользователю.
+     * Проверяет, принадлежит ли заметка текущему пользователю (локальная).
      * @param {SearchResult} item - Объект карточки.
      * @returns {boolean} true, если это локальная заметка (нет поля peer).
      */
@@ -4933,11 +5281,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (!item) return document.createElement('div');
       
       var state = StateManager.getState();
-      var seg = state.seg;
       var own = isOwnItem(item);
+      var isPinned = state.pinnedNote && state.pinnedNote.id === item.id;
       
       var card = document.createElement('div');
-      card.className = 'fi t-' + seg;
+      card.className = 'fi';
       card.setAttribute('data-id', item.id);
 
       var header = document.createElement('div');
@@ -4952,7 +5300,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       header.appendChild(badge);
 
       var scoreNum = typeof item.score === 'number' ? Math.round(item.score * 100) : null;
-      if (scoreNum !== null) {
+      if (scoreNum !== null && scoreNum > 0) {
         var scoreWrap = document.createElement('span');
         scoreWrap.className = 'fi-score';
         
@@ -4972,15 +5320,28 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
       var body = document.createElement('div');
       body.className = 'fi-body';
-      body.appendChild(highlightText(item.text, EditorComponent.getValue()));
+      var EC = DI.resolve('EditorComponent');
+      var query = EC && typeof EC.getValue === 'function' ? EC.getValue() : '';
+      body.appendChild(highlightText(item.text, query));
       card.appendChild(body);
 
       var footer = document.createElement('div');
       footer.className = 'fi-foot';
       
+      // Кнопка "ЕЩЕ" (pin) для всех карточек, кроме уже закреплённой
+      if (!isPinned) {
+        var btnPin = document.createElement('button');
+        btnPin.className = 'fi-act primary';
+        btnPin.setAttribute('data-act', 'pin');
+        btnPin.setAttribute('data-id', item.id);
+        btnPin.setAttribute('aria-label', I18n.t('btn.more'));
+        btnPin.textContent = I18n.t('btn.more');
+        footer.appendChild(btnPin);
+      }
+      
       if (own) {
         var btnEdit = document.createElement('button');
-        btnEdit.className = 'fi-act primary';
+        btnEdit.className = 'fi-act';
         btnEdit.setAttribute('data-act', 'edit');
         btnEdit.setAttribute('data-id', item.id);
         btnEdit.setAttribute('aria-label', I18n.t('btn.edit'));
@@ -5037,8 +5398,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
      * @returns {void}
      */
     function updatePaginationButtons() {
-      if (uiState.prevBtn) uiState.prevBtn.disabled = (uiState.currentPage === 0);
-      if (uiState.nextBtn) uiState.nextBtn.disabled = (uiState.currentPage >= uiState.totalPages - 1);
+      var state = StateManager.getState();
+      if (state.feedMode === 'world_fresh') {
+        if (uiState.prevBtn) uiState.prevBtn.disabled = (uiState.worldOffset === 0);
+        // Кнопка "вперёд" для world_fresh всегда активна (лента бесконечная)
+        if (uiState.nextBtn) uiState.nextBtn.disabled = false;
+      } else {
+        if (uiState.prevBtn) uiState.prevBtn.disabled = (uiState.currentPage === 0);
+        if (uiState.nextBtn) uiState.nextBtn.disabled = (uiState.currentPage >= uiState.totalPages - 1);
+      }
     }
 
     /**
@@ -5088,8 +5456,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Обработчик скролла карусели (тролтлится через requestAnimationFrame).
-     * Вычисляет активную карточку и обновляет точки/счётчик.
+     * Обработчик скролла карусели (троллится через requestAnimationFrame).
      * @returns {void}
      */
     function onCarouselScroll() {
@@ -5136,6 +5503,35 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
+     * Загружает начальную ленту world_fresh при старте.
+     * @returns {void}
+     */
+    function loadInitialWorldFresh() {
+      var state = StateManager.getState();
+      if (state.feedMode === 'world_fresh') {
+        uiState.worldOffset = 0;
+        SearchService.getWorldFreshFeed(0, PAGE_SIZE).then(function(results) {
+          var currentState = StateManager.getState();
+          // Избегаем перезаписи, если пользователь уже сменил режим
+          if (currentState.feedMode === 'world_fresh') {
+            StateManager.setState({
+              lists: {
+                local: results,
+                world: [],
+                seren: []
+              }
+            });
+            if (Bus && Bus.emit) {
+              try { Bus.emit('state:lists-changed'); } catch (_) {}
+            }
+          }
+        }).catch(function(err) {
+          if (Logger) Logger.warn('StreamViewComponent: loadInitialWorldFresh failed', String(err));
+        });
+      }
+    }
+
+    /**
      * Инициализирует или пересобирает карусель на основе текущего состояния StateManager.
      * Показывает empty-state, если данных нет.
      * @returns {void}
@@ -5149,7 +5545,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       var controls = document.getElementById('pagination-controls');
 
       var state = StateManager.getState();
-      var list = state.lists[state.seg];
+      var list = state.lists.local || [];
 
       paginate(list);
 
@@ -5162,12 +5558,18 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           var existingEmpty = wrap.querySelector('.feed-empty');
           if (existingEmpty) existingEmpty.remove();
 
-          var emptyMessages = {
-            local: { t: I18n.t('empty.local.t'), d: I18n.t('empty.local.d') },
-            world: { t: I18n.t('empty.world.t'), d: I18n.t('empty.world.d') },
-            seren: { t: I18n.t('empty.seren.t'), d: I18n.t('empty.seren.d') }
-          };
-          var msg = emptyMessages[state.seg];
+          var emptyT = '';
+          var emptyD = '';
+          if (state.feedMode === 'world_fresh') {
+            emptyT = I18n.t('empty.world_fresh.t');
+            emptyD = I18n.t('empty.world_fresh.d');
+          } else if (state.feedMode === 'pinned') {
+            emptyT = I18n.t('empty.seren.t');
+            emptyD = I18n.t('empty.seren.d');
+          } else {
+            emptyT = I18n.t('empty.local.t');
+            emptyD = I18n.t('empty.local.d');
+          }
           
           var emptyDiv = document.createElement('div');
           emptyDiv.className = 'feed-empty';
@@ -5177,15 +5579,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           emptyIc.textContent = '◇';
           emptyDiv.appendChild(emptyIc);
           
-          var emptyT = document.createElement('div');
-          emptyT.className = 'feed-empty-t';
-          emptyT.textContent = msg.t;
-          emptyDiv.appendChild(emptyT);
+          var emptyTt = document.createElement('div');
+          emptyTt.className = 'feed-empty-t';
+          emptyTt.textContent = emptyT;
+          emptyDiv.appendChild(emptyTt);
           
-          var emptyD = document.createElement('div');
-          emptyD.className = 'feed-empty-d';
-          emptyD.textContent = msg.d;
-          emptyDiv.appendChild(emptyD);
+          var emptyDd = document.createElement('div');
+          emptyDd.className = 'feed-empty-d';
+          emptyDd.textContent = emptyD;
+          emptyDiv.appendChild(emptyDd);
           
           wrap.appendChild(emptyDiv);
         }
@@ -5211,31 +5613,88 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Обновляет счётчики (бейджи) над сегментами карусели.
+     * Обрабатывает клики по действиям внутри карточки (pin, edit, copy, del, toggle).
+     * @param {string} action - Имя действия (из data-act).
+     * @param {HTMLElement} element - DOM-элемент кнопки.
      * @returns {void}
      */
-    function updateCounts() {
+    function handleItemAction(action, element) {
+      if (!element) return;
+      var id = element.getAttribute('data-id');
       var state = StateManager.getState();
-      ['local', 'world', 'seren'].forEach(function(key) {
-        var el = document.getElementById('c-' + key);
-        if (el) el.textContent = state.lists[key].length;
-      });
-    }
 
-    /**
-     * Переключает активный сегмент (local/world/seren) и перерисовывает карусель.
-     * @param {Segment} segKey - Ключ сегмента.
-     * @returns {void}
-     */
-    function setSegment(segKey) {
-      StateManager.setState({ seg: segKey });
-      document.querySelectorAll('.seg-b').forEach(function(b) {
-        b.classList.toggle('on', b.getAttribute('data-k') === segKey);
-      });
-      cachedQuery = null;
-      cachedRegex = null;
-      uiState.currentPage = 0;
-      initCarousel();
+      if (action === 'pin') {
+        var list = state.lists.local || [];
+        var item = null;
+        for (var i = 0; i < list.length; i++) {
+          if (list[i].id === id) { item = list[i]; break; }
+        }
+        if (!item) {
+          // Попробовать в world и seren
+          var wl = state.lists.world || [];
+          for (var j = 0; j < wl.length; j++) {
+            if (wl[j].id === id) { item = wl[j]; break; }
+          }
+          if (!item) {
+            var sl = state.lists.seren || [];
+            for (var k = 0; k < sl.length; k++) {
+              if (sl[k].id === id) { item = sl[k]; break; }
+            }
+          }
+        }
+        if (item) {
+          var cardEl = element.closest('.fi');
+          var targetEl = document.getElementById('pinned-area');
+          if (cardEl && targetEl && PinAnimation && typeof PinAnimation.flyToPinnedArea === 'function') {
+            PinAnimation.flyToPinnedArea(cardEl, targetEl).then(function() {
+              SearchService.activatePin(item);
+            });
+          } else {
+            SearchService.activatePin(item);
+          }
+        }
+        return;
+      }
+
+      if (action === 'edit') {
+        try { Bus.emit('editor:edit-note', { id: id }); } catch (_) { /* ignore */ }
+        return;
+      }
+      
+      if (action === 'copy') {
+        var item = null;
+        var allLists = (state.lists.local || []).concat(state.lists.world || []).concat(state.lists.seren || []);
+        for (var i = 0; i < allLists.length; i++) {
+          if (allLists[i].id === id) { item = allLists[i]; break; }
+        }
+        if (item) copyToClipboard(item.text);
+        return;
+      }
+      
+      if (action === 'del') {
+        if (!confirm(I18n.t('del.confirm'))) return;
+        DB.del(id).then(function() {
+          Toast.show('ok', I18n.t('toast.deleted'));
+          try { Bus.emit('editor:search-request', { force: true }); } catch (_) { /* ignore */ }
+        }).catch(function(err) {
+          Toast.show('err', String(err && err.message || err) || 'Delete failed');
+        });
+        return;
+      }
+      
+      if (action === 'toggle') {
+        DB.get(id).then(function(record) {
+          if (!record) return;
+          record.shared = !record.shared;
+          return DB.put(record).then(function() {
+            Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
+            try { Bus.emit('editor:search-request', { force: true }); } catch (_) { /* ignore */ }
+          });
+        }).catch(function(err) {
+          Toast.show('err', String(err && err.message || err) || 'Toggle failed');
+        });
+        return;
+      }
     }
 
     /**
@@ -5271,67 +5730,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Ищет элемент в массиве по его ID.
-     * @param {string} id - Идентификатор.
-     * @param {SearchResult[]} list - Массив для поиска.
-     * @returns {SearchResult | null}
-     */
-    function findItemById(id, list) {
-      for (var i = 0; i < list.length; i++) {
-        if (list[i].id === id) return list[i];
-      }
-      return null;
-    }
-
-    /**
-     * Обрабатывает клики по действиям внутри карточки (edit, copy, del, toggle).
-     * @param {string} action - Имя действия (из data-act).
-     * @param {HTMLElement} element - DOM-элемент кнопки.
-     * @returns {void}
-     */
-    function handleItemAction(action, element) {
-      if (!element) return;
-      var id = element.getAttribute('data-id');
-      var state = StateManager.getState();
-
-      if (action === 'edit') {
-        try { Bus.emit('editor:edit-note', { id: id }); } catch (_) { /* ignore */ }
-        return;
-      }
-      
-      if (action === 'copy') {
-        var item = findItemById(id, state.lists[state.seg]);
-        if (item) copyToClipboard(item.text);
-        return;
-      }
-      
-      if (action === 'del') {
-        if (!confirm(I18n.t('del.confirm'))) return;
-        DB.del(id).then(function() {
-          Toast.show('ok', I18n.t('toast.deleted'));
-          try { Bus.emit('editor:search-request', { force: true }); } catch (_) { /* ignore */ }
-        }).catch(function(err) {
-          Toast.show('err', String(err && err.message || err) || 'Delete failed');
-        });
-        return;
-      }
-      
-      if (action === 'toggle') {
-        DB.get(id).then(function(record) {
-          if (!record) return;
-          record.shared = !record.shared;
-          return DB.put(record).then(function() {
-            Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
-            try { Bus.emit('editor:search-request', { force: true }); } catch (_) { /* ignore */ }
-          });
-        }).catch(function(err) {
-          Toast.show('err', String(err && err.message || err) || 'Toggle failed');
-        });
-        return;
-      }
-    }
-
-    /**
      * Делегированный обработчик кликов по обёртке карусели (стрелки и действия карточек).
      * @param {MouseEvent} e - Событие клика.
      * @returns {void}
@@ -5339,18 +5737,58 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     function handleWrapClick(e) {
       var prevBtn = e.target.closest('#pagination-prev');
       if (prevBtn && !prevBtn.disabled) {
-        if (uiState.currentPage > 0) {
-          uiState.currentPage--;
-          renderPage(uiState.currentPage);
+        var state = StateManager.getState();
+        if (state.feedMode === 'world_fresh') {
+          uiState.worldOffset = Math.max(0, uiState.worldOffset - PAGE_SIZE);
+          SearchService.getWorldFreshFeed(uiState.worldOffset, PAGE_SIZE).then(function(results) {
+            var currentState = StateManager.getState();
+            if (currentState.feedMode === 'world_fresh') {
+              StateManager.setState({
+                lists: {
+                  local: results,
+                  world: [],
+                  seren: []
+                }
+              });
+              if (Bus && Bus.emit) {
+                try { Bus.emit('state:lists-changed'); } catch (_) {}
+              }
+            }
+          });
+        } else {
+          if (uiState.currentPage > 0) {
+            uiState.currentPage--;
+            renderPage(uiState.currentPage);
+          }
         }
         return;
       }
       
       var nextBtn = e.target.closest('#pagination-next');
       if (nextBtn && !nextBtn.disabled) {
-        if (uiState.currentPage < uiState.totalPages - 1) {
-          uiState.currentPage++;
-          renderPage(uiState.currentPage);
+        var state = StateManager.getState();
+        if (state.feedMode === 'world_fresh') {
+          uiState.worldOffset = uiState.worldOffset + PAGE_SIZE;
+          SearchService.getWorldFreshFeed(uiState.worldOffset, PAGE_SIZE).then(function(results) {
+            var currentState = StateManager.getState();
+            if (currentState.feedMode === 'world_fresh') {
+              StateManager.setState({
+                lists: {
+                  local: results,
+                  world: [],
+                  seren: []
+                }
+              });
+              if (Bus && Bus.emit) {
+                try { Bus.emit('state:lists-changed'); } catch (_) {}
+              }
+            }
+          });
+        } else {
+          if (uiState.currentPage < uiState.totalPages - 1) {
+            uiState.currentPage++;
+            renderPage(uiState.currentPage);
+          }
         }
         return;
       }
@@ -5362,14 +5800,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Привязывает первичные DOM-события (клики по сегментам и обёртке).
+     * Привязывает первичные DOM-события.
      * @returns {void}
      */
     function bindDOMEvents() {
-      document.querySelectorAll('.seg-b').forEach(function(b) {
-        b.onclick = function() { setSegment(b.getAttribute('data-k')); };
-      });
-
       var wrap = document.getElementById('carousel-wrap');
       if (wrap) {
         wrap.addEventListener('click', handleWrapClick);
@@ -5382,11 +5816,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
      */
     function init() {
       bindDOMEvents();
-
-      var state = StateManager.getState();
-      document.querySelectorAll('.seg-b').forEach(function(b) {
-        b.classList.toggle('on', b.getAttribute('data-k') === state.seg);
-      });
 
       var carouselEl = document.getElementById('carousel');
       if (carouselEl) {
@@ -5407,15 +5836,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }
 
       i18nHandler = function() {
-        var s = StateManager.getState();
-        document.querySelectorAll('.seg-b').forEach(function(b) {
-          var lbl = b.querySelector('.lbl');
-          var k = b.getAttribute('data-k');
-          if (lbl && k === 'local') lbl.textContent = I18n.t('seg.local');
-          else if (lbl && k === 'world') lbl.textContent = I18n.t('seg.world');
-          else if (lbl && k === 'seren') lbl.textContent = I18n.t('seg.seren');
-        });
-        updateCounts();
         cachedQuery = null;
         cachedRegex = null;
         initCarousel();
@@ -5423,7 +5843,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       Bus.on('i18n:change', i18nHandler);
 
       listsChangedHandler = function() {
-        updateCounts();
         cachedQuery = null;
         cachedRegex = null;
         uiState.currentPage = 0;
@@ -5431,8 +5850,34 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       };
       Bus.on('state:lists-changed', listsChangedHandler);
 
-      updateCounts();
+      viewChangedHandler = function(payload) {
+        if (payload && payload.view === 'stream') {
+          initCarousel();
+          // При переключении на поток в world_fresh - догружаем ленту, если пусто
+          var state = StateManager.getState();
+          if (state.feedMode === 'world_fresh' && (!state.lists.local || state.lists.local.length === 0)) {
+            loadInitialWorldFresh();
+          }
+        }
+      };
+      Bus.on('view:changed', viewChangedHandler);
+
+      stateChangedHandler = function(state) {
+        // При смене feedMode сбрасываем worldOffset
+        if (state.feedMode !== 'world_fresh') {
+          uiState.worldOffset = 0;
+        }
+      };
+      StateManager.subscribe(stateChangedHandler);
+
       initCarousel();
+
+      // Начальная загрузка мировой ленты, если мы в stream и в режиме world_fresh
+      var initState = StateManager.getState();
+      if (initState.view === 'stream' && initState.feedMode === 'world_fresh' &&
+          (!initState.lists.local || initState.lists.local.length === 0)) {
+        loadInitialWorldFresh();
+      }
     }
 
     /**
@@ -5458,6 +5903,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       uiState.prevBtn = null;
       uiState.nextBtn = null;
       uiState.pages = [];
+      uiState.worldOffset = 0;
       
       if (i18nHandler) {
         try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
@@ -5467,13 +5913,18 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) { /* ignore */ }
         listsChangedHandler = null;
       }
+      if (viewChangedHandler) {
+        try { Bus.off('view:changed', viewChangedHandler); } catch (_) { /* ignore */ }
+        viewChangedHandler = null;
+      }
+      stateChangedHandler = null;
     }
 
     return {
       init: init,
       destroy: destroy
     };
-  }, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'Toast', 'EditorComponent']);
+  }, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'Toast', 'EditorComponent', 'SearchService', 'PinAnimation']);
 <!-- NOOMIUM_MODULE_END StreamViewComponent -->
 
 <!-- NOOMIUM_MODULE_START BaseViewComponent -->
@@ -6278,6 +6729,14 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
       baseView.init();
     } catch (_) { /* ignore */ }
 
+    try {
+      var pinnedArea = DI.resolve('PinnedAreaComponent');
+      pinnedArea.destroy();
+      pinnedArea.init();
+    } catch (e) {
+      if (Logger) Logger.warn('PinnedAreaComponent refreshUI failed', String(e));
+    }
+
     switchView(savedView);
 
     if (AI.ready()) {
@@ -6309,18 +6768,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
   }
 
   /**
-   * Строит HTML-разметку сегментов карусели (local / world / seren).
-   * @returns {string} HTML-строка.
-   */
-  function buildSegmentsMarkup() {
-    return '<div class="seg">' +
-      '<button class="seg-b on" data-k="local"><span class="lbl">' + translate('seg.local') + '</span><span class="cnt" id="c-local">0</span></button>' +
-      '<button class="seg-b" data-k="world"><span class="lbl">' + translate('seg.world') + '</span><span class="cnt" id="c-world">0</span></button>' +
-      '<button class="seg-b" data-k="seren"><span class="lbl">' + translate('seg.seren') + '</span><span class="cnt" id="c-seren">0</span></button>' +
-    '</div>';
-  }
-
-  /**
    * Строит HTML-разметку обёртки карусели с пагинацией (стрелки, точки, счётчик).
    * @returns {string} HTML-строка.
    */
@@ -6339,11 +6786,12 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
   /**
    * Строит HTML-разметку редактора (поле ввода, счётчик символов,
    * переключатель режима и кнопка отправки).
+   * Футер (.ed-foot) скрыт по умолчанию через inline-стиль.
    * @returns {string} HTML-строка.
    */
   function buildEditorMarkup() {
     return '<div class="ed"><textarea id="ed-ta" class="ed-ta" placeholder="' + Utils.esc(translate('ed.placeholder')) + '"></textarea>' +
-    '<div class="ed-foot"><span id="ed-cnt" class="ed-cnt">0 ' + translate('ed.chars') + '</span>' +
+    '<div class="ed-foot" style="display:none;"><span id="ed-cnt" class="ed-cnt">0 ' + translate('ed.chars') + '</span>' +
     '<div class="ed-acts">' +
       '<div class="tog-sw" id="mode-toggle" data-mode="private">' +
         '<div class="tog-sw-thumb"></div>' +
@@ -6380,16 +6828,37 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
 
   /**
    * Собирает полную HTML-разметку приложения из отдельных блоков.
+   * Включает контейнер для закреплённой заметки (#pinned-area).
    * @returns {string} Полная HTML-строка для вставки в #app-root.
    */
   function buildMarkup() {
     return buildHeaderMarkup() +
-           '<div class="ws" id="ws-stream">' + buildSegmentsMarkup() + buildCarouselWrapMarkup() + buildEditorMarkup() + '</div>' +
+           '<div class="ws" id="ws-stream">' +
+             '<div id="pinned-area" style="display:none;"></div>' +
+             buildCarouselWrapMarkup() +
+             buildEditorMarkup() +
+           '</div>' +
            buildBaseMarkup() +
            buildBottomTabMarkup();
   }
 <!-- NOOMIUM_MODULE_END UI.Layout -->
+  
+<!-- NOOMIUM_MODULE_START I18n.new -->
+  I18n.addDict('ru', {
+    'btn.more': 'ЕЩЕ',
+    'pin.authoring': 'МОЕ МИР ОЗАРЕНИЕ',
+    'empty.world_fresh.t': 'Открытых мыслей пока нет',
+    'empty.world_fresh.d': 'Напишите первую и поделитесь с миром'
+  });
 
+  I18n.addDict('en', {
+    'btn.more': 'MORE',
+    'pin.authoring': 'MY WORLD INSIGHT',
+    'empty.world_fresh.t': 'No open thoughts yet',
+    'empty.world_fresh.d': 'Write the first one and share with the world'
+  });
+<!-- NOOMIUM_MODULE_END I18n.new -->
+  
 <!-- NOOMIUM_MODULE_START UI.Menu -->
   /**
    * Открывает модальное окно настроек приложения.
