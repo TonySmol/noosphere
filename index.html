@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.12">
+<meta name="app-version" content="1.3.13">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -3873,11 +3873,17 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /** @type {HTMLElement | null} */
     var modeToggle = null;
 
+    /** @type {HTMLElement | null} Контейнер нижней панели редактора */
+    var edFoot = null;
+
     /** @type {number | null} ID таймера debounce для поиска */
     var searchTimer = null;
 
     /** @type {function(): void | null} Обработчик смены языка */
     var i18nHandler = null;
+
+    /** @type {function(): void | null} Функция отписки от изменений StateManager */
+    var stateUnsubscribe = null;
 
     /** @type {function(): void | null} Ссылка на обработчик ввода текста */
     var onInput = null;
@@ -3898,6 +3904,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       counter = document.getElementById('ed-cnt');
       sendBtn = document.getElementById('btn-send');
       modeToggle = document.getElementById('mode-toggle');
+      edFoot = document.querySelector('.ed-foot');
     }
 
     /**
@@ -3982,6 +3989,18 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         sendBtn.disabled = false;
         sendBtn.innerHTML = PAPER_PLANE_SVG;
       }
+    }
+
+    /**
+     * Обновляет видимость нижней панели редактора в зависимости от режима приложения.
+     * В режимах browsing и pinned панель действий скрывается, в authoring — отображается.
+     * @returns {void}
+     */
+    function updateVisibilityByMode() {
+      refreshDOM();
+      if (!edFoot) return;
+      var mode = StateManager.getState().mode;
+      edFoot.style.display = (mode === 'authoring') ? 'flex' : 'none';
     }
 
     /**
@@ -4087,7 +4106,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (modeToggle && onModeClick) {
         try { modeToggle.removeEventListener('click', onModeClick); } catch (_) { /* ignore */ }
       }
-      editor = counter = sendBtn = modeToggle = null;
+      editor = counter = sendBtn = modeToggle = edFoot = null;
       onInput = onSendClick = onModeClick = null;
       if (searchTimer) {
         clearTimeout(searchTimer);
@@ -4108,6 +4127,14 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       var currentMode = SearchService.getSendMode();
       updateSendMode(currentMode);
       applyI18n();
+
+      // Подписка на изменение глобального режима приложения
+      stateUnsubscribe = StateManager.subscribe(function() {
+        updateVisibilityByMode();
+      });
+      
+      // Применение видимости при старте
+      updateVisibilityByMode();
     }
 
     /**
@@ -4119,6 +4146,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (i18nHandler) {
         try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
         i18nHandler = null;
+      }
+      if (typeof stateUnsubscribe === 'function') {
+        stateUnsubscribe();
+        stateUnsubscribe = null;
       }
     }
 
