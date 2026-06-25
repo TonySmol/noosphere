@@ -3,7 +3,7 @@
  * Версия передаётся через URL-параметр ?v=<app-version> для cache-busting.
  *
  * @file sw.js
- * @version 1.0.0
+ * @version 1.0.1
  */
 
 /**
