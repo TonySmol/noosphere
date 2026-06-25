@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.10">
+<meta name="app-version" content="1.3.11">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -7031,11 +7031,21 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
    * @returns {void}
    */
   function bootstrap() {
+  try {
+    const app = DI.resolve('App');
+    app.mount();
+    
+    // Инициализация Service Worker (после монтирования приложения).
+    // Вызов изолирован в try/catch, чтобы сбой SW не ломал запуск всего приложения:
+    // SW — опциональный компонент, приложение должно работать и без него (fallback).
     try {
-      const app = DI.resolve('App');
-      app.mount();
-    } catch (err) {
-      console.error('Bootstrap failed:', err);
+      const sw = DI.resolve('SW');
+      sw.init();
+    } catch (swErr) {
+      console.warn('[Bootstrap] SW init failed:', swErr);
+    }
+  } catch (err) {
+    console.error('Bootstrap failed:', err);
 
       let root = document.getElementById('app-root');
       if (!root) {
