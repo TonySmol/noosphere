@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.15">
+<meta name="app-version" content="1.3.16">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -4723,6 +4723,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /** @type {SearchResult[] | null} Временный кэш карточек для режима browsing */
     var browsingFeedCache = null;
 
+    /** @type {string | null} Последний обработанный режим для защиты от повторного входа */
+    var lastMode = null;
+
+    /** @type {string | null} ID последнего закреплённого пина */
+    var lastPinnedId = null;
+
+    /** @type {function(Object): void | null} Обработчик изменения статуса сети */
+    var netStatusHandler = null;
+
     /**
      * Создаёт DocumentFragment с подсвеченными совпадениями поискового запроса.
      * @param {string} text - Исходный текст карточки.
@@ -5253,6 +5262,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /**
      * Обрабатывает клик на кнопку «ЕЩЕ» (пин карточки).
+     * В режиме browsing ищет в кэше ленты, в режиме pinned — во всех сегментах.
      * @param {string} id - ID карточки для пина.
      * @returns {void}
      */
@@ -5260,20 +5270,30 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       var state = StateManager.getState();
       var item = null;
 
-      // Ищем карточку в текущем списке
+      // В режиме browsing ищем в кэше ленты
       if (state.mode === 'browsing' && browsingFeedCache) {
         item = findItemById(id, browsingFeedCache);
-      } else {
-        // В pinned режиме ищем в текущем сегменте
-        item = findItemById(id, state.lists[state.seg]);
+      } else if (state.mode === 'pinned') {
+        // В режиме pinned ищем во всех трёх сегментах
+        var segments = ['local', 'world', 'seren'];
+        for (var i = 0; i < segments.length; i++) {
+          var seg = segments[i];
+          if (state.lists[seg] && state.lists[seg].length > 0) {
+            item = findItemById(id, state.lists[seg]);
+            if (item) break;
+          }
+        }
       }
 
-      if (item && item.vector) {
-        StateManager.setState({
-          mode: 'pinned',
-          pinnedCard: { id: item.id, text: item.text, vector: item.vector }
-        });
+      if (!item || !item.vector) {
+        console.warn('StreamViewComponent: card not found for pin, id=' + id);
+        return;
       }
+
+      StateManager.setState({
+        mode: 'pinned',
+        pinnedCard: { id: item.id, text: item.text, vector: item.vector }
+      });
     }
 
     /**
@@ -5311,12 +5331,30 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /**
      * Главный диспетчер режимов: вызывается при изменении mode или pinnedCard.
      * Очищает старые данные и запускает загрузку для нового режима.
+     * Защищён от повторного входа при неизменном режиме.
      * @returns {void}
      */
     function applyMode() {
       var state = StateManager.getState();
       var mode = state.mode;
       var pinnedCard = state.pinnedCard;
+
+      // Защита от повторного входа: пропускаем, если режим не изменился
+      if (lastMode !== null && lastMode === mode) {
+        // В режиме pinned дополнительно проверяем изменение пина
+        if (mode === 'pinned') {
+          var currentPinnedId = pinnedCard ? pinnedCard.id : null;
+          if (currentPinnedId === lastPinnedId) {
+            return; // Пин не изменился, пропускаем
+          }
+        } else {
+          return; // Режим не изменился, пропускаем
+        }
+      }
+
+      // Обновляем сохранённые значения
+      lastMode = mode;
+      lastPinnedId = pinnedCard ? pinnedCard.id : null;
 
       // Очищаем текущие страницы
       uiState.pages = [];
@@ -5358,6 +5396,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       // Режим authoring
       if (mode === 'authoring') {
         removePinnedBlock();
+        // Сбрасываем сегмент на local при входе в режим автора
+        StateManager.setState({ seg: 'local' });
+        document.querySelectorAll('.seg-b').forEach(function(b) {
+          b.classList.toggle('on', b.getAttribute('data-k') === 'local');
+        });
         initCarousel(false); // showPinButton = false
         return;
       }
@@ -5472,6 +5515,17 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       };
       Bus.on('editor:search-request', editorSearchHandler);
 
+      // Автообновление ленты в browsing при восстановлении сети
+      netStatusHandler = function(payload) {
+        if (payload && payload.status === 'connected') {
+          var state = StateManager.getState();
+          if (state.mode === 'browsing') {
+            applyMode();
+          }
+        }
+      };
+      Bus.on('net:status', netStatusHandler);
+
       updateCounts();
       applyMode();
     }
@@ -5500,6 +5554,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       uiState.nextBtn = null;
       uiState.pages = [];
       browsingFeedCache = null;
+      lastMode = null;
+      lastPinnedId = null;
       
       if (i18nHandler) {
         try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
@@ -5516,6 +5572,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (editorSearchHandler) {
         try { Bus.off('editor:search-request', editorSearchHandler); } catch (_) { /* ignore */ }
         editorSearchHandler = null;
+      }
+      if (netStatusHandler) {
+        try { Bus.off('net:status', netStatusHandler); } catch (_) { /* ignore */ }
+        netStatusHandler = null;
       }
 
       removePinnedBlock();
