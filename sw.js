@@ -6,7 +6,7 @@
  * @version 1.0.2
  */
 
-const APP_VERSION = '1.3.12'; // Обязательно должно совпадать с meta-тегом в index.html
+const APP_VERSION = '1.3.15'; // Обязательно должно совпадать с meta-тегом в index.html
 const CACHE_NAME = 'noomium-v' + new URL(self.location).searchParams.get('v');
 
 const CDN_HOSTS = ['cdn.jsdelivr.net', 'huggingface.co'];
