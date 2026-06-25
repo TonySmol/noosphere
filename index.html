@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.11">
+<meta name="app-version" content="1.3.12">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -3372,6 +3372,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
    * @property {SearchResult[]} lists.local - Локальные совпадения.
    * @property {SearchResult[]} lists.world - Совпадения из сети.
    * @property {SearchResult[]} lists.seren - Озарения (близкие, но ниже порога).
+   * @property {SearchResult | null} pinnedItem - Закреплённая заметка (контекст).
+   * @property {boolean} isWriting - Флаг: поле ввода не пустое.
+   * @property {boolean} classicMode - Вычисляемое: классический режим (нет закрепа + идёт ввод).
    */
 
   DI.register('StateManager', function() {
@@ -3389,7 +3392,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       lastQuery: 0,
       netAuthorized: false,
       requestNetworkAuth: null,
-      lists: { local: [], world: [], seren: [] }
+      lists: { local: [], world: [], seren: [] },
+      pinnedItem: null,
+      isWriting: false,
+      classicMode: false
     };
 
     /**
@@ -3410,12 +3416,19 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /**
      * Обновляет состояние (частичное обновление через Object.assign)
      * и синхронно уведомляет всех подписчиков.
+     * Автоматически пересчитывает classicMode при изменении pinnedItem или isWriting.
      * @param {Partial<AppState>} partial - Объект с изменяемыми полями.
      * @returns {void}
      */
     function setState(partial) {
       if (partial && typeof partial === 'object') {
         Object.assign(state, partial);
+        
+        // Автоматическое вычисление classicMode
+        if ('pinnedItem' in partial || 'isWriting' in partial) {
+          state.classicMode = !state.pinnedItem && state.isWriting;
+        }
+        
         for (var i = 0; i < listeners.length; i++) {
           try {
             listeners[i](state);
@@ -3765,6 +3778,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_START EditorComponent -->
   DI.register('EditorComponent', function(Bus, I18n, Utils, SearchService, Config, StateManager) {
 
+    // SVG-иконки, используемые в кнопке отправки
+    var PAPER_PLANE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+    var SPINNER_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>';
+
     /** @type {HTMLTextAreaElement | null} */
     var editor = null;
 
@@ -3792,9 +3809,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /** @type {function(MouseEvent): void | null} Ссылка на обработчик переключения режима */
     var onModeClick = null;
 
+    /** @type {function(): void | null} Функция отписки от StateManager */
+    var unsubscribeState = null;
+
     /**
      * Обновляет ссылки на DOM-элементы.
-     * Вызывается при каждом обращении, так как DOM может быть пересоздан после refreshUI.
      * @returns {void}
      */
     function refreshDOM() {
@@ -3889,6 +3908,35 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
+     * Обновляет UI редактора в зависимости от контекста (pinnedItem, isWriting).
+     * Управляет видимостью переключателя режимов и текстом кнопки отправки.
+     * @returns {void}
+     */
+    function refreshEditorUI() {
+      refreshDOM();
+      var state = StateManager.getState();
+      
+      // Управление видимостью переключателя режимов
+      if (modeToggle) {
+        if (state.classicMode) {
+          modeToggle.style.display = '';
+        } else {
+          modeToggle.style.display = 'none';
+        }
+      }
+      
+      // Обновление aria-label кнопки отправки
+      if (sendBtn) {
+        var label = I18n.t('btn.send');
+        if (state.pinnedItem && state.pinnedItem.peer) {
+          // Закреплена чужая заметка → отправка в мир
+          label = I18n.t('btn.reply.world') || 'Ответить в мир';
+        }
+        sendBtn.setAttribute('aria-label', label);
+      }
+    }
+
+    /**
      * Применяет переводы к элементам редактора (placeholder, кнопки).
      * @returns {void}
      */
@@ -3910,18 +3958,29 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         }
       }
       
-      if (sendBtn) {
-        sendBtn.setAttribute('aria-label', I18n.t('btn.send'));
-      }
+      refreshEditorUI();
     }
 
     /**
      * Обрабатывает клик по кнопке отправки: запускает сохранение и очистку поля.
+     * Логика выбора режима отправки:
+     * - Если закреплена чужая заметка (pinnedItem.peer) → mode = 'world'
+     * - Иначе → mode = текущий sendMode (если переключатель видим) или 'private'
      * @returns {void}
      */
     function handleSend() {
       var text = getValue().trim();
-      var mode = SearchService.getSendMode();
+      var state = StateManager.getState();
+      var mode;
+      
+      // Определение режима отправки
+      if (state.pinnedItem && state.pinnedItem.peer) {
+        // Закреплена чужая заметка → отправка в мир (ответ)
+        mode = 'world';
+      } else {
+        // Обычная отправка: используем текущий sendMode или 'private'
+        mode = SearchService.getSendMode();
+      }
 
       setSendingState(true);
 
@@ -3950,6 +4009,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (editor) {
         onInput = function() {
           updateCounter();
+          // Обновление isWriting в StateManager
+          var value = getValue();
+          StateManager.setState({ isWriting: value.trim().length > 0 });
+          
           if (searchTimer) clearTimeout(searchTimer);
           searchTimer = setTimeout(function() {
             if (Bus && Bus.emit) {
@@ -4009,9 +4072,20 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       i18nHandler = function() { applyI18n(); };
       Bus.on('i18n:change', i18nHandler);
 
+      // Подписка на изменения StateManager для обновления UI
+      unsubscribeState = StateManager.subscribe(function(state) {
+        if ('pinnedItem' in state || 'isWriting' in state || 'classicMode' in state) {
+          refreshEditorUI();
+        }
+      });
+
       var currentMode = SearchService.getSendMode();
       updateSendMode(currentMode);
       applyI18n();
+      
+      // Инициализация isWriting на основе текущего значения
+      var initialValue = getValue();
+      StateManager.setState({ isWriting: initialValue.trim().length > 0 });
     }
 
     /**
@@ -4023,6 +4097,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (i18nHandler) {
         try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
         i18nHandler = null;
+      }
+      if (unsubscribeState) {
+        try { unsubscribeState(); } catch (_) { /* ignore */ }
+        unsubscribeState = null;
       }
     }
 
@@ -4554,10 +4632,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
    * @property {number | null} scrollRAF - ID requestAnimationFrame для скролла.
    */
 
-  DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent) {
+  DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent, SearchService, Logger) {
 
     /** @type {number} Количество карточек на одной странице */
     var PAGE_SIZE = 10;
+
+    /** @type {string} Идентификатор style-элемента для context-bar (защита от дублирования) */
+    var STYLE_ID = 'stream-view-context-styles';
 
     /** @type {CarouselUIState} */
     var uiState = {
@@ -4585,30 +4666,44 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /** @type {function(): void | null} */
     var listsChangedHandler = null;
 
+    /** @type {function(): void | null} Функция отписки от StateManager */
+    var unsubscribeState = null;
+
+    /** @type {HTMLElement | null} Контейнер для отображения закреплённой заметки */
+    var contextBar = null;
+
+    /** @type {boolean} Флаг, предотвращающий рекурсивный вызов renderFeed */
+    var isRendering = false;
+
+    /** @type {string | null} Последний обработанный контекст (для защиты от лишних перерисовок) */
+    var lastRenderContext = null;
+
     /**
      * Создаёт DocumentFragment с подсвеченными совпадениями поискового запроса.
+     * Безопасно обрабатывает пустой или undefined query.
      * @param {string} text - Исходный текст карточки.
      * @param {string} query - Поисковый запрос из редактора.
-     * @returns {DocumentFragment} Фрагмент с текстовыми узлами и тегами <mark>.
+     * @returns {DocumentFragment}
      */
     function highlightText(text, query) {
       var fragment = document.createDocumentFragment();
       if (!text) return fragment;
       
-      if (!query) {
+      var safeQuery = (query || '').trim();
+      if (!safeQuery) {
         fragment.appendChild(document.createTextNode(String(text)));
         return fragment;
       }
       
-      if (query !== cachedQuery) {
-        var words = query.toLowerCase().split(/\s+/).filter(function(w) { return w.length > 2; });
+      if (safeQuery !== cachedQuery) {
+        var words = safeQuery.toLowerCase().split(/\s+/).filter(function(w) { return w.length > 2; });
         if (words.length === 0) {
           cachedRegex = null;
         } else {
           var escapedWords = words.map(function(w) { return Utils.escRe(w); });
           cachedRegex = new RegExp('(' + escapedWords.join('|') + ')', 'gi');
         }
-        cachedQuery = query;
+        cachedQuery = safeQuery;
       }
       
       if (!cachedRegex) {
@@ -4633,7 +4728,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /**
      * Проверяет, принадлежит ли заметка текущему пользователю.
      * @param {SearchResult} item - Объект карточки.
-     * @returns {boolean} true, если это локальная заметка (нет поля peer).
+     * @returns {boolean}
      */
     function isOwnItem(item) {
       return !item.peer;
@@ -4642,7 +4737,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /**
      * Генерирует DOM-структуру карточки (fi) для переданного элемента.
      * @param {SearchResult} item - Данные для отрисовки.
-     * @returns {HTMLDivElement} Корневой элемент карточки.
+     * @returns {HTMLDivElement}
      */
     function renderItemHTML(item) {
       if (!item) return document.createElement('div');
@@ -4693,9 +4788,17 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       var footer = document.createElement('div');
       footer.className = 'fi-foot';
       
+      var btnFocus = document.createElement('button');
+      btnFocus.className = 'fi-act primary';
+      btnFocus.setAttribute('data-act', 'focus');
+      btnFocus.setAttribute('data-id', item.id);
+      btnFocus.setAttribute('aria-label', I18n.t('btn.focus') || 'Фокус');
+      btnFocus.textContent = I18n.t('btn.focus') || 'Фокус';
+      footer.appendChild(btnFocus);
+      
       if (own) {
         var btnEdit = document.createElement('button');
-        btnEdit.className = 'fi-act primary';
+        btnEdit.className = 'fi-act';
         btnEdit.setAttribute('data-act', 'edit');
         btnEdit.setAttribute('data-id', item.id);
         btnEdit.setAttribute('aria-label', I18n.t('btn.edit'));
@@ -4732,7 +4835,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /**
      * Разбивает плоский массив результатов на страницы по PAGE_SIZE.
-     * @param {SearchResult[]} list - Массив результатов поиска.
+     * @param {SearchResult[]} list
      * @returns {void}
      */
     function paginate(list) {
@@ -4748,7 +4851,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Обновляет disabled-статус кнопок пагинации в зависимости от текущей страницы.
+     * Обновляет disabled-статус кнопок пагинации.
      * @returns {void}
      */
     function updatePaginationButtons() {
@@ -4758,7 +4861,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /**
      * Полностью перерисовывает карусель для указанной страницы.
-     * @param {number} pageIndex - Индекс страницы для отображения.
+     * @param {number} pageIndex
      * @returns {void}
      */
     function renderPage(pageIndex) {
@@ -4803,8 +4906,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Обработчик скролла карусели (тролтлится через requestAnimationFrame).
-     * Вычисляет активную карточку и обновляет точки/счётчик.
+     * Обработчик скролла карусели (throttled через requestAnimationFrame).
      * @returns {void}
      */
     function onCarouselScroll() {
@@ -4838,7 +4940,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /**
      * Плавно прокручивает карусель к карточке с указанным индексом.
-     * @param {number} idx - Индекс карточки.
+     * @param {number} idx
      * @returns {void}
      */
     function scrollToIndex(idx) {
@@ -4851,111 +4953,193 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Инициализирует или пересобирает карусель на основе текущего состояния StateManager.
-     * Показывает empty-state, если данных нет.
+     * Создаёт или обновляет context-bar (плашку с закреплённой заметкой).
+     * @param {SearchResult | null} pinnedItem
      * @returns {void}
      */
-    function initCarousel() {
-      uiState.carouselEl = document.getElementById('carousel');
-      uiState.dotsContainer = document.getElementById('carousel-dots');
-      uiState.counterEl = document.getElementById('carousel-counter');
-      uiState.prevBtn = document.getElementById('pagination-prev');
-      uiState.nextBtn = document.getElementById('pagination-next');
-      var controls = document.getElementById('pagination-controls');
-
-      var state = StateManager.getState();
-      var list = state.lists[state.seg];
-
-      paginate(list);
-
-      if (uiState.totalPages === 0) {
-        if (uiState.carouselEl) uiState.carouselEl.style.display = 'none';
-        if (controls) controls.style.display = 'none';
-
-        var wrap = document.getElementById('carousel-wrap');
-        if (wrap) {
-          var existingEmpty = wrap.querySelector('.feed-empty');
-          if (existingEmpty) existingEmpty.remove();
-
-          var emptyMessages = {
-            local: { t: I18n.t('empty.local.t'), d: I18n.t('empty.local.d') },
-            world: { t: I18n.t('empty.world.t'), d: I18n.t('empty.world.d') },
-            seren: { t: I18n.t('empty.seren.t'), d: I18n.t('empty.seren.d') }
-          };
-          var msg = emptyMessages[state.seg];
-          
-          var emptyDiv = document.createElement('div');
-          emptyDiv.className = 'feed-empty';
-          
-          var emptyIc = document.createElement('div');
-          emptyIc.className = 'feed-empty-ic';
-          emptyIc.textContent = '◇';
-          emptyDiv.appendChild(emptyIc);
-          
-          var emptyT = document.createElement('div');
-          emptyT.className = 'feed-empty-t';
-          emptyT.textContent = msg.t;
-          emptyDiv.appendChild(emptyT);
-          
-          var emptyD = document.createElement('div');
-          emptyD.className = 'feed-empty-d';
-          emptyD.textContent = msg.d;
-          emptyDiv.appendChild(emptyD);
-          
-          wrap.appendChild(emptyDiv);
-        }
-
-        updatePaginationButtons();
+    function updateContextBar(pinnedItem) {
+      if (!contextBar) return;
+      
+      if (!pinnedItem) {
+        contextBar.style.display = 'none';
+        contextBar.innerHTML = '';
         return;
       }
+      
+      contextBar.style.display = 'flex';
+      contextBar.innerHTML = '';
+      
+      var textEl = document.createElement('div');
+      textEl.className = 'context-text';
+      textEl.textContent = pinnedItem.text;
+      contextBar.appendChild(textEl);
+      
+      var closeBtn = document.createElement('button');
+      closeBtn.className = 'context-close';
+      closeBtn.textContent = '✕';
+      closeBtn.setAttribute('aria-label', I18n.t('btn.unpin') || 'Открепить');
+      closeBtn.onclick = function() {
+        StateManager.setState({ pinnedItem: null });
+      };
+      contextBar.appendChild(closeBtn);
+    }
 
-      if (uiState.carouselEl) uiState.carouselEl.style.display = '';
-      if (controls) controls.style.display = '';
+    /**
+     * Рендерит пустое состояние ленты.
+     * @param {string} titleKey - Ключ заголовка в i18n.
+     * @param {string} descKey - Ключ описания в i18n.
+     * @returns {void}
+     */
+    function renderEmptyState(titleKey, descKey) {
+      if (uiState.carouselEl) uiState.carouselEl.style.display = 'none';
+      var controls = document.getElementById('pagination-controls');
+      if (controls) controls.style.display = 'none';
 
       var wrap = document.getElementById('carousel-wrap');
       if (wrap) {
         var existingEmpty = wrap.querySelector('.feed-empty');
         if (existingEmpty) existingEmpty.remove();
-      }
 
-      if (uiState.currentPage >= uiState.totalPages) {
-        uiState.currentPage = Math.max(0, uiState.totalPages - 1);
+        var emptyDiv = document.createElement('div');
+        emptyDiv.className = 'feed-empty';
+        
+        var emptyIc = document.createElement('div');
+        emptyIc.className = 'feed-empty-ic';
+        emptyIc.textContent = '◇';
+        emptyDiv.appendChild(emptyIc);
+        
+        var emptyT = document.createElement('div');
+        emptyT.className = 'feed-empty-t';
+        emptyT.textContent = I18n.t(titleKey);
+        emptyDiv.appendChild(emptyT);
+        
+        var emptyD = document.createElement('div');
+        emptyD.className = 'feed-empty-d';
+        emptyD.textContent = I18n.t(descKey);
+        emptyDiv.appendChild(emptyD);
+        
+        wrap.appendChild(emptyDiv);
       }
-
-      renderPage(uiState.currentPage);
+      updatePaginationButtons();
     }
 
     /**
-     * Обновляет счётчики (бейджи) над сегментами карусели.
-     * @returns {void}
+     * Строит уникальный ключ контекста рендеринга для защиты от рекурсии.
+     * @param {Object} state - Текущее состояние StateManager.
+     * @param {string} editorValue - Текущее значение редактора.
+     * @returns {string}
      */
-    function updateCounts() {
+    function buildRenderContext(state, editorValue) {
+      var pinId = state.pinnedItem ? state.pinnedItem.id : 'none';
+      var writing = state.isWriting ? '1' : '0';
+      var text = state.isWriting ? (editorValue || '') : '';
+      return pinId + '|' + writing + '|' + text;
+    }
+
+    /**
+     * Рендерит ленту в зависимости от контекста с защитой от рекурсии.
+     * Три режима:
+     * 1. pinnedItem && !isWriting → поиск по вектору закреплённой заметки
+     * 2. !pinnedItem && !isWriting → последние свои заметки
+     * 3. isWriting → обычный поиск по тексту
+     * @returns {Promise<void>}
+     */
+    function renderFeed() {
+      // Защита от рекурсии: если рендеринг уже идёт, выходим
+      if (isRendering) {
+        return Promise.resolve();
+      }
+
       var state = StateManager.getState();
-      ['local', 'world', 'seren'].forEach(function(key) {
-        var el = document.getElementById('c-' + key);
-        if (el) el.textContent = state.lists[key].length;
-      });
-    }
+      var editorValue = EditorComponent.getValue();
+      var currentContext = buildRenderContext(state, editorValue);
 
-    /**
-     * Переключает активный сегмент (local/world/seren) и перерисовывает карусель.
-     * @param {Segment} segKey - Ключ сегмента.
-     * @returns {void}
-     */
-    function setSegment(segKey) {
-      StateManager.setState({ seg: segKey });
-      document.querySelectorAll('.seg-b').forEach(function(b) {
-        b.classList.toggle('on', b.getAttribute('data-k') === segKey);
-      });
-      cachedQuery = null;
-      cachedRegex = null;
-      uiState.currentPage = 0;
-      initCarousel();
+      // Защита от лишних перерисовок при неизменном контексте
+      if (currentContext === lastRenderContext) {
+        return Promise.resolve();
+      }
+      lastRenderContext = currentContext;
+
+      isRendering = true;
+      var itemsPromise;
+      
+      if (state.pinnedItem && !state.isWriting) {
+        // Режим контекста: поиск похожих на закреплённую заметку
+        itemsPromise = SearchService.search(state.pinnedItem.text, true)
+          .then(function() {
+            var s = StateManager.getState();
+            return s.lists.local.concat(s.lists.world);
+          });
+      } else if (!state.pinnedItem && !state.isWriting) {
+        // Режим пустого состояния: последние свои заметки
+        itemsPromise = SearchService.getAllNotesCached()
+          .then(function(notes) {
+            return notes
+              .sort(function(a, b) { return (b.createdAt || 0) - (a.createdAt || 0); })
+              .map(function(n) {
+                return {
+                  id: n.id,
+                  text: n.text,
+                  vector: n.vector,
+                  score: null,
+                  shared: n.shared,
+                  createdAt: n.createdAt
+                };
+              });
+          });
+      } else {
+        // Режим поиска: обычный семантический поиск по тексту
+        itemsPromise = SearchService.search(editorValue, false)
+          .then(function() {
+            var s = StateManager.getState();
+            return s.lists.local.concat(s.lists.world).concat(s.lists.seren);
+          });
+      }
+      
+      return itemsPromise
+        .then(function(items) {
+          paginate(items);
+          
+          if (uiState.totalPages === 0) {
+            if (state.pinnedItem && !state.isWriting) {
+              renderEmptyState('empty.seren.t', 'empty.seren.d');
+            } else if (!state.pinnedItem && !state.isWriting) {
+              renderEmptyState('empty.local.t', 'empty.local.d');
+            } else {
+              renderEmptyState('empty.local.t', 'empty.local.d');
+            }
+            return;
+          }
+
+          if (uiState.carouselEl) uiState.carouselEl.style.display = '';
+          var controls = document.getElementById('pagination-controls');
+          if (controls) controls.style.display = '';
+
+          var wrap = document.getElementById('carousel-wrap');
+          if (wrap) {
+            var existingEmpty = wrap.querySelector('.feed-empty');
+            if (existingEmpty) existingEmpty.remove();
+          }
+
+          if (uiState.currentPage >= uiState.totalPages) {
+            uiState.currentPage = Math.max(0, uiState.totalPages - 1);
+          }
+
+          renderPage(uiState.currentPage);
+        })
+        .catch(function(err) {
+          if (Logger && Logger.warn) {
+            Logger.warn('StreamView.renderFeed error', String(err && err.message || err));
+          }
+        })
+        .finally(function() {
+          isRendering = false;
+        });
     }
 
     /**
      * Копирует текст в буфер обмена с фоллбэком на execCommand.
-     * @param {string} text - Текст для копирования.
+     * @param {string} text
      * @returns {void}
      */
     function copyToClipboard(text) {
@@ -4986,9 +5170,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Ищет элемент в массиве по его ID.
-     * @param {string} id - Идентификатор.
-     * @param {SearchResult[]} list - Массив для поиска.
+     * Ищет элемент в массиве по ID.
+     * @param {string} id
+     * @param {SearchResult[]} list
      * @returns {SearchResult | null}
      */
     function findItemById(id, list) {
@@ -4999,9 +5183,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Обрабатывает клики по действиям внутри карточки (edit, copy, del, toggle).
-     * @param {string} action - Имя действия (из data-act).
-     * @param {HTMLElement} element - DOM-элемент кнопки.
+     * Обрабатывает клики по действиям внутри карточки.
+     * @param {string} action
+     * @param {HTMLElement} element
      * @returns {void}
      */
     function handleItemAction(action, element) {
@@ -5009,14 +5193,24 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       var id = element.getAttribute('data-id');
       var state = StateManager.getState();
 
+      if (action === 'focus') {
+        var allItems = state.lists.local.concat(state.lists.world).concat(state.lists.seren);
+        var item = findItemById(id, allItems);
+        if (item && (!state.pinnedItem || state.pinnedItem.id !== item.id)) {
+          StateManager.setState({ pinnedItem: item });
+        }
+        return;
+      }
+      
       if (action === 'edit') {
         try { Bus.emit('editor:edit-note', { id: id }); } catch (_) { /* ignore */ }
         return;
       }
       
       if (action === 'copy') {
-        var item = findItemById(id, state.lists[state.seg]);
-        if (item) copyToClipboard(item.text);
+        var allItems2 = state.lists.local.concat(state.lists.world).concat(state.lists.seren);
+        var item2 = findItemById(id, allItems2);
+        if (item2) copyToClipboard(item2.text);
         return;
       }
       
@@ -5024,6 +5218,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         if (!confirm(I18n.t('del.confirm'))) return;
         DB.del(id).then(function() {
           Toast.show('ok', I18n.t('toast.deleted'));
+          // Если удалили закреплённую заметку — снимаем закреп
+          var st = StateManager.getState();
+          if (st.pinnedItem && st.pinnedItem.id === id) {
+            StateManager.setState({ pinnedItem: null });
+          }
           try { Bus.emit('editor:search-request', { force: true }); } catch (_) { /* ignore */ }
         }).catch(function(err) {
           Toast.show('err', String(err && err.message || err) || 'Delete failed');
@@ -5047,8 +5246,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Делегированный обработчик кликов по обёртке карусели (стрелки и действия карточек).
-     * @param {MouseEvent} e - Событие клика.
+     * Делегированный обработчик кликов по обёртке карусели.
+     * @param {MouseEvent} e
      * @returns {void}
      */
     function handleWrapClick(e) {
@@ -5077,14 +5276,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Привязывает первичные DOM-события (клики по сегментам и обёртке).
+     * Привязывает DOM-события.
      * @returns {void}
      */
     function bindDOMEvents() {
-      document.querySelectorAll('.seg-b').forEach(function(b) {
-        b.onclick = function() { setSegment(b.getAttribute('data-k')); };
-      });
-
       var wrap = document.getElementById('carousel-wrap');
       if (wrap) {
         wrap.addEventListener('click', handleWrapClick);
@@ -5092,16 +5287,38 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Инициализирует компонент: привязывает события, подписывается на шину, рендерит UI.
+     * Управляет видимостью сегмент-бара.
+     * @param {boolean} classicMode
+     * @returns {void}
+     */
+    function updateSegmentsVisibility(classicMode) {
+      var segBar = document.querySelector('.seg');
+      if (segBar) {
+        segBar.style.display = classicMode ? 'flex' : 'none';
+      }
+    }
+
+    /**
+     * Добавляет CSS-стили для context-bar (один раз, с защитой от дублирования).
+     * @returns {void}
+     */
+    function ensureStyles() {
+      if (document.getElementById(STYLE_ID)) return;
+      
+      var styleEl = document.createElement('style');
+      styleEl.id = STYLE_ID;
+      styleEl.textContent = 
+        '.context-text{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2);font-size:13px}' +
+        '.context-close{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:16px;padding:4px}';
+      document.head.appendChild(styleEl);
+    }
+
+    /**
+     * Инициализирует компонент.
      * @returns {void}
      */
     function init() {
       bindDOMEvents();
-
-      var state = StateManager.getState();
-      document.querySelectorAll('.seg-b').forEach(function(b) {
-        b.classList.toggle('on', b.getAttribute('data-k') === state.seg);
-      });
 
       var carouselEl = document.getElementById('carousel');
       if (carouselEl) {
@@ -5121,37 +5338,56 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         });
       }
 
+      // Создание context-bar (один раз за жизненный цикл модуля)
+      var wrap = document.getElementById('carousel-wrap');
+      if (wrap && !contextBar) {
+        ensureStyles();
+        contextBar = document.createElement('div');
+        contextBar.className = 'context-bar';
+        contextBar.style.cssText = 'display:none;align-items:center;gap:8px;padding:8px 12px;margin:0 12px 8px;background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-sm);';
+        wrap.parentNode.insertBefore(contextBar, wrap);
+      }
+
       i18nHandler = function() {
-        var s = StateManager.getState();
-        document.querySelectorAll('.seg-b').forEach(function(b) {
-          var lbl = b.querySelector('.lbl');
-          var k = b.getAttribute('data-k');
-          if (lbl && k === 'local') lbl.textContent = I18n.t('seg.local');
-          else if (lbl && k === 'world') lbl.textContent = I18n.t('seg.world');
-          else if (lbl && k === 'seren') lbl.textContent = I18n.t('seg.seren');
-        });
-        updateCounts();
         cachedQuery = null;
         cachedRegex = null;
-        initCarousel();
+        lastRenderContext = null;  // Сброс для принудительного ре-рендера при смене языка
+        renderFeed();
       };
       Bus.on('i18n:change', i18nHandler);
 
+      // ВАЖНО: listsChangedHandler НЕ вызывает renderFeed напрямую,
+      // чтобы избежать рекурсии. Он только сбрасывает кеш подсветки.
+      // Сам renderFeed вызывается из подписки на StateManager при изменении isWriting/pinnedItem.
       listsChangedHandler = function() {
-        updateCounts();
         cachedQuery = null;
         cachedRegex = null;
         uiState.currentPage = 0;
-        initCarousel();
+        // Сброс контекста, чтобы следующий renderFeed отработал
+        lastRenderContext = null;
+        renderFeed();
       };
       Bus.on('state:lists-changed', listsChangedHandler);
 
-      updateCounts();
-      initCarousel();
+      // Подписка на изменения StateManager
+      unsubscribeState = StateManager.subscribe(function(state) {
+        if ('pinnedItem' in state || 'isWriting' in state || 'classicMode' in state) {
+          updateSegmentsVisibility(state.classicMode);
+          updateContextBar(state.pinnedItem);
+          lastRenderContext = null;  // Сброс для принудительного ре-рендера
+          renderFeed();
+        }
+      });
+
+      // Начальное состояние
+      var initialState = StateManager.getState();
+      updateSegmentsVisibility(initialState.classicMode);
+      updateContextBar(initialState.pinnedItem);
+      renderFeed();
     }
 
     /**
-     * Уничтожает компонент: очищает таймеры, снимает обработчики, отписывается от шины.
+     * Уничтожает компонент.
      * @returns {void}
      */
     function destroy() {
@@ -5182,13 +5418,29 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) { /* ignore */ }
         listsChangedHandler = null;
       }
+      if (unsubscribeState) {
+        try { unsubscribeState(); } catch (_) { /* ignore */ }
+        unsubscribeState = null;
+      }
+      
+      // Удаляем contextBar из DOM при destroy, чтобы избежать дублирования
+      if (contextBar && contextBar.parentNode) {
+        try { contextBar.parentNode.removeChild(contextBar); } catch (_) { /* ignore */ }
+      }
+      contextBar = null;
+      
+      // Сброс флагов
+      isRendering = false;
+      lastRenderContext = null;
+      cachedQuery = null;
+      cachedRegex = null;
     }
 
     return {
       init: init,
       destroy: destroy
     };
-  }, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'Toast', 'EditorComponent']);
+  }, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'Toast', 'EditorComponent', 'SearchService', 'Logger']);
 <!-- NOOMIUM_MODULE_END StreamViewComponent -->
 
 <!-- NOOMIUM_MODULE_START BaseViewComponent -->
