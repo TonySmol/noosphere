@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.13">
+<meta name="app-version" content="1.3.14">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2600,7 +2600,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             for (var j = 0; j < answers.length; j++) {
               if (answers[j].id === ev.id) { isDupAnswer = true; break; }
             }
-                        if (!isDupAnswer) {
+            if (!isDupAnswer) {
               if (answers.length >= cfg.get('maxAnswersCache', 100)) answers.shift();
               answers.push({
                 id: ev.id,
@@ -2714,7 +2714,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           var nowSec = Math.floor(Date.now() / 1000);
           if (pool) {
             subscription = pool.subscribeMany(cfg.get('relays', []),
-              [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
+              [{ kinds: [KQ, KA, 21002], '#t': [room], since: nowSec - subWindow }],
               { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
             if (log) log.info('Reconnect: subscribed');
             reconnecting = false;
@@ -2883,6 +2883,45 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
        * @returns {Promise<void>}
        */
       init: init,
+
+      /**
+       * Отправляет роевой импульс (kind 21002) на целевую заметку.
+       * Создаёт Nostr-событие с тегами:
+       *   ['e', targetEventId] - ссылка на целевое событие
+       *   ['p', targetPubkey]  - публичный ключ получателя
+       *   ['t', room]          - тег комнаты для маршрутизации
+       *
+       * @param {string} targetEventId - ID целевого Nostr-события (64 hex).
+       * @param {string} targetPubkey - Публичный ключ получателя (64 hex).
+       * @returns {void}
+       */
+      publishImpulse: function(targetEventId, targetPubkey) {
+        if (!pool || !nostr || !sk) {
+          if (log) log.warn('publishImpulse: network not ready');
+          return;
+        }
+        if (!targetEventId || targetEventId.length !== 64 ||
+            !targetPubkey || targetPubkey.length !== 64) {
+          if (log) log.warn('publishImpulse: invalid params');
+          return;
+        }
+        try {
+          var ev = nostr.finalizeEvent({
+            kind: 21002,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [
+              ['e', targetEventId],
+              ['p', targetPubkey],
+              ['t', cfg.get('room', 'noomium-main')]
+            ],
+            content: ''
+          }, sk);
+          safePublish(ev);
+          if (log) log.info('publishImpulse: sent to ' + targetPubkey.slice(0, 6) + ' for event ' + targetEventId.slice(0, 8));
+        } catch (e) {
+          if (log) log.warn('publishImpulse fail', String(e && e.message || e));
+        }
+      },
 
       /**
        * Отправляет поисковый запрос в сеть.
@@ -3784,6 +3823,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                   score: answer.score,
                   shared: true,
                   peer: answer.peer,
+                  fullPubkey: answer.fullPubkey,
                   createdAt: answer.createdAt
                 });
               }
@@ -4754,7 +4794,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
    * @property {number | null} scrollRAF - ID requestAnimationFrame для скролла.
    */
 
-  DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent, SearchService, Logger) {
+  DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent, SearchService, Logger, ImpulseService) {
 
     /** @type {number} Количество карточек на одной странице */
     var PAGE_SIZE = 10;
@@ -4793,6 +4833,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /** @type {HTMLElement | null} Контейнер для отображения закреплённой заметки */
     var contextBar = null;
+
+    /** @type {Map<string, number>} Счётчики полученных импульсов (id -> count). Сбрасываются при смене ленты. */
+    var impulseCounters = new Map();
+
+    /** @type {function(Object): void | null} Обработчик события impulse:received */
+    var impulseHandler = null;
 
     /** @type {boolean} Флаг, предотвращающий рекурсивный вызов renderFeed */
     var isRendering = false;
@@ -4917,6 +4963,18 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       btnFocus.setAttribute('aria-label', I18n.t('btn.focus') || 'Фокус');
       btnFocus.textContent = I18n.t('btn.focus') || 'Фокус';
       footer.appendChild(btnFocus);
+
+      // Кнопка импульса только для чужих заметок (с peer и fullPubkey)
+      if (!own && item.fullPubkey) {
+        var btnImpulse = document.createElement('button');
+        btnImpulse.className = 'fi-act';
+        btnImpulse.setAttribute('data-act', 'impulse');
+        btnImpulse.setAttribute('data-id', item.id);
+        btnImpulse.setAttribute('aria-label', I18n.t('btn.impulse') || 'Импульс');
+        var impulseCount = impulseCounters.get(item.id) || 0;
+        btnImpulse.textContent = '◇' + (impulseCount > 0 ? ' ' + impulseCount : '');
+        footer.appendChild(btnImpulse);
+      }
       
       if (own) {
         var btnEdit = document.createElement('button');
@@ -5167,6 +5225,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
      * @returns {Promise<void>}
      */
     function renderFeed() {
+      // Сброс счётчиков импульсов при смене ленты (импульсы эфемерны)
+      impulseCounters.clear();
+
       // Защита от рекурсии: если рендеринг уже идёт, выходим
       if (isRendering) {
         return Promise.resolve();
@@ -5323,6 +5384,24 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         }
         return;
       }
+
+      if (action === 'impulse') {
+        var allItemsImp = state.lists.local.concat(state.lists.world).concat(state.lists.seren);
+        var itemImp = findItemById(id, allItemsImp);
+        if (itemImp && itemImp.peer && itemImp.fullPubkey) {
+          var sent = ImpulseService && ImpulseService.sendImpulse
+            ? ImpulseService.sendImpulse(itemImp.id, itemImp.fullPubkey)
+            : false;
+          if (sent) {
+            Toast.show('info', I18n.t('toast.impulse.sent') || '◇ импульс отправлен');
+          } else {
+            Toast.show('err', I18n.t('toast.impulse.fail') || 'Не удалось отправить импульс');
+          }
+        } else {
+          Toast.show('warn', I18n.t('toast.impulse.nopubkey') || 'Нет публичного ключа получателя');
+        }
+        return;
+      }
       
       if (action === 'edit') {
         try { Bus.emit('editor:edit-note', { id: id }); } catch (_) { /* ignore */ }
@@ -5421,7 +5500,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Добавляет CSS-стили для context-bar (один раз, с защитой от дублирования).
+     * Добавляет CSS-стили для context-bar и анимации импульсов (один раз, с защитой от дублирования).
      * @returns {void}
      */
     function ensureStyles() {
@@ -5431,7 +5510,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       styleEl.id = STYLE_ID;
       styleEl.textContent = 
         '.context-text{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2);font-size:13px}' +
-        '.context-close{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:16px;padding:4px}';
+        '.context-close{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:16px;padding:4px}' +
+        '.fi.impulse-flash{animation:impulseGlow .6s ease-out}' +
+        '@keyframes impulseGlow{0%{box-shadow:0 0 20px var(--brand-glow)}100%{box-shadow:none}}';
       document.head.appendChild(styleEl);
     }
 
@@ -5473,30 +5554,60 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       i18nHandler = function() {
         cachedQuery = null;
         cachedRegex = null;
-        lastRenderContext = null;  // Сброс для принудительного ре-рендера при смене языка
+        lastRenderContext = null;
         renderFeed();
       };
       Bus.on('i18n:change', i18nHandler);
 
-      // ВАЖНО: listsChangedHandler НЕ вызывает renderFeed напрямую,
-      // чтобы избежать рекурсии. Он только сбрасывает кеш подсветки.
-      // Сам renderFeed вызывается из подписки на StateManager при изменении isWriting/pinnedItem.
       listsChangedHandler = function() {
         cachedQuery = null;
         cachedRegex = null;
         uiState.currentPage = 0;
-        // Сброс контекста, чтобы следующий renderFeed отработал
         lastRenderContext = null;
         renderFeed();
       };
       Bus.on('state:lists-changed', listsChangedHandler);
+
+      // Подписка на входящие роевые импульсы
+      impulseHandler = function(payload) {
+        if (!payload || !payload.targetId) return;
+        
+        // Обновляем счётчик в памяти
+        var currentCount = impulseCounters.get(payload.targetId) || 0;
+        var newCount = currentCount + 1;
+        impulseCounters.set(payload.targetId, newCount);
+        
+        // Ищем карточку в текущем DOM (может быть не видна из-за пагинации)
+        var card = document.querySelector('.fi[data-id="' + payload.targetId + '"]');
+        if (card) {
+          // Запускаем анимацию вспышки
+          card.classList.remove('impulse-flash');
+          // Force reflow для перезапуска анимации
+          void card.offsetWidth;
+          card.classList.add('impulse-flash');
+          
+          // Обновляем текст кнопки импульса
+          var impulseBtn = card.querySelector('[data-act="impulse"]');
+          if (impulseBtn) {
+            impulseBtn.textContent = '◇ ' + newCount;
+          }
+          
+          // Убираем класс анимации после завершения
+          setTimeout(function() {
+            if (card && card.classList) {
+              card.classList.remove('impulse-flash');
+            }
+          }, 600);
+        }
+      };
+      Bus.on('impulse:received', impulseHandler);
 
       // Подписка на изменения StateManager
       unsubscribeState = StateManager.subscribe(function(state) {
         if ('pinnedItem' in state || 'isWriting' in state || 'classicMode' in state) {
           updateSegmentsVisibility(state.classicMode);
           updateContextBar(state.pinnedItem);
-          lastRenderContext = null;  // Сброс для принудительного ре-рендера
+          lastRenderContext = null;
           renderFeed();
         }
       });
@@ -5544,6 +5655,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         try { unsubscribeState(); } catch (_) { /* ignore */ }
         unsubscribeState = null;
       }
+
+      // Очистка обработчика импульсов
+      if (impulseHandler) {
+        try { Bus.off('impulse:received', impulseHandler); } catch (_) { /* ignore */ }
+        impulseHandler = null;
+      }
+
+      // Сброс счётчиков импульсов
+      impulseCounters.clear();
       
       // Удаляем contextBar из DOM при destroy, чтобы избежать дублирования
       if (contextBar && contextBar.parentNode) {
@@ -5562,7 +5682,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       init: init,
       destroy: destroy
     };
-  }, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'Toast', 'EditorComponent', 'SearchService', 'Logger']);
+  }, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'Toast', 'EditorComponent', 'SearchService', 'Logger', 'ImpulseService']);
 <!-- NOOMIUM_MODULE_END StreamViewComponent -->
 
 <!-- NOOMIUM_MODULE_START BaseViewComponent -->
@@ -7236,6 +7356,10 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     'btn.del': 'Удалить', 'btn.copy': 'Копия', 'btn.toggle.priv': 'Скрыть', 'btn.toggle.pub': 'Открыть',
     'btn.back': 'Назад', 'btn.gotit': 'Понятно', 'btn.forgot': 'Забыли пароль?',
     'btn.reset_storage': 'Сброс хранилища',
+    'btn.focus': 'Фокус',
+    'btn.unpin': 'Открепить',
+    'btn.reply.world': 'Ответ в мир',
+    'btn.impulse': 'Импульс',
     'reset_storage.confirm': 'Все данные будут удалены безвозвратно. Продолжить?',
     'sim.score': 'похожа на',
     'seg.local': 'Моё', 'seg.world': 'Мир', 'seg.seren': 'Озарения',
@@ -7261,6 +7385,9 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     'toast.edit.saved': 'сохранено',
     'toast.sending': 'отправка...',
     'toast.network.err': 'нет соединения',
+    'toast.impulse.sent': '◇ импульс отправлен',
+    'toast.impulse.fail': 'не удалось отправить импульс',
+    'toast.impulse.nopubkey': 'нет публичного ключа',
     'menu.settings': 'Настройки', 'menu.help': 'Как это работает', 'menu.theme': 'Тема',
     'menu.lang': 'Язык', 'menu.theme.dark': 'Тёмная', 'menu.theme.light': 'Светлая',
     'menu.export': 'Экспорт', 'menu.import': 'Импорт',
@@ -7311,6 +7438,10 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     'btn.del': 'Delete', 'btn.copy': 'Copy', 'btn.toggle.priv': 'Hide', 'btn.toggle.pub': 'Share',
     'btn.back': 'Back', 'btn.gotit': 'Got it', 'btn.forgot': 'Forgot password?',
     'btn.reset_storage': 'Reset Storage',
+    'btn.focus': 'Focus',
+    'btn.unpin': 'Unpin',
+    'btn.reply.world': 'Reply to world',
+    'btn.impulse': 'Impulse',
     'reset_storage.confirm': 'All data will be permanently deleted. Continue?',
     'sim.score': 'similarity',
     'seg.local': 'Mine', 'seg.world': 'World', 'seg.seren': 'Insights',
@@ -7336,6 +7467,9 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     'toast.edit.saved': 'saved',
     'toast.sending': 'sending...',
     'toast.network.err': 'no connection',
+    'toast.impulse.sent': '◇ impulse sent',
+    'toast.impulse.fail': 'failed to send impulse',
+    'toast.impulse.nopubkey': 'no public key available',
     'menu.settings': 'Settings', 'menu.help': 'How it works', 'menu.theme': 'Theme',
     'menu.lang': 'Language', 'menu.theme.dark': 'Dark', 'menu.theme.light': 'Light',
     'menu.export': 'Export', 'menu.import': 'Import',
@@ -7392,7 +7526,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     };
   }, ['Logger', 'Bus', 'Store', 'Config', 'Utils', 'DB', 'AI', 'Net', 'I18n', 'Modal', 'Toast', 'Progress']);
 <!-- NOOMIUM_MODULE_END App -->
-
+  
 <!-- NOOMIUM_MODULE_START Bootstrap -->
   /**
    * Точка входа приложения NOOmium.
