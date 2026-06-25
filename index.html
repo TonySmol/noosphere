@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.18">
+<meta name="app-version" content="1.3.9">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2063,38 +2063,117 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END AI -->
 
 <!-- NOOMIUM_MODULE_START Net -->
-  DI.register('Net', function(cfg, DB, AI, log, bus) {
-    var pool = null;
-    var sk = null;
-    var pk = null;
-    var queryId = null;
-    var peers = new Map();
-    var answers = [];
-    var onUpdate = null;
-    var hbTimer = null;
-    var flushTimer = null;
-    var lastQueryTime = 0;
-    var nostr = null;
-    var subscription = null;
-    var subscriptionJournal = null;
-    var peerListeners = [];
-    var started = false;
-    var reconnecting = false;
-    var seen = new Set();
-    var rateLimitedUntil = new Map();
-    var connAttempts = 0;
-    var netStatus = 'disconnected';
-    var sharedCache = [];
-    var sharedCacheOffset = 0;
-    var sharedCacheComplete = false;
-    var sharedCacheTime = 0;
-    var CACHE_TTL = cfg.get('sharedCacheTTL', 60000);
-    var outbox = [];
-    var relayErrors = new Map();
-    
-    var K_JOURNAL = 20001;
-    var journalCache = [];
+  /**
+   * @typedef {Object} NostrEvent
+   * @description Nostr-событие согласно NIP-01.
+   * @property {string} id - SHA-256 хеш события (64 hex-символа).
+   * @property {string} pubkey - Публичный ключ автора (64 hex-символа).
+   * @property {number} created_at - Unix timestamp создания.
+   * @property {number} kind - Тип события (kind).
+   * @property {Array<Array<string>>} tags - Массив тегов.
+   * @property {string} content - Содержимое события.
+   * @property {string} sig - Подпись события (Schnorr).
+   */
 
+  /**
+   * @typedef {Object} NetworkAnswer
+   * @description Ответ от сети на поисковый запрос.
+   * @property {string} id - ID Nostr-события.
+   * @property {string} text - Текст ответа.
+   * @property {Vector} vector - Вектор эмбеддинга.
+   * @property {number} score - Сырой косинус.
+   * @property {number} [z_score] - Z-score (опционально).
+   * @property {string} peer - Короткий ID пира (первые 6 символов pubkey).
+   * @property {string} fullPubkey - Полный публичный ключ автора.
+   * @property {number} createdAt - Timestamp получения ответа.
+   */
+
+  DI.register('Net', function(cfg, DB, AI, log, bus) {
+
+    /** @type {Object | null} Nostr SimplePool instance */
+    var pool = null;
+
+    /** @type {Uint8Array | null} Секретный ключ (приватный) */
+    var sk = null;
+
+    /** @type {string | null} Публичный ключ (hex) */
+    var pk = null;
+
+    /** @type {string | null} ID последнего отправленного запроса */
+    var queryId = null;
+
+    /** @type {Map<string, number>} Активные пиры: pubkey -> timestamp последнего события */
+    var peers = new Map();
+
+    /** @type {NetworkAnswer[]} Кэш полученных ответов */
+    var answers = [];
+
+    /** @type {function(): void | null} Колбэк обновления UI */
+    var onUpdate = null;
+
+    /** @type {number | null} ID таймера heartbeat */
+    var hbTimer = null;
+
+    /** @type {number | null} ID таймера flush outbox */
+    var flushTimer = null;
+
+    /** @type {number} Timestamp последнего запроса в сеть */
+    var lastQueryTime = 0;
+
+    /** @type {Object | null} Nostr-tools модуль */
+    var nostr = null;
+
+    /** @type {Object | null} Активная подписка на события */
+    var subscription = null;
+
+    /** @type {Array<function(number): void>} Подписчики на изменение количества пиров */
+    var peerListeners = [];
+
+    /** @type {boolean} Флаг инициализации сети */
+    var started = false;
+
+    /** @type {boolean} Флаг процесса переподключения */
+    var reconnecting = false;
+
+    /** @type {Set<string>} Множество ID уже обработанных событий (дедупликация) */
+    var seen = new Set();
+
+    /** @type {Map<string, number>} Rate limiting релеев: relay URL -> timestamp до которого заблокирован */
+    var rateLimitedUntil = new Map();
+
+    /** @type {number} Счётчик попыток подключения */
+    var connAttempts = 0;
+
+    /** @type {'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'failed'} */
+    var netStatus = 'disconnected';
+
+    /** @type {Array<{id: string, text: string, vector: Vector}>} Кэш shared-векторов для ответов на запросы */
+    var sharedCache = [];
+
+    /** @type {number} Текущий offset для пагинации sharedCache */
+    var sharedCacheOffset = 0;
+
+    /** @type {boolean} Флаг завершения загрузки sharedCache */
+    var sharedCacheComplete = false;
+
+    /** @type {number} Timestamp последнего обновления sharedCache */
+    var sharedCacheTime = 0;
+
+    /** @type {number} TTL для sharedCache */
+    var CACHE_TTL = cfg.get('sharedCacheTTL', 60000);
+
+    /** @type {NostrEvent[]} Очередь событий для отправки в offline-режиме */
+    var outbox = [];
+
+    /** @type {Map<string, number>} Счётчик ошибок для каждого релея */
+    var relayErrors = new Map();
+
+    /**
+     * Выводит AES-GCM ключ из пароля через PBKDF2 (100k итераций, SHA-256).
+     * @param {string} password - Пароль пользователя.
+     * @param {Uint8Array} salt - Соль для PBKDF2.
+     * @returns {Promise<CryptoKey>} Promise с CryptoKey для шифрования/дешифрования.
+     */
     function deriveKey(password, salt) {
       var enc = new TextEncoder();
       return crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']).then(function(keyMaterial) {
@@ -2108,6 +2187,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       });
     }
 
+    /**
+     * Шифрует hex-ключ паролем с использованием AES-GCM.
+     * @param {string} hexKey - Секретный ключ в hex-формате.
+     * @param {string} password - Пароль для шифрования.
+     * @returns {Promise<string>} Promise с Base64-строкой (salt + iv + ciphertext).
+     */
     function encryptKey(hexKey, password) {
       var salt = crypto.getRandomValues(new Uint8Array(16));
       var iv = crypto.getRandomValues(new Uint8Array(12));
@@ -2123,6 +2208,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       });
     }
 
+    /**
+     * Расшифровывает hex-ключ из Base64-строки с использованием пароля.
+     * @param {string} base64Str - Зашифрованная строка (salt + iv + ciphertext).
+     * @param {string} password - Пароль для дешифрования.
+     * @returns {Promise<string>} Promise с расшифрованным hex-ключом.
+     * @throws {Error} Если пароль неверный или данные повреждены.
+     */
     function decryptKey(base64Str, password) {
       var combined = Uint8Array.from(atob(base64Str), function(c) { return c.charCodeAt(0); });
       var salt = combined.slice(0, 16);
@@ -2135,6 +2227,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       });
     }
 
+    /**
+     * Устанавливает статус сети и публикует событие net:status.
+     * При переходе в 'connected' автоматически запускает flush outbox.
+     * @param {'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'failed'} s - Новый статус.
+     * @returns {void}
+     */
     function setStatus(s) {
       var wasDisconnected = (netStatus !== 'connected');
       netStatus = s;
@@ -2146,6 +2244,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }
     }
 
+    /**
+     * Уведомляет всех подписчиков об изменении количества пиров.
+     * @returns {void}
+     */
     function notifyPeers() {
       var count = peers.size;
       for (var i = 0; i < peerListeners.length; i++) {
@@ -2156,6 +2258,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }
     }
 
+    /**
+     * Проверяет валидность структуры Nostr-события.
+     * @param {NostrEvent} ev - Событие для проверки.
+     * @returns {boolean} true, если событие имеет корректную структуру.
+     */
     function isValidEvent(ev) {
       if (!ev || typeof ev !== 'object') return false;
       if (typeof ev.id !== 'string' || ev.id.length !== 64) return false;
@@ -2165,6 +2272,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       return true;
     }
 
+    /**
+     * Проверяет, является ли событие дубликатом (уже обработанным).
+     * Добавляет ID в seen Set и обрезает его при переполнении.
+     * @param {NostrEvent} ev - Событие для проверки.
+     * @returns {boolean} true, если событие уже было обработано.
+     */
     function isDuplicate(ev) {
       if (!ev || !ev.id) return true;
       if (seen.has(ev.id)) return true;
@@ -2179,6 +2292,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       return false;
     }
 
+    /**
+     * Инвалидирует кэш shared-векторов (вызывается при изменении базы).
+     * @returns {void}
+     */
     function invalidateSharedCache() {
       sharedCache = [];
       sharedCacheOffset = 0;
@@ -2190,6 +2307,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       bus.on('db:change', invalidateSharedCache);
     }
 
+    /**
+     * Добавляет событие в offline-очередь (outbox).
+     * @param {NostrEvent} ev - Событие для добавления.
+     * @returns {void}
+     */
     function addToOutbox(ev) {
       if (outbox.indexOf(ev) === -1) {
         if (outbox.length >= cfg.get('offlineQueueMaxSize', 100)) {
@@ -2202,6 +2324,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }
     }
 
+    /**
+     * Отправляет порцию событий из outbox через доступные релеи.
+     * @returns {void}
+     */
     function flushOutbox() {
       if (outbox.length === 0 || !pool) return;
       var limit = Math.min(cfg.get('outboxBatchSize', 2), outbox.length);
@@ -2212,6 +2338,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }
     }
 
+    /**
+     * Безопасно публикует событие, обходя rate-limited релеи.
+     * При ошибке применяет circuit breaker или backoff к релею.
+     * @param {NostrEvent} ev - Событие для публикации.
+     * @returns {Promise<void>}
+     */
     function safePublish(ev) {
       var relays = cfg.get('relays', []);
       var now = Date.now();
@@ -2265,15 +2397,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       return Promise.resolve();
     }
 
+    /**
+     * Обрабатывает входящее Nostr-событие: валидирует, обновляет пиров,
+     * отвечает на запросы или сохраняет ответы.
+     * @param {NostrEvent} ev - Входящее событие.
+     * @returns {void}
+     */
     function onEvent(ev) {
       try {
         if (!ev || !ev.pubkey) return;
-
-        if (!ev || typeof ev !== 'object') return;
-        if (!Array.isArray(ev.tags)) return;
-        if (!isValidEvent(ev)) return;
-        if (isDuplicate(ev)) return;
-        if (pk && ev.pubkey === pk) return;
 
         if (nostr && typeof nostr.verifyEvent === 'function') {
           if (!nostr.verifyEvent(ev)) {
@@ -2281,6 +2413,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             return;
           }
         }
+
+        if (!ev || typeof ev !== 'object') return;
+        if (!Array.isArray(ev.tags)) return;
+        if (!isValidEvent(ev)) return;
+        if (isDuplicate(ev)) return;
+        if (pk && ev.pubkey === pk) return;
 
         var had = peers.has(ev.pubkey);
         peers.set(ev.pubkey, Date.now());
@@ -2292,28 +2430,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         var KQ = cfg.get('kQuery', 21000);
         var KA = cfg.get('kAnswer', 21001);
         var room = cfg.get('room', 'noomium-main');
-
-        if (ev.kind === K_JOURNAL) {
-          var jData;
-          try { jData = JSON.parse(ev.content); } catch (_) { return; }
-          if (!jData || typeof jData !== 'object' || Array.isArray(jData)) return;
-          if (typeof jData.text !== 'string' || !jData.text || jData.text.length > 5000) return;
-          if (!Array.isArray(jData.vector)) return;
-
-          journalCache.push({
-            id: ev.id,
-            text: jData.text,
-            vector: jData.vector,
-            pubkey: ev.pubkey,
-            receivedAt: Date.now()
-          });
-          if (journalCache.length > 500) journalCache.shift();
-          
-          if (bus && bus.emit) {
-            try { bus.emit('net:journal-update'); } catch (_) { /* ignore */ }
-          }
-          return;
-        }
 
         if (ev.kind === KQ) {
           if (!sk) return;
@@ -2506,6 +2622,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }
     }
 
+    /**
+     * Запускает heartbeat для очистки устаревших пиров и ответов.
+     * Также запускает периодический flush outbox.
+     * @returns {void}
+     */
     function startHeartbeat() {
       if (hbTimer) clearInterval(hbTimer);
       var hbInterval = cfg.get('heartbeat', 30000);
@@ -2531,13 +2652,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             answers.splice(i, 1);
           }
         }
-        
-        var journalCutoff = now - 3600000;
-        for (var j = journalCache.length - 1; j >= 0; j--) {
-          if (journalCache[j].receivedAt < journalCutoff) {
-            journalCache.splice(j, 1);
-          }
-        }
       }, hbInterval);
 
       if (flushTimer) clearInterval(flushTimer);
@@ -2548,6 +2662,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }, cfg.get('offlineFlushInterval', 30000));
     }
 
+    /**
+     * Планирует попытку переподключения с экспоненциальным backoff.
+     * @returns {void}
+     */
     function scheduleReconnect() {
       if (reconnecting || !started) return;
       if (connAttempts >= cfg.get('reconnectMaxAttempts', 10)) {
@@ -2566,11 +2684,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             try { subscription.close(); } catch (_) { /* ignore */ }
           }
           subscription = null;
-          if (subscriptionJournal && typeof subscriptionJournal.close === 'function') {
-            try { subscriptionJournal.close(); } catch (_) { /* ignore */ }
-          }
-          subscriptionJournal = null;
-          
           var room = cfg.get('room', 'noomium-main');
           var KQ = cfg.get('kQuery', 21000);
           var KA = cfg.get('kAnswer', 21001);
@@ -2580,11 +2693,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             subscription = pool.subscribeMany(cfg.get('relays', []),
               [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
               { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
-              
-            subscriptionJournal = pool.subscribeMany(cfg.get('relays', []),
-              [{ kinds: [K_JOURNAL], '#t': [room], since: nowSec - 3600 }],
-              { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
-              
             if (log) log.info('Reconnect: subscribed');
             reconnecting = false;
           } else {
@@ -2602,6 +2710,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }, delay);
     }
 
+    /**
+     * Инициализирует сеть: загружает или создаёт ключ, подключается к релеям.
+     * @param {function(): void} callback - Колбэк обновления UI при изменении данных.
+     * @param {string} password - Пароль для дешифрования ключа.
+     * @returns {Promise<void>}
+     */
     function init(callback, password) {
       if (started) return Promise.resolve();
       onUpdate = callback;
@@ -2666,11 +2780,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           subscription = pool.subscribeMany(cfg.get('relays', []),
             [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
             { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
-            
-          subscriptionJournal = pool.subscribeMany(cfg.get('relays', []),
-            [{ kinds: [K_JOURNAL], '#t': [room], since: nowSec - 3600 }],
-            { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
-            
           startHeartbeat();
         } catch (e) {
           if (log) log.warn('sub fail', String(e));
@@ -2687,22 +2796,54 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     return {
+
+      /**
+       * Подписывает функцию на изменение количества пиров.
+       * @param {function(number): void} fn - Обработчик, принимающий количество пиров.
+       * @returns {void}
+       */
       onPeers: function(fn) {
         if (typeof fn === 'function') peerListeners.push(fn);
       },
+
+      /**
+       * Отписывает функцию от изменений количества пиров.
+       * @param {function(number): void} fn - Тот же ссылочный обработчик.
+       * @returns {void}
+       */
       offPeers: function(fn) {
         var idx = peerListeners.indexOf(fn);
         if (idx > -1) peerListeners.splice(idx, 1);
       },
+
+      /**
+       * Возвращает текущий статус сети.
+       * @returns {'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'failed'}
+       */
       getStatus: function() {
         return netStatus;
       },
+
+      /**
+       * Возвращает количество событий в offline-очереди.
+       * @returns {number}
+       */
       getOutboxLength: function() {
         return outbox.length;
       },
+
+      /**
+       * Проверяет, загружен ли секретный ключ.
+       * @returns {boolean}
+       */
       hasKey: function() {
         return sk !== null;
       },
+
+      /**
+       * Проверяет, зашифрован ли ключ в localStorage.
+       * @returns {boolean}
+       */
       isKeyEncrypted: function() {
         try {
           var stored = localStorage.getItem('noomium:sk');
@@ -2711,7 +2852,20 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           return false;
         }
       },
+
+      /**
+       * Инициализирует сеть (см. описание функции init).
+       * @param {function(): void} callback - Колбэк обновления UI.
+       * @param {string} password - Пароль для дешифрования ключа.
+       * @returns {Promise<void>}
+       */
       init: init,
+
+      /**
+       * Отправляет поисковый запрос в сеть.
+       * @param {Vector} vector - Вектор запроса.
+       * @returns {void}
+       */
       send: function(vector) {
         if (!pool || !nostr || !sk || AI.getMode() === 'demo') return;
         var now = Date.now();
@@ -2735,6 +2889,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           if (log) log.warn('pub fail', String(e));
         }
       },
+
+      /**
+       * Возвращает активные ответы от пиров, которые ещё в сети.
+       * @returns {NetworkAnswer[]}
+       */
       activeAnswers: function() {
         var out = [];
         for (var i = 0; i < answers.length; i++) {
@@ -2753,34 +2912,24 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         }
         return out;
       },
+
+      /**
+       * Возвращает текущее количество активных пиров.
+       * @returns {number}
+       */
       peerCount: function() {
         return peers.size;
       },
-      getJournalCache: function() {
-        return journalCache;
-      },
-      publishJournalEvent: function(text, vector) {
-        if (!pool || !nostr || !sk || AI.getMode() === 'demo') return;
-        try {
-          var ev = nostr.finalizeEvent({
-            kind: K_JOURNAL,
-            created_at: Math.floor(Date.now() / 1000),
-            tags: [['t', cfg.get('room', 'noomium-main')]],
-            content: JSON.stringify({ text: text, vector: vector })
-          }, sk);
-          safePublish(ev);
-        } catch (e) {
-          if (log) log.warn('publishJournalEvent fail', String(e));
-        }
-      },
+
+      /**
+       * Останавливает сеть: закрывает подписки, очищает состояние.
+       * @returns {void}
+       */
       stop: function() {
         if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
         if (flushTimer) { clearInterval(flushTimer); flushTimer = null; }
         if (subscription && typeof subscription.close === 'function') {
           try { subscription.close(); } catch (_) { /* ignore */ }
-        }
-        if (subscriptionJournal && typeof subscriptionJournal.close === 'function') {
-          try { subscriptionJournal.close(); } catch (_) { /* ignore */ }
         }
         if (pool && typeof pool.close === 'function') {
           try { pool.close(cfg.get('relays', [])); } catch (_) { /* ignore */ }
@@ -2790,7 +2939,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         }
         started = false;
         subscription = null;
-        subscriptionJournal = null;
         pool = null;
         peers.clear();
         answers.length = 0;
@@ -2799,12 +2947,18 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         relayErrors.clear();
         rateLimitedUntil.clear();
         reconnecting = false;
-        journalCache.length = 0;
         setStatus('disconnected');
         if (bus && bus.emit) {
           try { bus.emit('net:outbox', { count: 0 }); } catch (_) { /* ignore */ }
         }
       },
+
+      /**
+       * Перезапускает сеть (stop + init).
+       * @param {function(): void} callback - Колбэк обновления UI.
+       * @param {string} password - Пароль для дешифрования ключа.
+       * @returns {Promise<void>}
+       */
       restart: function(callback, password) {
         this.stop();
         return this.init(callback, password);
@@ -2812,289 +2966,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'DB', 'AI', 'Logger', 'Bus']);
 <!-- NOOMIUM_MODULE_END Net -->
-
-<!-- NOOMIUM_MODULE_START JournalService -->
-  DI.register('JournalService', function(Bus, StateManager, Net, AI, Config) {
-    var debounceTimer = null;
-
-    function recalculateFeed() {
-      var cache = Net.getJournalCache();
-      var state = StateManager.getState();
-      var pinned = state.pinnedCard;
-      var query = state.queryText || '';
-      var feedPromise;
-
-      if (pinned && pinned.vector) {
-        var items = [];
-        for (var i = 0; i < cache.length; i++) {
-          if (cache[i].vector) {
-            items.push({ id: cache[i].id, vector: cache[i].vector });
-          }
-        }
-        feedPromise = AI.cosineBatch(pinned.vector, items).then(function(scores) {
-          var filtered = [];
-          for (var j = 0; j < scores.length; j++) {
-            if (scores[j].score > 0.3) {
-              var original = null;
-              for (var k = 0; k < cache.length; k++) {
-                if (cache[k].id === scores[j].id) { 
-                  original = cache[k]; 
-                  break; 
-                }
-              }
-              if (original) filtered.push({ item: original, score: scores[j].score });
-            }
-          }
-          filtered.sort(function(a, b) { return b.score - a.score; });
-          var result = [];
-          for (var m = 0; m < Math.min(50, filtered.length); m++) {
-            result.push(filtered[m].item);
-          }
-          return result;
-        });
-      } else {
-        var sorted = cache.slice().sort(function(a, b) { return b.receivedAt - a.receivedAt; });
-        feedPromise = Promise.resolve(sorted.slice(0, 50));
-      }
-
-      feedPromise.then(function(feed) {
-        if (query && query.trim()) {
-          var words = query.toLowerCase().trim().split(/\s+/);
-          var filteredFeed = [];
-          for (var i = 0; i < feed.length; i++) {
-            var text = (feed[i].text || '').toLowerCase();
-            var matchAll = true;
-            for (var w = 0; w < words.length; w++) {
-              if (text.indexOf(words[w]) === -1) {
-                matchAll = false;
-                break;
-              }
-            }
-            if (matchAll) filteredFeed.push(feed[i]);
-          }
-          feed = filteredFeed;
-        }
-        StateManager.setState({ journalFeed: feed });
-        if (Bus && Bus.emit) {
-          try { Bus.emit('state:journal-changed'); } catch (_) {}
-        }
-      }).catch(function(err) {
-        var sorted = cache.slice().sort(function(a, b) { return b.receivedAt - a.receivedAt; });
-        StateManager.setState({ journalFeed: sorted.slice(0, 50) });
-        if (Bus && Bus.emit) {
-          try { Bus.emit('state:journal-changed'); } catch (_) {}
-        }
-      });
-    }
-
-    function triggerRecalculate() {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(function() {
-        recalculateFeed();
-      }, 300);
-    }
-
-    function init() {
-      if (Bus && Bus.on) {
-        Bus.on('net:journal-update', triggerRecalculate);
-        Bus.on('state:pinned-changed', triggerRecalculate);
-        Bus.on('state:query-changed', triggerRecalculate);
-      }
-      
-      StateManager.subscribe(function() {
-        triggerRecalculate();
-      });
-      
-      triggerRecalculate();
-    }
-
-    function destroy() {
-      if (debounceTimer) clearTimeout(debounceTimer);
-    }
-
-    return {
-      init: init,
-      destroy: destroy
-    };
-  }, ['Bus', 'StateManager', 'Net', 'AI', 'Config']);
-<!-- NOOMIUM_MODULE_END JournalService -->  
-
-<!-- NOOMIUM_MODULE_START JournalComponent -->
-  DI.register('JournalComponent', function(Bus, StateManager, I18n, Utils) {
-    var listenerEl = null;
-    var authorEl = null;
-    var pinnedBarEl = null;
-    var journalListEl = null;
-    
-    var stateUnsubscribe = null;
-    var journalChangedHandler = null;
-
-    function refreshDOM() {
-      listenerEl = document.getElementById('stream-listener');
-      authorEl = document.getElementById('stream-author');
-      pinnedBarEl = document.getElementById('pinned-bar');
-      journalListEl = document.getElementById('journal-list');
-    }
-
-    function renderPinnedBar() {
-      if (!pinnedBarEl) return;
-      var state = StateManager.getState();
-      var pinned = state.pinnedCard;
-      
-      if (!pinned) {
-        pinnedBarEl.style.display = 'none';
-        pinnedBarEl.innerHTML = '';
-        return;
-      }
-      
-      pinnedBarEl.style.display = 'block';
-      pinnedBarEl.innerHTML = '';
-      
-      var card = document.createElement('div');
-      card.className = 'fi t-local active';
-      card.style.cssText = 'margin-bottom:8px;';
-      
-      var header = document.createElement('div');
-      header.className = 'fi-h';
-      var badge = document.createElement('span');
-      badge.className = 'fi-badge';
-      badge.textContent = I18n.t('journal.pinned') || 'Закреплено';
-      header.appendChild(badge);
-      card.appendChild(header);
-      
-      var body = document.createElement('div');
-      body.className = 'fi-body';
-      body.textContent = pinned.text;
-      card.appendChild(body);
-      
-      var footer = document.createElement('div');
-      footer.className = 'fi-foot';
-      var unpinBtn = document.createElement('button');
-      unpinBtn.className = 'fi-act danger';
-      unpinBtn.textContent = I18n.t('journal.unpin') || 'Открепить';
-      unpinBtn.onclick = function() {
-        StateManager.setState({ mode: 'browsing', pinnedCard: null });
-      };
-      footer.appendChild(unpinBtn);
-      card.appendChild(footer);
-      
-      pinnedBarEl.appendChild(card);
-    }
-
-    function renderJournalList() {
-      if (!journalListEl) return;
-      var state = StateManager.getState();
-      var feed = state.journalFeed;
-      
-      journalListEl.innerHTML = '';
-      
-      if (!feed || feed.length === 0) {
-        var empty = document.createElement('div');
-        empty.className = 'feed-empty';
-        var emptyT = document.createElement('div');
-        emptyT.className = 'feed-empty-t';
-        emptyT.textContent = I18n.t('empty.browsing.t') || 'Пока нет мыслей';
-        var emptyD = document.createElement('div');
-        emptyD.className = 'feed-empty-d';
-        emptyD.textContent = I18n.t('empty.browsing.d') || 'Ожидаем мысли из мира';
-        empty.appendChild(emptyT);
-        empty.appendChild(emptyD);
-        journalListEl.appendChild(empty);
-        return;
-      }
-      
-      for (var i = 0; i < feed.length; i++) {
-        var item = feed[i];
-        var card = document.createElement('div');
-        card.className = 'fi t-world';
-        card.setAttribute('data-id', item.id);
-        
-        var header = document.createElement('div');
-        header.className = 'fi-h';
-        var badge = document.createElement('span');
-        badge.className = 'fi-badge';
-        badge.textContent = '· ' + (item.pubkey ? item.pubkey.slice(0, 6) : 'peer');
-        header.appendChild(badge);
-        card.appendChild(header);
-        
-        var body = document.createElement('div');
-        body.className = 'fi-body';
-        body.textContent = item.text;
-        card.appendChild(body);
-        
-        var footer = document.createElement('div');
-        footer.className = 'fi-foot';
-        var pinBtn = document.createElement('button');
-        pinBtn.className = 'fi-act';
-        pinBtn.textContent = I18n.t('btn.pin') || 'ЕЩЕ';
-        pinBtn.onclick = (function(it) {
-          return function() {
-            StateManager.setState({
-              mode: 'pinned',
-              pinnedCard: { id: it.id, text: it.text, vector: it.vector }
-            });
-          };
-        })(item);
-        footer.appendChild(pinBtn);
-        card.appendChild(footer);
-        
-        journalListEl.appendChild(card);
-      }
-    }
-
-    function updateVisibility() {
-      refreshDOM();
-      var state = StateManager.getState();
-      var mode = state.mode;
-      
-      if (mode === 'browsing' || mode === 'pinned') {
-        if (listenerEl) listenerEl.style.display = 'flex';
-        if (authorEl) authorEl.style.display = 'none';
-      } else {
-        if (listenerEl) listenerEl.style.display = 'none';
-        if (authorEl) authorEl.style.display = 'flex';
-      }
-    }
-
-    function init() {
-      refreshDOM();
-      
-      journalChangedHandler = function() {
-        renderJournalList();
-      };
-      
-      stateUnsubscribe = StateManager.subscribe(function() {
-        updateVisibility();
-        renderPinnedBar();
-      });
-      
-      if (Bus && Bus.on) {
-        Bus.on('state:journal-changed', journalChangedHandler);
-      }
-      
-      updateVisibility();
-      renderPinnedBar();
-      renderJournalList();
-    }
-
-    function destroy() {
-      if (typeof stateUnsubscribe === 'function') {
-        stateUnsubscribe();
-        stateUnsubscribe = null;
-      }
-      if (journalChangedHandler && Bus && Bus.off) {
-        try { Bus.off('state:journal-changed', journalChangedHandler); } catch(_) {}
-        journalChangedHandler = null;
-      }
-    }
-
-    return {
-      init: init,
-      destroy: destroy
-    };
-  }, ['Bus', 'StateManager', 'I18n', 'Utils']);
-<!-- NOOMIUM_MODULE_END JournalComponent -->
-  
 <!-- NOOMIUM_MODULE_START Modal -->
   /**
    * @typedef {Object} ModalButton
@@ -3501,8 +3372,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
    * @property {SearchResult[]} lists.local - Локальные совпадения.
    * @property {SearchResult[]} lists.world - Совпадения из сети.
    * @property {SearchResult[]} lists.seren - Озарения (близкие, но ниже порога).
-   * @property {'browsing' | 'pinned' | 'authoring'} mode - Текущий режим работы приложения.
-   * @property {{id: string, text: string, vector: Vector} | null} pinnedCard - Данные закреплённой карточки.
    */
 
   DI.register('StateManager', function() {
@@ -3520,11 +3389,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       lastQuery: 0,
       netAuthorized: false,
       requestNetworkAuth: null,
-      lists: { local: [], world: [], seren: [] },
-      /** @type {'browsing' | 'pinned' | 'authoring'} Текущий режим работы приложения */
-      mode: 'browsing',
-      /** @type {{id: string, text: string, vector: Vector} | null} Данные закреплённой карточки */
-      pinnedCard: null
+      lists: { local: [], world: [], seren: [] }
     };
 
     /**
@@ -3693,93 +3558,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Внутренний хелпер для обработки готового вектора:
-     * получение локальных заметок, вычисление косинусного сходства,
-     * сбор сетевых ответов, фильтрация по порогам и обновление StateManager.lists.
-     * @param {Vector} vec - Вектор запроса.
-     * @param {AbortSignal} signal - Сигнал для отмены операции.
-     * @returns {Promise<void>}
-     */
-    function _processVector(vec, signal) {
-      return getAllNotesCached().then(function(notes) {
-        if (signal.aborted) return;
-
-        var localCandidates = [];
-        var localDataMap = new Map();
-
-        for (var i = 0; i < notes.length; i++) {
-          var note = notes[i];
-          if (note && note.vector) {
-            localCandidates.push({ id: note.id, vector: note.vector });
-            localDataMap.set(note.id, note);
-          }
-        }
-
-        var state = StateManager.getState();
-        var worldAnswers = state.netAuthorized ? Net.activeAnswers() : [];
-
-        var processLocal = localCandidates.length > 0 
-          ? AI.cosineBatch(vec, localCandidates, signal) 
-          : Promise.resolve([]);
-
-        return processLocal.then(function(localScores) {
-          if (signal.aborted) return;
-
-          var localScored = [];
-          for (var k = 0; k < localScores.length; k++) {
-            var s = localScores[k];
-            var note = localDataMap.get(s.id);
-            if (note) {
-              localScored.push({
-                id: note.id,
-                text: note.text,
-                vector: note.vector,
-                score: s.score,
-                shared: note.shared,
-                createdAt: note.createdAt
-              });
-            }
-          }
-
-          var worldScored = [];
-          for (var j = 0; j < worldAnswers.length; j++) {
-            var answer = worldAnswers[j];
-            if (answer && typeof answer.score === 'number') {
-              worldScored.push({
-                id: answer.id,
-                text: answer.text,
-                vector: answer.vector,
-                score: answer.score,
-                shared: true,
-                peer: answer.peer,
-                createdAt: answer.createdAt
-              });
-            }
-          }
-
-          var threshold = Config.get('threshold', 0.7);
-          var serendipityDelta = Config.get('serendipity', 0.3);
-          var serenMin = threshold - serendipityDelta;
-
-          var newLists = {
-            local: localScored.filter(function(n) { return n.score >= threshold; })
-              .sort(function(a, b) { return b.score - a.score; }),
-            world: worldScored.filter(function(n) { return n.score >= threshold; })
-              .sort(function(a, b) { return b.score - a.score; }),
-            seren: localScored.concat(worldScored)
-              .filter(function(n) { return n.score >= serenMin && n.score < threshold; })
-              .sort(function(a, b) { return b.score - a.score; })
-          };
-
-          StateManager.setState({ lists: newLists });
-          if (Bus && Bus.emit) {
-            try { Bus.emit('state:lists-changed'); } catch (_) {}
-          }
-        });
-      });
-    }
-
-    /**
      * Выполняет семантический поиск по локальной базе и ответам из сети.
      * Делегирует вычисление косинусного сходства в Web Worker для избежания блокировки UI.
      * @param {string} text - Поисковый запрос (текст из редактора).
@@ -3820,15 +3598,88 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           }
         }
 
-        return _processVector(vec, signal);
+        return getAllNotesCached().then(function(notes) {
+          if (signal.aborted) return;
+
+          var localCandidates = [];
+          var localDataMap = new Map();
+
+          for (var i = 0; i < notes.length; i++) {
+            var note = notes[i];
+            if (note && note.vector) {
+              localCandidates.push({ id: note.id, vector: note.vector });
+              localDataMap.set(note.id, note);
+            }
+          }
+
+          var state = StateManager.getState();
+          var worldAnswers = state.netAuthorized ? Net.activeAnswers() : [];
+
+          var processLocal = localCandidates.length > 0 
+            ? AI.cosineBatch(vec, localCandidates, signal) 
+            : Promise.resolve([]);
+
+          return processLocal.then(function(localScores) {
+            if (signal.aborted) return;
+
+            var localScored = [];
+            for (var k = 0; k < localScores.length; k++) {
+              var s = localScores[k];
+              var note = localDataMap.get(s.id);
+              if (note) {
+                localScored.push({
+                  id: note.id,
+                  text: note.text,
+                  vector: note.vector,
+                  score: s.score,
+                  shared: note.shared,
+                  createdAt: note.createdAt
+                });
+              }
+            }
+
+            var worldScored = [];
+            for (var j = 0; j < worldAnswers.length; j++) {
+              var answer = worldAnswers[j];
+              if (answer && typeof answer.score === 'number') {
+                worldScored.push({
+                  id: answer.id,
+                  text: answer.text,
+                  vector: answer.vector,
+                  score: answer.score,
+                  shared: true,
+                  peer: answer.peer,
+                  createdAt: answer.createdAt
+                });
+              }
+            }
+
+            var threshold = Config.get('threshold', 0.7);
+            var serendipityDelta = Config.get('serendipity', 0.3);
+            var serenMin = threshold - serendipityDelta;
+
+            var newLists = {
+              local: localScored.filter(function(n) { return n.score >= threshold; })
+                .sort(function(a, b) { return b.score - a.score; }),
+              world: worldScored.filter(function(n) { return n.score >= threshold; })
+                .sort(function(a, b) { return b.score - a.score; }),
+              seren: localScored.concat(worldScored)
+                .filter(function(n) { return n.score >= serenMin && n.score < threshold; })
+                .sort(function(a, b) { return b.score - a.score; })
+            };
+
+            StateManager.setState({ lists: newLists });
+            if (Bus && Bus.emit) {
+              try { Bus.emit('state:lists-changed'); } catch (_) {}
+            }
+          });
+        });
       }).catch(function(err) {
         if (signal.aborted) return;
         Toast.show('err', String(err && err.message || err) || 'Search failed');
         Logger.warn('SearchService.search error', String(err && err.message || err));
       }).finally(function() {
-        if (searchAbortController === controller) {
-          searchAbortController = null;
-        }
+        searchAbortController = null;
       });
     }
 
@@ -3889,80 +3740,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Получает ленту свежих открытых мыслей из сети (режим Browsing).
-     * Не использует текстовый запрос, только сетевые ответы (kind 21001).
-     * Сортирует по убыванию createdAt (самые свежие сверху).
-     * @returns {Promise<SearchResult[]>} Promise с массивом SearchResult.
-     */
-    function fetchWorldFeed() {
-      if (!Net || typeof Net.activeAnswers !== 'function') {
-        return Promise.resolve([]);
-      }
-      
-      var answers = Net.activeAnswers();
-      var results = [];
-      
-      for (var i = 0; i < answers.length; i++) {
-        var a = answers[i];
-        if (a && a.text) {
-          results.push({
-            id: a.id,
-            text: a.text,
-            vector: a.vector,
-            score: typeof a.score === 'number' ? a.score : 0,
-            shared: true,
-            peer: a.peer,
-            createdAt: a.createdAt
-          });
-        }
-      }
-      
-      // Сортировка по createdAt (новые сверху)
-      results.sort(function(a, b) { 
-        return (b.createdAt || 0) - (a.createdAt || 0); 
-      });
-      
-      return Promise.resolve(results);
-    }
-
-    /**
-     * Выполняет поиск по готовому вектору (режим Pinned).
-     * Используется для построения ленты вокруг закреплённой карточки.
-     * Не отправляет сетевой запрос, так как пин сам является «запросом».
-     * @param {Vector} vector - Вектор для поиска.
-     * @returns {Promise<void>}
-     */
-    function searchByVector(vector) {
-      if (!vector || !AI.ready()) {
-        StateManager.setState({ lists: { local: [], world: [], seren: [] } });
-        if (Bus && Bus.emit) {
-          try { Bus.emit('state:lists-changed'); } catch (_) {}
-        }
-        return Promise.resolve();
-      }
-
-      // Прерываем предыдущий поиск (защита от гонки состояний при смене режимов)
-      if (searchAbortController) {
-        searchAbortController.abort();
-      }
-      var controller = new AbortController();
-      searchAbortController = controller;
-      var signal = controller.signal;
-
-      return _processVector(vector, signal)
-        .catch(function(err) {
-          if (signal.aborted) return;
-          Toast.show('err', String(err && err.message || err) || 'Search failed');
-          Logger.warn('SearchService.searchByVector error', String(err && err.message || err));
-        })
-        .finally(function() {
-          if (searchAbortController === controller) {
-            searchAbortController = null;
-          }
-        });
-    }
-
-    /**
      * Инициализирует сервис: подписывается на изменения базы для сброса кэша.
      * @returns {void}
      */
@@ -3974,8 +3751,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     return {
       search: search,
-      searchByVector: searchByVector,
-      fetchWorldFeed: fetchWorldFeed,
       send: send,
       getSendMode: getSendMode,
       setSendMode: setSendMode,
@@ -4002,17 +3777,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /** @type {HTMLElement | null} */
     var modeToggle = null;
 
-    /** @type {HTMLElement | null} Контейнер нижней панели редактора */
-    var edFoot = null;
-
     /** @type {number | null} ID таймера debounce для поиска */
     var searchTimer = null;
 
     /** @type {function(): void | null} Обработчик смены языка */
     var i18nHandler = null;
-
-    /** @type {function(): void | null} Функция отписки от изменений StateManager */
-    var stateUnsubscribe = null;
 
     /** @type {function(): void | null} Ссылка на обработчик ввода текста */
     var onInput = null;
@@ -4033,7 +3802,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       counter = document.getElementById('ed-cnt');
       sendBtn = document.getElementById('btn-send');
       modeToggle = document.getElementById('mode-toggle');
-      edFoot = document.querySelector('.ed-foot');
     }
 
     /**
@@ -4118,18 +3886,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         sendBtn.disabled = false;
         sendBtn.innerHTML = PAPER_PLANE_SVG;
       }
-    }
-
-    /**
-     * Обновляет видимость нижней панели редактора в зависимости от режима приложения.
-     * В режимах browsing и pinned панель действий скрывается, в authoring — отображается.
-     * @returns {void}
-     */
-    function updateVisibilityByMode() {
-      refreshDOM();
-      if (!edFoot) return;
-      var mode = StateManager.getState().mode;
-      edFoot.style.display = (mode === 'authoring') ? 'flex' : 'none';
     }
 
     /**
@@ -4235,7 +3991,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (modeToggle && onModeClick) {
         try { modeToggle.removeEventListener('click', onModeClick); } catch (_) { /* ignore */ }
       }
-      editor = counter = sendBtn = modeToggle = edFoot = null;
+      editor = counter = sendBtn = modeToggle = null;
       onInput = onSendClick = onModeClick = null;
       if (searchTimer) {
         clearTimeout(searchTimer);
@@ -4256,14 +4012,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       var currentMode = SearchService.getSendMode();
       updateSendMode(currentMode);
       applyI18n();
-
-      // Подписка на изменение глобального режима приложения
-      stateUnsubscribe = StateManager.subscribe(function() {
-        updateVisibilityByMode();
-      });
-      
-      // Применение видимости при старте
-      updateVisibilityByMode();
     }
 
     /**
@@ -4275,10 +4023,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (i18nHandler) {
         try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
         i18nHandler = null;
-      }
-      if (typeof stateUnsubscribe === 'function') {
-        stateUnsubscribe();
-        stateUnsubscribe = null;
       }
     }
 
@@ -4795,9 +4539,27 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END OfflineBarComponent -->
 
 <!-- NOOMIUM_MODULE_START StreamViewComponent -->
-  DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent, SearchService) {
+  /**
+   * @typedef {Object} CarouselUIState
+   * @description Внутреннее состояние компонента карусели.
+   * @property {number} currentPage - Текущая страница (0-based).
+   * @property {Array<SearchResult[]>} pages - Двумерный массив страниц.
+   * @property {number} totalPages - Общее количество страниц.
+   * @property {number} activeIndex - Индекс активной карточки на текущей странице.
+   * @property {HTMLElement | null} carouselEl - DOM-элемент карусели.
+   * @property {HTMLElement | null} dotsContainer - Контейнер с точками пагинации.
+   * @property {HTMLElement | null} counterEl - Элемент счётчика (X / Y).
+   * @property {HTMLButtonElement | null} prevBtn - Кнопка предыдущей страницы.
+   * @property {HTMLButtonElement | null} nextBtn - Кнопка следующей страницы.
+   * @property {number | null} scrollRAF - ID requestAnimationFrame для скролла.
+   */
+
+  DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent) {
+
+    /** @type {number} Количество карточек на одной странице */
     var PAGE_SIZE = 10;
 
+    /** @type {CarouselUIState} */
     var uiState = {
       currentPage: 0,
       pages: [],
@@ -4808,21 +4570,27 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       counterEl: null,
       prevBtn: null,
       nextBtn: null,
-      scrollRAF: null,
-      pinnedTextMode: false
+      scrollRAF: null
     };
 
+    /** @type {string | null} Кэшированный поисковый запрос для подсветки */
     var cachedQuery = null;
-    var cachedRegex = null;
-    var i18nHandler = null;
-    var listsChangedHandler = null;
-    var stateUnsubscribe = null;
-    var editorSearchHandler = null;
-    var lastMode = null;
-    var lastPinnedId = null;
-    var netStatusHandler = null;
-    var journalChangedHandler = null;
 
+    /** @type {RegExp | null} Скомпилированное RegExp для подсветки */
+    var cachedRegex = null;
+
+    /** @type {function(): void | null} */
+    var i18nHandler = null;
+
+    /** @type {function(): void | null} */
+    var listsChangedHandler = null;
+
+    /**
+     * Создаёт DocumentFragment с подсвеченными совпадениями поискового запроса.
+     * @param {string} text - Исходный текст карточки.
+     * @param {string} query - Поисковый запрос из редактора.
+     * @returns {DocumentFragment} Фрагмент с текстовыми узлами и тегами <mark>.
+     */
     function highlightText(text, query) {
       var fragment = document.createDocumentFragment();
       if (!text) return fragment;
@@ -4862,11 +4630,21 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       return fragment;
     }
 
+    /**
+     * Проверяет, принадлежит ли заметка текущему пользователю.
+     * @param {SearchResult} item - Объект карточки.
+     * @returns {boolean} true, если это локальная заметка (нет поля peer).
+     */
     function isOwnItem(item) {
       return !item.peer;
     }
 
-    function renderItemHTML(item, showPinButton) {
+    /**
+     * Генерирует DOM-структуру карточки (fi) для переданного элемента.
+     * @param {SearchResult} item - Данные для отрисовки.
+     * @returns {HTMLDivElement} Корневой элемент карточки.
+     */
+    function renderItemHTML(item) {
       if (!item) return document.createElement('div');
       
       var state = StateManager.getState();
@@ -4948,21 +4726,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         btnDel.textContent = I18n.t('btn.del');
         footer.appendChild(btnDel);
       }
-
-      if (showPinButton && !own) {
-        var btnPin = document.createElement('button');
-        btnPin.className = 'fi-act';
-        btnPin.setAttribute('data-act', 'pin');
-        btnPin.setAttribute('data-id', item.id);
-        btnPin.setAttribute('aria-label', I18n.t('btn.pin'));
-        btnPin.textContent = I18n.t('btn.pin');
-        footer.appendChild(btnPin);
-      }
-
       card.appendChild(footer);
       return card;
     }
 
+    /**
+     * Разбивает плоский массив результатов на страницы по PAGE_SIZE.
+     * @param {SearchResult[]} list - Массив результатов поиска.
+     * @returns {void}
+     */
     function paginate(list) {
       uiState.pages = [];
       if (!list || list.length === 0) {
@@ -4975,12 +4747,21 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       uiState.totalPages = uiState.pages.length;
     }
 
+    /**
+     * Обновляет disabled-статус кнопок пагинации в зависимости от текущей страницы.
+     * @returns {void}
+     */
     function updatePaginationButtons() {
       if (uiState.prevBtn) uiState.prevBtn.disabled = (uiState.currentPage === 0);
       if (uiState.nextBtn) uiState.nextBtn.disabled = (uiState.currentPage >= uiState.totalPages - 1);
     }
 
-    function renderPage(pageIndex, showPinButton) {
+    /**
+     * Полностью перерисовывает карусель для указанной страницы.
+     * @param {number} pageIndex - Индекс страницы для отображения.
+     * @returns {void}
+     */
+    function renderPage(pageIndex) {
       if (!uiState.carouselEl || !uiState.dotsContainer || !uiState.counterEl) return;
 
       while (uiState.carouselEl.firstChild) {
@@ -5001,7 +4782,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       for (var i = 0; i < pageItems.length; i++) {
         var itemEl = document.createElement('div');
         itemEl.className = 'carousel-item';
-        itemEl.appendChild(renderItemHTML(pageItems[i], showPinButton));
+        itemEl.appendChild(renderItemHTML(pageItems[i]));
         uiState.carouselEl.appendChild(itemEl);
       }
 
@@ -5021,6 +4802,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       updatePaginationButtons();
     }
 
+    /**
+     * Обработчик скролла карусели (тролтлится через requestAnimationFrame).
+     * Вычисляет активную карточку и обновляет точки/счётчик.
+     * @returns {void}
+     */
     function onCarouselScroll() {
       if (uiState.scrollRAF) return;
       uiState.scrollRAF = requestAnimationFrame(function() {
@@ -5050,6 +4836,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       });
     }
 
+    /**
+     * Плавно прокручивает карусель к карточке с указанным индексом.
+     * @param {number} idx - Индекс карточки.
+     * @returns {void}
+     */
     function scrollToIndex(idx) {
       if (!uiState.carouselEl) return;
       var itemWidth = uiState.carouselEl.clientWidth;
@@ -5059,44 +4850,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       });
     }
 
-    function renderPinnedBlock(pinnedCard) {
-      var wrap = document.getElementById('carousel-wrap');
-      if (!wrap) return;
-
-      removePinnedBlock();
-
-      var block = document.createElement('div');
-      block.id = 'pinned-block';
-      block.style.cssText = 'margin:0 12px 8px;padding:12px;background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r);display:flex;gap:10px;align-items:center;';
-
-      var textEl = document.createElement('div');
-      textEl.style.cssText = 'flex:1;font-size:14px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-      textEl.textContent = pinnedCard.text;
-      block.appendChild(textEl);
-
-      var closeBtn = document.createElement('button');
-      closeBtn.className = 'fi-act danger';
-      closeBtn.setAttribute('aria-label', 'Удалить пин');
-      closeBtn.textContent = '×';
-      closeBtn.style.cssText = 'min-width:32px;min-height:32px;padding:0;font-size:20px;line-height:1;';
-      closeBtn.onclick = function() {
-        var editorText = EditorComponent.getValue();
-        var newMode = (editorText && editorText.trim().length > 0) ? 'authoring' : 'browsing';
-        StateManager.setState({ mode: newMode, pinnedCard: null });
-      };
-      block.appendChild(closeBtn);
-
-      wrap.insertBefore(block, wrap.firstChild);
-    }
-
-    function removePinnedBlock() {
-      var block = document.getElementById('pinned-block');
-      if (block && block.parentNode) {
-        block.parentNode.removeChild(block);
-      }
-    }
-
-    function initCarousel(showPinButton) {
+    /**
+     * Инициализирует или пересобирает карусель на основе текущего состояния StateManager.
+     * Показывает empty-state, если данных нет.
+     * @returns {void}
+     */
+    function initCarousel() {
       uiState.carouselEl = document.getElementById('carousel');
       uiState.dotsContainer = document.getElementById('carousel-dots');
       uiState.counterEl = document.getElementById('carousel-counter');
@@ -5123,7 +4882,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             world: { t: I18n.t('empty.world.t'), d: I18n.t('empty.world.d') },
             seren: { t: I18n.t('empty.seren.t'), d: I18n.t('empty.seren.d') }
           };
-          var msg = emptyMessages[state.seg] || { t: 'Пусто', d: 'Нет данных' };
+          var msg = emptyMessages[state.seg];
           
           var emptyDiv = document.createElement('div');
           emptyDiv.className = 'feed-empty';
@@ -5163,9 +4922,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         uiState.currentPage = Math.max(0, uiState.totalPages - 1);
       }
 
-      renderPage(uiState.currentPage, showPinButton);
+      renderPage(uiState.currentPage);
     }
 
+    /**
+     * Обновляет счётчики (бейджи) над сегментами карусели.
+     * @returns {void}
+     */
     function updateCounts() {
       var state = StateManager.getState();
       ['local', 'world', 'seren'].forEach(function(key) {
@@ -5174,6 +4937,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       });
     }
 
+    /**
+     * Переключает активный сегмент (local/world/seren) и перерисовывает карусель.
+     * @param {Segment} segKey - Ключ сегмента.
+     * @returns {void}
+     */
     function setSegment(segKey) {
       StateManager.setState({ seg: segKey });
       document.querySelectorAll('.seg-b').forEach(function(b) {
@@ -5182,10 +4950,14 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       cachedQuery = null;
       cachedRegex = null;
       uiState.currentPage = 0;
-      var state = StateManager.getState();
-      initCarousel(state.mode !== 'authoring');
+      initCarousel();
     }
 
+    /**
+     * Копирует текст в буфер обмена с фоллбэком на execCommand.
+     * @param {string} text - Текст для копирования.
+     * @returns {void}
+     */
     function copyToClipboard(text) {
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -5213,6 +4985,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }
     }
 
+    /**
+     * Ищет элемент в массиве по его ID.
+     * @param {string} id - Идентификатор.
+     * @param {SearchResult[]} list - Массив для поиска.
+     * @returns {SearchResult | null}
+     */
     function findItemById(id, list) {
       for (var i = 0; i < list.length; i++) {
         if (list[i].id === id) return list[i];
@@ -5220,6 +4998,12 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       return null;
     }
 
+    /**
+     * Обрабатывает клики по действиям внутри карточки (edit, copy, del, toggle).
+     * @param {string} action - Имя действия (из data-act).
+     * @param {HTMLElement} element - DOM-элемент кнопки.
+     * @returns {void}
+     */
     function handleItemAction(action, element) {
       if (!element) return;
       var id = element.getAttribute('data-id');
@@ -5260,48 +5044,19 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         });
         return;
       }
-
-      if (action === 'pin') {
-        handlePinAction(id);
-        return;
-      }
     }
 
-    function handlePinAction(id) {
-      var state = StateManager.getState();
-      var item = null;
-
-      if (state.mode === 'browsing') {
-        var feed = state.journalFeed || [];
-        item = findItemById(id, feed);
-      } else if (state.mode === 'pinned') {
-        var segments = ['local', 'world', 'seren'];
-        for (var i = 0; i < segments.length; i++) {
-          var seg = segments[i];
-          if (state.lists[seg] && state.lists[seg].length > 0) {
-            item = findItemById(id, state.lists[seg]);
-            if (item) break;
-          }
-        }
-      }
-
-      if (!item || !item.vector) {
-        return;
-      }
-
-      StateManager.setState({
-        mode: 'pinned',
-        pinnedCard: { id: item.id, text: item.text, vector: item.vector }
-      });
-    }
-
+    /**
+     * Делегированный обработчик кликов по обёртке карусели (стрелки и действия карточек).
+     * @param {MouseEvent} e - Событие клика.
+     * @returns {void}
+     */
     function handleWrapClick(e) {
       var prevBtn = e.target.closest('#pagination-prev');
       if (prevBtn && !prevBtn.disabled) {
         if (uiState.currentPage > 0) {
           uiState.currentPage--;
-          var state = StateManager.getState();
-          renderPage(uiState.currentPage, state.mode !== 'authoring');
+          renderPage(uiState.currentPage);
         }
         return;
       }
@@ -5310,8 +5065,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (nextBtn && !nextBtn.disabled) {
         if (uiState.currentPage < uiState.totalPages - 1) {
           uiState.currentPage++;
-          var state = StateManager.getState();
-          renderPage(uiState.currentPage, state.mode !== 'authoring');
+          renderPage(uiState.currentPage);
         }
         return;
       }
@@ -5322,78 +5076,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }
     }
 
-    function applyMode() {
-      var state = StateManager.getState();
-      var mode = state.mode;
-      var pinnedCard = state.pinnedCard;
-
-      if (lastMode !== null && lastMode === mode) {
-        if (mode === 'pinned') {
-          var currentPinnedId = pinnedCard ? pinnedCard.id : null;
-          if (currentPinnedId === lastPinnedId) {
-            return;
-          }
-        } else {
-          return;
-        }
-      }
-
-      lastMode = mode;
-      lastPinnedId = pinnedCard ? pinnedCard.id : null;
-
-      uiState.pages = [];
-      uiState.currentPage = 0;
-      uiState.pinnedTextMode = false;
-
-      var segPanel = document.querySelector('.seg');
-      if (segPanel) {
-        segPanel.style.display = (mode === 'authoring') ? 'flex' : 'none';
-      }
-
-      if (mode === 'browsing') {
-        removePinnedBlock();
-        var feed = state.journalFeed || [];
-        var worldList = [];
-        for (var i = 0; i < feed.length; i++) {
-          var item = feed[i];
-          worldList.push({
-            id: item.id,
-            text: item.text,
-            vector: item.vector,
-            score: 0,
-            shared: true,
-            peer: item.pubkey ? item.pubkey.slice(0, 6) : 'peer',
-            createdAt: item.receivedAt
-          });
-        }
-        StateManager.setState({ lists: { local: [], world: worldList, seren: [] } });
-        initCarousel(true);
-        return;
-      }
-
-      if (mode === 'pinned') {
-        if (!pinnedCard) {
-          StateManager.setState({ mode: 'browsing', pinnedCard: null });
-          return;
-        }
-        renderPinnedBlock(pinnedCard);
-        SearchService.searchByVector(pinnedCard.vector).then(function() {
-          initCarousel(true);
-        });
-        return;
-      }
-
-      if (mode === 'authoring') {
-        removePinnedBlock();
-        StateManager.setState({ seg: 'local' });
-        document.querySelectorAll('.seg-b').forEach(function(b) {
-          b.classList.toggle('on', b.getAttribute('data-k') === 'local');
-        });
-        initCarousel(false);
-        return;
-      }
-    }
-
+    /**
+     * Привязывает первичные DOM-события (клики по сегментам и обёртке).
+     * @returns {void}
+     */
     function bindDOMEvents() {
       document.querySelectorAll('.seg-b').forEach(function(b) {
         b.onclick = function() { setSegment(b.getAttribute('data-k')); };
@@ -5405,6 +5091,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       }
     }
 
+    /**
+     * Инициализирует компонент: привязывает события, подписывается на шину, рендерит UI.
+     * @returns {void}
+     */
     function init() {
       bindDOMEvents();
 
@@ -5443,88 +5133,27 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         updateCounts();
         cachedQuery = null;
         cachedRegex = null;
-        applyMode();
+        initCarousel();
       };
       Bus.on('i18n:change', i18nHandler);
 
       listsChangedHandler = function() {
         updateCounts();
-        var state = StateManager.getState();
-        
-        if (state.mode === 'pinned' && uiState.pinnedTextMode) {
-          initCarousel(true);
-          return;
-        }
-        
         cachedQuery = null;
         cachedRegex = null;
         uiState.currentPage = 0;
-        initCarousel(state.mode !== 'authoring');
+        initCarousel();
       };
       Bus.on('state:lists-changed', listsChangedHandler);
 
-      stateUnsubscribe = StateManager.subscribe(function() {
-        applyMode();
-      });
-
-      editorSearchHandler = function(payload) {
-        var state = StateManager.getState();
-        var editorText = EditorComponent.getValue();
-        var hasText = editorText && editorText.trim().length > 0;
-
-        if (state.mode === 'pinned' && state.pinnedCard) {
-          if (hasText) {
-            uiState.pinnedTextMode = true;
-            SearchService.search(editorText, false);
-          } else {
-            uiState.pinnedTextMode = false;
-            SearchService.searchByVector(state.pinnedCard.vector);
-          }
-          return;
-        }
-
-        if (state.mode === 'authoring' && !hasText && !state.pinnedCard) {
-          StateManager.setState({ mode: 'browsing' });
-        }
-      };
-      Bus.on('editor:search-request', editorSearchHandler);
-
-      netStatusHandler = function(payload) {
-        if (payload && payload.status === 'connected') {
-          var state = StateManager.getState();
-          if (state.mode === 'browsing') {
-            applyMode();
-          }
-        }
-      };
-      Bus.on('net:status', netStatusHandler);
-
-      journalChangedHandler = function() {
-        var state = StateManager.getState();
-        if (state.mode === 'browsing') {
-          var feed = state.journalFeed || [];
-          var worldList = [];
-          for (var i = 0; i < feed.length; i++) {
-            var item = feed[i];
-            worldList.push({
-              id: item.id,
-              text: item.text,
-              vector: item.vector,
-              score: 0,
-              shared: true,
-              peer: item.pubkey ? item.pubkey.slice(0, 6) : 'peer',
-              createdAt: item.receivedAt
-            });
-          }
-          StateManager.setState({ lists: { local: [], world: worldList, seren: [] } });
-        }
-      };
-      Bus.on('state:journal-changed', journalChangedHandler);
-
       updateCounts();
-      applyMode();
+      initCarousel();
     }
 
+    /**
+     * Уничтожает компонент: очищает таймеры, снимает обработчики, отписывается от шины.
+     * @returns {void}
+     */
     function destroy() {
       if (uiState.scrollRAF) {
         cancelAnimationFrame(uiState.scrollRAF);
@@ -5544,8 +5173,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       uiState.prevBtn = null;
       uiState.nextBtn = null;
       uiState.pages = [];
-      lastMode = null;
-      lastPinnedId = null;
       
       if (i18nHandler) {
         try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
@@ -5555,33 +5182,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) { /* ignore */ }
         listsChangedHandler = null;
       }
-      if (typeof stateUnsubscribe === 'function') {
-        stateUnsubscribe();
-        stateUnsubscribe = null;
-      }
-      if (editorSearchHandler) {
-        try { Bus.off('editor:search-request', editorSearchHandler); } catch (_) { /* ignore */ }
-        editorSearchHandler = null;
-      }
-      if (netStatusHandler) {
-        try { Bus.off('net:status', netStatusHandler); } catch (_) { /* ignore */ }
-        netStatusHandler = null;
-      }
-      if (journalChangedHandler) {
-        try { Bus.off('state:journal-changed', journalChangedHandler); } catch (_) { /* ignore */ }
-        journalChangedHandler = null;
-      }
-
-      removePinnedBlock();
     }
 
     return {
       init: init,
       destroy: destroy
     };
-  }, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'Toast', 'EditorComponent', 'SearchService']);
+  }, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'Toast', 'EditorComponent']);
 <!-- NOOMIUM_MODULE_END StreamViewComponent -->
-  
+
 <!-- NOOMIUM_MODULE_START BaseViewComponent -->
 DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast, SearchService) {
   var ITEM_HEIGHT = 100;
@@ -6215,6 +5824,29 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
 <!-- NOOMIUM_MODULE_END BaseViewComponent -->
 
 <!-- NOOMIUM_MODULE_START App.State -->
+  /**
+   * @typedef {Object} WindowHandlers
+   * @description Коллекция обработчиков глобальных событий окна.
+   * @property {function(): void | null} resize - Обработчик изменения размера.
+   * @property {function(): void | null} focusin - Обработчик получения фокуса.
+   * @property {function(): void | null} focusout - Обработчик потери фокуса.
+   * @property {function(): void | null} orientationchange - Обработчик поворота устройства.
+   * @property {function(BeforeUnloadEvent): void | null} beforeunload - Обработчик ухода со страницы.
+   */
+
+  /**
+   * @typedef {Object} AppUIState
+   * @description Глобальное состояние UI-слоя приложения (App.State).
+   * @property {WindowHandlers} windowHandlers - Зарегистрированные обработчики окна.
+   * @property {function(Object): void | null} progressHandler - Обработчик прогресса AI.
+   * @property {function(Object): void | null} editorSearchHandler - Обработчик запроса поиска из редактора.
+   * @property {function(): void | null} editorSendHandler - Обработчик завершения отправки из редактора.
+   */
+
+  /**
+   * Локальные ссылки на основные сервисы, резолвятся один раз при загрузке модуля.
+   * Используются внутри функций App.State для избежания повторных DI.resolve().
+   */
   var Logger = DI.resolve('Logger');
   var Bus = DI.resolve('Bus');
   var Store = DI.resolve('Store');
@@ -6231,6 +5863,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
   var SearchService = DI.resolve('SearchService');
   var EditorComponent = DI.resolve('EditorComponent');
 
+  /** @type {AppUIState} */
   var uiState = {
     windowHandlers: {
       resize: null,
@@ -6244,14 +5877,33 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     editorSendHandler: null
   };
 
+  /**
+   * Короткая обёртка над I18n.t() для использования внутри модуля App.State и UI.Layout.
+   * @param {string} key - Ключ перевода.
+   * @param {Object<string, *>} [params] - Параметры для подстановки.
+   * @param {string} [fallback] - Значение по умолчанию.
+   * @returns {string}
+   */
   function translate(key, params, fallback) {
     return I18n.t(key, params, fallback);
   }
 
+  /**
+   * Короткая обёртка над Toast.show() для использования внутри App.State.
+   * @param {string} msg - Сообщение.
+   * @param {'ok' | 'err' | 'warn' | 'info'} [type='info'] - Тип тоста.
+   * @returns {void}
+   */
   function toast(msg, type) {
     if (Toast && Toast.show) Toast.show(type || 'info', msg);
   }
 
+  /**
+   * Применяет цветовую тему: обновляет data-theme у body,
+   * сохраняет в Config и синхронизирует мета-тег theme-color для мобильных браузеров.
+   * @param {'dark' | 'light'} theme - Название темы.
+   * @returns {void}
+   */
   function applyTheme(theme) {
     document.body.setAttribute('data-theme', theme);
     Config.set('theme', theme);
@@ -6262,22 +5914,25 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     }
   }
 
+  /**
+   * Запускает поиск по текущему тексту из редактора.
+   * После завершения публикует событие state:lists-changed для обновления UI.
+   * @param {boolean} [force=false] - Принудительная отправка запроса в сеть.
+   * @returns {Promise<void>}
+   */
   function executeSearch(force) {
-    var state = StateManager.getState();
-    
-    if (state.mode === 'browsing') return Promise.resolve();
-    
-    if (state.mode === 'pinned') {
-      var editorText = EditorComponent.getValue();
-      if (!editorText || !editorText.trim()) return Promise.resolve();
-    }
-    
     var text = EditorComponent.getValue();
     return SearchService.search(text, force).then(function() {
       try { Bus.emit('state:lists-changed'); } catch (_) { /* ignore */ }
     });
   }
 
+  /**
+   * Переключает активную вкладку приложения (Поток / База).
+   * Обновляет StateManager, DOM-классы, видимость блоков и публикует view:changed.
+   * @param {ViewName} viewName - Имя вкладки.
+   * @returns {void}
+   */
   function switchView(viewName) {
     StateManager.setState({ view: viewName });
     document.querySelectorAll('.btab-b').forEach(function(b) {
@@ -6290,6 +5945,13 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     try { Bus.emit('view:changed', { view: viewName }); } catch (_) { /* ignore */ }
   }
 
+  /**
+   * Полностью пересобирает UI: уничтожает старые компоненты,
+   * перерисовывает разметку, инициализирует все компоненты заново
+   * и восстанавливает сохранённую активную вкладку.
+   * Вызывается при смене языка (i18n:change).
+   * @returns {void}
+   */
   function refreshUI() {
     var state = StateManager.getState();
     var savedView = state.view;
@@ -6331,18 +5993,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
       baseView.init();
     } catch (_) { /* ignore */ }
 
-    try {
-      var journalService = DI.resolve('JournalService');
-      if (journalService.destroy) journalService.destroy();
-      journalService.init();
-    } catch (_) { /* ignore */ }
-
-    try {
-      var journalComponent = DI.resolve('JournalComponent');
-      if (journalComponent.destroy) journalComponent.destroy();
-      journalComponent.init();
-    } catch (_) { /* ignore */ }
-
     switchView(savedView);
 
     if (AI.ready()) {
@@ -6350,8 +6000,13 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     }
   }
 <!-- NOOMIUM_MODULE_END App.State -->
-  
+
 <!-- NOOMIUM_MODULE_START UI.Layout -->
+  /**
+   * Строит HTML-разметку шапки приложения (хедер) с логотипом,
+   * индикаторами статуса сети/AI, кнопкой меню и офлайн-баром.
+   * @returns {string} HTML-строка.
+   */
   function buildHeaderMarkup() {
     return '<div class="hdr">' +
       '<div class="logo"><span class="logo-mark">N</span><span>NOO<span class="logo-dot">.</span>mium</span></div>' +
@@ -6368,6 +6023,10 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     '</div>';
   }
 
+  /**
+   * Строит HTML-разметку сегментов карусели (local / world / seren).
+   * @returns {string} HTML-строка.
+   */
   function buildSegmentsMarkup() {
     return '<div class="seg">' +
       '<button class="seg-b on" data-k="local"><span class="lbl">' + translate('seg.local') + '</span><span class="cnt" id="c-local">0</span></button>' +
@@ -6376,6 +6035,10 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     '</div>';
   }
 
+  /**
+   * Строит HTML-разметку обёртки карусели с пагинацией (стрелки, точки, счётчик).
+   * @returns {string} HTML-строка.
+   */
   function buildCarouselWrapMarkup() {
     return '<div class="carousel-wrap" id="carousel-wrap">' +
       '<div class="carousel" id="carousel" tabindex="0"></div>' +
@@ -6388,6 +6051,11 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     '</div>';
   }
 
+  /**
+   * Строит HTML-разметку редактора (поле ввода, счётчик символов,
+   * переключатель режима и кнопка отправки).
+   * @returns {string} HTML-строка.
+   */
   function buildEditorMarkup() {
     return '<div class="ed"><textarea id="ed-ta" class="ed-ta" placeholder="' + Utils.esc(translate('ed.placeholder')) + '"></textarea>' +
     '<div class="ed-foot"><span id="ed-cnt" class="ed-cnt">0 ' + translate('ed.chars') + '</span>' +
@@ -6401,6 +6069,10 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     '</div></div></div>';
   }
 
+  /**
+   * Строит HTML-разметку вкладки «База» (статистика, поиск, сортировка, список).
+   * @returns {string} HTML-строка.
+   */
   function buildBaseMarkup() {
     return '<div class="ws base ws-base-init" id="ws-base">' +
       '<div class="base-h"><div class="base-stats" id="base-stats"></div>' +
@@ -6410,6 +6082,10 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     '</div>';
   }
 
+  /**
+   * Строит HTML-разметку нижней навигационной панели (табы Поток / База).
+   * @returns {string} HTML-строка.
+   */
   function buildBottomTabMarkup() {
     return '<div class="btab">' +
       '<button class="btab-b on" data-v="stream"><span class="btab-ic">◇</span><span>' + translate('tab.stream') + '</span></button>' +
@@ -6417,18 +6093,13 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     '</div>';
   }
 
+  /**
+   * Собирает полную HTML-разметку приложения из отдельных блоков.
+   * @returns {string} Полная HTML-строка для вставки в #app-root.
+   */
   function buildMarkup() {
     return buildHeaderMarkup() +
-           '<div class="ws" id="ws-stream">' +
-             '<div id="pinned-bar" style="display:none; margin: 0 12px;"></div>' +
-             '<div id="stream-listener" style="display:none; flex-direction:column; flex:1; overflow-y:auto; padding: 0 12px;">' +
-               '<div id="journal-list" style="display:flex; flex-direction:column; gap:10px; padding-bottom:10px;"></div>' +
-             '</div>' +
-             '<div id="stream-author" style="display:flex; flex-direction:column; flex:1; min-height:0;">' +
-               buildSegmentsMarkup() + buildCarouselWrapMarkup() +
-             '</div>' +
-             buildEditorMarkup() +
-           '</div>' +
+           '<div class="ws" id="ws-stream">' + buildSegmentsMarkup() + buildCarouselWrapMarkup() + buildEditorMarkup() + '</div>' +
            buildBaseMarkup() +
            buildBottomTabMarkup();
   }
@@ -6895,6 +6566,15 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
 <!-- NOOMIUM_MODULE_START App.Boot -->
   var AuthService = DI.resolve('AuthService');
 
+  /**
+   * Главная функция загрузки приложения:
+   * 1. Показывает прогресс-бар загрузки AI.
+   * 2. Загружает ML-модель в Worker'е.
+   * 3. Запрашивает пароль у пользователя (создание нового ключа или расшифровка).
+   * 4. Инициализирует сеть Nostr.
+   * 5. При первом запуске показывает онбординг.
+   * @returns {void}
+   */
   function bootApp() {
     I18n.addDict('ru', { 'btn.forgot': 'Забыли пароль?' });
     I18n.addDict('en', { 'btn.forgot': 'Forgot password?' });
@@ -6904,6 +6584,11 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     var aiLoaded = false;
     var netInitialized = false;
 
+    /**
+     * Проверяет, завершены ли загрузка AI и инициализация сети,
+     * и показывает онбординг при первом запуске.
+     * @returns {void}
+     */
     function checkOnboarding() {
       if (aiLoaded && netInitialized && !Config.get('onboarded', false)) {
         openHelp(true);
@@ -6922,6 +6607,11 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
       checkOnboarding();
     });
 
+    /**
+     * Пытается инициализировать сеть с заданным паролем.
+     * @param {string} password - Пароль для расшифровки ключа.
+     * @returns {Promise<void>}
+     */
     function tryInit(password) {
       return Net.init(function() { executeSearch(); }, password).then(function() {
         netInitialized = true;
@@ -6932,6 +6622,12 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
       });
     }
 
+    /**
+     * Запрашивает у пользователя пароль (создание нового или ввод существующего).
+     * Рекурсивно вызывает себя при неверном пароле.
+     * @param {function(): void} [onSuccess] - Колбэк после успешной авторизации.
+     * @returns {void}
+     */
     function requestAuth(onSuccess) {
       if (AuthService.needsNewKey()) {
         promptNewPassword(function(pwd) {
@@ -6961,6 +6657,10 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
       }
     }
 
+    /**
+     * Показывает модалку сброса данных при превышении лимита попыток ввода пароля.
+     * @returns {void}
+     */
     function showResetModal() {
       var body = document.createElement('div');
       body.innerHTML = '<p class="reset-modal-text">' + translate('auth.reset_body') + '</p>';
@@ -6982,6 +6682,11 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
       });
     }
 
+    /**
+     * Показывает модалку создания нового пароля (первый запуск).
+     * @param {function(string): void} callback - Вызывается с введённым паролем.
+     * @returns {void}
+     */
     function promptNewPassword(callback) {
       var body = document.createElement('div');
       body.innerHTML = '<div class="fg"><label class="fl">' + translate('auth.new_password_label1') + '</label><input type="password" class="fi-input" id="pwd1" /></div>' +
@@ -7010,6 +6715,12 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
       });
     }
 
+    /**
+     * Показывает модалку ввода пароля (повторный запуск).
+     * Содержит кнопку сброса хранилища при забытом пароле.
+     * @param {function(string): void} callback - Вызывается с введённым паролем.
+     * @returns {void}
+     */
     function promptExistingPassword(callback) {
       var body = document.createElement('div');
       body.innerHTML = '<div class="fg"><label class="fl">' + translate('auth.existing_password_label') + '</label><input type="password" class="fi-input" id="pwd1" /></div>';
@@ -7049,6 +6760,11 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
       });
     }
 
+    /**
+     * Колбэк для запроса авторизации сети из SearchService (при попытке отправить в world).
+     * @param {function(): void} onSuccess - Вызывается после успешной авторизации.
+     * @returns {void}
+     */
     function requestNetworkAuth(onSuccess) {
       if (StateManager.getState().netAuthorized) {
         if (typeof onSuccess === 'function') onSuccess();
@@ -7060,6 +6776,12 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     StateManager.setState({ requestNetworkAuth: requestNetworkAuth });
   }
 
+  /**
+   * Точка монтирования приложения: создаёт корневой элемент,
+   * рендерит разметку, инициализирует все UI-компоненты и запускает bootApp().
+   * При ошибке показывает экран с кнопкой перезагрузки.
+   * @returns {void}
+   */
   function mountApp() {
     try {
       cleanup();
@@ -7089,12 +6811,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
       }
       try { DI.resolve('BaseViewComponent').init(); } catch (e) {
         if (Logger) Logger.warn('BaseViewComponent init failed', String(e));
-      }
-      try { DI.resolve('JournalService').init(); } catch (e) {
-        if (Logger) Logger.warn('JournalService init failed', String(e));
-      }
-      try { DI.resolve('JournalComponent').init(); } catch (e) {
-        if (Logger) Logger.warn('JournalComponent init failed', String(e));
       }
 
       try { SearchService.init(); } catch (e) {
@@ -7133,7 +6849,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     }
   }
 <!-- NOOMIUM_MODULE_END App.Boot -->
-  
+
 <!-- NOOMIUM_MODULE_START App -->
   I18n.addDict('ru', {
     'app.name': 'NOOmium',
@@ -7146,7 +6862,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     'btn.del': 'Удалить', 'btn.copy': 'Копия', 'btn.toggle.priv': 'Скрыть', 'btn.toggle.pub': 'Открыть',
     'btn.back': 'Назад', 'btn.gotit': 'Понятно', 'btn.forgot': 'Забыли пароль?',
     'btn.reset_storage': 'Сброс хранилища',
-    'btn.pin': 'ЕЩЕ',
     'reset_storage.confirm': 'Все данные будут удалены безвозвратно. Продолжить?',
     'sim.score': 'похожа на',
     'seg.local': 'Моё', 'seg.world': 'Мир', 'seg.seren': 'Озарения',
@@ -7154,7 +6869,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     'empty.local.t': 'Пока нет мыслей', 'empty.local.d': 'Начните печатать в поле выше',
     'empty.world.t': 'Никто не думает так же', 'empty.world.d': 'Ждём открытые мысли других',
     'empty.seren.t': 'Озарений нет', 'empty.seren.d': 'Попробуйте другую формулировку',
-    'empty.browsing.t': 'Сеть пока пуста', 'empty.browsing.d': 'Никто не публиковал открытые мысли в последнее время',
     'empty.base.t': 'База пуста', 'empty.base.d': 'Запишите первую мысль',
     'empty.base.empty': 'Под фильтр ничего не подошло',
     'base.stat.total': 'всего', 'base.stat.open': 'открыто', 'base.stat.priv': 'лично',
@@ -7223,7 +6937,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     'btn.del': 'Delete', 'btn.copy': 'Copy', 'btn.toggle.priv': 'Hide', 'btn.toggle.pub': 'Share',
     'btn.back': 'Back', 'btn.gotit': 'Got it', 'btn.forgot': 'Forgot password?',
     'btn.reset_storage': 'Reset Storage',
-    'btn.pin': 'MORE',
     'reset_storage.confirm': 'All data will be permanently deleted. Continue?',
     'sim.score': 'similarity',
     'seg.local': 'Mine', 'seg.world': 'World', 'seg.seren': 'Insights',
@@ -7231,7 +6944,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     'empty.local.t': 'No thoughts yet', 'empty.local.d': 'Start typing above',
     'empty.world.t': 'Nobody thinks alike', 'empty.world.d': 'Waiting for open thoughts',
     'empty.seren.t': 'No insights', 'empty.seren.d': 'Try different wording',
-    'empty.browsing.t': 'Nothing in the network', 'empty.browsing.d': 'No recent open thoughts from others',
     'empty.base.t': 'Base is empty', 'empty.base.d': 'Write your first thought',
     'empty.base.empty': 'Nothing matches',
     'base.stat.total': 'total', 'base.stat.open': 'open', 'base.stat.priv': 'private',
