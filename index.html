@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.10">
+<meta name="app-version" content="1.3.11">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -3564,6 +3564,93 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
+     * Внутренний хелпер для обработки готового вектора:
+     * получение локальных заметок, вычисление косинусного сходства,
+     * сбор сетевых ответов, фильтрация по порогам и обновление StateManager.lists.
+     * @param {Vector} vec - Вектор запроса.
+     * @param {AbortSignal} signal - Сигнал для отмены операции.
+     * @returns {Promise<void>}
+     */
+    function _processVector(vec, signal) {
+      return getAllNotesCached().then(function(notes) {
+        if (signal.aborted) return;
+
+        var localCandidates = [];
+        var localDataMap = new Map();
+
+        for (var i = 0; i < notes.length; i++) {
+          var note = notes[i];
+          if (note && note.vector) {
+            localCandidates.push({ id: note.id, vector: note.vector });
+            localDataMap.set(note.id, note);
+          }
+        }
+
+        var state = StateManager.getState();
+        var worldAnswers = state.netAuthorized ? Net.activeAnswers() : [];
+
+        var processLocal = localCandidates.length > 0 
+          ? AI.cosineBatch(vec, localCandidates, signal) 
+          : Promise.resolve([]);
+
+        return processLocal.then(function(localScores) {
+          if (signal.aborted) return;
+
+          var localScored = [];
+          for (var k = 0; k < localScores.length; k++) {
+            var s = localScores[k];
+            var note = localDataMap.get(s.id);
+            if (note) {
+              localScored.push({
+                id: note.id,
+                text: note.text,
+                vector: note.vector,
+                score: s.score,
+                shared: note.shared,
+                createdAt: note.createdAt
+              });
+            }
+          }
+
+          var worldScored = [];
+          for (var j = 0; j < worldAnswers.length; j++) {
+            var answer = worldAnswers[j];
+            if (answer && typeof answer.score === 'number') {
+              worldScored.push({
+                id: answer.id,
+                text: answer.text,
+                vector: answer.vector,
+                score: answer.score,
+                shared: true,
+                peer: answer.peer,
+                createdAt: answer.createdAt
+              });
+            }
+          }
+
+          var threshold = Config.get('threshold', 0.7);
+          var serendipityDelta = Config.get('serendipity', 0.3);
+          var serenMin = threshold - serendipityDelta;
+
+          var newLists = {
+            local: localScored.filter(function(n) { return n.score >= threshold; })
+              .sort(function(a, b) { return b.score - a.score; }),
+            world: worldScored.filter(function(n) { return n.score >= threshold; })
+              .sort(function(a, b) { return b.score - a.score; }),
+            seren: localScored.concat(worldScored)
+              .filter(function(n) { return n.score >= serenMin && n.score < threshold; })
+              .sort(function(a, b) { return b.score - a.score; })
+          };
+
+          StateManager.setState({ lists: newLists });
+          if (Bus && Bus.emit) {
+            try { Bus.emit('state:lists-changed'); } catch (_) {}
+          }
+        });
+      });
+    }
+
+    /**
      * Выполняет семантический поиск по локальной базе и ответам из сети.
      * Делегирует вычисление косинусного сходства в Web Worker для избежания блокировки UI.
      * @param {string} text - Поисковый запрос (текст из редактора).
@@ -3604,88 +3691,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           }
         }
 
-        return getAllNotesCached().then(function(notes) {
-          if (signal.aborted) return;
-
-          var localCandidates = [];
-          var localDataMap = new Map();
-
-          for (var i = 0; i < notes.length; i++) {
-            var note = notes[i];
-            if (note && note.vector) {
-              localCandidates.push({ id: note.id, vector: note.vector });
-              localDataMap.set(note.id, note);
-            }
-          }
-
-          var state = StateManager.getState();
-          var worldAnswers = state.netAuthorized ? Net.activeAnswers() : [];
-
-          var processLocal = localCandidates.length > 0 
-            ? AI.cosineBatch(vec, localCandidates, signal) 
-            : Promise.resolve([]);
-
-          return processLocal.then(function(localScores) {
-            if (signal.aborted) return;
-
-            var localScored = [];
-            for (var k = 0; k < localScores.length; k++) {
-              var s = localScores[k];
-              var note = localDataMap.get(s.id);
-              if (note) {
-                localScored.push({
-                  id: note.id,
-                  text: note.text,
-                  vector: note.vector,
-                  score: s.score,
-                  shared: note.shared,
-                  createdAt: note.createdAt
-                });
-              }
-            }
-
-            var worldScored = [];
-            for (var j = 0; j < worldAnswers.length; j++) {
-              var answer = worldAnswers[j];
-              if (answer && typeof answer.score === 'number') {
-                worldScored.push({
-                  id: answer.id,
-                  text: answer.text,
-                  vector: answer.vector,
-                  score: answer.score,
-                  shared: true,
-                  peer: answer.peer,
-                  createdAt: answer.createdAt
-                });
-              }
-            }
-
-            var threshold = Config.get('threshold', 0.7);
-            var serendipityDelta = Config.get('serendipity', 0.3);
-            var serenMin = threshold - serendipityDelta;
-
-            var newLists = {
-              local: localScored.filter(function(n) { return n.score >= threshold; })
-                .sort(function(a, b) { return b.score - a.score; }),
-              world: worldScored.filter(function(n) { return n.score >= threshold; })
-                .sort(function(a, b) { return b.score - a.score; }),
-              seren: localScored.concat(worldScored)
-                .filter(function(n) { return n.score >= serenMin && n.score < threshold; })
-                .sort(function(a, b) { return b.score - a.score; })
-            };
-
-            StateManager.setState({ lists: newLists });
-            if (Bus && Bus.emit) {
-              try { Bus.emit('state:lists-changed'); } catch (_) {}
-            }
-          });
-        });
+        return _processVector(vec, signal);
       }).catch(function(err) {
         if (signal.aborted) return;
         Toast.show('err', String(err && err.message || err) || 'Search failed');
         Logger.warn('SearchService.search error', String(err && err.message || err));
       }).finally(function() {
-        searchAbortController = null;
+        if (searchAbortController === controller) {
+          searchAbortController = null;
+        }
       });
     }
 
@@ -3746,6 +3760,80 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
+     * Получает ленту свежих открытых мыслей из сети (режим Browsing).
+     * Не использует текстовый запрос, только сетевые ответы (kind 21001).
+     * Сортирует по убыванию createdAt (самые свежие сверху).
+     * @returns {Promise<SearchResult[]>} Promise с массивом SearchResult.
+     */
+    function fetchWorldFeed() {
+      if (!Net || typeof Net.activeAnswers !== 'function') {
+        return Promise.resolve([]);
+      }
+      
+      var answers = Net.activeAnswers();
+      var results = [];
+      
+      for (var i = 0; i < answers.length; i++) {
+        var a = answers[i];
+        if (a && a.text) {
+          results.push({
+            id: a.id,
+            text: a.text,
+            vector: a.vector,
+            score: typeof a.score === 'number' ? a.score : 0,
+            shared: true,
+            peer: a.peer,
+            createdAt: a.createdAt
+          });
+        }
+      }
+      
+      // Сортировка по createdAt (новые сверху)
+      results.sort(function(a, b) { 
+        return (b.createdAt || 0) - (a.createdAt || 0); 
+      });
+      
+      return Promise.resolve(results);
+    }
+
+    /**
+     * Выполняет поиск по готовому вектору (режим Pinned).
+     * Используется для построения ленты вокруг закреплённой карточки.
+     * Не отправляет сетевой запрос, так как пин сам является «запросом».
+     * @param {Vector} vector - Вектор для поиска.
+     * @returns {Promise<void>}
+     */
+    function searchByVector(vector) {
+      if (!vector || !AI.ready()) {
+        StateManager.setState({ lists: { local: [], world: [], seren: [] } });
+        if (Bus && Bus.emit) {
+          try { Bus.emit('state:lists-changed'); } catch (_) {}
+        }
+        return Promise.resolve();
+      }
+
+      // Прерываем предыдущий поиск (защита от гонки состояний при смене режимов)
+      if (searchAbortController) {
+        searchAbortController.abort();
+      }
+      var controller = new AbortController();
+      searchAbortController = controller;
+      var signal = controller.signal;
+
+      return _processVector(vector, signal)
+        .catch(function(err) {
+          if (signal.aborted) return;
+          Toast.show('err', String(err && err.message || err) || 'Search failed');
+          Logger.warn('SearchService.searchByVector error', String(err && err.message || err));
+        })
+        .finally(function() {
+          if (searchAbortController === controller) {
+            searchAbortController = null;
+          }
+        });
+    }
+
+    /**
      * Инициализирует сервис: подписывается на изменения базы для сброса кэша.
      * @returns {void}
      */
@@ -3757,6 +3845,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     return {
       search: search,
+      searchByVector: searchByVector,
+      fetchWorldFeed: fetchWorldFeed,
       send: send,
       getSendMode: getSendMode,
       setSendMode: setSendMode,
