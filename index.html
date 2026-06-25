@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.11">
+<meta name="app-version" content="1.3.12">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -4648,9 +4648,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
    * @property {HTMLButtonElement | null} prevBtn - Кнопка предыдущей страницы.
    * @property {HTMLButtonElement | null} nextBtn - Кнопка следующей страницы.
    * @property {number | null} scrollRAF - ID requestAnimationFrame для скролла.
+   * @property {boolean} pinnedTextMode - Флаг временного текстового поиска в режиме pinned.
    */
 
-  DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent) {
+  DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent, SearchService) {
 
     /** @type {number} Количество карточек на одной странице */
     var PAGE_SIZE = 10;
@@ -4666,7 +4667,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       counterEl: null,
       prevBtn: null,
       nextBtn: null,
-      scrollRAF: null
+      scrollRAF: null,
+      pinnedTextMode: false
     };
 
     /** @type {string | null} Кэшированный поисковый запрос для подсветки */
@@ -4680,6 +4682,15 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /** @type {function(): void | null} */
     var listsChangedHandler = null;
+
+    /** @type {function(Object): void | null} */
+    var stateChangeHandler = null;
+
+    /** @type {function(Object): void | null} */
+    var editorSearchHandler = null;
+
+    /** @type {SearchResult[] | null} Временный кэш карточек для режима browsing */
+    var browsingFeedCache = null;
 
     /**
      * Создаёт DocumentFragment с подсвеченными совпадениями поискового запроса.
@@ -4738,9 +4749,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /**
      * Генерирует DOM-структуру карточки (fi) для переданного элемента.
      * @param {SearchResult} item - Данные для отрисовки.
+     * @param {boolean} showPinButton - Показывать ли кнопку «ЕЩЕ» (пин).
      * @returns {HTMLDivElement} Корневой элемент карточки.
      */
-    function renderItemHTML(item) {
+    function renderItemHTML(item, showPinButton) {
       if (!item) return document.createElement('div');
       
       var state = StateManager.getState();
@@ -4822,6 +4834,18 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         btnDel.textContent = I18n.t('btn.del');
         footer.appendChild(btnDel);
       }
+
+      // Кнопка «ЕЩЕ» для режимов browsing и pinned
+      if (showPinButton) {
+        var btnPin = document.createElement('button');
+        btnPin.className = 'fi-act';
+        btnPin.setAttribute('data-act', 'pin');
+        btnPin.setAttribute('data-id', item.id);
+        btnPin.setAttribute('aria-label', 'ЕЩЕ');
+        btnPin.textContent = 'ЕЩЕ';
+        footer.appendChild(btnPin);
+      }
+
       card.appendChild(footer);
       return card;
     }
@@ -4855,9 +4879,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /**
      * Полностью перерисовывает карусель для указанной страницы.
      * @param {number} pageIndex - Индекс страницы для отображения.
+     * @param {boolean} showPinButton - Показывать ли кнопку «ЕЩЕ» на карточках.
      * @returns {void}
      */
-    function renderPage(pageIndex) {
+    function renderPage(pageIndex, showPinButton) {
       if (!uiState.carouselEl || !uiState.dotsContainer || !uiState.counterEl) return;
 
       while (uiState.carouselEl.firstChild) {
@@ -4878,7 +4903,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       for (var i = 0; i < pageItems.length; i++) {
         var itemEl = document.createElement('div');
         itemEl.className = 'carousel-item';
-        itemEl.appendChild(renderItemHTML(pageItems[i]));
+        itemEl.appendChild(renderItemHTML(pageItems[i], showPinButton));
         uiState.carouselEl.appendChild(itemEl);
       }
 
@@ -4947,11 +4972,58 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Инициализирует или пересобирает карусель на основе текущего состояния StateManager.
-     * Показывает empty-state, если данных нет.
+     * Отображает блок закреплённой карточки (pinned block) над каруселью.
+     * @param {Object} pinnedCard - Данные закреплённой карточки.
      * @returns {void}
      */
-    function initCarousel() {
+    function renderPinnedBlock(pinnedCard) {
+      var wrap = document.getElementById('carousel-wrap');
+      if (!wrap) return;
+
+      removePinnedBlock();
+
+      var block = document.createElement('div');
+      block.id = 'pinned-block';
+      block.style.cssText = 'margin:0 12px 8px;padding:12px;background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r);display:flex;gap:10px;align-items:center;';
+
+      var textEl = document.createElement('div');
+      textEl.style.cssText = 'flex:1;font-size:14px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      textEl.textContent = pinnedCard.text;
+      block.appendChild(textEl);
+
+      var closeBtn = document.createElement('button');
+      closeBtn.className = 'fi-act danger';
+      closeBtn.setAttribute('aria-label', 'Удалить пин');
+      closeBtn.textContent = '×';
+      closeBtn.style.cssText = 'min-width:32px;min-height:32px;padding:0;font-size:20px;line-height:1;';
+      closeBtn.onclick = function() {
+        var editorText = EditorComponent.getValue();
+        var newMode = (editorText && editorText.trim().length > 0) ? 'authoring' : 'browsing';
+        StateManager.setState({ mode: newMode, pinnedCard: null });
+      };
+      block.appendChild(closeBtn);
+
+      wrap.insertBefore(block, wrap.firstChild);
+    }
+
+    /**
+     * Удаляет блок закреплённой карточки из DOM.
+     * @returns {void}
+     */
+    function removePinnedBlock() {
+      var block = document.getElementById('pinned-block');
+      if (block && block.parentNode) {
+        block.parentNode.removeChild(block);
+      }
+    }
+
+    /**
+     * Инициализирует или пересобирает карусель на основе текущего состояния StateManager.
+     * Показывает empty-state, если данных нет.
+     * @param {boolean} showPinButton - Показывать ли кнопку «ЕЩЕ» на карточках.
+     * @returns {void}
+     */
+    function initCarousel(showPinButton) {
       uiState.carouselEl = document.getElementById('carousel');
       uiState.dotsContainer = document.getElementById('carousel-dots');
       uiState.counterEl = document.getElementById('carousel-counter');
@@ -4978,7 +5050,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             world: { t: I18n.t('empty.world.t'), d: I18n.t('empty.world.d') },
             seren: { t: I18n.t('empty.seren.t'), d: I18n.t('empty.seren.d') }
           };
-          var msg = emptyMessages[state.seg];
+          var msg = emptyMessages[state.seg] || { t: 'Пусто', d: 'Нет данных' };
           
           var emptyDiv = document.createElement('div');
           emptyDiv.className = 'feed-empty';
@@ -5018,7 +5090,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         uiState.currentPage = Math.max(0, uiState.totalPages - 1);
       }
 
-      renderPage(uiState.currentPage);
+      renderPage(uiState.currentPage, showPinButton);
     }
 
     /**
@@ -5046,7 +5118,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       cachedQuery = null;
       cachedRegex = null;
       uiState.currentPage = 0;
-      initCarousel();
+      var state = StateManager.getState();
+      initCarousel(state.mode !== 'authoring');
     }
 
     /**
@@ -5095,7 +5168,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Обрабатывает клики по действиям внутри карточки (edit, copy, del, toggle).
+     * Обрабатывает клики по действиям внутри карточки (edit, copy, del, toggle, pin).
      * @param {string} action - Имя действия (из data-act).
      * @param {HTMLElement} element - DOM-элемент кнопки.
      * @returns {void}
@@ -5140,6 +5213,36 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         });
         return;
       }
+
+      if (action === 'pin') {
+        handlePinAction(id);
+        return;
+      }
+    }
+
+    /**
+     * Обрабатывает клик на кнопку «ЕЩЕ» (пин карточки).
+     * @param {string} id - ID карточки для пина.
+     * @returns {void}
+     */
+    function handlePinAction(id) {
+      var state = StateManager.getState();
+      var item = null;
+
+      // Ищем карточку в текущем списке
+      if (state.mode === 'browsing' && browsingFeedCache) {
+        item = findItemById(id, browsingFeedCache);
+      } else {
+        // В pinned режиме ищем в текущем сегменте
+        item = findItemById(id, state.lists[state.seg]);
+      }
+
+      if (item && item.vector) {
+        StateManager.setState({
+          mode: 'pinned',
+          pinnedCard: { id: item.id, text: item.text, vector: item.vector }
+        });
+      }
     }
 
     /**
@@ -5152,7 +5255,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (prevBtn && !prevBtn.disabled) {
         if (uiState.currentPage > 0) {
           uiState.currentPage--;
-          renderPage(uiState.currentPage);
+          var state = StateManager.getState();
+          renderPage(uiState.currentPage, state.mode !== 'authoring');
         }
         return;
       }
@@ -5161,7 +5265,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (nextBtn && !nextBtn.disabled) {
         if (uiState.currentPage < uiState.totalPages - 1) {
           uiState.currentPage++;
-          renderPage(uiState.currentPage);
+          var state = StateManager.getState();
+          renderPage(uiState.currentPage, state.mode !== 'authoring');
         }
         return;
       }
@@ -5169,6 +5274,61 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       var actionEl = e.target.closest('[data-act]');
       if (actionEl) {
         handleItemAction(actionEl.getAttribute('data-act'), actionEl);
+      }
+    }
+
+    /**
+     * Главный диспетчер режимов: вызывается при изменении mode или pinnedCard.
+     * Очищает старые данные и запускает загрузку для нового режима.
+     * @returns {void}
+     */
+    function applyMode() {
+      var state = StateManager.getState();
+      var mode = state.mode;
+      var pinnedCard = state.pinnedCard;
+
+      // Очищаем текущие страницы
+      uiState.pages = [];
+      uiState.currentPage = 0;
+      browsingFeedCache = null;
+      uiState.pinnedTextMode = false;
+
+      // Управление видимостью панели сегментов
+      var segPanel = document.querySelector('.seg');
+      if (segPanel) {
+        segPanel.style.display = (mode === 'authoring') ? 'flex' : 'none';
+      }
+
+      // Режим browsing
+      if (mode === 'browsing') {
+        removePinnedBlock();
+        SearchService.fetchWorldFeed().then(function(feed) {
+          browsingFeedCache = feed;
+          StateManager.setState({ lists: { local: [], world: feed, seren: [] } });
+          initCarousel(true); // showPinButton = true
+        });
+        return;
+      }
+
+      // Режим pinned
+      if (mode === 'pinned') {
+        if (!pinnedCard) {
+          // Ошибка: pinned без pinnedCard, переход в browsing
+          StateManager.setState({ mode: 'browsing', pinnedCard: null });
+          return;
+        }
+        renderPinnedBlock(pinnedCard);
+        SearchService.searchByVector(pinnedCard.vector).then(function() {
+          initCarousel(true); // showPinButton = true
+        });
+        return;
+      }
+
+      // Режим authoring
+      if (mode === 'authoring') {
+        removePinnedBlock();
+        initCarousel(false); // showPinButton = false
+        return;
       }
     }
 
@@ -5229,21 +5389,61 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         updateCounts();
         cachedQuery = null;
         cachedRegex = null;
-        initCarousel();
+        applyMode();
       };
       Bus.on('i18n:change', i18nHandler);
 
       listsChangedHandler = function() {
         updateCounts();
+        var state = StateManager.getState();
+        
+        // В режиме pinned при текстовом поиске не перерисовываем карусель автоматически
+        if (state.mode === 'pinned' && uiState.pinnedTextMode) {
+          initCarousel(true);
+          return;
+        }
+        
         cachedQuery = null;
         cachedRegex = null;
         uiState.currentPage = 0;
-        initCarousel();
+        initCarousel(state.mode !== 'authoring');
       };
       Bus.on('state:lists-changed', listsChangedHandler);
 
+      // Подписка на изменения StateManager (mode, pinnedCard)
+      stateChangeHandler = function() {
+        applyMode();
+      };
+      StateManager.subscribe(stateChangeHandler);
+
+      // Обработка ввода текста в режиме pinned
+      editorSearchHandler = function(payload) {
+        var state = StateManager.getState();
+        var editorText = EditorComponent.getValue();
+        var hasText = editorText && editorText.trim().length > 0;
+
+        if (state.mode === 'pinned' && state.pinnedCard) {
+          if (hasText) {
+            // Временный текстовый поиск в режиме pinned
+            uiState.pinnedTextMode = true;
+            SearchService.search(editorText, false);
+          } else {
+            // Возврат к поиску по вектору пина
+            uiState.pinnedTextMode = false;
+            SearchService.searchByVector(state.pinnedCard.vector);
+          }
+          return;
+        }
+
+        if (state.mode === 'authoring' && !hasText && !state.pinnedCard) {
+          // Переход в browsing при очистке поля
+          StateManager.setState({ mode: 'browsing' });
+        }
+      };
+      Bus.on('editor:search-request', editorSearchHandler);
+
       updateCounts();
-      initCarousel();
+      applyMode();
     }
 
     /**
@@ -5269,6 +5469,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       uiState.prevBtn = null;
       uiState.nextBtn = null;
       uiState.pages = [];
+      browsingFeedCache = null;
       
       if (i18nHandler) {
         try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
@@ -5278,15 +5479,26 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) { /* ignore */ }
         listsChangedHandler = null;
       }
+      if (stateChangeHandler) {
+        // Отписка от StateManager (предполагается, что subscribe возвращает unsubscribe)
+        // В текущей реализации StateManager не возвращает unsubscribe, поэтому просто обнуляем
+        stateChangeHandler = null;
+      }
+      if (editorSearchHandler) {
+        try { Bus.off('editor:search-request', editorSearchHandler); } catch (_) { /* ignore */ }
+        editorSearchHandler = null;
+      }
+
+      removePinnedBlock();
     }
 
     return {
       init: init,
       destroy: destroy
     };
-  }, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'Toast', 'EditorComponent']);
+  }, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'Toast', 'EditorComponent', 'SearchService']);
 <!-- NOOMIUM_MODULE_END StreamViewComponent -->
-
+  
 <!-- NOOMIUM_MODULE_START BaseViewComponent -->
 DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast, SearchService) {
   var ITEM_HEIGHT = 100;
