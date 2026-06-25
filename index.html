@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.13">
+<meta name="app-version" content="1.3.14">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -4714,8 +4714,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /** @type {function(): void | null} */
     var listsChangedHandler = null;
 
-    /** @type {function(Object): void | null} */
-    var stateChangeHandler = null;
+    /** @type {function(): void | null} */
+    var stateUnsubscribe = null;
 
     /** @type {function(Object): void | null} */
     var editorSearchHandler = null;
@@ -4872,8 +4872,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         btnPin.className = 'fi-act';
         btnPin.setAttribute('data-act', 'pin');
         btnPin.setAttribute('data-id', item.id);
-        btnPin.setAttribute('aria-label', 'ЕЩЕ');
-        btnPin.textContent = 'ЕЩЕ';
+        btnPin.setAttribute('aria-label', I18n.t('btn.pin'));
+        btnPin.textContent = I18n.t('btn.pin');
         footer.appendChild(btnPin);
       }
 
@@ -5442,10 +5442,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       Bus.on('state:lists-changed', listsChangedHandler);
 
       // Подписка на изменения StateManager (mode, pinnedCard)
-      stateChangeHandler = function() {
+      stateUnsubscribe = StateManager.subscribe(function() {
         applyMode();
-      };
-      StateManager.subscribe(stateChangeHandler);
+      });
 
       // Обработка ввода текста в режиме pinned
       editorSearchHandler = function(payload) {
@@ -5510,10 +5509,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) { /* ignore */ }
         listsChangedHandler = null;
       }
-      if (stateChangeHandler) {
-        // Отписка от StateManager (предполагается, что subscribe возвращает unsubscribe)
-        // В текущей реализации StateManager не возвращает unsubscribe, поэтому просто обнуляем
-        stateChangeHandler = null;
+      if (typeof stateUnsubscribe === 'function') {
+        stateUnsubscribe();
+        stateUnsubscribe = null;
       }
       if (editorSearchHandler) {
         try { Bus.off('editor:search-request', editorSearchHandler); } catch (_) { /* ignore */ }
@@ -6255,11 +6253,23 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
 
   /**
    * Запускает поиск по текущему тексту из редактора.
+   * Содержит защиту от вызова в режимах, где текстовый поиск не требуется (browsing, pinned без текста).
    * После завершения публикует событие state:lists-changed для обновления UI.
    * @param {boolean} [force=false] - Принудительная отправка запроса в сеть.
    * @returns {Promise<void>}
    */
   function executeSearch(force) {
+    var state = StateManager.getState();
+    
+    // В режиме browsing текстовый поиск не выполняется
+    if (state.mode === 'browsing') return Promise.resolve();
+    
+    // В режиме pinned поиск выполняется только если есть текст в редакторе
+    if (state.mode === 'pinned') {
+      var editorText = EditorComponent.getValue();
+      if (!editorText || !editorText.trim()) return Promise.resolve();
+    }
+    
     var text = EditorComponent.getValue();
     return SearchService.search(text, force).then(function() {
       try { Bus.emit('state:lists-changed'); } catch (_) { /* ignore */ }
@@ -6339,7 +6349,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     }
   }
 <!-- NOOMIUM_MODULE_END App.State -->
-
+  
 <!-- NOOMIUM_MODULE_START UI.Layout -->
   /**
    * Строит HTML-разметку шапки приложения (хедер) с логотипом,
@@ -7201,6 +7211,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     'btn.del': 'Удалить', 'btn.copy': 'Копия', 'btn.toggle.priv': 'Скрыть', 'btn.toggle.pub': 'Открыть',
     'btn.back': 'Назад', 'btn.gotit': 'Понятно', 'btn.forgot': 'Забыли пароль?',
     'btn.reset_storage': 'Сброс хранилища',
+    'btn.pin': 'ЕЩЕ',
     'reset_storage.confirm': 'Все данные будут удалены безвозвратно. Продолжить?',
     'sim.score': 'похожа на',
     'seg.local': 'Моё', 'seg.world': 'Мир', 'seg.seren': 'Озарения',
@@ -7208,6 +7219,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     'empty.local.t': 'Пока нет мыслей', 'empty.local.d': 'Начните печатать в поле выше',
     'empty.world.t': 'Никто не думает так же', 'empty.world.d': 'Ждём открытые мысли других',
     'empty.seren.t': 'Озарений нет', 'empty.seren.d': 'Попробуйте другую формулировку',
+    'empty.browsing.t': 'Сеть пока пуста', 'empty.browsing.d': 'Никто не публиковал открытые мысли в последнее время',
     'empty.base.t': 'База пуста', 'empty.base.d': 'Запишите первую мысль',
     'empty.base.empty': 'Под фильтр ничего не подошло',
     'base.stat.total': 'всего', 'base.stat.open': 'открыто', 'base.stat.priv': 'лично',
@@ -7276,6 +7288,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     'btn.del': 'Delete', 'btn.copy': 'Copy', 'btn.toggle.priv': 'Hide', 'btn.toggle.pub': 'Share',
     'btn.back': 'Back', 'btn.gotit': 'Got it', 'btn.forgot': 'Forgot password?',
     'btn.reset_storage': 'Reset Storage',
+    'btn.pin': 'MORE',
     'reset_storage.confirm': 'All data will be permanently deleted. Continue?',
     'sim.score': 'similarity',
     'seg.local': 'Mine', 'seg.world': 'World', 'seg.seren': 'Insights',
@@ -7283,6 +7296,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     'empty.local.t': 'No thoughts yet', 'empty.local.d': 'Start typing above',
     'empty.world.t': 'Nobody thinks alike', 'empty.world.d': 'Waiting for open thoughts',
     'empty.seren.t': 'No insights', 'empty.seren.d': 'Try different wording',
+    'empty.browsing.t': 'Nothing in the network', 'empty.browsing.d': 'No recent open thoughts from others',
     'empty.base.t': 'Base is empty', 'empty.base.d': 'Write your first thought',
     'empty.base.empty': 'Nothing matches',
     'base.stat.total': 'total', 'base.stat.open': 'open', 'base.stat.priv': 'private',
