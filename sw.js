@@ -3,7 +3,7 @@
  * Версия передаётся через URL-параметр ?v=<app-version> для cache-busting.
  *
  * @file sw.js
- * @version 1.0.1
+ * @version 1.0.0
  */
 
 /**
@@ -11,7 +11,7 @@
  * Извлекается из query-параметра `v` URL-адреса регистрации SW.
  * @type {string}
  */
-const APP_VERSION = '1.3.16';
+const APP_VERSION = '1.3.9';
 const CACHE_NAME = 'noomium-v' + new URL(self.location).searchParams.get('v');
 
 /**
@@ -107,7 +107,7 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // 2. Navigation (index.html): Cache-First с offline-fallback.
+  // 2. Navigation (index.html): Cache-First.
   // Обновление HTML происходит автоматически за счёт смены CACHE_NAME при деплое новой версии.
   if (e.request.mode === 'navigate') {
     e.respondWith(
@@ -131,37 +131,7 @@ self.addEventListener('fetch', (e) => {
               }
               return res;
             }
-          ).catch(() => {
-            // Fallback на статическую офлайн-страницу при отсутствии сети и пустом кэше.
-            // Inline-стили гарантируют корректное отображение без зависимости от внешних CSS.
-            // Статус 200 предотвращает показ системной ошибки браузера (ERR_INTERNET_DISCONNECTED).
-            return new Response(
-              '<!DOCTYPE html>' +
-              '<html lang="en">' +
-              '<head>' +
-                '<meta charset="UTF-8">' +
-                '<meta name="viewport" content="width=device-width,initial-scale=1">' +
-                '<title>Offline - NOOmium</title>' +
-                '<style>' +
-                  'body{font-family:ui-sans-serif,-apple-system,sans-serif;display:flex;align-items:center;' +
-                  'justify-content:center;height:100vh;margin:0;background:#0b0b10;color:#ececf1;text-align:center;padding:20px;}' +
-                  'h1{font-size:24px;margin-bottom:12px;font-weight:600;}' +
-                  'p{color:#a0a0ae;font-size:15px;line-height:1.5;max-width:320px;margin:0 auto;}' +
-                '</style>' +
-              '</head>' +
-              '<body>' +
-                '<div>' +
-                  '<h1>No connection</h1>' +
-                  '<p>NOOmium requires an internet connection for the initial load. Please check your network and reload.</p>' +
-                '</div>' +
-              '</body>' +
-              '</html>',
-              {
-                status: 200,
-                headers: { 'Content-Type': 'text/html; charset=utf-8' }
-              }
-            );
-          });
+          );
         }
       )
     );
