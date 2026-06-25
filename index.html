@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.12">
+<meta name="app-version" content="1.3.13">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2429,6 +2429,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
         var KQ = cfg.get('kQuery', 21000);
         var KA = cfg.get('kAnswer', 21001);
+        var KI = 21002; // Kind для роевых импульсов (Swarm Signals)
         var room = cfg.get('room', 'noomium-main');
 
         if (ev.kind === KQ) {
@@ -2599,7 +2600,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             for (var j = 0; j < answers.length; j++) {
               if (answers[j].id === ev.id) { isDupAnswer = true; break; }
             }
-            if (!isDupAnswer) {
+                        if (!isDupAnswer) {
               if (answers.length >= cfg.get('maxAnswersCache', 100)) answers.shift();
               answers.push({
                 id: ev.id,
@@ -2614,6 +2615,28 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
               if (typeof onUpdate === 'function') {
                 try { onUpdate(); } catch (_) { /* ignore */ }
               }
+            }
+          }
+        }
+
+        // Обработка роевых импульсов (kind 21002)
+        if (ev.kind === KI) {
+          var impulseETag = null;
+          var impulsePTag = null;
+          for (var i = 0; i < ev.tags.length; i++) {
+            var tag = ev.tags[i];
+            if (Array.isArray(tag)) {
+              if (tag[0] === 'e') impulseETag = tag[1];
+              else if (tag[0] === 'p') impulsePTag = tag[1];
+            }
+          }
+          // Обрабатываем только импульсы, адресованные нам (p === pk)
+          if (impulseETag && impulsePTag && pk && impulsePTag === pk) {
+            try {
+              var impulseService = DI.resolve('ImpulseService');
+              impulseService.handleIncomingImpulse(impulseETag, ev.pubkey.slice(0, 6));
+            } catch (e) {
+              if (log) log.warn('handleIncomingImpulse fail', String(e));
             }
           }
         }
@@ -2778,7 +2801,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         started = true;
         try {
           subscription = pool.subscribeMany(cfg.get('relays', []),
-            [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
+            [{ kinds: [KQ, KA, 21002], '#t': [room], since: nowSec - subWindow }],
             { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
           startHeartbeat();
         } catch (e) {
@@ -2966,6 +2989,105 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'DB', 'AI', 'Logger', 'Bus']);
 <!-- NOOMIUM_MODULE_END Net -->
+
+<!-- NOOMIUM_MODULE_START ImpulseService -->
+  /**
+   * @typedef {Object} ImpulseReceivedPayload
+   * @description Payload события impulse:received.
+   * @property {string} targetId - ID Nostr-события, на которое пришёл импульс.
+   * @property {string} peer - Короткий идентификатор отправителя (6 символов pubkey).
+   */
+
+  /**
+   * Сервис управления роевыми импульсами (Swarm Signals).
+   *
+   * Импульс — короткое Nostr-событие kind 21002, выражающее внимание к чужой мысли.
+   * Импульсы не сохраняются в базу, живут только в сетевом слое и в UI-счётчиках.
+   *
+   * Архитектурные решения:
+   * - Делегирует сетевую отправку в Net (избегает дублирования криптографии).
+   * - Принимает входящие импульсы от Net и публикует события в Bus для UI.
+   * - Не хранит состояние: счётчики импульсов живут в StreamViewComponent.
+   *
+   * @module ImpulseService
+   */
+  DI.register('ImpulseService', function(Bus, Net, StateManager, Logger) {
+
+    /**
+     * Отправляет импульс на целевую заметку через сеть Nostr.
+     *
+     * Требования к параметрам:
+     * - targetEventId должен быть валидным Nostr event ID (64 hex-символа).
+     * - targetPubkey должен быть полным публичным ключом автора (64 hex-символа).
+     *
+     * Если у пользователя нет ключа (Net.hasKey() === false), отправка игнорируется.
+     *
+     * @param {string} targetEventId - ID события Nostr, на которое отправляется импульс.
+     * @param {string} targetPubkey - Полный публичный ключ автора заметки.
+     * @returns {boolean} true, если отправка инициирована.
+     */
+    function sendImpulse(targetEventId, targetPubkey) {
+      // Валидация входных данных
+      if (!targetEventId || typeof targetEventId !== 'string' || targetEventId.length !== 64) {
+        if (Logger) Logger.warn('ImpulseService.sendImpulse: invalid targetEventId', targetEventId);
+        return false;
+      }
+      if (!targetPubkey || typeof targetPubkey !== 'string' || targetPubkey.length !== 64) {
+        if (Logger) Logger.warn('ImpulseService.sendImpulse: invalid targetPubkey', targetPubkey);
+        return false;
+      }
+      if (!Net || typeof Net.hasKey !== 'function' || !Net.hasKey()) {
+        if (Logger) Logger.warn('ImpulseService.sendImpulse: no network key');
+        return false;
+      }
+      if (typeof Net.publishImpulse !== 'function') {
+        if (Logger) Logger.warn('ImpulseService.sendImpulse: Net.publishImpulse not available');
+        return false;
+      }
+      
+      try {
+        Net.publishImpulse(targetEventId, targetPubkey);
+        return true;
+      } catch (e) {
+        if (Logger) Logger.warn('ImpulseService.sendImpulse error', String(e && e.message || e));
+        return false;
+      }
+    }
+
+    /**
+     * Обрабатывает полученный импульс от другого пользователя.
+     * Вызывается модулем Net при получении события kind 21002,
+     * адресованного текущему пользователю.
+     *
+     * Публикует событие 'impulse:received' в Bus, которое подхватывает
+     * StreamViewComponent для визуализации (анимация + счётчик).
+     *
+     * @param {string} targetId - ID события, на которое отправлен импульс.
+     * @param {string} peer - Короткий идентификатор отправителя (первые 6 символов pubkey).
+     * @returns {void}
+     */
+    function handleIncomingImpulse(targetId, peer) {
+      if (!targetId || !peer) {
+        if (Logger) Logger.warn('ImpulseService.handleIncomingImpulse: missing data', { targetId, peer });
+        return;
+      }
+      
+      if (Bus && typeof Bus.emit === 'function') {
+        try {
+          Bus.emit('impulse:received', { targetId: targetId, peer: peer });
+        } catch (e) {
+          if (Logger) Logger.warn('ImpulseService.handleIncomingImpulse emit error', String(e));
+        }
+      }
+    }
+
+    return {
+      sendImpulse: sendImpulse,
+      handleIncomingImpulse: handleIncomingImpulse
+    };
+  }, ['Bus', 'Net', 'StateManager', 'Logger']);
+<!-- NOOMIUM_MODULE_END ImpulseService -->
+  
 <!-- NOOMIUM_MODULE_START Modal -->
   /**
    * @typedef {Object} ModalButton
