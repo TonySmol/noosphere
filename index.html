@@ -3422,15 +3422,356 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END Modal -->
 
 <!-- NOOMIUM_MODULE_START Toast -->
+  /**
+   * @typedef {'ok' | 'err' | 'warn' | 'info'} ToastType
+   * @description Тип отображаемого уведомления (успех, ошибка, предупреждение, информация).
+   */
 
+  DI.register('Toast', function(Config) {
+
+    /** @type {HTMLDivElement | null} Контейнер для тостов */
+    var container = null;
+
+    /** @type {number} Максимальное количество одновременно видимых тостов */
+    var LIMIT = Config.get('toastMaxVisible', 3);
+
+    /**
+     * Словарь иконок для каждого типа тоста.
+     * @type {Object<ToastType, string>}
+     */
+    var icons = { ok: '✓', err: '×', warn: '!', info: '◆' };
+
+    /**
+     * Создаёт DOM-контейнер для тостов при первом обращении.
+     * Контейнер позиционируется фиксированно внизу экрана (через CSS класс .tc).
+     * @returns {void}
+     */
+    function ensureContainer() {
+      // Проверка, что контейнер существует и не был удален из DOM (например, при refreshUI)
+      if (container && container.parentNode) return;
+      container = document.createElement('div');
+      container.className = 'tc';
+      document.body.appendChild(container);
+    }
+
+    /**
+     * Показывает всплывающее уведомление (тост).
+     * Автоматически удаляет старые тосты, если превышен лимит,
+     * и скрывает текущий через заданное или дефолтное время с плавной анимацией.
+     * 
+     * @param {ToastType} type - Тип уведомления (влияет на иконку и цвет).
+     * @param {string} msg - Текст уведомления.
+     * @param {number} [ms] - Время показа в миллисекундах (по умолчанию из конфига).
+     * @returns {void}
+     */
+    function show(type, msg, ms) {
+      ensureContainer();
+      var cls = type === 'ok' ? 'ok' : type === 'err' ? 'err' : type === 'warn' ? 'warn' : 'info';
+      
+      var el = document.createElement('div');
+      el.className = 'tt ' + cls;
+      
+      var ic = document.createElement('span');
+      ic.className = 'tt-ic';
+      ic.textContent = icons[cls] || icons.info;
+      
+      var m = document.createElement('span');
+      m.textContent = String(msg || '');
+      
+      el.appendChild(ic);
+      el.appendChild(m);
+      container.appendChild(el);
+      
+      // Удаляем самые старые тосты при превышении лимита
+      while (container.childElementCount > LIMIT) {
+        try {
+          container.removeChild(container.firstChild);
+        } catch (_) {
+          break;
+        }
+      }
+      
+      // Планируем анимированное скрытие и удаление из DOM
+      setTimeout(function() {
+        el.style.transition = 'opacity .2s';
+        el.style.opacity = '0';
+        setTimeout(function() {
+          try { 
+            if (el.parentNode) el.remove(); 
+          } catch (_) { /* ignore */ }
+        }, 200);
+      }, ms || Config.get('toastDefaultDuration', 2200));
+    }
+
+    return {
+
+      /**
+       * Публичный метод для показа уведомления.
+       * 
+       * @param {ToastType} type - Тип уведомления.
+       * @param {string} msg - Текст.
+       * @param {number} [ms] - Длительность показа.
+       * @returns {void}
+       */
+      show: show
+    };
+  }, ['Config']);
 <!-- NOOMIUM_MODULE_END Toast -->
 
 <!-- NOOMIUM_MODULE_START Progress -->
+  DI.register('Progress', function() {
 
+    /** @type {HTMLDivElement | null} Оверлей прогресс-бара */
+    var overlay = null;
+
+    /** @type {HTMLDivElement | null} Элемент заполнения прогресс-бара */
+    var fillEl = null;
+
+    /** @type {HTMLDivElement | null} Элемент с текстом процентов */
+    var pctEl = null;
+
+    /**
+     * Создаёт и показывает полноэкранный оверлей с прогресс-баром загрузки AI.
+     * Игнорирует повторные вызовы, если оверлей уже создан и присутствует в DOM.
+     * DOM-структура создаётся динамически для изоляции от refreshUI().
+     * 
+     * @returns {void}
+     */
+    function show() {
+      // Защита от повторного создания и проверка, что оверлей не был удалён из DOM
+      if (overlay && overlay.parentNode) return;
+      
+      overlay = document.createElement('div');
+      overlay.className = 'aip';
+      
+      var card = document.createElement('div');
+      card.className = 'aip-c';
+      card.innerHTML =
+        '<div class="aip-ic">◆</div><div class="aip-t">Загружаем модель ИИ</div>' +
+        '<div class="aip-d">Чтобы искать мысли по смыслу, нужна небольшая модель. Это произойдёт один раз.</div>' +
+        '<div class="aip-bar"><div class="aip-fill"></div></div>' +
+        '<div class="aip-pct">0%</div>';
+        
+      overlay.appendChild(card);
+      document.body.appendChild(overlay);
+      
+      fillEl = card.querySelector('.aip-fill');
+      pctEl = card.querySelector('.aip-pct');
+      if (fillEl) fillEl.style.width = '0%';
+    }
+
+    /**
+     * Обновляет визуальное состояние прогресс-бара.
+     * Клампнет значение в диапазон [0, 100] и округляет до целого.
+     * Игнорирует вызовы, если DOM-элементы ещё не созданы.
+     * 
+     * @param {number} percent - Процент выполнения (от 0 до 100).
+     * @returns {void}
+     */
+    function update(percent) {
+      if (!fillEl || !pctEl) return;
+      var value = Math.max(0, Math.min(100, Math.round(percent)));
+      fillEl.style.width = value + '%';
+      pctEl.textContent = value + '%';
+    }
+
+    /**
+     * Скрывает и удаляет оверлей прогресс-бара из DOM.
+     * Сбрасывает внутренние ссылки на элементы для предотвращения утечек памяти.
+     * 
+     * @returns {void}
+     */
+    function hide() {
+      if (overlay && overlay.parentNode) {
+        try { overlay.parentNode.removeChild(overlay); } catch (_) { /* ignore */ }
+      }
+      overlay = null;
+      fillEl = null;
+      pctEl = null;
+    }
+
+    return {
+
+      /**
+       * Показать прогресс-бар (публичный API).
+       * @returns {void}
+       */
+      show: show,
+
+      /**
+       * Скрыть прогресс-бар (публичный API).
+       * @returns {void}
+       */
+      hide: hide,
+
+      /**
+       * Обновить процент загрузки (публичный API).
+       * @param {number} percent - Процент (0-100).
+       * @returns {void}
+       */
+      update: update
+    };
+  }, []);
 <!-- NOOMIUM_MODULE_END Progress -->
 
 <!-- NOOMIUM_MODULE_START StateManager -->
+  /**
+   * @typedef {'stream' | 'base'} ViewName
+   * @description Активная вкладка приложения (Поток или База).
+   */
 
+  /**
+   * @typedef {'private' | 'world'} SendMode
+   * @description Режим отправки мысли (Личное или Мир).
+   */
+
+  /**
+   * @typedef {Object} FocusedItem
+   * @description Данные закреплённой заметки в режиме фокуса.
+   * @property {string} id - ID заметки.
+   * @property {string} text - Текст заметки.
+   * @property {Vector} vector - Вектор эмбеддинга (для поиска).
+   * @property {string} [peer] - ID пира (если заметка сетевая).
+   */
+
+  /**
+   * @typedef {Object} AppState
+   * @description Глобальное состояние приложения (единый источник истины).
+   * @property {ViewName} view - Текущая активная вкладка.
+   * @property {Segment} seg - Активный сегмент карусели.
+   * @property {SendMode} sendMode - Текущий режим отправки.
+   * @property {boolean} sendLock - Флаг блокировки кнопки отправки (во избежание дублей).
+   * @property {Vector | null} lastVec - Вектор последнего поискового запроса.
+   * @property {number} lastQuery - Timestamp последнего запроса.
+   * @property {boolean} netAuthorized - Флаг успешной авторизации в сети (ключ расшифрован).
+   * @property {function(function(): void): void | null} requestNetworkAuth - Колбэк для запроса авторизации.
+   * @property {Object<string, SearchResult[]>} lists - Результаты поиска по сегментам.
+   * @property {SearchResult[]} lists.local - Локальные совпадения.
+   * @property {SearchResult[]} lists.world - Совпадения из сети.
+   * @property {SearchResult[]} lists.seren - Озарения (близкие, но ниже порога).
+   * @property {SearchResult[]} lists.focus - Результаты поиска в режиме фокуса.
+   * @property {boolean} focusMode - Активен ли режим фокуса (закреплена заметка).
+   * @property {FocusedItem | null} focusedItem - Данные закреплённой заметки.
+   * @property {boolean} streamActive - Показывает ли лента живой поток (когда нет поиска и нет фокуса).
+   * @property {SearchResult[]} streamData - Массив свежих заметок из сети для live-ленты.
+   */
+
+  DI.register('StateManager', function() {
+
+    /**
+     * Внутреннее состояние приложения.
+     * @type {AppState}
+     */
+    var state = {
+      view: 'stream',
+      seg: 'local',
+      sendMode: 'private',
+      sendLock: false,
+      lastVec: null,
+      lastQuery: 0,
+      netAuthorized: false,
+      requestNetworkAuth: null,
+      lists: { local: [], world: [], seren: [], focus: [] },
+      focusMode: false,
+      focusedItem: null,
+      streamActive: true,
+      streamData: []
+    };
+
+    /**
+     * Список подписчиков на изменения состояния.
+     * @type {Array<function(AppState): void>}
+     */
+    var listeners = [];
+
+    /**
+     * Возвращает ссылку на текущий объект состояния.
+     * Внимание: мутация полей напрямую запрещена, используйте setState.
+     * @returns {AppState} Текущее состояние.
+     */
+    function getState() {
+      return state;
+    }
+
+    /**
+     * Обновляет состояние (частичное обновление через Object.assign)
+     * и синхронно уведомляет всех подписчиков.
+     * 
+     * @param {Partial<AppState>} partial - Объект с изменяемыми полями.
+     * @returns {void}
+     */
+    function setState(partial) {
+      if (partial && typeof partial === 'object') {
+        Object.assign(state, partial);
+        for (var i = 0; i < listeners.length; i++) {
+          try {
+            listeners[i](state);
+          } catch (e) {
+            /* ignore listener errors to prevent breaking the cycle */
+          }
+        }
+      }
+    }
+
+    /**
+     * Подписывает функцию на любые изменения глобального состояния.
+     * 
+     * @param {function(AppState): void} listener - Функция-обработчик.
+     * @returns {function(): void} Функция для отписки.
+     */
+    function subscribe(listener) {
+      if (typeof listener === 'function') {
+        listeners.push(listener);
+      }
+      return function unsubscribe() {
+        var idx = listeners.indexOf(listener);
+        if (idx > -1) listeners.splice(idx, 1);
+      };
+    }
+
+    /**
+     * Dispatch action (заготовка для будущего расширения архитектуры).
+     * В текущей реализации просто делегирует в setState.
+     * 
+     * @param {Partial<AppState>} action - Объект действия (изменения состояния).
+     * @returns {void}
+     */
+    function dispatch(action) {
+      if (action && typeof action === 'object') {
+        setState(action);
+      }
+    }
+
+    return {
+
+      /**
+       * Получить текущее состояние (публичный API).
+       * @returns {AppState}
+       */
+      getState: getState,
+
+      /**
+       * Обновить состояние (публичный API).
+       * @param {Partial<AppState>} partial
+       * @returns {void}
+       */
+      setState: setState,
+
+      /**
+       * Подписаться на изменения (публичный API).
+       * @param {function(AppState): void} listener
+       * @returns {function(): void}
+       */
+      subscribe: subscribe,
+
+      /**
+       * Dispatch (публичный API).
+       * @param {Partial<AppState>} action
+       * @returns {void}
+       */
+      dispatch: dispatch
+    };
+  }, []);
 <!-- NOOMIUM_MODULE_END StateManager -->
 
 <!-- NOOMIUM_MODULE_START SearchService -->
