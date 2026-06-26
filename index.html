@@ -518,7 +518,181 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END DI -->
 
 <!-- NOOMIUM_MODULE_START Utils -->
+  /**
+   * @typedef {number[]} Vector
+   * @description Вектор эмбеддинга (массив чисел с плавающей точкой).
+   */
 
+  /**
+   * @typedef {'local' | 'world' | 'seren'} Segment
+   * @description Сегмент карусели (локальные, мировые или озарения).
+   */
+
+  /**
+   * @typedef {Object} Note
+   * @property {string} id - Уникальный идентификатор заметки.
+   * @property {string} text - Текст мысли.
+   * @property {Vector} [vector] - Вектор эмбеддинга (может отсутствовать у старых записей).
+   * @property {boolean} shared - Флаг публикации в общую сеть.
+   * @property {number} createdAt - Timestamp создания.
+   * @property {number} [updatedAt] - Timestamp последнего редактирования.
+   * @property {string} [parentId] - ID родительской заметки (для связей).
+   * @property {string[]} [children] - Массив ID дочерних заметок.
+   */
+
+  /**
+   * @typedef {Object} SearchResult
+   * @property {string} id - Идентификатор заметки.
+   * @property {string} text - Текст.
+   * @property {Vector} vector - Вектор.
+   * @property {number} score - Косинусное сходство с запросом (0..1).
+   * @property {boolean} shared - Флаг публикации.
+   * @property {string} [peer] - Публичный ключ автора (для сетевых ответов).
+   * @property {number} createdAt - Timestamp создания.
+   * @property {string} [parentId] - ID родительской заметки.
+   * @property {string[]} [children] - Массив ID дочерних заметок.
+   */
+
+  DI.register('Utils', function() {
+
+    /**
+     * Экранирует специальные HTML-символы для безопасной вставки в DOM.
+     * Предотвращает XSS-атаки при отображении пользовательского контента.
+     * 
+     * @param {*} s - Входное значение (любой тип будет приведён к строке).
+     * @returns {string} Экранированная строка.
+     */
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+
+    /**
+     * Экранирует специальные символы регулярных выражений.
+     * Используется для безопасного создания RegExp из пользовательского ввода.
+     * 
+     * @param {*} s - Входное значение.
+     * @returns {string} Строка, безопасная для использования в RegExp.
+     */
+    function escRe(s) {
+      return String(s == null ? '' : s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    /**
+     * Возвращает правильную форму слова для русского/английского языка в зависимости от числа.
+     * Поддерживает славянские правила склонения (1, 2-4, 5-20, 21, 22, 25, 111, 112, 115).
+     * 
+     * @param {number} n - Количество.
+     * @param {string} one - Форма для 1 (например, «символ» / «char»).
+     * @param {string} few - Форма для 2-4 (например, «символа» / «chars»).
+     * @param {string} many - Форма для остальных (например, «символов» / «chars»).
+     * @returns {string} Выбранная форма слова.
+     */
+    function plural(n, one, few, many) {
+      n = Math.abs(n);
+      var a = n % 10, b = n % 100;
+      if (a === 1 && b !== 11) return one;
+      if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return few;
+      return many;
+    }
+
+    /**
+     * Словарь генераторов строк с числительными для разных сущностей.
+     * @type {Object<string, function(number, string): string>}
+     */
+    var words = {
+
+      /**
+       * Строка вида «N символ(ов)» / «N char(s)».
+       * @param {number} n - Количество.
+       * @param {string} l - Язык ('ru' | 'en').
+       * @returns {string}
+       */
+      symbols: function(n, l) {
+        return n + ' ' + (l === 'en' ? plural(n, 'char', 'chars', 'chars') : plural(n, 'символ', 'символа', 'символов'));
+      },
+
+      /**
+       * Строка вида «N узел(ов)» / «N peer(s)».
+       * @param {number} n - Количество.
+       * @param {string} l - Язык ('ru' | 'en').
+       * @returns {string}
+       */
+      peers: function(n, l) {
+        return n + ' ' + (l === 'en' ? plural(n, 'peer', 'peers', 'peers') : plural(n, 'узел', 'узла', 'узлов'));
+      },
+
+      /**
+       * Строка вида «N мысль(ей)» / «N note(s)».
+       * @param {number} n - Количество.
+       * @param {string} l - Язык ('ru' | 'en').
+       * @returns {string}
+       */
+      thoughts: function(n, l) {
+        return n + ' ' + (l === 'en' ? plural(n, 'note', 'notes', 'notes') : plural(n, 'мысль', 'мысли', 'мыслей'));
+      }
+    };
+
+    /**
+     * Публичная обёртка для получения строки с числительным по ключу сущности.
+     * 
+     * @param {string} key - Ключ сущности ('symbols' | 'peers' | 'thoughts').
+     * @param {number} n - Количество.
+     * @param {string} lang - Язык ('ru' | 'en').
+     * @returns {string} Отформатированная строка.
+     */
+    function word(key, n, lang) {
+      var fn = words[key];
+      return fn ? fn(n, lang) : String(n);
+    }
+
+    /**
+     * Форматирует timestamp в короткую дату (например, «05 июн.»).
+     * Возвращает пустую строку при невалидном timestamp или ошибке форматирования.
+     * 
+     * @param {number} ts - Timestamp в миллисекундах.
+     * @param {string} lang - Язык ('ru' | 'en').
+     * @returns {string} Отформатированная дата или пустая строка при ошибке.
+     */
+    function fmtDate(ts, lang) {
+      if (!ts) return '';
+      var d = new Date(ts);
+      var loc = lang === 'en' ? 'en-US' : 'ru-RU';
+      try {
+        return d.toLocaleDateString(loc, { day: '2-digit', month: 'short' });
+      } catch (_) {
+        return '';
+      }
+    }
+
+    /**
+     * Форматирует timestamp в короткое время (например, «14:30»).
+     * Возвращает пустую строку при невалидном timestamp или ошибке форматирования.
+     * 
+     * @param {number} ts - Timestamp в миллисекундах.
+     * @param {string} lang - Язык ('ru' | 'en').
+     * @returns {string} Отформатированное время или пустая строка при ошибке.
+     */
+    function fmtTime(ts, lang) {
+      if (!ts) return '';
+      var d = new Date(ts);
+      var loc = lang === 'en' ? 'en-US' : 'ru-RU';
+      try {
+        return d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit' });
+      } catch (_) {
+        return '';
+      }
+    }
+
+    return {
+      esc: esc,
+      escRe: escRe,
+      word: word,
+      fmtDate: fmtDate,
+      fmtTime: fmtTime
+    };
+  }, []);
 <!-- NOOMIUM_MODULE_END Utils -->
 
 <!-- NOOMIUM_MODULE_START Logger -->
