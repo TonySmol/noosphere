@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.3">
+<meta name="app-version" content="1.4.4">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -4701,12 +4701,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         var btn = container.querySelector('.focus-unfocus');
         if (btn) {
           btn.onclick = function() {
-            // Сбрасываем состояние фокуса
-            StateManager.setState({ focusMode: false, focusedItem: null });
-            
-            // Очищаем список результатов фокуса
+            // 🔑 ОПТИМИЗАЦИЯ: Объединяем два setState в один вызов (ПРОБЛЕМА #3)
             var lists = StateManager.getState().lists;
-            StateManager.setState({ lists: Object.assign({}, lists, { focus: [] }) });
+            StateManager.setState({ 
+              focusMode: false, 
+              focusedItem: null,
+              lists: Object.assign({}, lists, { focus: [] })
+            });
             
             // Запускаем поиск с текущим текстом редактора
             // Это вернёт UI к live stream (если редактор пуст) или к текстовому поиску
@@ -5399,6 +5400,9 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /** @type {function(): void | null} */
     var parentUpdatedHandler = null;
 
+    /** @type {function(): void | null} 🔑 НОВЫЙ handler для resize/orientationchange */
+    var resizeHandler = null;
+
     /**
      * Создаёт DocumentFragment с подсвеченными совпадениями поискового запроса.
      * Использует кэширование RegExp для оптимизации при скролле.
@@ -5448,7 +5452,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /**
      * Генерирует DOM-структуру карточки (fi) для переданного элемента.
-     * Отображает бейджи, связи parent/child,.score и кнопки действий.
+     * Отображает бейджи, связи parent/child, score и кнопки действий.
      * 
      * @param {SearchResult} item - Данные для отрисовки.
      * @param {string} mode - Текущий режим ('local', 'world', 'seren', 'focus').
@@ -5696,6 +5700,22 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         left: idx * uiState.snapStep, 
         behavior: 'smooth' 
       });
+    }
+
+    /**
+     * 🔑 НОВАЯ ФУНКЦИЯ: Пересчитывает snapStep при изменении размера окна.
+     * Критично для корректной работы точек пагинации на мобильных устройствах
+     * при повороте экрана или изменении размера окна.
+     * 
+     * @returns {void}
+     */
+    function recalculateSnapStep() {
+      if (uiState.carouselEl && uiState.pages.length > 0) {
+        var firstItem = uiState.carouselEl.querySelector('.carousel-item');
+        if (firstItem) {
+          uiState.snapStep = firstItem.getBoundingClientRect().width + 10;
+        }
+      }
     }
 
     /**
@@ -5947,6 +5967,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /**
      * Инициализирует компонент: привязывает события, подписывается на шину, рендерит UI.
+     * 🔑 Добавляет listener на resize/orientationchange для пересчёта snapStep (БАГ #2).
+     * 
      * @returns {void}
      */
     function init() {
@@ -6023,12 +6045,21 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       stateSubscriber = function() { initCarousel(); };
       StateManager.subscribe(stateSubscriber);
 
+      // 🔑 КРИТИЧНО: Listener на resize/orientationchange для пересчёта snapStep (БАГ #2)
+      resizeHandler = function() {
+        recalculateSnapStep();
+      };
+      window.addEventListener('resize', resizeHandler);
+      window.addEventListener('orientationchange', resizeHandler);
+
       updateCounts(); 
       initCarousel();
     }
 
     /**
      * Уничтожает компонент: очищает таймеры, снимает обработчики, отписывается от шины.
+     * 🔑 Снимает listener на resize/orientationchange.
+     * 
      * @returns {void}
      */
     function destroy() {
@@ -6043,6 +6074,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       var wrap = document.getElementById('carousel-wrap');
       if (wrap) {
         wrap.removeEventListener('click', handleWrapClick);
+      }
+      
+      // 🔑 Снимаем resize listener
+      if (resizeHandler) {
+        window.removeEventListener('resize', resizeHandler);
+        window.removeEventListener('orientationchange', resizeHandler);
+        resizeHandler = null;
       }
       
       uiState.carouselEl = null; 
