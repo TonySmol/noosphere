@@ -22,21 +22,16 @@
  * 4. controllerchange на клиенте перезагружает страницу для консистентности.
  *
  * @file sw.js
- * @version 1.1.0
+ * @version 1.2.0
  */
-
-/**
- * Версия приложения (дублирует meta[name="app-version"] для самодокументирования).
- * @type {string}
- */
-const APP_VERSION = '1.3.9';
 
 /**
  * Уникальное имя кеша для текущей версии.
  * Извлекается из query-параметра `v` URL регистрации SW.
+ * Fallback на 'unknown' защищает от мусорных ключей при ручной регистрации без параметра.
  * @type {string}
  */
-const CACHE_NAME = 'noomium-v' + new URL(self.location).searchParams.get('v');
+const CACHE_NAME = 'noomium-v' + (new URL(self.location).searchParams.get('v') || 'unknown');
 
 /**
  * Канонический ключ для кеширования навигационных документов.
@@ -75,7 +70,11 @@ const CDN_HOSTS = ['cdn.jsdelivr.net', 'huggingface.co'];
  * Возвращает status 200, чтобы SW не бросал исключение и браузер
  * корректно отобразил страницу вместо "No internet" ошибки.
  *
- * @returns {Response} Офлайн-страница с кнопкой перезагрузки.
+ * Использует тег <a href="/"> вместо <button onclick="location.reload()">,
+ * так как строгий CSP приложения (script-src без 'unsafe-inline')
+ * блокирует inline-обработчики событий.
+ *
+ * @returns {Response} Офлайн-страница с ссылкой-кнопкой для повторной попытки.
  */
 function buildOfflineResponse() {
   const html = `<!DOCTYPE html>
@@ -91,16 +90,16 @@ function buildOfflineResponse() {
   .card{max-width:400px}
   h1{font-size:48px;margin:0 0 8px;font-weight:800}
   p{color:#a0a0ae;margin:0 0 24px;line-height:1.5}
-  button{background:#8b7cff;color:white;border:none;padding:12px 24px;
-    border-radius:8px;font-size:15px;font-weight:600;cursor:pointer}
-  button:active{filter:brightness(1.1)}
+  .btn{display:inline-block;background:#8b7cff;color:white;text-decoration:none;
+    padding:12px 24px;border-radius:8px;font-size:15px;font-weight:600}
+  .btn:active{filter:brightness(1.1)}
 </style>
 </head>
 <body>
 <div class="card">
   <h1>◆</h1>
   <p>NOOmium недоступен без сети.<br>Проверьте подключение и попробуйте снова.</p>
-  <button onclick="location.reload()">Обновить</button>
+  <a href="/" class="btn">Попробовать снова</a>
 </div>
 </body>
 </html>`;
@@ -237,7 +236,7 @@ function handleNavigation(request) {
  * 1. Ищем совпадение в кеше.
  * 2. Если найдено — сразу возвращаем (stale) и в фоне обновляем кеш (revalidate).
  * 3. Если не найдено — ждём ответа сети и сохраняем его в кеш.
- * 4. При сетевой ошибке без кеша — пробрасываем ошибку браузеру.
+ * 4. При сетевой ошибке без кеша — возвращаем 504 Gateway Timeout.
  *
  * @param {Request} request - Запрос статического ассета.
  * @param {FetchEvent} event - Исходное событие fetch (для waitUntil).
