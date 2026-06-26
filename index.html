@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.3.13">
+<meta name="app-version" content="1.3.14">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -5747,57 +5747,44 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
    * @typedef {Object} SWRegistrationPayload
    * @description Payload события sw:registered.
    * @property {string} version - Версия приложения.
-   * @property {string} cacheName - Имя кеша SW.
+   * @property {string} scope - Область действия SW.
+   * @property {boolean} firstInstall - Флаг первой установки.
    */
 
   /**
    * Клиентский модуль управления жизненным циклом Service Worker.
    *
    * Отвечает за:
-   * - Регистрацию SW с правильными параметрами (updateViaCache: 'none')
-   * - Отслеживание фаз обновления (installing → installed → activating → activated)
+   * - Регистрацию SW с динамическим scope и updateViaCache: 'none'
+   * - Отслеживание фаз обновления с гарантированным снятием listener'ов
    * - Координацию немедленной активации через SKIP_WAITING
-   * - Контролируемую перезагрузку страницы при смене контроллера
-   * - Интеграцию с шиной событий для UI-уведомлений
+   * - Приём сообщений от SW (sw:message)
+   * - Безопасную перезагрузку с учётом состояния приложения
    *
-   * Архитектурные решения:
-   * - Graceful degradation: работает без Config/Logger/Bus через console fallback
-   * - Защита от множественных listener'ов при повторных вызовах init()
-   * - Fallback на meta-тег app-version, если Config не содержит версию
-   * - Safe postMessage с обработкой InvalidStateError
-   *
-   * События Bus:
-   * - 'sw:registered' - успешная регистрация
-   * - 'sw:updatefound' - обнаружена новая версия
-   * - 'sw:updated' - активация завершена, imminent reload
-   * - 'sw:error' - ошибка регистрации (опционально)
+   * @module SW
    */
   DI.register('SW', function(Config, Logger, Bus) {
 
     /**
      * Флаг, предотвращающий множественные перезагрузки страницы.
-     * Устанавливается в true при первом срабатывании controllerchange.
      * @type {boolean}
      */
     var refreshing = false;
 
     /**
-     * Флаг, защищающий от повторной установки глобального обработчика
-     * controllerchange при повторных вызовах init() (например, после refreshUI).
+     * Флаг, защищающий от повторной установки глобальных обработчиков.
      * @type {boolean}
      */
-    var controllerListenerAttached = false;
+    var globalListenersAttached = false;
 
     /**
-     * Ссылка на активный ServiceWorkerRegistration для возможности
-     * ручного вызова update() из других модулей (future-proof).
+     * Ссылка на активный ServiceWorkerRegistration.
      * @type {ServiceWorkerRegistration | null}
      */
     var registration = null;
 
     /**
      * Безопасный wrapper над Logger с fallback на console.
-     * Обеспечивает единый формат логов с префиксом [SW].
      * @param {'info'|'warn'|'error'} level - Уровень лога.
      * @param {string} msg - Сообщение.
      * @param {*} [data] - Дополнительные данные.
@@ -5810,16 +5797,11 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
         try {
           Logger[level](fullMsg, data);
           return;
-        } catch (_) {
-          /* fallback на console при ошибке Logger */
-        }
+        } catch (_) { /* fallback */ }
       }
       var fn = console[level] || console.log;
-      if (data !== undefined) {
-        fn(fullMsg, data);
-      } else {
-        fn(fullMsg);
-      }
+      if (data !== undefined) fn(fullMsg, data);
+      else fn(fullMsg);
     }
 
     /**
@@ -5830,17 +5812,12 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
      */
     function emit(event, payload) {
       if (!Bus || typeof Bus.emit !== 'function') return;
-      try {
-        Bus.emit(event, payload);
-      } catch (err) {
-        log('warn', 'Failed to emit ' + event, err);
-      }
+      try { Bus.emit(event, payload); } 
+      catch (err) { log('warn', 'Failed to emit ' + event, err); }
     }
 
     /**
      * Безопасно отправляет сообщение Service Worker'у.
-     * Оборачивает postMessage в try/catch для обработки случая,
-     * когда SW уже terminated или находится в некорректном состоянии.
      * @param {ServiceWorker} worker - Целевой worker.
      * @param {Object} message - Сообщение для отправки.
      * @returns {boolean} true если сообщение успешно отправлено.
@@ -5857,75 +5834,49 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     }
 
     /**
-     * Извлекает версию приложения из Config с fallback на meta-тег.
-     * Это обеспечивает robustness: если Config ещё не инициализирован
-     * или не содержит appVersion, используется значение из <meta>.
+     * Извлекает версию приложения напрямую из meta-тега.
+     * Избегаем грязного fallback через Config, так как версии там нет.
      * @returns {string} Версия приложения.
      */
     function resolveAppVersion() {
-      var version = '1.0.0';
-      
-      // Приоритет 1: Config
-      if (Config && typeof Config.get === 'function') {
-        try {
-          var cfgVersion = Config.get('appVersion', null);
-          if (cfgVersion && typeof cfgVersion === 'string') {
-            version = cfgVersion;
-          }
-        } catch (_) {
-          /* ignore, use fallback */
+      try {
+        var meta = document.querySelector('meta[name="app-version"]');
+        if (meta && meta.getAttribute) {
+          var metaVersion = meta.getAttribute('content');
+          if (metaVersion) return metaVersion;
         }
-      }
-      
-      // Приоритет 2: meta-тег (если Config не дал результат)
-      if (version === '1.0.0') {
-        try {
-          var meta = document.querySelector('meta[name="app-version"]');
-          if (meta && meta.getAttribute) {
-            var metaVersion = meta.getAttribute('content');
-            if (metaVersion) version = metaVersion;
-          }
-        } catch (_) {
-          /* ignore */
-        }
-      }
-      
-      return version;
+      } catch (_) { /* ignore */ }
+      return '1.0.0';
     }
 
     /**
      * Отправляет команду немедленной активации ожидающему Service Worker'у.
-     * Вызывается в двух сценариях:
-     * 1. При старте, если reg.waiting существует (возврат на страницу).
-     * 2. При обнаружении новой версии через updatefound → installed.
      * @param {ServiceWorker} worker - Ожидающий активации worker.
-     * @param {string} reason - Причина вызова (для логирования).
+     * @param {string} reason - Причина вызова.
      * @returns {void}
      */
     function requestSkipWaiting(worker, reason) {
       if (!worker) return;
-      log('info', 'Requesting SKIP_WAITING (' + reason + ')', {
-        state: worker.state
-      });
+      log('info', 'Requesting SKIP_WAITING (' + reason + ')', { state: worker.state });
       safePostMessage(worker, { type: 'SKIP_WAITING' });
       emit('sw:updatefound', { reason: reason });
     }
 
     /**
      * Обработчик изменения состояния устанавливающегося Service Worker'а.
-     * Отслеживает переход в 'installed' и инициирует немедленную активацию,
-     * если уже есть активный контроллер (значит это обновление, а не первая установка).
+     * Снимает сам себя после достижения фазы 'installed' для предотвращения утечек.
      * @param {ServiceWorker} installing - Worker в фазе установки.
      * @returns {function(Event): void} Обработчик statechange.
      */
     function createInstallingStateHandler(installing) {
-      return function onStateChange() {
+      var handler = function onStateChange() {
         if (!installing) return;
-        
         log('info', 'Worker state changed', { state: installing.state });
         
         if (installing.state === 'installed') {
-          // Если есть активный контроллер — это обновление, а не первая установка
+          // КРИТИЧНО: Снимаем listener, чтобы не спамить при activating/activated
+          installing.removeEventListener('statechange', handler);
+          
           if (navigator.serviceWorker.controller) {
             requestSkipWaiting(installing, 'update-installed');
           } else {
@@ -5934,11 +5885,11 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
           }
         }
       };
+      return handler;
     }
 
     /**
      * Обработчик события updatefound на регистрации SW.
-     * Подписывается на statechange нового worker'а (reg.installing).
      * @param {ServiceWorkerRegistration} reg - Активная регистрация.
      * @returns {function(): void} Обработчик updatefound.
      */
@@ -5949,7 +5900,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
           log('warn', 'updatefound fired but reg.installing is null');
           return;
         }
-        
         log('info', 'New SW detected, state: ' + installing.state);
         installing.addEventListener('statechange', createInstallingStateHandler(installing));
       };
@@ -5957,8 +5907,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
 
     /**
      * Глобальный обработчик смены контроллера Service Worker.
-     * Срабатывает, когда новый SW берёт контроль над клиентом.
-     * Использует флаг refreshing для предотвращения цикла перезагрузок.
+     * Эмитит событие для UI, чтобы приложение могло корректно подготовиться к перезагрузке.
      * @returns {function(): void}
      */
     function onControllerChange() {
@@ -5968,26 +5917,34 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
       }
       
       refreshing = true;
-      log('info', 'Controller changed, initiating reload');
+      log('info', 'Controller changed, initiating reload sequence');
       emit('sw:updated', { timestamp: Date.now() });
       
-      // Небольшая задержка, чтобы Bus успел доставить событие подписчикам
-      // (например, Toast-уведомлению об обновлении)
+      // Даем UI 100мс на сохранение состояний и показ тостов перед нативным beforeunload
       setTimeout(function() {
         window.location.reload();
-      }, 50);
+      }, 100);
     }
 
     /**
-     * Устанавливает глобальный обработчик controllerchange.
-     * Защищён от повторной регистрации через флаг controllerListenerAttached.
+     * Обработчик входящих сообщений от Service Worker.
+     * Позволяет SW_pushить данные в UI (например, статус фоновой синхронизации).
+     * @param {MessageEvent} event - Событие сообщения.
      * @returns {void}
      */
-    function attachControllerChangeListener() {
-      if (controllerListenerAttached) {
-        log('info', 'controllerchange listener already attached');
-        return;
-      }
+    function onServiceWorkerMessage(event) {
+      if (!event.data) return;
+      log('info', 'Message from SW', event.data);
+      emit('sw:message', event.data);
+    }
+
+    /**
+     * Устанавливает глобальные обработчики controllerchange и message.
+     * Защищён от повторной регистрации.
+     * @returns {void}
+     */
+    function attachGlobalListeners() {
+      if (globalListenersAttached) return;
       
       if (!navigator.serviceWorker || typeof navigator.serviceWorker.addEventListener !== 'function') {
         log('warn', 'navigator.serviceWorker.addEventListener not available');
@@ -5996,16 +5953,16 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
       
       try {
         navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
-        controllerListenerAttached = true;
-        log('info', 'controllerchange listener attached');
+        navigator.serviceWorker.addEventListener('message', onServiceWorkerMessage);
+        globalListenersAttached = true;
+        log('info', 'Global SW listeners attached');
       } catch (err) {
-        log('error', 'Failed to attach controllerchange listener', err);
+        log('error', 'Failed to attach global SW listeners', err);
       }
     }
 
     /**
      * Обрабатывает успешную регистрацию Service Worker'а.
-     * Проверяет наличие ожидающего worker'а, подписывается на обновления.
      * @param {ServiceWorkerRegistration} reg - Объект регистрации.
      * @param {string} appVersion - Версия приложения.
      * @returns {void}
@@ -6024,26 +5981,21 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
         firstInstall: false
       });
       
-      // Сценарий 1: Возврат на страницу, где уже есть ожидающий SW
-      // (например, пользователь открыл новую вкладку)
       if (reg.waiting) {
         log('info', 'Found waiting SW on startup, requesting activation');
         requestSkipWaiting(reg.waiting, 'waiting-on-startup');
       }
       
-      // Сценарий 2: Активный SW уже существует — ничего не делаем
       if (reg.active && !reg.waiting && !reg.installing) {
         log('info', 'Active SW is up-to-date');
       }
       
-      // Подписываемся на обнаружение новых версий
       reg.addEventListener('updatefound', createUpdateFoundHandler(reg));
       log('info', 'updatefound listener attached');
     }
 
     /**
      * Обрабатывает ошибку регистрации Service Worker'а.
-     * Не прерывает работу приложения — SW является опциональным компонентом.
      * @param {Error} err - Объект ошибки.
      * @returns {void}
      */
@@ -6057,19 +6009,15 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
 
     /**
      * Главная точка входа модуля.
-     * Инициирует регистрацию Service Worker'а и настраивает обработчики
-     * жизненного цикла. Безопасна для повторных вызовов.
-     *
+     * Инициирует регистрацию SW с динамическим scope.
      * @returns {void}
      */
     function init() {
-      // Проверка поддержки Service Worker
       if (!('serviceWorker' in navigator)) {
         log('warn', 'Service Worker API not supported by browser');
         return;
       }
       
-      // Проверка безопасности: SW работает только в secure context
       if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
         log('warn', 'Service Worker requires HTTPS (current: ' + window.location.protocol + ')');
         return;
@@ -6078,19 +6026,21 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
       var appVersion = resolveAppVersion();
       log('info', 'Initializing SW registration', { version: appVersion });
       
-      // Устанавливаем controllerchange listener до регистрации,
-      // чтобы не пропустить событие, если SW активируется мгновенно
-      attachControllerChangeListener();
+      attachGlobalListeners();
       
-      // Формируем URL с версией для cache-busting самого sw.js
-      var swUrl = '/sw.js?v=' + encodeURIComponent(appVersion);
+      var swUrl = './sw.js?v=' + encodeURIComponent(appVersion);
       
-      // Регистрируем SW с updateViaCache: 'none' для предотвращения
-      // кеширования браузером файла sw.js (иначе обновления могут
-      // задерживаться до 24 часов согласно спецификации SW)
+      // Вычисляем scope динамически, чтобы избежать SecurityError при деплое в подпапки
+      var scopeUrl;
+      try {
+        scopeUrl = new URL('./', window.location.href).pathname;
+      } catch (_) {
+        scopeUrl = './';
+      }
+      
       navigator.serviceWorker.register(swUrl, {
         updateViaCache: 'none',
-        scope: '/'
+        scope: scopeUrl
       })
         .then(function(reg) {
           handleRegistrationSuccess(reg, appVersion);
@@ -6100,7 +6050,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
 
     /**
      * Публичный метод для принудительной проверки обновлений SW.
-     * Может быть вызван из UI (например, кнопка "Проверить обновления").
      * @returns {Promise<boolean>} true если проверка инициирована.
      */
     function checkForUpdates() {
@@ -6122,7 +6071,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     }
 
     /**
-     * Возвращает текущую версию приложения (для UI).
+     * Возвращает текущую версию приложения.
      * @returns {string}
      */
     function getVersion() {
@@ -6131,7 +6080,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
 
     /**
      * Возвращает текущее состояние флага refreshing.
-     * Полезно для отладки и UI-индикаторов.
      * @returns {boolean}
      */
     function isRefreshing() {
