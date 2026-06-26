@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.1">
+<meta name="app-version" content="1.4.2">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2602,6 +2602,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /**
      * Обрабатывает входящее Nostr-событие.
      * Порядок проверок: структура → подпись → валидность → дубликат → обработка.
+     * 
+     * 🔑 КРИТИЧНО: Добавлена валидация длины вектора (БАГ #4 из аудита).
+     * Отклоняет события с некорректной размерностью вектора для защиты от DoS-атак,
+     * где злоумышленник отправляет гигантские векторы (10000+ элементов) для OOM/CPU spike.
+     * 
      * @param {NostrEvent} ev
      * @returns {void}
      */
@@ -2743,6 +2748,19 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           if (!data || typeof data !== 'object' || Array.isArray(data)) return;
           if (typeof data.text !== 'string' || !data.text || data.text.length > MAX_P2P_TEXT_LENGTH) return;
           if (!Array.isArray(data.vector) || typeof data.score !== 'number') return;
+
+          // 🔑 КРИТИЧНО: ВАЛИДАЦИЯ ДЛИНЫ ВЕКТОРА (БАГ #4)
+          // Защита от DoS-атак, где злоумышленник отправляет гигантские векторы
+          // (10000+ элементов вместо ожидаемых 384) для вызова OOM/CPU spike
+          var expectedDim = cfg.get('dim', 384);
+          if (data.vector.length !== expectedDim) {
+            if (log) log.warn('Invalid vector dimension', { 
+              expected: expectedDim, 
+              got: data.vector.length,
+              eventId: ev.id 
+            });
+            return; // Отклоняем событие с некорректной размерностью
+          }
 
           // Сохранение как ответ на наш запрос
           if (eTag && eTag === queryId) {
@@ -3213,7 +3231,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     };
   }, ['Config', 'DB', 'AI', 'Logger', 'Bus']);
 <!-- NOOMIUM_MODULE_END Net -->
-
+  
 <!-- NOOMIUM_MODULE_START Modal -->
   /**
    * @typedef {Object} ModalButton
