@@ -3775,11 +3775,822 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END StateManager -->
 
 <!-- NOOMIUM_MODULE_START SearchService -->
+  DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I18n, Toast, Logger, Utils) {
 
+    /** @type {Vector | null} Вектор последнего выполненного поискового запроса */
+    var lastVec = null;
+
+    /** @type {number} Timestamp последнего поискового запроса */
+    var lastQuery = 0;
+
+    /** @type {AbortController | null} Контроллер для отмены предыдущего поиска */
+    var searchAbortController = null;
+
+    /** @type {Note[] | null} Кэш всех локальных заметок */
+    var allNotesCache = null;
+
+    /** @type {number} Timestamp последнего обновления кэша заметок */
+    var allNotesCacheTime = 0;
+
+    /** @type {number} Время жизни кэша всех заметок (5 минут) */
+    var ALL_NOTES_TTL = 5 * 60 * 1000;
+
+    /**
+     * Возвращает все заметки из базы, используя кэш для оптимизации.
+     * Если кэш истёк, запрашивает свежие данные из DB.
+     * 
+     * @returns {Promise<Note[]>} Promise с массивом всех заметок.
+     */
+    function getAllNotesCached() {
+      var now = Date.now();
+      if (allNotesCache && (now - allNotesCacheTime < ALL_NOTES_TTL)) {
+        return Promise.resolve(allNotesCache);
+      }
+      return DB.all().then(function(notes) {
+        allNotesCache = notes;
+        allNotesCacheTime = now;
+        return notes;
+      });
+    }
+
+    /**
+     * Принудительно сбрасывает кэш всех заметок.
+     * Вызывается после редактирования/удаления для гарантии актуальности данных.
+     * @returns {void}
+     */
+    function invalidateNotesCache() {
+      allNotesCache = null;
+    }
+
+    /**
+     * Возвращает текущий режим отправки (Личное/Мир) из StateManager.
+     * @returns {SendMode}
+     */
+    function getSendMode() {
+      return StateManager.getState().sendMode;
+    }
+
+    /**
+     * Устанавливает режим отправки в StateManager.
+     * @param {SendMode} mode - Новый режим.
+     * @returns {void}
+     */
+    function setSendMode(mode) {
+      StateManager.setState({ sendMode: mode });
+    }
+
+    /**
+     * Проверяет, заблокирована ли сейчас кнопка отправки (идёт ли процесс сохранения).
+     * @returns {boolean}
+     */
+    function isSending() {
+      return StateManager.getState().sendLock;
+    }
+
+    /**
+     * Выполняет семантический поиск по готовому вектору (для режима фокуса).
+     * Не вычисляет эмбеддинг повторно, использует переданный вектор.
+     * Результаты объединяются в единый список State.lists.focus.
+     * 
+     * @param {Vector} vector - Вектор запроса (уже вычисленный).
+     * @returns {Promise<void>}
+     */
+    function searchByVector(vector) {
+      if (!vector || !AI.ready()) return Promise.resolve();
+      
+      // Отменяем предыдущий поиск
+      if (searchAbortController) {
+        searchAbortController.abort();
+      }
+      var controller = new AbortController();
+      searchAbortController = controller;
+      var signal = controller.signal;
+
+      return getAllNotesCached().then(function(notes) {
+        if (signal.aborted) return;
+
+        // Подготовка локальных кандидатов
+        var localCandidates = [];
+        var localDataMap = new Map();
+        for (var i = 0; i < notes.length; i++) {
+          if (notes[i] && notes[i].vector) {
+            localCandidates.push({ id: notes[i].id, vector: notes[i].vector });
+            localDataMap.set(notes[i].id, notes[i]);
+          }
+        }
+
+        // Запрос в AI (Worker или fallback)
+        var processLocal = localCandidates.length > 0 
+          ? AI.cosineBatch(vector, localCandidates, signal) 
+          : Promise.resolve([]);
+
+        return processLocal.then(function(localScores) {
+          if (signal.aborted) return;
+
+          // Формирование списка локальных результатов
+          var localScored = [];
+          for (var k = 0; k < localScores.length; k++) {
+            var note = localDataMap.get(localScores[k].id);
+            if (note) {
+              localScored.push({
+                id: note.id,
+                text: note.text,
+                vector: note.vector,
+                score: localScores[k].score,
+                shared: note.shared,
+                createdAt: note.createdAt,
+                parentId: note.parentId,
+                children: note.children
+              });
+            }
+          }
+
+          // Получение активных ответов из сети (если авторизованы)
+          var state = StateManager.getState();
+          var worldAnswers = state.netAuthorized && Net ? Net.activeAnswers() : [];
+          var worldScored = [];
+          for (var j = 0; j < worldAnswers.length; j++) {
+            var answer = worldAnswers[j];
+            if (answer && typeof answer.score === 'number') {
+              worldScored.push({
+                id: answer.id,
+                text: answer.text,
+                vector: answer.vector,
+                score: answer.score,
+                shared: true,
+                peer: answer.peer,
+                createdAt: answer.createdAt,
+                parentId: answer.parentId,
+                children: answer.children
+              });
+            }
+          }
+
+          // В режиме фокуса всё объединяем в одну ленту и сортируем по score
+          var combined = localScored.concat(worldScored).sort(function(a, b) { 
+            return b.score - a.score; 
+          });
+
+          var currentLists = StateManager.getState().lists;
+          StateManager.setState({ 
+            lists: Object.assign({}, currentLists, { focus: combined }) 
+          });
+          
+          if (Bus && Bus.emit) {
+            try { Bus.emit('state:lists-changed'); } catch (_) {}
+          }
+        });
+      }).catch(function(err) {
+        if (signal.aborted) return;
+        if (Logger) Logger.warn('SearchService.searchByVector error', String(err && err.message || err));
+      }).finally(function() {
+        searchAbortController = null;
+      });
+    }
+
+    /**
+     * Выполняет семантический поиск по локальной базе и ответам из сети.
+     * Управляет жизненным циклом Live Stream и приоритетом режима фокуса.
+     * 
+     * Логика приоритетов:
+     * 1. Если есть текст → обычный поиск (выключает Live Stream).
+     * 2. Если текста нет, но есть focusMode → поиск по вектору фокуса.
+     * 3. Если текста нет и focusMode выключен → включает Live Stream.
+     * 
+     * @param {string} text - Поисковый запрос (текст из редактора).
+     * @param {boolean} [force=false] - Принудительная отправка запроса в сеть.
+     * @returns {Promise<void>}
+     */
+    function search(text, force) {
+      var state = StateManager.getState();
+      var trimmed = (text || '').trim();
+
+      // Остановка Live Stream при любом поиске
+      if (state.streamActive && Net && typeof Net.stopLiveStream === 'function') {
+        Net.stopLiveStream();
+        StateManager.setState({ streamActive: false });
+      }
+
+      // Приоритет фокуса, если текст пуст
+      if (!trimmed && state.focusMode && state.focusedItem && state.focusedItem.vector) {
+        return searchByVector(state.focusedItem.vector);
+      }
+
+      // Если текста нет и фокуса нет — очистка результатов и включение Live Stream
+      if (!trimmed || !AI.ready()) {
+        StateManager.setState({ lists: { local: [], world: [], seren: [], focus: [] } });
+        if (Bus && Bus.emit) {
+          try { Bus.emit('state:lists-changed'); } catch (_) {}
+        }
+        
+        // Возврат к Live Stream, если редактор пуст и фокус снят
+        if (!trimmed && !state.focusMode && Net && typeof Net.startLiveStream === 'function') {
+          Net.startLiveStream();
+          StateManager.setState({ streamActive: true });
+        }
+        return Promise.resolve();
+      }
+
+      // Отмена предыдущего поиска
+      if (searchAbortController) {
+        searchAbortController.abort();
+      }
+      var controller = new AbortController();
+      searchAbortController = controller;
+      var signal = controller.signal;
+
+      return AI.embed(text).then(function(vec) {
+        if (signal.aborted) return;
+        if (!vec) return;
+
+        // Определение необходимости отправки запроса в сеть
+        var shouldSendToNet = false;
+        if (!lastVec || AI.cosine(vec, lastVec) < Config.get('vectorSimilarityThreshold', 0.98) || force) {
+          lastVec = vec;
+          lastQuery = Date.now();
+          shouldSendToNet = true;
+        }
+
+        return getAllNotesCached().then(function(notes) {
+          if (signal.aborted) return;
+
+          // Отправка запроса в сеть (после проверки signal.aborted)
+          if (shouldSendToNet && AI.getMode() === 'model') {
+            var st = StateManager.getState();
+            if (st.netAuthorized && Net && typeof Net.send === 'function') {
+              Net.send(vec);
+            }
+          }
+
+          // Подготовка локальных кандидатов
+          var localCandidates = [];
+          var localDataMap = new Map();
+          for (var i = 0; i < notes.length; i++) {
+            var note = notes[i];
+            if (note && note.vector) {
+              localCandidates.push({ id: note.id, vector: note.vector });
+              localDataMap.set(note.id, note);
+            }
+          }
+
+          // Получение активных ответов из сети
+          var st2 = StateManager.getState();
+          var worldAnswers = st2.netAuthorized && Net ? Net.activeAnswers() : [];
+
+          // Запрос в AI для локальных заметок
+          var processLocal = localCandidates.length > 0 
+            ? AI.cosineBatch(vec, localCandidates, signal) 
+            : Promise.resolve([]);
+
+          return processLocal.then(function(localScores) {
+            if (signal.aborted) return;
+
+            // Формирование локальных результатов
+            var localScored = [];
+            for (var k = 0; k < localScores.length; k++) {
+              var s = localScores[k];
+              var note = localDataMap.get(s.id);
+              if (note) {
+                localScored.push({
+                  id: note.id,
+                  text: note.text,
+                  vector: note.vector,
+                  score: s.score,
+                  shared: note.shared,
+                  createdAt: note.createdAt,
+                  parentId: note.parentId,
+                  children: note.children
+                });
+              }
+            }
+
+            // Формирование сетевых результатов
+            var worldScored = [];
+            for (var j = 0; j < worldAnswers.length; j++) {
+              var answer = worldAnswers[j];
+              if (answer && typeof answer.score === 'number') {
+                worldScored.push({
+                  id: answer.id,
+                  text: answer.text,
+                  vector: answer.vector,
+                  score: answer.score,
+                  shared: true,
+                  peer: answer.peer,
+                  createdAt: answer.createdAt,
+                  parentId: answer.parentId,
+                  children: answer.children
+                });
+              }
+            }
+
+            // Фильтрация по порогам
+            var threshold = Config.get('threshold', 0.7);
+            var serendipityDelta = Config.get('serendipity', 0.3);
+            var serenMin = threshold - serendipityDelta;
+
+            var focusMode = StateManager.getState().focusMode;
+            var newLists;
+
+            if (focusMode) {
+              // В режиме фокуса всё объединяем в одну ленту
+              var combined = localScored.concat(worldScored).sort(function(a, b) { 
+                return b.score - a.score; 
+              });
+              newLists = {
+                local: [],
+                world: [],
+                seren: [],
+                focus: combined
+              };
+            } else {
+              // Обычный режим с сегментами
+              newLists = {
+                local: localScored.filter(function(n) { return n.score >= threshold; })
+                  .sort(function(a, b) { return b.score - a.score; }),
+                world: worldScored.filter(function(n) { return n.score >= threshold; })
+                  .sort(function(a, b) { return b.score - a.score; }),
+                seren: localScored.concat(worldScored)
+                  .filter(function(n) { return n.score >= serenMin && n.score < threshold; })
+                  .sort(function(a, b) { return b.score - a.score; }),
+                focus: StateManager.getState().lists.focus // сохраняем, если было
+              };
+            }
+
+            StateManager.setState({ lists: newLists });
+            if (Bus && Bus.emit) {
+              try { Bus.emit('state:lists-changed'); } catch (_) {}
+            }
+          });
+        });
+      }).catch(function(err) {
+        if (signal.aborted) return;
+        Toast.show('err', String(err && err.message || err) || 'Search failed');
+        if (Logger) Logger.warn('SearchService.search error', String(err && err.message || err));
+      }).finally(function() {
+        searchAbortController = null;
+      });
+    }
+
+    /**
+     * Сохраняет новую мысль в локальную базу и опционально публикует в сеть.
+     * Поддерживает parentId для создания связей parent/child.
+     * Блокирует повторные вызовы через sendLock.
+     * 
+     * @param {string} text - Текст мысли.
+     * @param {SendMode} mode - Режим отправки ('private' или 'world').
+     * @param {string} [parentId] - ID родительской заметки (если активен фокус).
+     * @returns {Promise<void>}
+     */
+    function send(text, mode, parentId) {
+      if (StateManager.getState().sendLock) return Promise.resolve();
+
+      var trimmedText = (text || '').trim();
+      if (!trimmedText) {
+        Toast.show('warn', I18n.t('toast.empty'));
+        return Promise.resolve();
+      }
+
+      if (!AI.ready()) {
+        Toast.show('err', I18n.t('toast.ai.notready'));
+        return Promise.resolve();
+      }
+
+      var state = StateManager.getState();
+      if (mode === 'world' && !state.netAuthorized) {
+        if (state.requestNetworkAuth) {
+          state.requestNetworkAuth(function() {
+            send(trimmedText, mode, parentId);
+          });
+        }
+        return Promise.resolve();
+      }
+
+      var isWorld = mode === 'world';
+      StateManager.setState({ sendLock: true });
+
+      var newId = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+      return AI.embed(trimmedText)
+        .then(function(vector) {
+          var noteObj = {
+            id: newId,
+            text: trimmedText,
+            vector: vector,
+            shared: !!isWorld,
+            createdAt: Date.now()
+          };
+          if (parentId) noteObj.parentId = parentId;
+          return DB.put(noteObj).then(function() { return noteObj; });
+        })
+        .then(function(savedNote) {
+          // Обновление локального родителя (если он есть в БД)
+          if (parentId) {
+            DB.addChild(parentId, savedNote.id);
+          }
+          // Публикация в сеть с тегом ответа (если shared)
+          if (savedNote.shared && Net && typeof Net.publishNote === 'function') {
+            Net.publishNote(savedNote, parentId);
+          }
+          lastVec = null;
+          Toast.show('ok', isWorld ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
+        })
+        .catch(function(err) {
+          Toast.show('err', String(err && err.message || err) || 'Send failed');
+          if (Logger) Logger.warn('SearchService.send error', String(err && err.message || err));
+        })
+        .finally(function() {
+          StateManager.setState({ sendLock: false });
+        });
+    }
+
+    /**
+     * Инициализирует сервис: подписывается на изменения базы для сброса кэша.
+     * @returns {void}
+     */
+    function init() {
+      Bus.on('db:change', function() {
+        allNotesCache = null;
+      });
+    }
+
+    return {
+      /**
+       * Выполняет семантический поиск.
+       * @param {string} text
+       * @param {boolean} [force]
+       * @returns {Promise<void>}
+       */
+      search: search,
+
+      /**
+       * Поиск по готовому вектору (для фокуса).
+       * @param {Vector} vector
+       * @returns {Promise<void>}
+       */
+      searchByVector: searchByVector,
+
+      /**
+       * Сохраняет и публикует заметку.
+       * @param {string} text
+       * @param {SendMode} mode
+       * @param {string} [parentId]
+       * @returns {Promise<void>}
+       */
+      send: send,
+
+      /**
+       * Возвращает режим отправки.
+       * @returns {SendMode}
+       */
+      getSendMode: getSendMode,
+
+      /**
+       * Устанавливает режим отправки.
+       * @param {SendMode} mode
+       * @returns {void}
+       */
+      setSendMode: setSendMode,
+
+      /**
+       * Проверяет, идёт ли отправка.
+       * @returns {boolean}
+       */
+      isSending: isSending,
+
+      /**
+       * Возвращает кэш всех заметок.
+       * @returns {Promise<Note[]>}
+       */
+      getAllNotesCached: getAllNotesCached,
+
+      /**
+       * Сбрасывает кэш заметок.
+       * @returns {void}
+       */
+      invalidateNotesCache: invalidateNotesCache,
+
+      /**
+       * Инициализирует сервис.
+       * @returns {void}
+       */
+      init: init
+    };
+  }, ['AI', 'DB', 'Net', 'Config', 'Bus', 'StateManager', 'I18n', 'Toast', 'Logger', 'Utils']);
 <!-- NOOMIUM_MODULE_END SearchService -->
 
 <!-- NOOMIUM_MODULE_START EditorComponent -->
+  DI.register('EditorComponent', function(Bus, I18n, Utils, SearchService, Config, StateManager, Net) {
 
+    /** @type {HTMLTextAreaElement | null} */
+    var editor = null;
+
+    /** @type {HTMLElement | null} */
+    var counter = null;
+
+    /** @type {HTMLButtonElement | null} */
+    var sendBtn = null;
+
+    /** @type {HTMLElement | null} */
+    var modeToggle = null;
+
+    /** @type {number | null} ID таймера debounce для поиска */
+    var searchTimer = null;
+
+    /** @type {function(): void | null} Обработчик смены языка */
+    var i18nHandler = null;
+
+    /** @type {function(): void | null} Ссылка на обработчик ввода текста */
+    var onInput = null;
+
+    /** @type {function(): void | null} Ссылка на обработчик клика по кнопке отправки */
+    var onSendClick = null;
+
+    /** @type {function(MouseEvent): void | null} Ссылка на обработчик переключения режима */
+    var onModeClick = null;
+
+    /**
+     * Обновляет ссылки на DOM-элементы.
+     * Вызывается при каждом обращении, так как DOM может быть пересоздан после refreshUI.
+     * @returns {void}
+     */
+    function refreshDOM() {
+      editor = document.getElementById('ed-ta');
+      counter = document.getElementById('ed-cnt');
+      sendBtn = document.getElementById('btn-send');
+      modeToggle = document.getElementById('mode-toggle');
+    }
+
+    /**
+     * Возвращает текущий текст из поля ввода.
+     * @returns {string}
+     */
+    function getValue() {
+      if (!editor) refreshDOM();
+      return editor ? editor.value : '';
+    }
+
+    /**
+     * Устанавливает текст в поле ввода и обновляет счётчик символов.
+     * @param {string} val - Новый текст.
+     * @returns {void}
+     */
+    function setValue(val) {
+      if (!editor) refreshDOM();
+      if (editor) {
+        editor.value = val;
+        updateCounter();
+      }
+    }
+
+    /**
+     * Очищает поле ввода.
+     * @returns {void}
+     */
+    function clear() {
+      setValue('');
+    }
+
+    /**
+     * Пересчитывает и отображает количество символов в UI с учетом локализации.
+     * @returns {void}
+     */
+    function updateCounter() {
+      if (!counter) refreshDOM();
+      if (counter) {
+        var value = getValue();
+        counter.textContent = Utils.word('symbols', value.length, I18n.getLang());
+      }
+    }
+
+    /**
+     * Обновляет визуальное состояние переключателя режима отправки (Личное/Мир).
+     * Синхронизирует UI с состоянием SearchService.
+     * 
+     * @param {SendMode} mode - Активный режим ('private' | 'world').
+     * @returns {void}
+     */
+    function updateSendMode(mode) {
+      SearchService.setSendMode(mode);
+      if (!modeToggle) refreshDOM();
+      if (!modeToggle) return;
+      
+      modeToggle.setAttribute('data-mode', mode);
+      var opts = modeToggle.querySelectorAll('.tog-sw-opt');
+      for (var i = 0; i < opts.length; i++) {
+        var opt = opts[i];
+        if (opt.getAttribute('data-v') === mode) {
+          opt.classList.add('on');
+        } else {
+          opt.classList.remove('on');
+        }
+      }
+    }
+
+    /**
+     * Переключает визуальное состояние кнопки отправки (иконка / спиннер).
+     * Блокирует кнопку на время отправки для предотвращения дублей.
+     * 
+     * @param {boolean} isSending - true, если идёт процесс отправки.
+     * @returns {void}
+     */
+    function setSendingState(isSending) {
+      if (!sendBtn) refreshDOM();
+      if (!sendBtn) return;
+      
+      if (isSending) {
+        sendBtn.classList.add('sending');
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = SPINNER_SVG;
+      } else {
+        sendBtn.classList.remove('sending');
+        sendBtn.disabled = false;
+        sendBtn.innerHTML = PAPER_PLANE_SVG;
+      }
+    }
+
+    /**
+     * Применяет переводы к элементам редактора (placeholder, кнопки, режимы).
+     * @returns {void}
+     */
+    function applyI18n() {
+      if (!editor) refreshDOM();
+      if (editor) {
+        editor.placeholder = I18n.t('ed.placeholder');
+      }
+      updateCounter();
+      
+      if (!modeToggle) refreshDOM();
+      if (modeToggle) {
+        var opts = modeToggle.querySelectorAll('.tog-sw-opt');
+        for (var i = 0; i < opts.length; i++) {
+          var opt = opts[i];
+          var v = opt.getAttribute('data-v');
+          if (v === 'private') opt.textContent = I18n.t('btn.private');
+          else if (v === 'world') opt.textContent = I18n.t('btn.public');
+        }
+      }
+      
+      if (sendBtn) {
+        sendBtn.setAttribute('aria-label', I18n.t('btn.send'));
+      }
+    }
+
+    /**
+     * Обрабатывает клик по кнопке отправки:
+     * 1. Сбрасывает таймер поиска.
+     * 2. Извлекает parentId из StateManager (если активен фокус).
+     * 3. Запускает сохранение через SearchService.
+     * 4. Очищает поле и эмитит событие завершения.
+     * 
+     * @returns {void}
+     */
+    function handleSend() {
+      // Сбрасываем отложенный поиск, чтобы избежать гонки с отправкой
+      if (searchTimer) {
+        clearTimeout(searchTimer);
+        searchTimer = null;
+      }
+
+      var text = getValue().trim();
+      var mode = SearchService.getSendMode();
+      var state = StateManager.getState();
+      var parentId = null;
+
+      // Логика Parent/Child: если активен фокус, привязываем заметку к родителю
+      if (state.focusMode && state.focusedItem && state.focusedItem.id) {
+        parentId = state.focusedItem.id;
+      }
+
+      setSendingState(true);
+
+      SearchService.send(text, mode, parentId)
+        .then(function() {
+          clear();
+          if (Bus && Bus.emit) {
+            try { Bus.emit('editor:send-complete'); } catch (_) { /* ignore */ }
+          }
+        })
+        .catch(function() {
+          /* Ошибки уже обработаны в SearchService через Toast */
+        })
+        .finally(function() {
+          setSendingState(false);
+        });
+    }
+
+    /**
+     * Навешивает обработчики событий на DOM-элементы редактора.
+     * Реализует логику управления Live Stream и debounce поиска.
+     * 
+     * @returns {void}
+     */
+    function bindDOMEvents() {
+      refreshDOM();
+
+      if (editor) {
+        onInput = function() {
+          updateCounter();
+          var val = getValue().trim();
+          var state = StateManager.getState();
+
+          // Если пользователь начал печатать, немедленно останавливаем Live Stream
+          // для корректного переключения UI в режим поиска
+          if (val && state.streamActive && Net && typeof Net.stopLiveStream === 'function') {
+            Net.stopLiveStream();
+            StateManager.setState({ streamActive: false });
+          }
+
+          if (searchTimer) clearTimeout(searchTimer);
+          
+          // Debounce запроса на поиск
+          searchTimer = setTimeout(function() {
+            if (Bus && Bus.emit) {
+              try { Bus.emit('editor:search-request', { force: false }); } catch (_) { /* ignore */ }
+            }
+          }, Config.get('debounce', 800));
+        };
+        editor.addEventListener('input', onInput);
+      }
+
+      if (sendBtn) {
+        onSendClick = function() { handleSend(); };
+        sendBtn.addEventListener('click', onSendClick);
+      }
+
+      if (modeToggle) {
+        onModeClick = function(e) {
+          var opt = e.target.closest('.tog-sw-opt');
+          if (opt) {
+            var value = opt.getAttribute('data-v');
+            if (value) updateSendMode(value);
+          }
+        };
+        modeToggle.addEventListener('click', onModeClick);
+      }
+    }
+
+    /**
+     * Снимает обработчики событий и обнуляет ссылки на DOM.
+     * Критично для предотвращения утечек памяти при refreshUI.
+     * 
+     * @returns {void}
+     */
+    function unbindDOMEvents() {
+      if (editor && onInput) {
+        try { editor.removeEventListener('input', onInput); } catch (_) { /* ignore */ }
+      }
+      if (sendBtn && onSendClick) {
+        try { sendBtn.removeEventListener('click', onSendClick); } catch (_) { /* ignore */ }
+      }
+      if (modeToggle && onModeClick) {
+        try { modeToggle.removeEventListener('click', onModeClick); } catch (_) { /* ignore */ }
+      }
+      editor = counter = sendBtn = modeToggle = null;
+      onInput = onSendClick = onModeClick = null;
+      if (searchTimer) {
+        clearTimeout(searchTimer);
+        searchTimer = null;
+      }
+    }
+
+    /**
+     * Инициализирует компонент: привязывает события и применяет начальные переводы.
+     * @returns {void}
+     */
+    function init() {
+      bindDOMEvents();
+
+      i18nHandler = function() { applyI18n(); };
+      Bus.on('i18n:change', i18nHandler);
+
+      var currentMode = SearchService.getSendMode();
+      updateSendMode(currentMode);
+      applyI18n();
+    }
+
+    /**
+     * Уничтожает компонент: отвязывает события и отписывается от шины.
+     * @returns {void}
+     */
+    function destroy() {
+      unbindDOMEvents();
+      if (i18nHandler) {
+        try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
+        i18nHandler = null;
+      }
+    }
+
+    return {
+      init: init,
+      destroy: destroy,
+      getValue: getValue,
+      setValue: setValue,
+      clear: clear,
+      updateCounter: updateCounter,
+      updateSendMode: updateSendMode,
+      setSendingState: setSendingState
+    };
+  }, ['Bus', 'I18n', 'Utils', 'SearchService', 'Config', 'StateManager', 'Net']);
 <!-- NOOMIUM_MODULE_END EditorComponent -->
 
 <!-- NOOMIUM_MODULE_START FocusBarComponent -->
