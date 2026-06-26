@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.2">
+<meta name="app-version" content="1.4.3">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -6119,6 +6119,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     var viewChangedHandler = null;
     /** @type {function(Object): void | null} */
     var editNoteHandler = null;
+    /** @type {function(Object): void | null} */
+    var showChildrenHandler = null;
 
     /**
      * Создаёт DOM-элемент карточки статистики.
@@ -6167,7 +6169,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /**
      * Заполняет DOM-элемент пула данными конкретной заметки.
-     * Отображает текст, теги, дату и индикаторы Parent/Child.
+     * Отображает текст, теги, дату и кликабельные индикаторы Parent/Child.
      * 
      * @param {HTMLDivElement} element - Целевой DOM-узел из пула.
      * @param {Note} note - Данные заметки.
@@ -6194,18 +6196,32 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       tagEl.textContent = note.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
       meta.appendChild(tagEl);
 
-      // Индикатор Parent/Child связей
+      // 🔑 КЛИКАБЕЛЬНАЯ ссылка на родителя
       if (note.parentId) {
-        var parentEl = document.createElement('span');
-        parentEl.className = 'bi-parent';
-        parentEl.textContent = '↳ ' + I18n.t('note.parent');
-        meta.appendChild(parentEl);
+        var parentLink = document.createElement('a');
+        parentLink.href = '#';
+        parentLink.className = 'fi-parent';
+        parentLink.textContent = '↳ ' + I18n.t('note.parent');
+        parentLink.onclick = function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          openNoteView(note.parentId);
+        };
+        meta.appendChild(parentLink);
       }
+
+      // 🔑 КЛИКАБЕЛЬНЫЙ индикатор дочерних ответов
       if (note.children && note.children.length > 0) {
-        var childEl = document.createElement('span');
-        childEl.className = 'bi-children';
-        childEl.textContent = '💬 ' + note.children.length;
-        meta.appendChild(childEl);
+        var childLink = document.createElement('a');
+        childLink.href = '#';
+        childLink.className = 'fi-children';
+        childLink.textContent = '💬 ' + note.children.length;
+        childLink.onclick = function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          Bus.emit('base:show-children', { parentId: note.id, children: note.children });
+        };
+        meta.appendChild(childLink);
       }
 
       var dateEl = document.createElement('span');
@@ -6222,8 +6238,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /**
      * Вычисляет видимую область и обновляет содержимое/позицию элементов пула.
-     * Реализует виртуальный скроллинг для плавной работы с тысячами заметок.
-     * 
      * @returns {void}
      */
     function updateVisibleItems() {
@@ -6418,8 +6432,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /**
      * Обрабатывает сохранение изменений заметки из NoteView.
-     * Пересчитывает вектор через AI и обновляет запись в БД.
-     * 
      * @param {string} id - ID заметки.
      * @param {Note} record - Объект заметки.
      * @param {HTMLTextAreaElement} ta - Текстовое поле с новым содержимым.
@@ -6456,8 +6468,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /**
      * Закрывает NoteView и удаляет его из DOM с задержкой для анимации.
-     * Снимает глобальный обработчик Escape и сбрасывает activeNoteView.
-     * 
      * @param {HTMLDivElement} nvOverlay - Оверлей NoteView.
      * @returns {void}
      */
@@ -6480,28 +6490,105 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
+     * 🔑 НОВАЯ ФУНКЦИЯ: Открывает read-only NoteView для сетевой заметки.
+     * Позволяет пользователям просматривать заметки от пиров и навигировать по цепочке Parent/Child.
+     * 
+     * @param {NetworkNote} netNote - Сетевая заметка из in-memory кэша Net.
+     * @returns {void}
+     */
+    function openNetworkNoteView(netNote) {
+      if (activeNoteView) {
+        closeNoteView(activeNoteView);
+      }
+
+      var nvOverlay = document.createElement('div');
+      nvOverlay.className = 'nv on';
+      document.body.appendChild(nvOverlay);
+      activeNoteView = nvOverlay;
+
+      // Верхний бар (только кнопка закрытия)
+      var topFooter = document.createElement('div');
+      topFooter.className = 'nv-f';
+      var closeBtn = document.createElement('button');
+      closeBtn.className = 'nv-act';
+      closeBtn.textContent = I18n.t('btn.close');
+      closeBtn.onclick = function() { closeNoteView(nvOverlay); };
+      topFooter.appendChild(closeBtn);
+      nvOverlay.appendChild(topFooter);
+
+      // Тело (read-only)
+      var body = document.createElement('div');
+      body.className = 'nv-b';
+
+      var infoRow = document.createElement('div');
+      infoRow.className = 'info-row';
+
+      var peerEl = document.createElement('span');
+      peerEl.className = 'bi-tag';
+      peerEl.textContent = '· ' + netNote.peer;
+      infoRow.appendChild(peerEl);
+
+      // Ссылка на родителя (если есть)
+      if (netNote.parentId) {
+        var parentLink = document.createElement('a');
+        parentLink.href = '#';
+        parentLink.className = 'fi-parent';
+        parentLink.textContent = '↳ ' + I18n.t('note.parent');
+        parentLink.onclick = function(e) {
+          e.preventDefault();
+          closeNoteView(nvOverlay);
+          setTimeout(function() { openNoteView(netNote.parentId); }, 250);
+        };
+        infoRow.appendChild(parentLink);
+      }
+
+      // Индикатор дочерних ответов (если есть)
+      if (netNote.children && netNote.children.length > 0) {
+        var childCount = document.createElement('span');
+        childCount.className = 'fi-children';
+        childCount.textContent = '💬 ' + netNote.children.length + ' ' + I18n.t('note.children');
+        infoRow.appendChild(childCount);
+      }
+
+      body.appendChild(infoRow);
+
+      var textEl = document.createElement('div');
+      textEl.className = 'nv-text';
+      textEl.textContent = netNote.text;
+      body.appendChild(textEl);
+
+      nvOverlay.appendChild(body);
+
+      // Обработчик Escape
+      noteViewEscHandler = function(e) {
+        if (e.key === 'Escape') closeNoteView(nvOverlay);
+      };
+      document.addEventListener('keydown', noteViewEscHandler);
+    }
+
+    /**
      * Открывает полноэкранное модальное окно редактирования заметки (NoteView).
-     * Защищено от создания множественных оверлеев через activeNoteView.
+     * Поддерживает как локальные, так и сетевые заметки (через openNetworkNoteView).
      * 
      * @param {string} id - ID заметки для открытия.
      * @returns {void}
      */
     function openNoteView(id) {
-      // Защита от дублирования оверлеев
       if (activeNoteView) {
         closeNoteView(activeNoteView);
       }
 
       DB.get(id).then(function(record) {
         if (!record) {
-          // Попытка найти в сетевом кэше (если это ответ от пира)
+          // 🔑 КРИТИЧНО: Если заметки нет в БД, ищем в сетевом кэше (БАГ #1)
           if (Net && Net.getNetworkNote) {
             var netNote = Net.getNetworkNote(id);
             if (netNote) {
-              Toast.show('info', 'Network note (read-only)');
-              // Для сетевых заметок можно показать read-only view, но пока ограничимся тостом
+              openNetworkNoteView(netNote);
+              return;
             }
           }
+          Toast.show('warn', 'Note not found');
           return;
         }
 
@@ -6552,7 +6639,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         tagEl.textContent = record.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
         infoRow.appendChild(tagEl);
 
-        // Отображение связей Parent/Child в NoteView
+        // Ссылка на родителя
         if (record.parentId) {
           var parentLink = document.createElement('a');
           parentLink.href = '#';
@@ -6565,6 +6652,8 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
           };
           infoRow.appendChild(parentLink);
         }
+
+        // Индикатор дочерних ответов
         if (record.children && record.children.length > 0) {
           var childCount = document.createElement('span');
           childCount.className = 'fi-children';
@@ -6647,7 +6736,6 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /**
      * Открывает диалог выбора файла, парсит JSON и импортирует заметки в базу.
-     * Валидирует структуру и генерирует ID для записей без них.
      * @returns {void}
      */
     function importData() {
@@ -6695,8 +6783,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Привязывает события к элементам вкладки "База" (клики по строкам, поиск, сортировка).
-     * Использует делегирование событий для кликов по карточкам.
+     * Привязывает события к элементам вкладки "База".
      * @returns {void}
      */
     function bindDOMEvents() {
@@ -6721,7 +6808,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     }
 
     /**
-     * Инициализирует компонент: привязывает события, подписывается на шину.
+     * Инициализирует компонент.
      * @returns {void}
      */
     function init() {
@@ -6756,12 +6843,18 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       };
       Bus.on('editor:edit-note', editNoteHandler);
 
+      showChildrenHandler = function(payload) {
+        if (payload && payload.children) {
+          Toast.show('info', 'Children: ' + payload.children.length);
+        }
+      };
+      Bus.on('base:show-children', showChildrenHandler);
+
       if (StateManager.getState().view === 'base') renderBase();
     }
 
     /**
-     * Уничтожает компонент: очищает таймеры, снимает обработчики, отписывается от шины.
-     * Гарантирует отсутствие утечек памяти при refreshUI().
+     * Уничтожает компонент.
      * @returns {void}
      */
     function destroy() {
@@ -6783,6 +6876,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
       if (listsChangedHandler) { try { Bus.off('state:lists-changed', listsChangedHandler); } catch (_) {} listsChangedHandler = null; }
       if (viewChangedHandler) { try { Bus.off('view:changed', viewChangedHandler); } catch (_) {} viewChangedHandler = null; }
       if (editNoteHandler) { try { Bus.off('editor:edit-note', editNoteHandler); } catch (_) {} editNoteHandler = null; }
+      if (showChildrenHandler) { try { Bus.off('base:show-children', showChildrenHandler); } catch (_) {} showChildrenHandler = null; }
     }
 
     return {
