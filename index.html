@@ -6933,11 +6933,414 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END App.State -->
 
 <!-- NOOMIUM_MODULE_START UI.Layout -->
+  /**
+   * Модуль генерации HTML-разметки приложения.
+   * Все функции возвращают строки HTML, которые собираются в единый документ
+   * и вставляются в #app-root при первом запуске и при refreshUI().
+   * 
+   * Использует глобальные хелперы translate() и Utils.esc() из App.State.
+   * @namespace UI.Layout
+   */
 
+  /**
+   * Строит HTML-разметку шапки приложения (хедер) с логотипом,
+   * индикаторами статуса сети/AI, кнопкой меню и офлайн-баром.
+   * 
+   * @returns {string} HTML-строка.
+   */
+  function buildHeaderMarkup() {
+    return '<div class="hdr">' +
+      '<div class="logo"><span class="logo-mark">N</span><span>NOO<span class="logo-dot">.</span>mium</span></div>' +
+      '<div class="hdr-status">' +
+        '<span class="hdr-st-item"><span class="hdr-st-dot load" id="st-net-dot"></span><span id="st-net-txt">' + translate('st.net') + '</span></span>' +
+        '<span class="hdr-st-sep">·</span>' +
+        '<span class="hdr-st-item"><span class="hdr-st-dot load" id="st-ai-dot"></span><span id="st-ai-txt">' + translate('st.ai.loading') + '</span></span>' +
+      '</div>' +
+      '<button class="burger" id="btn-menu" aria-label="Menu" aria-expanded="false"><span class="burger-line"></span><span class="burger-line"></span><span class="burger-line"></span></button>' +
+    '</div>' +
+    '<div id="offline-bar" class="offline-bar-init">' +
+      '<span id="offline-text">' + translate('offline.bar') + '</span>' +
+      '<span id="offline-queue" class="offline-queue-init">(' + translate('offline.queue').replace('{count}', '0') + ')</span>' +
+    '</div>';
+  }
+
+  /**
+   * Строит HTML-разметку сегментов карусели (local / world / seren).
+   * Блок скрывается через CSS при активации Focus Mode.
+   * 
+   * @returns {string} HTML-строка.
+   */
+  function buildSegmentsMarkup() {
+    return '<div class="seg">' +
+      '<button class="seg-b on" data-k="local"><span class="lbl">' + translate('seg.local') + '</span><span class="cnt" id="c-local">0</span></button>' +
+      '<button class="seg-b" data-k="world"><span class="lbl">' + translate('seg.world') + '</span><span class="cnt" id="c-world">0</span></button>' +
+      '<button class="seg-b" data-k="seren"><span class="lbl">' + translate('seg.seren') + '</span><span class="cnt" id="c-seren">0</span></button>' +
+    '</div>';
+  }
+
+  /**
+   * Строит HTML-разметку панели фокуса (FocusBar).
+   * Изначально скрыта через CSS-класс focus-bar-init.
+   * Заполняется динамически компонентом FocusBarComponent.
+   * 
+   * @returns {string} HTML-строка.
+   */
+  function buildFocusBarMarkup() {
+    return '<div id="focus-bar" class="focus-bar-init"></div>';
+  }
+
+  /**
+   * Строит HTML-разметку обёртки карусели с пагинацией (стрелки, точки, счётчик).
+   * 
+   * @returns {string} HTML-строка.
+   */
+  function buildCarouselWrapMarkup() {
+    return '<div class="carousel-wrap" id="carousel-wrap">' +
+      '<div class="carousel" id="carousel" tabindex="0"></div>' +
+      '<div class="pagination-controls" id="pagination-controls">' +
+        '<button class="pagination-btn" id="pagination-prev" disabled aria-label="' + translate('btn.prev') + '">‹</button>' +
+        '<div class="carousel-dots" id="carousel-dots"></div>' +
+        '<span class="carousel-counter" id="carousel-counter">0 / 0</span>' +
+        '<button class="pagination-btn" id="pagination-next" aria-label="' + translate('btn.next') + '">›</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /**
+   * Строит HTML-разметку редактора (поле ввода, счётчик символов,
+   * переключатель режима и кнопка отправки).
+   * Placeholder экранируется через Utils.esc для защиты от XSS.
+   * 
+   * @returns {string} HTML-строка.
+   */
+  function buildEditorMarkup() {
+    return '<div class="ed"><textarea id="ed-ta" class="ed-ta" placeholder="' + Utils.esc(translate('ed.placeholder')) + '"></textarea>' +
+    '<div class="ed-foot"><span id="ed-cnt" class="ed-cnt">0 ' + translate('ed.chars') + '</span>' +
+    '<div class="ed-acts">' +
+      '<div class="tog-sw" id="mode-toggle" data-mode="private">' +
+        '<div class="tog-sw-thumb"></div>' +
+        '<div class="tog-sw-opt on" data-v="private">' + translate('btn.private') + '</div>' +
+        '<div class="tog-sw-opt" data-v="world">' + translate('btn.public') + '</div>' +
+      '</div>' +
+      '<button class="btn-send" id="btn-send" aria-label="' + translate('btn.send') + '">' + PAPER_PLANE_SVG + '</button>' +
+    '</div></div></div>';
+  }
+
+  /**
+   * Строит HTML-разметку вкладки «База» (статистика, поиск, сортировка, список).
+   * Placeholder поиска экранируется через Utils.esc.
+   * 
+   * @returns {string} HTML-строка.
+   */
+  function buildBaseMarkup() {
+    return '<div class="ws base ws-base-init" id="ws-base">' +
+      '<div class="base-h"><div class="base-stats" id="base-stats"></div>' +
+      '<div class="base-ctrls"><input type="text" class="base-search" id="base-q" placeholder="' + Utils.esc(translate('base.search')) + '" />' +
+      '<select class="base-sort" id="base-sort"><option value="new">' + translate('base.sort.new') + '</option><option value="old">' + translate('base.sort.old') + '</option><option value="az">' + translate('base.sort.az') + '</option></select></div></div>' +
+      '<div class="base-list" id="base-list"></div>' +
+    '</div>';
+  }
+
+  /**
+   * Строит HTML-разметку нижней навигационной панели (табы Поток / База).
+   * 
+   * @returns {string} HTML-строка.
+   */
+  function buildBottomTabMarkup() {
+    return '<div class="btab">' +
+      '<button class="btab-b on" data-v="stream"><span class="btab-ic">◇</span><span>' + translate('tab.stream') + '</span></button>' +
+      '<button class="btab-b" data-v="base"><span class="btab-ic">▤</span><span>' + translate('tab.base') + '</span></button>' +
+    '</div>';
+  }
+
+  /**
+   * Собирает полную HTML-разметку приложения из отдельных блоков.
+   * Порядок вкладки stream: Header -> Segments -> FocusBar -> Carousel -> Editor.
+   * FocusBar идёт после Segments, чтобы при фокусе Segments скрывался, а FocusBar занимал его место.
+   * 
+   * @returns {string} Полная HTML-строка для вставки в #app-root.
+   */
+  function buildMarkup() {
+    return buildHeaderMarkup() +
+           '<div class="ws" id="ws-stream">' + 
+             buildSegmentsMarkup() + 
+             buildFocusBarMarkup() + 
+             buildCarouselWrapMarkup() + 
+             buildEditorMarkup() + 
+           '</div>' +
+           buildBaseMarkup() +
+           buildBottomTabMarkup();
+  }
 <!-- NOOMIUM_MODULE_END UI.Layout -->
 
 <!-- NOOMIUM_MODULE_START UI.Menu -->
+  /**
+   * Открывает модальное окно настроек приложения.
+   * Содержит секции: основные настройки (тема, язык, помощь),
+   * расширенные сетевые параметры, экспорт/импорт и опасную зону.
+   * При сохранении обновляет Config и перезапускает сеть.
+   * 
+   * Использует глобальные хелперы translate(), toast(), applyTheme(), executeSearch()
+   * и сервисы Config, I18n, Modal, Net из App.State.
+   * Для доступа к BaseViewComponent и AuthService используется DI.resolve(),
+   * так как они не инициализируются в глобальном скоупе App.State.
+   * 
+   * @returns {void}
+   */
+  function openMenu() {
+    var body = document.createElement('div');
 
+    // --- Секция 1: Основные настройки (Тема, Язык, Помощь) ---
+    var appSection = document.createElement('div');
+    appSection.className = 'set-sec';
+    appSection.innerHTML = '<div class="set-sec-t">' + translate('menu.settings') + '</div>';
+
+    var themeRow = document.createElement('button');
+    themeRow.className = 'tog ' + (Config.get('theme', 'dark') === 'light' ? 'on' : '');
+    themeRow.innerHTML = '<span class="tog-ic">◐</span><span class="tog-lbl">' + translate('menu.theme') + '</span><div class="tog-track"><div class="tog-thumb"></div></div>';
+    themeRow.onclick = function() {
+      var current = Config.get('theme', 'dark');
+      var next = current === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      themeRow.classList.toggle('on', next === 'light');
+    };
+    appSection.appendChild(themeRow);
+
+    var langRow = document.createElement('div');
+    langRow.style.marginTop = '8px';
+    langRow.innerHTML = '<div class="fl mb-5">' + translate('menu.lang') + '</div>';
+    var langSwitch = document.createElement('div');
+    langSwitch.className = 'lang-sw';
+    ['ru', 'en'].forEach(function(lang) {
+      var langBtn = document.createElement('button');
+      langBtn.className = 'lang-sw-b' + (I18n.getLang() === lang ? ' on' : '');
+      langBtn.textContent = lang.toUpperCase();
+      langBtn.onclick = function() {
+        I18n.setLang(lang);
+        Modal.close();
+      };
+      langSwitch.appendChild(langBtn);
+    });
+    langRow.appendChild(langSwitch);
+    appSection.appendChild(langRow);
+
+    var helpBtn = document.createElement('button');
+    helpBtn.className = 'tog';
+    helpBtn.style.marginTop = '8px';
+    helpBtn.innerHTML = '<span class="tog-ic">?</span><span class="tog-lbl">' + translate('menu.help') + '</span><span class="tog-arr">→</span>';
+    helpBtn.onclick = function() {
+      Modal.close();
+      setTimeout(function() { openHelp(false); }, 200);
+    };
+    appSection.appendChild(helpBtn);
+    body.appendChild(appSection);
+
+    // --- Секция 2: Расширенные сетевые параметры ---
+    var netSection = document.createElement('div');
+    netSection.className = 'set-sec';
+    netSection.innerHTML = '<div class="set-sec-t">' + translate('set.advanced') + '</div>';
+
+    var roomInput = document.createElement('input');
+    roomInput.type = 'text';
+    roomInput.className = 'fi-input';
+    roomInput.value = Config.get('room', 'noomium-main');
+    var roomGroup = document.createElement('div');
+    roomGroup.className = 'fg';
+    roomGroup.innerHTML = '<label class="fl">' + translate('set.room') + '</label>';
+    roomGroup.appendChild(roomInput);
+    var roomHint = document.createElement('div');
+    roomHint.className = 'fh';
+    roomHint.textContent = translate('set.room.hint');
+    roomGroup.appendChild(roomHint);
+    netSection.appendChild(roomGroup);
+
+    var thresholdInput = document.createElement('input');
+    thresholdInput.type = 'range';
+    thresholdInput.className = 'fr';
+    thresholdInput.min = '0';
+    thresholdInput.max = '1';
+    thresholdInput.step = '0.01';
+    thresholdInput.value = Config.get('threshold', 0.7);
+    var thresholdValue = document.createElement('span');
+    thresholdValue.className = 'rv';
+    thresholdValue.textContent = Number(Config.get('threshold', 0.7)).toFixed(2);
+    thresholdInput.oninput = function(e) {
+      thresholdValue.textContent = parseFloat(e.target.value).toFixed(2);
+    };
+    var thresholdGroup = document.createElement('div');
+    thresholdGroup.className = 'fg';
+    thresholdGroup.innerHTML = '<label class="fl">' + translate('set.threshold') + '</label>';
+    var thresholdWrapper = document.createElement('div');
+    thresholdWrapper.appendChild(thresholdInput);
+    thresholdWrapper.appendChild(thresholdValue);
+    thresholdGroup.appendChild(thresholdWrapper);
+    var thresholdHint = document.createElement('div');
+    thresholdHint.className = 'fh';
+    thresholdHint.textContent = translate('set.threshold.hint');
+    thresholdGroup.appendChild(thresholdHint);
+    netSection.appendChild(thresholdGroup);
+
+    var serenInput = document.createElement('input');
+    serenInput.type = 'range';
+    serenInput.className = 'fr';
+    serenInput.min = '0';
+    serenInput.max = '1';
+    serenInput.step = '0.01';
+    serenInput.value = Config.get('serendipity', 0.3);
+    var serenValue = document.createElement('span');
+    serenValue.className = 'rv';
+    serenValue.textContent = Number(Config.get('serendipity', 0.3)).toFixed(2);
+    serenInput.oninput = function(e) {
+      serenValue.textContent = parseFloat(e.target.value).toFixed(2);
+    };
+    var serenGroup = document.createElement('div');
+    serenGroup.className = 'fg';
+    serenGroup.innerHTML = '<label class="fl">' + translate('set.seren') + '</label>';
+    var serenWrapper = document.createElement('div');
+    serenWrapper.appendChild(serenInput);
+    serenWrapper.appendChild(serenValue);
+    serenGroup.appendChild(serenWrapper);
+    var serenHint = document.createElement('div');
+    serenHint.className = 'fh';
+    serenHint.textContent = translate('set.seren.hint');
+    serenGroup.appendChild(serenHint);
+    netSection.appendChild(serenGroup);
+
+    var relaysInput = document.createElement('textarea');
+    relaysInput.className = 'fi-textarea';
+    relaysInput.value = Config.get('relays', []).join('\n');
+    var relaysGroup = document.createElement('div');
+    relaysGroup.className = 'fg';
+    relaysGroup.innerHTML = '<label class="fl">' + translate('set.relays') + '</label>';
+    relaysGroup.appendChild(relaysInput);
+    var relaysHint = document.createElement('div');
+    relaysHint.className = 'fh';
+    relaysHint.textContent = translate('set.relays.hint');
+    relaysGroup.appendChild(relaysHint);
+    netSection.appendChild(relaysGroup);
+    body.appendChild(netSection);
+
+    // --- Секция 3: Данные (Экспорт / Импорт) ---
+    var dataSection = document.createElement('div');
+    dataSection.className = 'set-sec';
+    dataSection.innerHTML = '<div class="set-sec-t">' + translate('set.data') + '</div>';
+
+    var exportBtn = document.createElement('button');
+    exportBtn.className = 'tog';
+    exportBtn.style.marginTop = '4px';
+    exportBtn.innerHTML = '<span class="tog-ic">↓</span><span class="tog-lbl">' + translate('menu.export') + '</span><span class="tog-arr">→</span>';
+    exportBtn.onclick = function() {
+      Modal.close();
+      setTimeout(function() {
+        try {
+          DI.resolve('BaseViewComponent').exportData();
+        } catch (err) {
+          toast(String(err && err.message || err) || 'Export failed', 'err');
+        }
+      }, 200);
+    };
+    dataSection.appendChild(exportBtn);
+
+    var importBtn = document.createElement('button');
+    importBtn.className = 'tog';
+    importBtn.style.marginTop = '4px';
+    importBtn.innerHTML = '<span class="tog-ic">↑</span><span class="tog-lbl">' + translate('menu.import') + '</span><span class="tog-arr">→</span>';
+    importBtn.onclick = function() {
+      Modal.close();
+      setTimeout(function() {
+        try {
+          DI.resolve('BaseViewComponent').importData();
+        } catch (err) {
+          toast(String(err && err.message || err) || 'Import failed', 'err');
+        }
+      }, 200);
+    };
+    dataSection.appendChild(importBtn);
+    body.appendChild(dataSection);
+
+    // --- Секция 4: Опасная зона (Сброс кеша, Стирание базы) ---
+    var dangerSection = document.createElement('div');
+    dangerSection.className = 'set-sec';
+    dangerSection.innerHTML = '<div class="set-sec-t">' + translate('set.danger') + '</div>';
+
+    var clearCacheBtn = document.createElement('button');
+    clearCacheBtn.className = 'btn-send full-width mb-8';
+    clearCacheBtn.textContent = translate('btn.clear_cache');
+    clearCacheBtn.onclick = function() {
+      if (window.caches) {
+        caches.keys().then(function(keys) {
+          return Promise.all(keys.map(function(key) { return caches.delete(key); }));
+        }).then(function() {
+          toast(translate('toast.cache_cleared'), 'ok');
+          setTimeout(function() { location.reload(true); }, 500);
+        }).catch(function() {
+          setTimeout(function() { location.reload(true); }, 500);
+        });
+      } else {
+        setTimeout(function() { location.reload(true); }, 500);
+      }
+    };
+    dangerSection.appendChild(clearCacheBtn);
+
+    var wipeBtn = document.createElement('button');
+    wipeBtn.className = 'btn-send full-width danger-bg';
+    wipeBtn.textContent = translate('base.wipe');
+    wipeBtn.onclick = function() {
+      if (!confirm(translate('base.wipe.confirm'))) return;
+      try {
+        var AuthService = DI.resolve('AuthService');
+        AuthService.resetStorage().then(function() {
+          toast(translate('toast.base.wiped'), 'ok');
+          setTimeout(function() { location.reload(); }, 500);
+        });
+      } catch (e) {
+        setTimeout(function() { location.reload(); }, 500);
+      }
+    };
+    dangerSection.appendChild(wipeBtn);
+    body.appendChild(dangerSection);
+
+    // --- Открытие модального окна с кнопками Отмена / Сохранить ---
+    Modal.open({
+      title: '',
+      body: body,
+      buttons: [
+        {
+          text: translate('btn.cancel'),
+          primary: false,
+          onClick: function() { Modal.close(); }
+        },
+        {
+          text: translate('btn.save'),
+          primary: true,
+          onClick: function() {
+            // Сохранение новых значений в Config
+            Config.set('room', roomInput.value.trim() || 'noomium-main');
+            Config.set('threshold', parseFloat(thresholdInput.value));
+            Config.set('serendipity', parseFloat(serenInput.value));
+            
+            // Парсинг и валидация списка реле
+            var relaysText = relaysInput.value.trim();
+            var relays = relaysText
+              ? relaysText.split(/[\n,]+/).map(function(r) { return r.trim(); }).filter(function(r) { return r && /^wss?:\/\//.test(r); })
+              : Config.defaults().relays;
+            Config.set('relays', relays);
+            Config.save();
+            
+            Modal.close();
+            toast(translate('toast.net.restart'), 'info');
+            
+            // Перезапуск сети. 
+            // Примечание: пароль не требуется, так как sk уже расшифрован и хранится 
+            // в памяти модуля Net. Net.init() безопасно пропустит шаг дешифровки.
+            setTimeout(function() {
+              if (Net && Net.restart) Net.restart(function() { executeSearch(); });
+            }, 300);
+          }
+        }
+      ]
+    });
+  }
 <!-- NOOMIUM_MODULE_END UI.Menu -->
 
 <!-- NOOMIUM_MODULE_START UI.Help -->
