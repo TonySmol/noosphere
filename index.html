@@ -4594,7 +4594,124 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END EditorComponent -->
 
 <!-- NOOMIUM_MODULE_START FocusBarComponent -->
+  DI.register('FocusBarComponent', function(Bus, I18n, StateManager, SearchService) {
 
+    /** @type {HTMLDivElement | null} Контейнер для панели фокуса */
+    var container = null;
+
+    /** @type {function(AppState): void | null} Обработчик изменений состояния */
+    var stateHandler = null;
+
+    /** @type {function(): void | null} Обработчик смены языка */
+    var i18nHandler = null;
+
+    /**
+     * Обновляет ссылку на DOM-контейнер.
+     * Вызывается при каждом рендере, так как DOM может быть пересоздан после refreshUI.
+     * @returns {void}
+     */
+    function ensureDOM() {
+      container = document.getElementById('focus-bar');
+    }
+
+    /**
+     * Рендерит панель фокуса в зависимости от текущего состояния.
+     * 
+     * Логика отображения:
+     * - Если focusMode && focusedItem: показываем панель, скрываем seg-блок.
+     * - Иначе: скрываем панель, показываем seg-блок.
+     * 
+     * @returns {void}
+     */
+    function render() {
+      if (!container) ensureDOM();
+      if (!container) return;
+      
+      var state = StateManager.getState();
+      var segBlock = document.querySelector('.seg');
+
+      if (state.focusMode && state.focusedItem) {
+        container.style.display = 'block';
+        if (segBlock) segBlock.style.display = 'none';
+
+        var text = state.focusedItem.text || '';
+        if (text.length > 100) text = text.substring(0, 100) + '…';
+        var peer = state.focusedItem.peer || I18n.t('focus.you');
+
+        container.innerHTML = '<div class="focus-bar-inner">' +
+          '<div class="focus-text">' + text + '</div>' +
+          '<div class="focus-meta"><span class="focus-peer">' + peer + '</span>' +
+          '<button class="focus-unfocus" aria-label="' + I18n.t('btn.unfocus') + '">✕</button></div></div>';
+
+        var btn = container.querySelector('.focus-unfocus');
+        if (btn) {
+          btn.onclick = function() {
+            // Сбрасываем состояние фокуса
+            StateManager.setState({ focusMode: false, focusedItem: null });
+            
+            // Очищаем список результатов фокуса
+            var lists = StateManager.getState().lists;
+            StateManager.setState({ lists: Object.assign({}, lists, { focus: [] }) });
+            
+            // Запускаем поиск с текущим текстом редактора
+            // Это вернёт UI к live stream (если редактор пуст) или к текстовому поиску
+            var editorVal = document.getElementById('ed-ta') ? document.getElementById('ed-ta').value.trim() : '';
+            SearchService.search(editorVal, true);
+          };
+        }
+      } else {
+        container.style.display = 'none';
+        if (segBlock) segBlock.style.display = '';
+      }
+    }
+
+    /**
+     * Инициализирует компонент: подписывается на изменения состояния и смену языка.
+     * Выполняет первый рендер.
+     * 
+     * @returns {void}
+     */
+    function init() {
+      ensureDOM();
+      
+      stateHandler = function() { render(); };
+      i18nHandler = function() { render(); };
+      
+      StateManager.subscribe(stateHandler);
+      Bus.on('i18n:change', i18nHandler);
+      
+      render();
+    }
+
+    /**
+     * Уничтожает компонент: отписывается от шины событий.
+     * Примечание: отписка от StateManager не требуется, так как subscribe возвращает
+     * функцию unsubscribe, но в текущей архитектуре StateManager живет весь lifecycle приложения.
+     * 
+     * @returns {void}
+     */
+    function destroy() {
+      if (i18nHandler) {
+        try { Bus.off('i18n:change', i18nHandler); } catch (_) {}
+        i18nHandler = null;
+      }
+      stateHandler = null;
+    }
+
+    return {
+      /**
+       * Инициализирует компонент (публичный API).
+       * @returns {void}
+       */
+      init: init,
+
+      /**
+       * Уничтожает компонент (публичный API).
+       * @returns {void}
+       */
+      destroy: destroy
+    };
+  }, ['Bus', 'I18n', 'StateManager', 'SearchService']);
 <!-- NOOMIUM_MODULE_END FocusBarComponent -->
 
 <!-- NOOMIUM_MODULE_START AuthService -->
