@@ -7408,11 +7408,522 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END UI.Help -->
 
 <!-- NOOMIUM_MODULE_START App.Events -->
+  /**
+   * @typedef {Object} BusHandlerRecord
+   * @description Запись о зарегистрированном обработчике шины для последующей отписки.
+   * @property {string} event - Имя события.
+   * @property {function(*): void} fn - Ссылка на функцию-обработчик.
+   */
 
+  /**
+   * Массив всех обработчиков шины, зарегистрированных в App.Events,
+   * для массового удаления при cleanup() (например, перед refreshUI).
+   * @type {BusHandlerRecord[]}
+   */
+  var busHandlers = [];
+
+  /**
+   * Привязывает первичные DOM-события и глобальные горячие клавиши,
+   * подписывается на ключевые события шины (i18n:change, ai:progress,
+   * editor:search-request, editor:send-complete).
+   * 
+   * Горячие клавиши:
+   * - Escape: закрытие модальных окон.
+   * - '/': перевод фокуса на главный редактор (игнорируется, если фокус уже в input/textarea).
+   * 
+   * @returns {void}
+   */
+  function bindEvents() {
+    // Переключение вкладок (Поток / База)
+    document.querySelectorAll('.btab-b').forEach(function(b) {
+      b.onclick = function() { switchView(b.getAttribute('data-v')); };
+    });
+
+    // Открытие меню настроек
+    var menuBtn = document.getElementById('btn-menu');
+    if (menuBtn) menuBtn.onclick = openMenu;
+
+    // Глобальные горячие клавиши
+    document.addEventListener('keydown', function(e) {
+      // Закрытие модальных окон по Escape
+      if (e.key === 'Escape') {
+        Modal.close();
+      }
+      
+      // Быстрый фокус на редактор по '/'
+      if (e.key === '/') {
+        var activeEl = document.activeElement;
+        // Игнорируем, если пользователь уже печатает в каком-либо поле ввода
+        var isEditable = activeEl && (
+          activeEl.tagName === 'INPUT' || 
+          activeEl.tagName === 'TEXTAREA' || 
+          activeEl.isContentEditable
+        );
+        
+        if (!isEditable) {
+          var editor = document.getElementById('ed-ta');
+          if (editor) {
+            e.preventDefault();
+            editor.focus();
+          }
+        }
+      }
+    });
+
+    // Подписка на смену языка: требуется полный пересбор UI
+    var i18nHandler = function() { refreshUI(); };
+    Bus.on('i18n:change', i18nHandler);
+    busHandlers.push({ event: 'i18n:change', fn: i18nHandler });
+
+    // Подписка на прогресс загрузки AI модели
+    var aiProgressHandler = function(payload) {
+      if (Progress && payload && typeof payload.pct === 'number') {
+        Progress.update(payload.pct);
+      }
+    };
+    Bus.on('ai:progress', aiProgressHandler);
+    busHandlers.push({ event: 'ai:progress', fn: aiProgressHandler });
+
+    // Подписка на запрос поиска из редактора (debounce уже выполнен в EditorComponent)
+    uiState.editorSearchHandler = function(payload) {
+      var force = payload && payload.force === true;
+      executeSearch(force);
+    };
+    Bus.on('editor:search-request', uiState.editorSearchHandler);
+    busHandlers.push({ event: 'editor:search-request', fn: uiState.editorSearchHandler });
+
+    // Подписка на успешное завершение отправки заметки (нужно обновить списки)
+    uiState.editorSendHandler = function() {
+      executeSearch();
+    };
+    Bus.on('editor:send-complete', uiState.editorSendHandler);
+    busHandlers.push({ event: 'editor:send-complete', fn: uiState.editorSendHandler });
+  }
+
+  /**
+   * Устанавливает глобальные обработчики окна:
+   * - resize, focusin, focusout, orientationchange: для корректной высоты 100vh на мобильных
+   *   (обновление CSS-переменной --vh).
+   * - beforeunload: предупреждение при закрытии вкладки с несохранённым текстом в редакторе.
+   * 
+   * Предварительно снимает старые обработчики для избежания дублирования при refreshUI().
+   * 
+   * @returns {void}
+   */
+  function setupWindowListeners() {
+    var handlers = uiState.windowHandlers;
+
+    // Очистка старых обработчиков
+    if (handlers.resize) window.removeEventListener('resize', handlers.resize);
+    if (handlers.focusin) window.removeEventListener('focusin', handlers.focusin);
+    if (handlers.focusout) window.removeEventListener('focusout', handlers.focusout);
+    if (handlers.orientationchange) window.removeEventListener('orientationchange', handlers.orientationchange);
+    if (handlers.beforeunload) window.removeEventListener('beforeunload', handlers.beforeunload);
+
+    /**
+     * Вычисляет 1% высоты viewport и сохраняет в CSS-переменную --vh.
+     * Это решает проблему "прыгающего" 100vh в мобильных браузерах (Safari, Chrome)
+     * при появлении/исчезновении адресной строки.
+     */
+    var setVH = function() {
+      var vh = window.innerHeight * 0.01;
+      document.documentElement.style.setProperty('--vh', vh + 'px');
+    };
+
+    handlers.resize = setVH;
+    handlers.focusin = setVH;
+    handlers.focusout = setVH;
+    handlers.orientationchange = function() { setTimeout(setVH, 100); };
+
+    handlers.beforeunload = function(e) {
+      try {
+        var text = EditorComponent.getValue();
+        if (text && text.trim().length > 0) {
+          e.preventDefault();
+          e.returnValue = ''; // Требуется для совместимости со старыми браузерами
+        }
+      } catch (_) { /* ignore */ }
+    };
+
+    // Привязка новых обработчиков
+    window.addEventListener('resize', handlers.resize);
+    window.addEventListener('focusin', handlers.focusin);
+    window.addEventListener('focusout', handlers.focusout);
+    window.addEventListener('orientationchange', handlers.orientationchange);
+    window.addEventListener('beforeunload', handlers.beforeunload);
+
+    // Первичный расчет --vh
+    setVH();
+  }
+
+  /**
+   * Снимает все глобальные обработчики окна и шины событий.
+   * Вызывается перед refreshUI() или при уничтожении приложения.
+   * Гарантирует отсутствие утечек памяти и "зомби-обработчиков".
+   * 
+   * @returns {void}
+   */
+  function cleanup() {
+    // Отписка от прогресса AI (он использует отдельный механизм подписки)
+    if (uiState.progressHandler) {
+      AI.offProgress(uiState.progressHandler);
+      uiState.progressHandler = null;
+    }
+    
+    // Снятие window listeners
+    var handlers = uiState.windowHandlers;
+    if (handlers.resize) window.removeEventListener('resize', handlers.resize);
+    if (handlers.focusin) window.removeEventListener('focusin', handlers.focusin);
+    if (handlers.focusout) window.removeEventListener('focusout', handlers.focusout);
+    if (handlers.orientationchange) window.removeEventListener('orientationchange', handlers.orientationchange);
+    if (handlers.beforeunload) window.removeEventListener('beforeunload', handlers.beforeunload);
+
+    handlers.resize = null;
+    handlers.focusin = null;
+    handlers.focusout = null;
+    handlers.orientationchange = null;
+    handlers.beforeunload = null;
+
+    // Массовая отписка от шины событий
+    for (var i = 0; i < busHandlers.length; i++) {
+      Bus.off(busHandlers[i].event, busHandlers[i].fn);
+    }
+    busHandlers = [];
+    
+    // Очистка ссылок на специфичные обработчики
+    uiState.editorSearchHandler = null;
+    uiState.editorSendHandler = null;
+  }
 <!-- NOOMIUM_MODULE_END App.Events -->
 
 <!-- NOOMIUM_MODULE_START App.Boot -->
+  /**
+   * Модуль инициализации и загрузки приложения.
+   * Управляет последовательностью старта: AI -> Auth -> Net -> UI.
+   * 
+   * Использует глобальные хелперы и сервисы из App.State, а также
+   * резолвит AuthService через DI (так как он нужен только на этапе загрузки).
+   * 
+   * @namespace App.Boot
+   */
 
+  var AuthService = DI.resolve('AuthService');
+
+  /**
+   * Главная функция загрузки приложения:
+   * 1. Показывает прогресс-бар загрузки AI.
+   * 2. Загружает ML-модель в Worker'е.
+   * 3. Запрашивает пароль у пользователя (создание нового ключа или расшифровка).
+   * 4. Инициализирует сеть Nostr.
+   * 5. При первом запуске показывает онбординг.
+   * 
+   * @returns {void}
+   */
+  function bootApp() {
+    // Добавляем специфичные ключи для модалок авторизации, если их нет в основном словаре
+    I18n.addDict('ru', { 'btn.forgot': 'Забыли пароль?' });
+    I18n.addDict('en', { 'btn.forgot': 'Forgot password?' });
+
+    Progress.show();
+
+    var aiLoaded = false;
+    var netInitialized = false;
+
+    /**
+     * Проверяет, завершены ли загрузка AI и инициализация сети,
+     * и показывает онбординг при первом запуске (флаг onboarded в Config).
+     * @returns {void}
+     */
+    function checkOnboarding() {
+      if (aiLoaded && netInitialized && !Config.get('onboarded', false)) {
+        openHelp(true);
+      }
+    }
+
+    // Запуск загрузки AI модели
+    AI.load().then(function() {
+      Progress.hide();
+      aiLoaded = true;
+      requestAuth();
+      checkOnboarding();
+    }).catch(function(err) {
+      Progress.hide();
+      if (Logger) Logger.error('AI load failed', String(err && err.message || err));
+      aiLoaded = true;
+      // Даже если AI упал в demo-режим, продолжаем загрузку
+      requestAuth();
+      checkOnboarding();
+    });
+
+    /**
+     * Пытается инициализировать сеть с заданным паролем.
+     * Устанавливает флаг netAuthorized в StateManager при успехе.
+     * 
+     * @param {string} password - Пароль для расшифровки ключа.
+     * @returns {Promise<void>}
+     */
+    function tryInit(password) {
+      return Net.init(function() { executeSearch(); }, password).then(function() {
+        netInitialized = true;
+        StateManager.setState({ netAuthorized: true });
+        checkOnboarding();
+      }).catch(function(err) {
+        if (Logger) Logger.error('Net init failed', String(err && err.message || err));
+        netInitialized = true; // Считаем сеть инициализированной (в offline/failed режиме)
+        checkOnboarding();
+      });
+    }
+
+    /**
+     * Запрашивает у пользователя пароль (создание нового или ввод существующего).
+     * Рекурсивно вызывает себя при неверном пароле, пока не будет превышен лимит попыток.
+     * 
+     * @param {function(): void} [onSuccess] - Колбэк после успешной авторизации.
+     * @returns {void}
+     */
+    function requestAuth(onSuccess) {
+      if (AuthService.needsNewKey()) {
+        promptNewPassword(function(pwd) {
+          AuthService.createNew(pwd, function() {
+            tryInit(pwd).then(function() {
+              if (typeof onSuccess === 'function') onSuccess();
+            });
+          });
+        });
+      } else {
+        promptExistingPassword(function(pwd) {
+          AuthService.unlock(pwd,
+            function() {
+              tryInit(pwd).then(function() {
+                if (typeof onSuccess === 'function') onSuccess();
+              });
+            },
+            function() {
+              toast(translate('auth.wrong_password'), 'err');
+              requestAuth(onSuccess); // Рекурсия при неверном пароле
+            },
+            function() {
+              showResetModal(); // Превышен лимит попыток
+            }
+          );
+        });
+      }
+    }
+
+    /**
+     * Показывает модалку сброса данных при превышении лимита попыток ввода пароля.
+     * Предлагает пользователю стереть локальное хранилище и начать заново.
+     * @returns {void}
+     */
+    function showResetModal() {
+      var body = document.createElement('div');
+      body.innerHTML = '<p class="reset-modal-text">' + translate('auth.reset_body') + '</p>';
+      Modal.open({
+        title: translate('auth.reset_title'),
+        body: body,
+        buttons: [
+          {
+            text: translate('auth.reset_btn'),
+            danger: true,
+            primary: true,
+            onClick: function() {
+              AuthService.resetStorage().then(function() {
+                location.reload(true);
+              });
+            }
+          }
+        ]
+      });
+    }
+
+    /**
+     * Показывает модалку создания нового пароля (первый запуск).
+     * Валидирует совпадение двух введённых паролей.
+     * 
+     * @param {function(string): void} callback - Вызывается с введённым паролем.
+     * @returns {void}
+     */
+    function promptNewPassword(callback) {
+      var body = document.createElement('div');
+      body.innerHTML = '<div class="fg"><label class="fl">' + translate('auth.new_password_label1') + '</label><input type="password" class="fi-input" id="pwd1" /></div>' +
+                       '<div class="fg"><label class="fl">' + translate('auth.new_password_label2') + '</label><input type="password" class="fi-input" id="pwd2" /></div>';
+      var errorEl = document.createElement('div');
+      errorEl.className = 'danger-text fs-12 mt-8';
+      body.appendChild(errorEl);
+
+      Modal.open({
+        title: translate('auth.new_password_title'),
+        body: body,
+        buttons: [
+          {
+            text: translate('auth.new_password_save'),
+            primary: true,
+            onClick: function() {
+              var p1 = document.getElementById('pwd1').value;
+              var p2 = document.getElementById('pwd2').value;
+              if (!p1) { errorEl.textContent = translate('auth.new_password_empty'); return; }
+              if (p1 !== p2) { errorEl.textContent = translate('auth.new_password_mismatch'); return; }
+              Modal.close();
+              callback(p1);
+            }
+          }
+        ]
+      });
+    }
+
+    /**
+     * Показывает модалку ввода пароля (повторный запуск).
+     * Содержит кнопку сброса хранилища при забытом пароле.
+     * 
+     * @param {function(string): void} callback - Вызывается с введённым паролем.
+     * @returns {void}
+     */
+    function promptExistingPassword(callback) {
+      var body = document.createElement('div');
+      body.innerHTML = '<div class="fg"><label class="fl">' + translate('auth.existing_password_label') + '</label><input type="password" class="fi-input" id="pwd1" /></div>';
+
+      var forgotBtn = document.createElement('button');
+      forgotBtn.type = 'button';
+      forgotBtn.className = 'nv-act danger full-width mt-10 inline-flex-center';
+      forgotBtn.textContent = translate('btn.reset_storage');
+      forgotBtn.onclick = function() {
+        if (!confirm(translate('reset_storage.confirm'))) return;
+        Modal.close();
+        AuthService.resetStorage().then(function() {
+          location.reload(true);
+        });
+      };
+      body.appendChild(forgotBtn);
+
+      var errorEl = document.createElement('div');
+      errorEl.className = 'danger-text fs-12 mt-8';
+      body.appendChild(errorEl);
+
+      Modal.open({
+        title: translate('auth.existing_password_title'),
+        body: body,
+        buttons: [
+          {
+            text: translate('auth.existing_password_btn'),
+            primary: true,
+            onClick: function() {
+              var p1 = document.getElementById('pwd1').value;
+              if (!p1) { errorEl.textContent = translate('auth.existing_password_empty'); return; }
+              Modal.close();
+              callback(p1);
+            }
+          }
+        ]
+      });
+    }
+
+    /**
+     * Колбэк для запроса авторизации сети из SearchService.
+     * Вызывается, когда пользователь пытается отправить заметку в 'world',
+     * но сеть ещё не авторизована (например, после сбоя инициализации).
+     * 
+     * @param {function(): void} onSuccess - Вызывается после успешной авторизации.
+     * @returns {void}
+     */
+    function requestNetworkAuth(onSuccess) {
+      if (StateManager.getState().netAuthorized) {
+        if (typeof onSuccess === 'function') onSuccess();
+        return;
+      }
+      requestAuth(onSuccess);
+    }
+
+    // Сохраняем колбэк в StateManager для доступа из SearchService
+    StateManager.setState({ requestNetworkAuth: requestNetworkAuth });
+  }
+
+  /**
+   * Точка монтирования приложения: создаёт корневой элемент,
+   * рендерит разметку, инициализирует все UI-компоненты и запускает bootApp().
+   * При критической ошибке показывает fallback-экран с кнопкой перезагрузки.
+   * 
+   * @returns {void}
+   */
+  function mountApp() {
+    try {
+      // Очистка возможных старых обработчиков (на случай HMR или повторного вызова)
+      cleanup();
+
+      var root = document.getElementById('app-root');
+      if (!root) {
+        root = document.createElement('div');
+        root.id = 'app-root';
+        document.body.appendChild(root);
+      }
+      document.body.classList.add('show-app');
+      
+      // Генерация и вставка HTML-разметки
+      root.innerHTML = buildMarkup();
+      
+      // Привязка глобальных window listeners и Bus events
+      setupWindowListeners();
+      bindEvents();
+
+      // Инициализация UI-компонентов
+      try { DI.resolve('HeaderStatusComponent').init(); } catch (e) {
+        if (Logger) Logger.warn('HeaderStatusComponent init failed', String(e));
+      }
+      try { DI.resolve('OfflineBarComponent').init(); } catch (e) {
+        if (Logger) Logger.warn('OfflineBarComponent init failed', String(e));
+      }
+      try { EditorComponent.init(); } catch (e) {
+        if (Logger) Logger.warn('EditorComponent init failed', String(e));
+      }
+      try { DI.resolve('StreamViewComponent').init(); } catch (e) {
+        if (Logger) Logger.warn('StreamViewComponent init failed', String(e));
+      }
+      try { DI.resolve('FocusBarComponent').init(); } catch (e) {
+        if (Logger) Logger.warn('FocusBarComponent init failed', String(e));
+      }
+      try { DI.resolve('BaseViewComponent').init(); } catch (e) {
+        if (Logger) Logger.warn('BaseViewComponent init failed', String(e));
+      }
+
+      // Инициализация сервисов
+      try { SearchService.init(); } catch (e) {
+        if (Logger) Logger.warn('SearchService init failed', String(e));
+      }
+
+      // Запуск цепочки загрузки (AI -> Auth -> Net)
+      bootApp();
+      
+      if (Logger) Logger.info('App mounted successfully');
+    } catch (err) {
+      console.error('App mount failed:', err);
+      
+      // Fallback UI при фатальной ошибке инициализации
+      var root = document.getElementById('app-root');
+      if (root) {
+        root.textContent = '';
+        var wrapper = document.createElement('div');
+        wrapper.className = 'error-wrapper';
+
+        var heading = document.createElement('h2');
+        heading.className = 'error-heading';
+        heading.textContent = 'NOOmium failed to start';
+
+        var message = document.createElement('p');
+        message.className = 'error-message';
+        message.textContent = String(err && err.message || err);
+
+        var reloadBtn = document.createElement('button');
+        reloadBtn.className = 'error-reload-btn';
+        reloadBtn.textContent = 'Reload';
+        reloadBtn.onclick = function() { location.reload(); };
+
+        wrapper.appendChild(heading);
+        wrapper.appendChild(message);
+        wrapper.appendChild(reloadBtn);
+        root.appendChild(wrapper);
+        document.body.classList.add('show-app');
+      }
+    }
+  }
 <!-- NOOMIUM_MODULE_END App.Boot -->
 
 <!-- NOOMIUM_MODULE_START App -->
