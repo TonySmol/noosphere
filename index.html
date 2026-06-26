@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.0">
+<meta name="app-version" content="1.4.1">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -3775,6 +3775,23 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END StateManager -->
 
 <!-- NOOMIUM_MODULE_START SearchService -->
+  /**
+   * Сервис семантического поиска и управления заметками.
+   * 
+   * Отвечает за:
+   * - Поиск по локальной базе (local) и сети (world) через векторные эмбеддинги
+   * - Режим озарений (seren) — близкие, но ниже порога совпадения
+   * - Режим фокуса (focus) — поиск по вектору закреплённой заметки
+   * - Live Stream control — остановка/запуск живой ленты
+   * - Сохранение заметок с поддержкой Parent/Child связей
+   * 
+   * Приоритеты режимов (в search()):
+   * 1. Текст в редакторе → обычный поиск (local/world/seren)
+   * 2. Нет текста, но есть focusMode → поиск по вектору фокуса
+   * 3. Нет текста и фокуса → включение Live Stream
+   * 
+   * @module SearchService
+   */
   DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I18n, Toast, Logger, Utils) {
 
     /** @type {Vector | null} Вектор последнего выполненного поискового запроса */
@@ -3794,6 +3811,13 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 
     /** @type {number} Время жизни кэша всех заметок (5 минут) */
     var ALL_NOTES_TTL = 5 * 60 * 1000;
+
+    /** 
+     * Максимальное количество результатов в каждом списке (local, world, seren, focus).
+     * Защита от тормозов UI при большой базе (10000+ заметок).
+     * @type {number}
+     */
+    var MAX_RESULTS_PER_LIST = 100;
 
     /**
      * Возвращает все заметки из базы, используя кэш для оптимизации.
@@ -3850,7 +3874,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
     /**
      * Выполняет семантический поиск по готовому вектору (для режима фокуса).
      * Не вычисляет эмбеддинг повторно, использует переданный вектор.
-     * Результаты объединяются в единый список State.lists.focus.
+     * Результаты объединяются в единый список State.lists.focus с лимитом MAX_RESULTS_PER_LIST.
      * 
      * @param {Vector} vector - Вектор запроса (уже вычисленный).
      * @returns {Promise<void>}
@@ -3926,10 +3950,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             }
           }
 
-          // В режиме фокуса всё объединяем в одну ленту и сортируем по score
-          var combined = localScored.concat(worldScored).sort(function(a, b) { 
-            return b.score - a.score; 
-          });
+          // В режиме фокуса всё объединяем в одну ленту, сортируем по score
+          // и ОБРЕЗАЕМ до MAX_RESULTS_PER_LIST для защиты от тормозов UI
+          var combined = localScored.concat(worldScored)
+            .sort(function(a, b) { return b.score - a.score; })
+            .slice(0, MAX_RESULTS_PER_LIST);
 
           var currentLists = StateManager.getState().lists;
           StateManager.setState({ 
@@ -3956,6 +3981,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
      * 1. Если есть текст → обычный поиск (выключает Live Stream).
      * 2. Если текста нет, но есть focusMode → поиск по вектору фокуса.
      * 3. Если текста нет и focusMode выключен → включает Live Stream.
+     * 
+     * Защита от race condition: Net.send() вызывается ТОЛЬКО после повторной
+     * проверки signal.aborted, чтобы предотвратить отправку устаревших запросов
+     * при быстрой смене текста в редакторе.
      * 
      * @param {string} text - Поисковый запрос (текст из редактора).
      * @param {boolean} [force=false] - Принудительная отправка запроса в сеть.
@@ -4014,8 +4043,11 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
         return getAllNotesCached().then(function(notes) {
           if (signal.aborted) return;
 
-          // Отправка запроса в сеть (после проверки signal.aborted)
+          // 🔑 КРИТИЧНО: ПОВТОРНАЯ проверка signal.aborted ПЕРЕД Net.send
+          // Это предотвращает отправку устаревших запросов в сеть,
+          // если пользователь быстро изменил текст в редакторе
           if (shouldSendToNet && AI.getMode() === 'model') {
+            if (signal.aborted) return;
             var st = StateManager.getState();
             if (st.netAuthorized && Net && typeof Net.send === 'function') {
               Net.send(vec);
@@ -4092,10 +4124,10 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
             var newLists;
 
             if (focusMode) {
-              // В режиме фокуса всё объединяем в одну ленту
-              var combined = localScored.concat(worldScored).sort(function(a, b) { 
-                return b.score - a.score; 
-              });
+              // В режиме фокуса всё объединяем в одну ленту с лимитом
+              var combined = localScored.concat(worldScored)
+                .sort(function(a, b) { return b.score - a.score; })
+                .slice(0, MAX_RESULTS_PER_LIST);
               newLists = {
                 local: [],
                 world: [],
@@ -4103,15 +4135,20 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
                 focus: combined
               };
             } else {
-              // Обычный режим с сегментами
+              // Обычный режим с сегментами — каждый список ограничен MAX_RESULTS_PER_LIST
               newLists = {
-                local: localScored.filter(function(n) { return n.score >= threshold; })
-                  .sort(function(a, b) { return b.score - a.score; }),
-                world: worldScored.filter(function(n) { return n.score >= threshold; })
-                  .sort(function(a, b) { return b.score - a.score; }),
+                local: localScored
+                  .filter(function(n) { return n.score >= threshold; })
+                  .sort(function(a, b) { return b.score - a.score; })
+                  .slice(0, MAX_RESULTS_PER_LIST),
+                world: worldScored
+                  .filter(function(n) { return n.score >= threshold; })
+                  .sort(function(a, b) { return b.score - a.score; })
+                  .slice(0, MAX_RESULTS_PER_LIST),
                 seren: localScored.concat(worldScored)
                   .filter(function(n) { return n.score >= serenMin && n.score < threshold; })
-                  .sort(function(a, b) { return b.score - a.score; }),
+                  .sort(function(a, b) { return b.score - a.score; })
+                  .slice(0, MAX_RESULTS_PER_LIST),
                 focus: StateManager.getState().lists.focus // сохраняем, если было
               };
             }
