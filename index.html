@@ -1036,15 +1036,1225 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END I18n -->
 
 <!-- NOOMIUM_MODULE_START Config -->
+  /**
+   * @typedef {Object} AppConfig
+   * @description Полный объект конфигурации приложения NOOmium.
+   * @property {string} room - Nostr-комната (тег #t) для обмена мыслями.
+   * @property {number} threshold - Порог косинусного сходства для попадания в local/world.
+   * @property {number} serendipity - Дельта ниже threshold для сегмента seren (озарения).
+   * @property {string[]} relays - Список WebSocket-адресов Nostr-релеев.
+   * @property {number} kQuery - Kind Nostr-события для поискового запроса.
+   * @property {number} kAnswer - Kind Nostr-события для ответа на запрос.
+   * @property {string} model - Идентификатор HuggingFace-модели для эмбеддингов.
+   * @property {number} dim - Размерность вектора эмбеддинга.
+   * @property {number} debounce - Задержка debounce для поиска (мс).
+   * @property {number} peerTTL - Время жизни пира в сети (мс).
+   * @property {number} heartbeat - Интервал heartbeat для очистки пиров (мс).
+   * @property {number} subWindow - Окно подписки на события Nostr (сек).
+   * @property {number} queryRateLimit - Минимальный интервал между запросами в сеть (мс).
+   * @property {string} dbName - Имя базы IndexedDB.
+   * @property {string} storeName - Имя объектного хранилища в IDB.
+   * @property {'dark'|'light'} theme - Активная цветовая тема.
+   * @property {boolean} onboarded - Флаг прохождения онбординга.
+   * @property {number} publishCooldown - Задержка между публикациями (мс).
+   * @property {number} maxAnswersPerQuery - Макс. ответов на один запрос.
+   * @property {number} aiCacheLimit - Макс. размер LRU-кэша векторов.
+   * @property {number} aiEmbedTimeout - Таймаут запроса эмбеддинга в Worker (мс).
+   * @property {number} aiLoadRetries - Кол-во попыток загрузки модели.
+   * @property {number} aiLoadMaxBackoff - Макс. задержка между попытками (мс).
+   * @property {number} sharedCacheTTL - TTL кэша shared-векторов (мс).
+   * @property {number} seenMaxSize - Макс. размер SetSeen дубликатов.
+   * @property {number} seenKeepSize - Сколько последних ID сохранять при переполнении.
+   * @property {number} outboxBatchSize - Размер батча отправки из outbox.
+   * @property {number} relayErrorThreshold - Кол-во ошибок до circuit-break релея.
+   * @property {number} relayCircuitBreakTime - Время блокировки релея (мс).
+   * @property {number} relayBackoff1 - Первый уровень backoff для релея (мс).
+   * @property {number} relayBackoff2 - Второй уровень backoff для релея (мс).
+   * @property {number} maxAnswersCache - Макс. размер кэша входящих ответов.
+   * @property {number} answersTTL - TTL ответа в кэше (мс).
+   * @property {number} answerStaggerDelay - Задержка между ответами (мс).
+   * @property {number} reconnectMaxAttempts - Макс. попыток переподключения.
+   * @property {number} reconnectBaseDelay - Базовая задержка reconnect (мс).
+   * @property {number} reconnectMaxDelay - Макс. задержка reconnect (мс).
+   * @property {number} baseChunkSize - Размер чанка при пагинации IDB.
+   * @property {number} truncateTextLength - Макс. длина текста в списке базы.
+   * @property {number} noteViewAnimationDelay - Задержка анимации NoteView (мс).
+   * @property {number} vectorSimilarityThreshold - Порог схожести для дедупликации запросов.
+   * @property {number} baseSearchDebounce - Debounce текстового поиска в базе (мс).
+   * @property {number} maxPasswordAttempts - Макс. попыток ввода пароля.
+   * @property {number} toastMaxVisible - Макс. одновременно видимых тостов.
+   * @property {number} toastDefaultDuration - Длительность тоста по умолчанию (мс).
+   * @property {number} progressFocusDelay - Задержка фокуса в Progress (мс).
+   * @property {number} modalFocusDelay - Задержка фокуса в Modal (мс).
+   * @property {number} maxAnswerTextLength - Макс. длина текста ответа из сети.
+   * @property {number} offlineQueueMaxSize - Макс. размер offline-очереди.
+   * @property {number} offlineFlushInterval - Интервал flush offline-очереди (мс).
+   */
 
+  DI.register('Config', function(store, log) {
+
+    /**
+     * Ключ для сохранения конфигурации в Store.
+     * @type {string}
+     */
+    var KEY = 'cfg';
+
+    /**
+     * Значения по умолчанию для всех параметров приложения.
+     * @type {AppConfig}
+     */
+    var defaults = {
+      room: 'noomium-main',
+      threshold: 0.7,
+      serendipity: 0.3,
+      relays: ['wss://offchain.pub', 'wss://relay.nostr.info', 'wss://nostr.mom'],
+      kQuery: 21000,
+      kAnswer: 21001,
+      model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+      dim: 384,
+      debounce: 800,
+      peerTTL: 60000,
+      heartbeat: 30000,
+      subWindow: 300,
+      queryRateLimit: 3000,
+      dbName: 'noomium_v8',
+      storeName: 'notes',
+      theme: 'dark',
+      onboarded: false,
+      publishCooldown: 1500,
+      maxAnswersPerQuery: 5,
+      aiCacheLimit: 300,
+      aiEmbedTimeout: 15000,
+      aiLoadRetries: 2,
+      aiLoadMaxBackoff: 30000,
+      sharedCacheTTL: 60000,
+      seenMaxSize: 1000,
+      seenKeepSize: 500,
+      outboxBatchSize: 2,
+      relayErrorThreshold: 5,
+      relayCircuitBreakTime: 120000,
+      relayBackoff1: 15000,
+      relayBackoff2: 30000,
+      maxAnswersCache: 100,
+      answersTTL: 300000,
+      answerStaggerDelay: 500,
+      reconnectMaxAttempts: 10,
+      reconnectBaseDelay: 1000,
+      reconnectMaxDelay: 60000,
+      baseChunkSize: 20,
+      truncateTextLength: 120,
+      noteViewAnimationDelay: 200,
+      vectorSimilarityThreshold: 0.98,
+      baseSearchDebounce: 200,
+      maxPasswordAttempts: 3,
+      toastMaxVisible: 3,
+      toastDefaultDuration: 2200,
+      progressFocusDelay: 50,
+      modalFocusDelay: 50,
+      maxAnswerTextLength: 10000,
+      offlineQueueMaxSize: 100,
+      offlineFlushInterval: 30000
+    };
+
+    /**
+     * Текущее состояние конфигурации (defaults + сохранённые значения).
+     * @type {AppConfig}
+     */
+    var state = Object.assign({}, defaults);
+
+    // Загрузка сохранённой конфигурации из Store
+    try {
+      var saved = store ? store.get(KEY, null) : null;
+      if (saved && typeof saved === 'object') {
+        Object.assign(state, saved);
+      }
+    } catch (e) {
+      if (log) log.warn('Config load failed', String(e));
+    }
+
+    return {
+
+      /**
+       * Возвращает копию объекта значений по умолчанию.
+       * Полезно для сброса отдельных параметров или UI-форм.
+       * @returns {AppConfig} Клон defaults.
+       */
+      defaults: function() {
+        return Object.assign({}, defaults);
+      },
+
+      /**
+       * Читает значение параметра конфигурации.
+       * Возвращает глубокую копию для массивов и объектов, чтобы предотвратить
+       * случайную мутацию внутреннего состояния извне (защита от багов).
+       * 
+       * @template T
+       * @param {keyof AppConfig} k - Имя параметра.
+       * @param {T} [def] - Значение по умолчанию, если ключа нет в state.
+       * @returns {AppConfig[keyof AppConfig] | T} Значение параметра или def.
+       */
+      get: function(k, def) {
+        var val = state.hasOwnProperty(k) ? state[k] : def;
+        if (Array.isArray(val)) return val.slice();
+        if (val && typeof val === 'object') return Object.assign({}, val);
+        return val;
+      },
+
+      /**
+       * Устанавливает значение параметра в runtime-состоянии.
+       * Не сохраняет в Store автоматически — нужен явный вызов save().
+       * 
+       * @param {keyof AppConfig} k - Имя параметра.
+       * @param {*} v - Новое значение.
+       * @returns {void}
+       */
+      set: function(k, v) {
+        state[k] = v;
+      },
+
+      /**
+       * Сохраняет текущее состояние конфигурации в Store (localStorage).
+       * Игнорирует ошибки квоты или сериализации.
+       * @returns {void}
+       */
+      save: function() {
+        try {
+          if (store) store.set(KEY, state);
+        } catch (e) {
+          if (log) log.warn('Config save failed', String(e));
+        }
+      }
+    };
+  }, ['Store', 'Logger']);
 <!-- NOOMIUM_MODULE_END Config -->
 
 <!-- NOOMIUM_MODULE_START DB -->
+  /**
+   * @typedef {Object} IDBMockRequest
+   * @description Мок-объект запроса для fallback на Map при недоступности IndexedDB.
+   * @property {*} result - Результат операции.
+   * @property {function(): void} [onsuccess] - Колбэк успеха.
+   * @property {function(*): void} [onerror] - Колбэк ошибки.
+   */
 
+  DI.register('DB', function(cfg, log, bus) {
+
+    /**
+     * Инстанс открытой IndexedDB (null, если IDB недоступен).
+     * @type {IDBDatabase | null}
+     */
+    var db = null;
+
+    /**
+     * In-memory fallback-хранилище (используется, если IDB недоступен).
+     * @type {Map<string, Note> | null}
+     */
+    var mem = null;
+
+    /**
+     * Максимальное количество заметок в in-memory fallback.
+     * Предотвращает OOM при длительной работе без IDB.
+     * @type {number}
+     */
+    var MAX_FALLBACK_NOTES = 10000;
+
+    /**
+     * Возвращает имя базы данных из конфигурации.
+     * @returns {string}
+     */
+    function dbName() {
+      return cfg.get('dbName', 'noomium_v8');
+    }
+
+    /**
+     * Возвращает имя объектного хранилища из конфигурации.
+     * @returns {string}
+     */
+    function storeName() {
+      return cfg.get('storeName', 'notes');
+    }
+
+    /**
+     * Публикует событие db:change через Bus после любой мутации данных.
+     * Используется другими модулями для инвалидации кэшей.
+     * @returns {void}
+     */
+    function emitChange() {
+      if (bus && bus.emit) {
+        try {
+          bus.emit('db:change');
+        } catch (_) {
+          /* ignore */
+        }
+      }
+    }
+
+    /**
+     * Открывает соединение с IndexedDB (или создаёт in-memory fallback).
+     * Кэширует результат в переменной db для повторных вызовов.
+     * 
+     * @returns {Promise<IDBDatabase | null>} Разрешается инстансом IDB или null (fallback).
+     */
+    function open() {
+      return new Promise(function(resolve, reject) {
+        if (db) return resolve(db);
+        if (!window.indexedDB) {
+          mem = new Map();
+          return resolve(null);
+        }
+        try {
+          var req = indexedDB.open(dbName(), 1);
+          req.onupgradeneeded = function(e) {
+            var d = e.target.result;
+            var s = storeName();
+            if (!d.objectStoreNames.contains(s)) {
+              d.createObjectStore(s, { keyPath: 'id' });
+            }
+          };
+          req.onsuccess = function(e) {
+            db = e.target.result;
+            resolve(db);
+          };
+          req.onerror = function() {
+            if (log) log.warn('IDB open error', String(req.error));
+            mem = new Map();
+            resolve(null);
+          };
+          req.onblocked = function() {
+            mem = new Map();
+            resolve(null);
+          };
+        } catch (err) {
+          if (log) log.warn('IDB unsupported', String(err));
+          mem = new Map();
+          resolve(null);
+        }
+      });
+    }
+
+    /**
+     * Выполняет операцию внутри IDB-транзакции (или в in-memory fallback).
+     * Для fallback использует микро-таски (Promise.resolve().then) вместо setTimeout,
+     * чтобы не блокировать event loop при массовых операциях.
+     * 
+     * @param {'readonly' | 'readwrite'} mode - Режим транзакции.
+     * @param {function(IDBObjectStore | Object): IDBRequest | IDBMockRequest | *} fn -
+     *   Функция, принимающая objectStore и возвращающая запрос или результат.
+     * @returns {Promise<*>} Promise с результатом операции.
+     */
+    function tx(mode, fn) {
+      return open().then(function(d) {
+        return new Promise(function(resolve, reject) {
+          try {
+            if (!d) {
+              // In-memory fallback
+              var mockStore = {
+                get: function(k) {
+                  return { result: mem.get(k) };
+                },
+                put: function(v) {
+                  mem.set(v.id, v);
+                  // Ограничение размера Map для предотвращения OOM
+                  if (mem.size > MAX_FALLBACK_NOTES) {
+                    var oldest = mem.keys().next().value;
+                    mem.delete(oldest);
+                  }
+                  return {};
+                },
+                delete: function(k) {
+                  mem.delete(k);
+                  return {};
+                },
+                getAll: function() {
+                  return { result: Array.from(mem.values()) };
+                }
+              };
+              var req = { result: null, onsuccess: null, onerror: null };
+              try {
+                var r = fn(mockStore);
+                if (!r || typeof r.onsuccess !== 'function') {
+                  resolve(r && r.result !== undefined ? r.result : r);
+                  return;
+                }
+                req.result = r.result !== undefined ? r.result : r;
+                req.onsuccess = function() { resolve(req.result); };
+                req.onerror = function(e) { reject(e); };
+                // Микро-таск для имитации асинхронности IDB
+                Promise.resolve().then(function() {
+                  if (req.onsuccess) req.onsuccess();
+                });
+              } catch (e) {
+                req.onerror = function() { reject(e); };
+                Promise.resolve().then(function() {
+                  if (req.onerror) req.onerror();
+                });
+              }
+              return;
+            }
+            // Реальная IDB транзакция
+            var transaction = d.transaction(storeName(), mode);
+            var store = transaction.objectStore(storeName());
+            var r = fn(store);
+            r.onsuccess = function() { resolve(r.result); };
+            r.onerror = function() {
+              if (log) log.warn('DB op error', String(r.error));
+              reject(r.error);
+            };
+          } catch (err) {
+            if (log) log.warn('DB tx error', String(err));
+            reject(err);
+          }
+        });
+      });
+    }
+
+    return {
+
+      /**
+       * Создаёт или обновляет заметку в хранилище.
+       * Эмитит db:change после успешной записи.
+       * 
+       * @param {Note} note - Объект заметки с обязательным полем id.
+       * @returns {Promise<*>} Promise, разрешающийся после записи.
+       */
+      put: function(note) {
+        return tx('readwrite', function(s) {
+          return s.put(note);
+        }).then(function(res) {
+          emitChange();
+          return res;
+        });
+      },
+
+      /**
+       * Читает одну заметку по её идентификатору.
+       * 
+       * @param {string} id - Уникальный ID заметки.
+       * @returns {Promise<Note | undefined>} Promise с заметкой или undefined.
+       */
+      get: function(id) {
+        return tx('readonly', function(s) {
+          return s.get(id);
+        });
+      },
+
+      /**
+       * Удаляет заметку по идентификатору.
+       * Эмитит db:change после успешного удаления.
+       * 
+       * @param {string} id - Уникальный ID заметки.
+       * @returns {Promise<*>} Promise, разрешающийся после удаления.
+       */
+      del: function(id) {
+        return tx('readwrite', function(s) {
+          return s.delete(id);
+        }).then(function(res) {
+          emitChange();
+          return res;
+        });
+      },
+
+      /**
+       * Возвращает все заметки из хранилища.
+       * Внимание: при большой базе может быть ресурсоёмким.
+       * 
+       * @returns {Promise<Note[]>} Promise с массивом всех заметок.
+       */
+      all: function() {
+        return tx('readonly', function(s) {
+          return s.getAll();
+        });
+      },
+
+      /**
+       * Возвращает порцию заметок через IDB-курсор (для экономии памяти).
+       * В fallback-режиме использует slice на массиве.
+       * 
+       * @param {number} offset - Количество пропускаемых записей.
+       * @param {number} limit - Макс. количество возвращаемых записей.
+       * @returns {Promise<Note[]>} Promise с массивом заметок.
+       */
+      getAllPaginated: function(offset, limit) {
+        return open().then(function(d) {
+          return new Promise(function(resolve, reject) {
+            if (!d) {
+              var all = mem ? Array.from(mem.values()) : [];
+              resolve(all.slice(offset, offset + limit));
+              return;
+            }
+            var transaction = d.transaction(storeName(), 'readonly');
+            var store = transaction.objectStore(storeName());
+            var request = store.openCursor();
+            var result = [];
+            var advanced = false;
+
+            request.onsuccess = function(event) {
+              var cursor = event.target.result;
+              if (!cursor) {
+                resolve(result);
+                return;
+              }
+              if (!advanced && offset > 0) {
+                advanced = true;
+                try {
+                  cursor.advance(offset);
+                } catch (e) {
+                  resolve(result);
+                }
+                return;
+              }
+              result.push(cursor.value);
+              if (result.length >= limit) {
+                resolve(result);
+                return;
+              }
+              cursor.continue();
+            };
+
+            request.onerror = function() {
+              if (log) log.warn('DB cursor error', String(request.error));
+              reject(request.error);
+            };
+          });
+        });
+      },
+
+      /**
+       * Массовая вставка/обновление заметок в одной транзакции.
+       * Эмитит db:change только один раз после завершения всей операции.
+       * 
+       * @param {Note[]} notes - Массив заметок для записи.
+       * @returns {Promise<number>} Promise с количеством записанных заметок.
+       */
+      bulkPut: function(notes) {
+        return open().then(function(d) {
+          return new Promise(function(resolve, reject) {
+            try {
+              if (!d) {
+                for (var i = 0; i < notes.length; i++) {
+                  mem.set(notes[i].id, notes[i]);
+                  if (mem.size > MAX_FALLBACK_NOTES) {
+                    var oldest = mem.keys().next().value;
+                    mem.delete(oldest);
+                  }
+                }
+                emitChange();
+                return resolve(notes.length);
+              }
+              var transaction = d.transaction(storeName(), 'readwrite');
+              var store = transaction.objectStore(storeName());
+              for (var i = 0; i < notes.length; i++) {
+                store.put(notes[i]);
+              }
+              transaction.oncomplete = function() {
+                emitChange();
+                resolve(notes.length);
+              };
+              transaction.onerror = function() {
+                reject(transaction.error);
+              };
+            } catch (err) {
+              reject(err);
+            }
+          });
+        });
+      },
+
+      /**
+       * Добавляет ID дочерней заметки в массив children родительской заметки.
+       * Если parentId не найден в БД, операция игнорируется (родитель может быть сетевым).
+       * 
+       * @param {string} parentId - ID родительской заметки.
+       * @param {string} childId - ID дочерней заметки.
+       * @returns {Promise<void>}
+       */
+      addChild: function(parentId, childId) {
+        return tx('readonly', function(s) {
+          return s.get(parentId);
+        }).then(function(parent) {
+          if (!parent) return;
+          if (!Array.isArray(parent.children)) parent.children = [];
+          if (parent.children.indexOf(childId) === -1) {
+            parent.children.push(childId);
+            return tx('readwrite', function(s) {
+              return s.put(parent);
+            }).then(function() {
+              emitChange();
+            });
+          }
+        }).catch(function(e) {
+          if (log) log.warn('DB.addChild fail', String(e));
+        });
+      },
+
+      /**
+       * Полностью удаляет базу данных и очищает in-memory fallback.
+       * Используется для сброса всех данных пользователя.
+       * 
+       * @returns {Promise<void>} Promise, разрешающийся после удаления.
+       */
+      reset: function() {
+        if (db) {
+          try { db.close(); } catch (_) { /* ignore */ }
+          db = null;
+        }
+        if (mem) mem.clear();
+        return new Promise(function(resolve) {
+          try {
+            var req = indexedDB.deleteDatabase(dbName());
+            req.onsuccess = req.onerror = req.onblocked = function() {
+              emitChange();
+              resolve();
+            };
+          } catch (_) {
+            emitChange();
+            resolve();
+          }
+        });
+      }
+    };
+  }, ['Config', 'Logger', 'Bus']);
 <!-- NOOMIUM_MODULE_END DB -->
 
 <!-- NOOMIUM_MODULE_START AI -->
+  /**
+   * @typedef {'loading' | 'model' | 'demo'} AIMode
+   * @description Состояние модуля AI: загрузка, готова модель или fallback на хеш.
+   */
 
+  /**
+   * @typedef {Object} EmbedCallback
+   * @description Внутренняя структура для отслеживания pending-запросов к Worker'у.
+   * @property {function(Vector): void} resolve - Функция разрешения Promise.
+   * @property {function(Error): void} reject - Функция отклонения Promise.
+   * @property {string} text - Оригинальный текст (для fallback на хеш).
+   * @property {number} timer - ID таймаута для принудительного завершения.
+   */
+
+  /**
+   * @typedef {Object} BatchCallback
+   * @description Внутренняя структура для отслеживания batch-запросов косинусного сходства.
+   * @property {function(Array<{id: string, score: number}>): void} resolve - Разрешение Promise.
+   * @property {function(Error): void} reject - Отклонение Promise.
+   * @property {number} timer - ID таймаута.
+   * @property {Vector} queryVector - Вектор запроса (для fallback).
+   * @property {Array<{id: string, vector: Vector}>} items - Массив элементов (для fallback).
+   */
+
+  DI.register('AI', function(cfg, log, bus) {
+
+    /**
+     * Исходный код Web Worker'а для изолированной загрузки и выполнения ML-модели.
+     * Worker импортирует @xenova/transformers из CDN и выполняет инференс.
+     * @type {string}
+     */
+    var workerCode = [
+      'let extractor = null;',
+      'let ready = false;',
+      '',
+      'async function loadModel(modelName, options) {',
+      '  const { pipeline, env } = await import("https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2");',
+      '  if (env) {',
+      '    env.allowLocalModels = false;',
+      '    env.useBrowserCache = true;',
+      '  }',
+      '  extractor = await pipeline("feature-extraction", modelName, {',
+      '    quantized: true,',
+      '    progress_callback: function(p) {',
+      '      if (p.status === "progress" && p.total > 0) {',
+      '        const pct = p.loaded / p.total * 100;',
+      '        self.postMessage({ type: "progress", pct: pct });',
+      '      }',
+      '    }',
+      '  });',
+      '  ready = true;',
+      '  self.postMessage({ type: "ready" });',
+      '}',
+      '',
+      'self.onmessage = async function(e) {',
+      '  var msg = e.data;',
+      '  if (msg.type === "load") {',
+      '    try {',
+      '      await loadModel(msg.modelName, msg.options);',
+      '    } catch (err) {',
+      '      self.postMessage({ type: "error", id: null, message: err.message || String(err) });',
+      '    }',
+      '    return;',
+      '  }',
+      '  if (!ready) {',
+      '    self.postMessage({ type: "error", id: msg.id, message: "Model not loaded" });',
+      '    return;',
+      '  }',
+      '  if (msg.type === "embed") {',
+      '    try {',
+      '      var output = await extractor(msg.text, { pooling: "mean", normalize: true });',
+      '      var vec = Array.from(output.data);',
+      '      self.postMessage({ type: "result", id: msg.id, vector: vec });',
+      '    } catch (err) {',
+      '      self.postMessage({ type: "error", id: msg.id, message: err.message || String(err) });',
+      '    }',
+      '  }',
+      '  if (msg.type === "cosineBatch") {',
+      '    try {',
+      '      var scores = [];',
+      '      var qv = msg.queryVector;',
+      '      var vectors = msg.vectors;',
+      '      for (var i = 0; i < vectors.length; i++) {',
+      '        var item = vectors[i];',
+      '        var v = item.vector;',
+      '        var sum = 0;',
+      '        var len = Math.min(qv.length, v.length);',
+      '        for (var j = 0; j < len; j++) {',
+      '          sum += qv[j] * v[j];',
+      '        }',
+      '        var score = Math.abs(sum) < 1e-8 ? 0 : sum;',
+      '        scores.push({ id: item.id, score: score });',
+      '      }',
+      '      self.postMessage({ type: "cosineBatchResult", id: msg.id, scores: scores });',
+      '    } catch (err) {',
+      '      self.postMessage({ type: "error", id: msg.id, message: err.message || String(err) });',
+      '    }',
+      '  }',
+      '};'
+    ].join('\n');
+
+    /** @type {Worker | null} */
+    var worker = null;
+
+    /** @type {string | null} */
+    var workerUrl = null;
+
+    /** @type {AIMode} */
+    var mode = 'loading';
+
+    /**
+     * LRU-кэш вычисленных векторов.
+     * При обращении ключ удаляется и добавляется заново (перемещение в конец).
+     * @type {Map<string, Vector>}
+     */
+    var cache = new Map();
+
+    /** @type {number} */
+    var cacheLimit = cfg.get('aiCacheLimit', 300);
+
+    /** @type {Array<function(number): void>} */
+    var progressFns = [];
+
+    /** @type {Promise<void> | null} */
+    var loadPromise = null;
+
+    /** @type {function(): void | null} */
+    var loadResolve = null;
+
+    /** @type {function(Error): void | null} */
+    var loadReject = null;
+
+    /** @type {Map<number, EmbedCallback>} */
+    var embedCallbacks = new Map();
+
+    /** @type {Map<number, BatchCallback>} */
+    var batchCallbacks = new Map();
+
+    /** @type {number} */
+    var nextId = 0;
+
+    /**
+     * Генерирует псевдо-вектор (хеш-эмбеддинг) на основе FNV-1a.
+     * Используется как быстрый fallback, если ML-модель недоступна.
+     * Вектор нормализуется для корректного косинусного сходства.
+     * 
+     * @param {string} text - Входной текст.
+     * @returns {Vector} Нормализованный вектор размерности `dim`.
+     */
+    function hashEmbed(text) {
+      var DIM = cfg.get('dim', 384);
+      var vec = new Float32Array(DIM);
+      var tokens = (text || '').toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
+      
+      for (var t = 0; t < tokens.length; t++) {
+        var tok = tokens[t];
+        var h = 2166136261;
+        for (var i = 0; i < tok.length; i++) {
+          h ^= tok.charCodeAt(i);
+          h = Math.imul(h, 16777619);
+        }
+        vec[Math.abs(h) % DIM] += 1;
+        
+        var h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
+        vec[Math.abs(h2) % DIM] += 0.5;
+      }
+      
+      var norm = 0;
+      for (var i = 0; i < DIM; i++) norm += vec[i] * vec[i];
+      norm = Math.sqrt(norm) || 1;
+      
+      for (var i = 0; i < DIM; i++) vec[i] /= norm;
+      return Array.from(vec);
+    }
+
+    /**
+     * Безопасно добавляет вектор в LRU-кэш, удаляя самый старый элемент при переполнении.
+     * Если ключ уже существует, он удаляется и добавляется заново (LRU-стратегия).
+     * 
+     * @param {string} text - Ключ кэша (исходный текст).
+     * @param {Vector} vector - Вектор для сохранения.
+     * @returns {void}
+     */
+    function cacheSet(text, vector) {
+      if (cache.has(text)) {
+        cache.delete(text);
+      }
+      if (cache.size >= cacheLimit) {
+        var oldestKey = cache.keys().next().value;
+        cache.delete(oldestKey);
+      }
+      cache.set(text, vector);
+    }
+
+    /**
+     * Очищает все pending-запросы (embed и batch) при падении Worker'а.
+     * Для embed-запросов вычисляет fallback hashEmbed и разрешает промис.
+     * Для batch-запросов разрешает пустым массивом.
+     * 
+     * @returns {void}
+     */
+    function rejectAllPending() {
+      embedCallbacks.forEach(function(cb) {
+        clearTimeout(cb.timer);
+        var hashVec = hashEmbed(cb.text);
+        cacheSet(cb.text, hashVec);
+        cb.resolve(hashVec);
+      });
+      embedCallbacks.clear();
+
+      batchCallbacks.forEach(function(cb) {
+        clearTimeout(cb.timer);
+        cb.resolve([]);
+      });
+      batchCallbacks.clear();
+    }
+
+    /**
+     * Принудительно завершает Web Worker и освобождает Object URL.
+     * Вызывается при критических ошибках или превышении retry-лимита.
+     * 
+     * @returns {void}
+     */
+    function cleanupWorker() {
+      rejectAllPending();
+      if (worker) {
+        try { worker.terminate(); } catch (_) { /* ignore */ }
+        worker = null;
+      }
+      if (workerUrl) {
+        try { URL.revokeObjectURL(workerUrl); } catch (_) { /* ignore */ }
+        workerUrl = null;
+      }
+      nextId = 0;
+    }
+
+    /**
+     * Инициализирует Worker и запускает загрузку модели с поддержкой retry.
+     * Использует экспоненциальный backoff между попытками.
+     * 
+     * @param {function(number): void} [onProgress] - Колбэк прогресса загрузки.
+     * @param {number} [attempt=0] - Текущий номер попытки (для backoff).
+     * @returns {Promise<void>}
+     */
+    function doLoad(onProgress, attempt) {
+      attempt = attempt || 0;
+
+      if (typeof Worker === 'undefined') {
+        if (log) log.warn('Web Worker not supported, fallback to demo mode');
+        mode = 'demo';
+        if (bus && bus.emit) {
+          try { bus.emit('ai:status', { mode: 'demo' }); } catch (_) { /* ignore */ }
+        }
+        return Promise.resolve();
+      }
+
+      try {
+        var blob = new Blob([workerCode], { type: 'application/javascript' });
+        workerUrl = URL.createObjectURL(blob);
+        worker = new Worker(workerUrl, { type: 'module' });
+      } catch (err) {
+        if (log) log.warn('Failed to create Worker, fallback to demo mode', String(err && err.message || err));
+        mode = 'demo';
+        if (bus && bus.emit) {
+          try { bus.emit('ai:status', { mode: 'demo' }); } catch (_) { /* ignore */ }
+        }
+        return Promise.resolve();
+      }
+
+      worker.onerror = function(err) {
+        if (log) log.warn('Worker error, fallback to demo mode', String(err && err.message || err));
+        rejectAllPending();
+        cleanupWorker();
+        mode = 'demo';
+        if (bus && bus.emit) {
+          try { bus.emit('ai:status', { mode: 'demo' }); } catch (_) { /* ignore */ }
+        }
+        if (loadReject) {
+          loadReject(err);
+          loadReject = null;
+          loadResolve = null;
+        }
+      };
+
+      worker.onmessage = function(e) {
+        var msg = e.data;
+
+        if (msg.type === 'progress') {
+          if (typeof onProgress === 'function') {
+            try { onProgress(msg.pct); } catch (_) { /* ignore */ }
+          }
+          for (var i = 0; i < progressFns.length; i++) {
+            try { progressFns[i](msg.pct); } catch (_) { /* ignore */ }
+          }
+          if (bus && bus.emit) {
+            try { bus.emit('ai:progress', { pct: msg.pct }); } catch (_) { /* ignore */ }
+            try { bus.emit('ai:status', { mode: 'loading', percent: msg.pct }); } catch (_) { /* ignore */ }
+          }
+        } else if (msg.type === 'ready') {
+          mode = 'model';
+          if (log) log.info('AI loaded in Worker: ' + cfg.get('model', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2'));
+          if (bus && bus.emit) {
+            try { bus.emit('ai:status', { mode: 'model' }); } catch (_) { /* ignore */ }
+          }
+          if (loadResolve) {
+            loadResolve();
+            loadResolve = null;
+            loadReject = null;
+          }
+        } else if (msg.type === 'error' && msg.id === null) {
+          // Ошибка загрузки модели
+          if (attempt < cfg.get('aiLoadRetries', 2)) {
+            var delay = Math.min(cfg.get('aiLoadMaxBackoff', 30000), 2000 * Math.pow(2, attempt));
+            if (log) log.warn('AI load fail in Worker, retry ' + (attempt + 1) + ' in ' + delay + 'ms', msg.message);
+            cleanupWorker();
+            setTimeout(function() {
+              doLoad(onProgress, attempt + 1).then(function() {
+                if (loadResolve) {
+                  loadResolve();
+                  loadResolve = null;
+                  loadReject = null;
+                }
+              }).catch(function(err) {
+                if (loadReject) {
+                  loadReject(err);
+                  loadReject = null;
+                  loadResolve = null;
+                }
+              });
+            }, delay);
+          } else {
+            if (log) log.warn('AI load failed in Worker, fallback to demo mode', msg.message);
+            rejectAllPending();
+            cleanupWorker();
+            mode = 'demo';
+            if (bus && bus.emit) {
+              try { bus.emit('ai:status', { mode: 'demo' }); } catch (_) { /* ignore */ }
+            }
+            if (loadResolve) {
+              loadResolve();
+              loadResolve = null;
+              loadReject = null;
+            }
+          }
+        } else if (msg.type === 'result') {
+          // Успешный embed
+          var cb = embedCallbacks.get(msg.id);
+          if (cb) {
+            clearTimeout(cb.timer);
+            embedCallbacks.delete(msg.id);
+            cacheSet(cb.text, msg.vector);
+            cb.resolve(msg.vector);
+          }
+        } else if (msg.type === 'cosineBatchResult') {
+          // Успешный cosineBatch
+          var batchCb = batchCallbacks.get(msg.id);
+          if (batchCb) {
+            clearTimeout(batchCb.timer);
+            batchCallbacks.delete(msg.id);
+            batchCb.resolve(msg.scores);
+          }
+        } else if (msg.type === 'error' && msg.id !== null) {
+          // Ошибка embed или cosineBatch
+          var batchCbErr = batchCallbacks.get(msg.id);
+          if (batchCbErr) {
+            clearTimeout(batchCbErr.timer);
+            batchCallbacks.delete(msg.id);
+            if (log) log.warn('AI batch error, fallback to sync for id=' + msg.id, msg.message);
+            var scores = [];
+            for (var i = 0; i < batchCbErr.items.length; i++) {
+              var v = batchCbErr.items[i].vector;
+              var sum = 0;
+              var len = Math.min(batchCbErr.queryVector.length, v.length);
+              for (var j = 0; j < len; j++) sum += batchCbErr.queryVector[j] * v[j];
+              scores.push({ id: batchCbErr.items[i].id, score: Math.abs(sum) < 1e-8 ? 0 : sum });
+            }
+            batchCbErr.resolve(scores);
+            return;
+          }
+          var embedCb = embedCallbacks.get(msg.id);
+          if (embedCb) {
+            clearTimeout(embedCb.timer);
+            embedCallbacks.delete(msg.id);
+            if (log) log.warn('AI embed error, fallback to hash for id=' + msg.id, msg.message);
+            var hashVec = hashEmbed(embedCb.text);
+            cacheSet(embedCb.text, hashVec);
+            embedCb.resolve(hashVec);
+          }
+        }
+      };
+
+      worker.postMessage({
+        type: 'load',
+        modelName: cfg.get('model', 'Xenova/paraphrase-multilingual-MiniLM-L12-v2'),
+        options: {}
+      });
+
+      return new Promise(function(resolve, reject) {
+        loadResolve = resolve;
+        loadReject = reject;
+      });
+    }
+
+    /**
+     * Синхронное вычисление косинусного сходства (fallback).
+     * Используется при недоступности Worker'а или таймауте.
+     * 
+     * @param {Vector} queryVector - Вектор запроса.
+     * @param {Array<{id: string, vector: Vector}>} items - Массив элементов.
+     * @returns {Array<{id: string, score: number}>}
+     */
+    function syncCosineBatch(queryVector, items) {
+      var scores = [];
+      for (var i = 0; i < items.length; i++) {
+        var v = items[i].vector;
+        var sum = 0;
+        var len = Math.min(queryVector.length, v.length);
+        for (var j = 0; j < len; j++) sum += queryVector[j] * v[j];
+        scores.push({ id: items[i].id, score: Math.abs(sum) < 1e-8 ? 0 : sum });
+      }
+      return scores;
+    }
+
+    return {
+
+      /**
+       * Проверяет, готов ли модуль к векторизации (модель загружена или работает fallback).
+       * @returns {boolean}
+       */
+      ready: function() {
+        return mode === 'model' || mode === 'demo';
+      },
+
+      /**
+       * Возвращает текущий режим работы модуля.
+       * @returns {AIMode}
+       */
+      getMode: function() {
+        return mode;
+      },
+
+      /**
+       * Подписывает функцию на события прогресса загрузки модели.
+       * 
+       * @param {function(number): void} fn - Обработчик, принимающий процент (0-100).
+       * @returns {void}
+       */
+      onProgress: function(fn) {
+        if (typeof fn === 'function') progressFns.push(fn);
+      },
+
+      /**
+       * Отписывает функцию от событий прогресса.
+       * 
+       * @param {function(number): void} fn - Тот же ссылочный обработчик.
+       * @returns {void}
+       */
+      offProgress: function(fn) {
+        var idx = progressFns.indexOf(fn);
+        if (idx > -1) progressFns.splice(idx, 1);
+      },
+
+      /**
+       * Инициирует создание Worker'а и загрузку ML-модели.
+       * Повторные вызовы возвращают существующий Promise или разрешаются мгновенно.
+       * 
+       * @param {function(number): void} [onProgress] - Опциональный колбэк прогресса.
+       * @returns {Promise<void>}
+       */
+      load: function(onProgress) {
+        if (mode === 'model' || mode === 'demo') return Promise.resolve();
+        if (loadPromise) return loadPromise;
+        
+        loadPromise = doLoad(onProgress).catch(function(err) {
+          mode = 'demo';
+          loadPromise = null;
+          if (log) log.warn('AI load failed, fallback to demo mode', String(err && err.message || err));
+          return Promise.resolve();
+        });
+        return loadPromise;
+      },
+
+      /**
+       * Вычисляет вектор эмбеддинга для заданного текста.
+       * Проверяет LRU-кэш (с перемещением ключа), при промахе отправляет запрос в Worker.
+       * При таймауте или ошибке автоматически делает fallback на hashEmbed.
+       * 
+       * @param {string} text - Текст для векторизации.
+       * @returns {Promise<Vector | null>} Promise с вектором или null, если текст пуст.
+       */
+      embed: function(text) {
+        var t = (text || '').trim();
+        if (!t) return Promise.resolve(null);
+
+        // LRU: удаляем и добавляем заново для перемещения в конец
+        if (cache.has(t)) {
+          var val = cache.get(t);
+          cache.delete(t);
+          cacheSet(t, val);
+          return Promise.resolve(val);
+        }
+
+        // Fallback если Worker недоступен
+        if (mode === 'demo' || !worker) {
+          var hashVec = hashEmbed(t);
+          cacheSet(t, hashVec);
+          return Promise.resolve(hashVec);
+        }
+
+        var id = nextId++;
+        var timeout = cfg.get('aiEmbedTimeout', 15000);
+
+        return new Promise(function(resolve, reject) {
+          var timer = setTimeout(function() {
+            var cb = embedCallbacks.get(id);
+            if (cb) {
+              embedCallbacks.delete(id);
+              if (log) log.warn('AI embed timeout for id=' + id + ', fallback to hash');
+              var hashVec = hashEmbed(cb.text);
+              cacheSet(cb.text, hashVec);
+              cb.resolve(hashVec);
+            }
+          }, timeout);
+
+          embedCallbacks.set(id, { resolve: resolve, reject: reject, text: t, timer: timer });
+          worker.postMessage({ type: 'embed', id: id, text: t });
+        });
+      },
+
+      /**
+       * Пакетное вычисление косинусного сходства между вектором запроса и массивом векторов.
+       * Использует Web Worker для offloading вычислений с главного потока.
+       * При таймауте, ошибке или недоступности Worker делает fallback на синхронный расчёт.
+       * 
+       * @param {Vector} queryVector - Вектор запроса.
+       * @param {Array<{id: string, vector: Vector}>} items - Массив объектов с id и vector.
+       * @param {AbortSignal} [signal] - Опциональный сигнал для отмены операции.
+       * @returns {Promise<Array<{id: string, score: number}>>} Promise с массивом результатов.
+       */
+      cosineBatch: function(queryVector, items, signal) {
+        if (!queryVector || !items || items.length === 0) {
+          return Promise.resolve([]);
+        }
+
+        if (signal && signal.aborted) {
+          return Promise.reject(new Error('Aborted'));
+        }
+
+        // Fallback если Worker недоступен
+        if (mode === 'demo' || !worker) {
+          return Promise.resolve(syncCosineBatch(queryVector, items));
+        }
+
+        var id = nextId++;
+        var timeout = cfg.get('aiEmbedTimeout', 15000);
+
+        return new Promise(function(resolve, reject) {
+          var onAbort = function() {
+            var cb = batchCallbacks.get(id);
+            if (cb) {
+              clearTimeout(cb.timer);
+              batchCallbacks.delete(id);
+              if (signal) signal.removeEventListener('abort', onAbort);
+              if (log) log.warn('AI cosineBatch aborted for id=' + id);
+              reject(new Error('Aborted'));
+            }
+          };
+
+          if (signal) {
+            signal.addEventListener('abort', onAbort);
+          }
+
+          var timer = setTimeout(function() {
+            var cb = batchCallbacks.get(id);
+            if (cb) {
+              clearTimeout(cb.timer);
+              batchCallbacks.delete(id);
+              if (signal) signal.removeEventListener('abort', onAbort);
+              if (log) log.warn('AI cosineBatch timeout for id=' + id + ', fallback to sync');
+              resolve(syncCosineBatch(cb.queryVector, cb.items));
+            }
+          }, timeout);
+
+          batchCallbacks.set(id, {
+            resolve: function(scores) {
+              if (signal) signal.removeEventListener('abort', onAbort);
+              resolve(scores);
+            },
+            reject: reject,
+            timer: timer,
+            queryVector: queryVector,
+            items: items
+          });
+
+          worker.postMessage({
+            type: 'cosineBatch',
+            id: id,
+            queryVector: queryVector,
+            vectors: items
+          });
+        });
+      },
+
+      /**
+       * Вычисляет косинусную близость (dot product) между двумя нормализованными векторами.
+       * В отличие от `cosine`, не обнуляет малые значения и использует строгую проверку типов.
+       * 
+       * @param {Vector} a - Первый вектор.
+       * @param {Vector} b - Второй вектор.
+       * @returns {number} Значение близости (или 0 при невалидных данных).
+       */
+      cosineSimilarity: function(a, b) {
+        if (!Array.isArray(a) || !Array.isArray(b) || a.length === 0 || a.length !== b.length) {
+          return 0;
+        }
+        var sum = 0;
+        for (var i = 0; i < a.length; i++) {
+          sum += a[i] * b[i];
+        }
+        return sum;
+      },
+
+      /**
+       * Вычисляет косинусное сходство между двумя векторами (Legacy).
+       * Обнуляет значения меньше 1e-8 для избежания floating-point шума.
+       * 
+       * @param {Vector} a - Первый вектор.
+       * @param {Vector} b - Второй вектор.
+       * @returns {number} Значение сходства от -1 до 1 (или 0 при ошибке/нулевых векторах).
+       */
+      cosine: function(a, b) {
+        if (!a || !b || a.length !== b.length) return 0;
+        var sum = 0;
+        for (var i = 0; i < a.length; i++) sum += a[i] * b[i];
+        return Math.abs(sum) < 1e-8 ? 0 : sum;
+      }
+    };
+  }, ['Config', 'Logger', 'Bus']);
 <!-- NOOMIUM_MODULE_END AI -->
 
 <!-- NOOMIUM_MODULE_START Net -->
