@@ -4715,15 +4715,588 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END FocusBarComponent -->
 
 <!-- NOOMIUM_MODULE_START AuthService -->
+  DI.register('AuthService', function(Config, Logger, Bus, DB) {
 
+    /** @type {string} Ключ для хранения секретного ключа Nostr */
+    var SK_KEY = 'noomium:sk';
+
+    /** @type {string} Ключ для хранения конфигурации */
+    var CFG_KEY = 'noomium:cfg';
+
+    /** @type {string} Ключ для хранения версии приложения */
+    var VER_KEY = 'noomium:appVersion';
+
+    /** @type {string} Ключ для хранения выбранного языка */
+    var LANG_KEY = 'noomium:lang';
+
+    /** @type {number} Максимально допустимое количество попыток ввода пароля */
+    var maxAttempts = Config.get('maxPasswordAttempts', 3);
+
+    /** @type {number} Текущий счётчик неудачных попыток */
+    var currentAttempts = 0;
+
+    /**
+     * Выводит ключ AES-GCM из пароля через PBKDF2 (100k итераций, SHA-256).
+     * Использует Web Crypto API для безопасной деривации ключа.
+     * 
+     * @param {string} password - Пароль пользователя.
+     * @param {Uint8Array} salt - Соль для PBKDF2 (16 байт).
+     * @returns {Promise<CryptoKey>} Promise с CryptoKey для шифрования/дешифрования.
+     */
+    function deriveKey(password, salt) {
+      var enc = new TextEncoder();
+      return crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']).then(function(keyMaterial) {
+        return crypto.subtle.deriveKey(
+          { name: 'PBKDF2', salt: salt, iterations: 100000, hash: 'SHA-256' },
+          keyMaterial,
+          { name: 'AES-GCM', length: 256 },
+          false,
+          ['encrypt', 'decrypt']
+        );
+      });
+    }
+
+    /**
+     * Шифрует hex-ключ паролем с использованием AES-GCM.
+     * Формат результата: Base64(salt[16] + iv[12] + ciphertext[N]).
+     * 
+     * @param {string} hexKey - Секретный ключ в hex-формате (64 символа).
+     * @param {string} password - Пароль для шифрования.
+     * @returns {Promise<string>} Promise с Base64-строкой (salt + iv + ciphertext).
+     */
+    function encryptKey(hexKey, password) {
+      var salt = crypto.getRandomValues(new Uint8Array(16));
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      return deriveKey(password, salt).then(function(key) {
+        var enc = new TextEncoder();
+        return crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(hexKey)).then(function(ciphertext) {
+          var combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
+          combined.set(salt, 0);
+          combined.set(iv, salt.length);
+          combined.set(new Uint8Array(ciphertext), salt.length + iv.length);
+          return btoa(String.fromCharCode.apply(null, combined));
+        });
+      });
+    }
+
+    /**
+     * Расшифровывает hex-ключ из Base64-строки с использованием пароля.
+     * Извлекает salt и iv из первых 28 байт, остальное — ciphertext.
+     * 
+     * @param {string} base64Str - Зашифрованная строка (salt + iv + ciphertext).
+     * @param {string} password - Пароль для дешифрования.
+     * @returns {Promise<string>} Promise с расшифрованным hex-ключом.
+     * @throws {Error} Если пароль неверный или данные повреждены.
+     */
+    function decryptKey(base64Str, password) {
+      var combined = Uint8Array.from(atob(base64Str), function(c) { return c.charCodeAt(0); });
+      var salt = combined.slice(0, 16);
+      var iv = combined.slice(16, 28);
+      var ciphertext = combined.slice(28);
+      return deriveKey(password, salt).then(function(key) {
+        return crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv }, key, ciphertext).then(function(dec) {
+          return new TextDecoder().decode(dec);
+        });
+      });
+    }
+
+    /**
+     * Читает сырое значение секретного ключа из localStorage.
+     * Может быть либо hex-строка (64 символа), либо Base64 (зашифрованный).
+     * 
+     * @returns {string | null}
+     */
+    function getStoredKey() {
+      try { return localStorage.getItem(SK_KEY); } catch (e) { return null; }
+    }
+
+    /**
+     * Проверяет, существует ли ключ и зашифрован ли он (не в сыром hex-формате).
+     * 
+     * @returns {boolean}
+     */
+    function hasEncryptedKey() {
+      var stored = getStoredKey();
+      return !!(stored && !/^[0-9a-f]{64}$/i.test(stored));
+    }
+
+    /**
+     * Проверяет, отсутствует ли ключ вообще (первый запуск приложения).
+     * 
+     * @returns {boolean}
+     */
+    function needsNewKey() {
+      return !getStoredKey();
+    }
+
+    /**
+     * Сбрасывает счётчик неудачных попыток ввода пароля.
+     * Вызывается после успешной авторизации.
+     * 
+     * @returns {void}
+     */
+    function resetAttempts() {
+      currentAttempts = 0;
+    }
+
+    /**
+     * Пытается расшифровать существующий ключ с помощью введённого пароля.
+     * Управляет счётчиком попыток и эмитит события через Bus.
+     * 
+     * @param {string} password - Введённый пароль.
+     * @param {function(): void} onSuccess - Вызывается при успешной расшифровке.
+     * @param {function(Error): void} onWrongPassword - Вызывается при неверном пароле (пока есть попытки).
+     * @param {function(): void} onMaxAttempts - Вызывается при превышении лимита попыток.
+     * @returns {void}
+     */
+    function unlock(password, onSuccess, onWrongPassword, onMaxAttempts) {
+      var stored = getStoredKey();
+      if (!stored) {
+        if (typeof onWrongPassword === 'function') onWrongPassword(new Error('NO_KEY'));
+        return;
+      }
+
+      // Если ключ в сыром hex-формате (миграция со старых версий)
+      if (/^[0-9a-f]{64}$/i.test(stored)) {
+        resetAttempts();
+        if (typeof onSuccess === 'function') onSuccess();
+        return;
+      }
+
+      decryptKey(stored, password).then(function() {
+        resetAttempts();
+        if (typeof onSuccess === 'function') onSuccess();
+      }).catch(function(err) {
+        currentAttempts++;
+        if (Logger) Logger.warn('AuthService: wrong password attempt ' + currentAttempts + '/' + maxAttempts);
+
+        if (currentAttempts >= maxAttempts) {
+          if (Bus && Bus.emit) { try { Bus.emit('auth:locked'); } catch (_) { /* ignore */ } }
+          if (typeof onMaxAttempts === 'function') onMaxAttempts();
+        } else {
+          if (typeof onWrongPassword === 'function') onWrongPassword(err);
+        }
+      });
+    }
+
+    /**
+     * Генерирует новый секретный ключ Nostr и сохраняет его в зашифрованном виде.
+     * Использует crypto.getRandomValues для криптографически стойкой генерации.
+     * 
+     * @param {string} password - Пароль для шифрования.
+     * @param {function(): void} onSuccess - Вызывается после успешного сохранения.
+     * @returns {void}
+     */
+    function createNew(password, onSuccess) {
+      var raw = crypto.getRandomValues(new Uint8Array(32));
+      var keyHex = Array.from(raw).map(function(b) { return b.toString(16).padStart(2, '0'); }).join('');
+
+      encryptKey(keyHex, password).then(function(encrypted) {
+        try { localStorage.setItem(SK_KEY, encrypted); } catch (e) {
+          if (Logger) Logger.warn('AuthService: failed to save key', String(e));
+        }
+        resetAttempts();
+        if (typeof onSuccess === 'function') onSuccess();
+      }).catch(function(err) {
+        if (Logger) Logger.error('AuthService: createNew failed', String(err && err.message || err));
+      });
+    }
+
+    /**
+     * Полностью сбрасывает хранилище: удаляет ключи, конфиг, язык и очищает IndexedDB.
+     * Используется при превышении лимита попыток или при ручном сбросе пользователем.
+     * 
+     * @returns {Promise<void>}
+     */
+    function resetStorage() {
+      try {
+        localStorage.removeItem(SK_KEY);
+        localStorage.removeItem(CFG_KEY);
+        localStorage.removeItem(VER_KEY);
+        localStorage.removeItem(LANG_KEY);
+      } catch (e) {
+        if (Logger) Logger.warn('AuthService: localStorage cleanup failed', String(e));
+      }
+
+      resetAttempts();
+
+      return DB.reset().catch(function(err) {
+        if (Logger) Logger.warn('AuthService: DB reset failed', String(err && err.message || err));
+      });
+    }
+
+    return {
+      /**
+       * Проверяет, существует ли зашифрованный ключ.
+       * @returns {boolean}
+       */
+      hasEncryptedKey: hasEncryptedKey,
+
+      /**
+       * Проверяет, нужен ли новый ключ (первый запуск).
+       * @returns {boolean}
+       */
+      needsNewKey: needsNewKey,
+
+      /**
+       * Разблокирует существующий ключ паролем.
+       * @param {string} password
+       * @param {function(): void} onSuccess
+       * @param {function(Error): void} onWrongPassword
+       * @param {function(): void} onMaxAttempts
+       * @returns {void}
+       */
+      unlock: unlock,
+
+      /**
+       * Создаёт новый ключ и шифрует его паролем.
+       * @param {string} password
+       * @param {function(): void} onSuccess
+       * @returns {void}
+       */
+      createNew: createNew,
+
+      /**
+       * Полностью сбрасывает все данные пользователя.
+       * @returns {Promise<void>}
+       */
+      resetStorage: resetStorage,
+
+      /**
+       * Возвращает текущее количество неудачных попыток ввода пароля.
+       * @returns {number}
+       */
+      getAttempts: function() { return currentAttempts; },
+
+      /**
+       * Возвращает максимальное допустимое количество попыток.
+       * @returns {number}
+       */
+      getMaxAttempts: function() { return maxAttempts; }
+    };
+  }, ['Config', 'Logger', 'Bus', 'DB']);
 <!-- NOOMIUM_MODULE_END AuthService -->
 
 <!-- NOOMIUM_MODULE_START HeaderStatusComponent -->
+  /**
+   * @typedef {Object} NetStatusPayload
+   * @description Payload события net:status.
+   * @property {'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'failed'} status - Статус сети.
+   */
 
+  /**
+   * @typedef {Object} NetPeersPayload
+   * @description Payload события net:peers.
+   * @property {number} count - Количество активных пиров.
+   */
+
+  /**
+   * @typedef {Object} AIStatusPayload
+   * @description Payload события ai:status.
+   * @property {AIMode} mode - Текущий режим AI ('loading' | 'model' | 'demo').
+   * @property {number} [percent] - Процент загрузки (только для mode='loading').
+   */
+
+  DI.register('HeaderStatusComponent', function(Bus, I18n, Net, AI, Utils) {
+
+    /** @type {function(NetStatusPayload): void | null} Обработчик статуса сети */
+    var netStatusHandler = null;
+
+    /** @type {function(NetPeersPayload): void | null} Обработчик количества пиров */
+    var netPeersHandler = null;
+
+    /** @type {function(AIStatusPayload): void | null} Обработчик статуса AI */
+    var aiStatusHandler = null;
+
+    /** @type {function(): void | null} Обработчик смены языка */
+    var i18nHandler = null;
+
+    /**
+     * Обновляет индикатор сети в хедере.
+     * DOM-элементы берутся каждый раз заново через getElementById для корректной 
+     * работы после refreshUI(), когда DOM пересобирается полностью.
+     * 
+     * @param {string} cls - CSS-класс для точки ('ok' | 'warn' | 'err' | 'load').
+     * @param {string} text - Текст статуса.
+     * @returns {void}
+     */
+    function updateNet(cls, text) {
+      var dot = document.getElementById('st-net-dot');
+      var txt = document.getElementById('st-net-txt');
+      if (dot) dot.className = 'hdr-st-dot ' + (cls || '');
+      if (txt) txt.textContent = text || '';
+    }
+
+    /**
+     * Обновляет индикатор AI в хедере.
+     * DOM-элементы берутся каждый раз заново для защиты от устаревших ссылок.
+     * 
+     * @param {string} cls - CSS-класс для точки ('ok' | 'warn' | 'err' | 'load').
+     * @param {string} text - Текст статуса.
+     * @returns {void}
+     */
+    function updateAi(cls, text) {
+      var dot = document.getElementById('st-ai-dot');
+      var txt = document.getElementById('st-ai-txt');
+      if (dot) dot.className = 'hdr-st-dot ' + (cls || '');
+      if (txt) txt.textContent = text || '';
+    }
+
+    /**
+     * Инициализирует компонент: подписывается на события сети, AI и смены языка.
+     * Отображает текущее состояние сервисов при старте.
+     * 
+     * @returns {void}
+     */
+    function init() {
+      // Обработчик изменения статуса сети (connected, reconnecting, failed и т.д.)
+      netStatusHandler = function(payload) {
+        var status = payload && payload.status ? payload.status : 'disconnected';
+        var text = I18n.t('st.net');
+        var cls = 'load';
+        
+        if (status === 'connected') {
+          text = I18n.t('st.net.online') + ' · ' + Utils.word('peers', Net.peerCount(), I18n.getLang());
+          cls = 'ok';
+        } else if (status === 'connecting') {
+          text = I18n.t('st.net.connecting');
+          cls = 'load';
+        } else if (status === 'reconnecting') {
+          text = I18n.t('st.net.reconnecting');
+          cls = 'warn';
+        } else if (status === 'failed') {
+          text = I18n.t('st.net.failed');
+          cls = 'err';
+        }
+        
+        updateNet(cls, text);
+      };
+
+      // Обработчик изменения количества активных пиров
+      netPeersHandler = function(payload) {
+        var count = payload && typeof payload.count === 'number' ? payload.count : 0;
+        var text = count > 0
+          ? I18n.t('st.net.online') + ' · ' + Utils.word('peers', count, I18n.getLang())
+          : I18n.t('st.net.listen');
+        var cls = count > 0 ? 'ok' : 'load';
+        updateNet(cls, text);
+      };
+
+      // Обработчик изменения статуса AI модели (loading, model, demo)
+      aiStatusHandler = function(payload) {
+        if (!payload) return;
+        var mode = payload.mode;
+        var percent = payload.percent || 0;
+        
+        if (mode === 'loading') {
+          updateAi('load', I18n.t('st.ai.loading') + ' ' + Math.round(percent) + '%');
+        } else if (mode === 'model') {
+          updateAi('ok', I18n.t('st.ai.ready'));
+        } else if (mode === 'demo') {
+          updateAi('warn', I18n.t('st.ai.demo'));
+        }
+      };
+
+      // Обработчик смены языка: перерисовывает текущие статусы с новыми переводами
+      i18nHandler = function() {
+        if (Net) {
+          var currentNetStatus = Net.getStatus();
+          netStatusHandler({ status: currentNetStatus });
+        }
+        if (AI) {
+          if (AI.ready()) {
+            aiStatusHandler({ mode: AI.getMode() });
+          } else {
+            aiStatusHandler({ mode: 'loading' });
+          }
+        }
+      };
+
+      // Подписка на события шины
+      Bus.on('net:status', netStatusHandler);
+      Bus.on('net:peers', netPeersHandler);
+      Bus.on('ai:status', aiStatusHandler);
+      Bus.on('i18n:change', i18nHandler);
+
+      // Первичная отрисовка текущего состояния
+      if (Net) {
+        netStatusHandler({ status: Net.getStatus() });
+      } else {
+        updateNet('load', I18n.t('st.net.connecting'));
+      }
+
+      if (AI && AI.ready()) {
+        aiStatusHandler({ mode: AI.getMode() });
+      } else {
+        aiStatusHandler({ mode: 'loading' });
+      }
+    }
+
+    /**
+     * Уничтожает компонент: отписывается от всех событий шины.
+     * Предотвращает утечки памяти и вызовы обновлений для удалённого DOM.
+     * 
+     * @returns {void}
+     */
+    function destroy() {
+      if (netStatusHandler) {
+        try { Bus.off('net:status', netStatusHandler); } catch (_) { /* ignore */ }
+      }
+      if (netPeersHandler) {
+        try { Bus.off('net:peers', netPeersHandler); } catch (_) { /* ignore */ }
+      }
+      if (aiStatusHandler) {
+        try { Bus.off('ai:status', aiStatusHandler); } catch (_) { /* ignore */ }
+      }
+      if (i18nHandler) {
+        try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
+      }
+      netStatusHandler = netPeersHandler = aiStatusHandler = i18nHandler = null;
+    }
+
+    return {
+      /**
+       * Инициализирует компонент (публичный API).
+       * @returns {void}
+       */
+      init: init,
+
+      /**
+       * Уничтожает компонент (публичный API).
+       * @returns {void}
+       */
+      destroy: destroy
+    };
+  }, ['Bus', 'I18n', 'Net', 'AI', 'Utils']);
 <!-- NOOMIUM_MODULE_END HeaderStatusComponent -->
 
 <!-- NOOMIUM_MODULE_START OfflineBarComponent -->
+  /**
+   * @typedef {Object} NetStatusPayload
+   * @description Payload события net:status.
+   * @property {'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'failed'} status - Статус сети.
+   */
 
+  /**
+   * @typedef {Object} NetOutboxPayload
+   * @description Payload события net:outbox.
+   * @property {number} count - Количество событий в очереди.
+   */
+
+  DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
+
+    /** @type {function(NetStatusPayload): void | null} Обработчик статуса сети */
+    var netStatusHandler = null;
+
+    /** @type {function(NetOutboxPayload): void | null} Обработчик размера очереди */
+    var netOutboxHandler = null;
+
+    /** @type {function(): void | null} Обработчик смены языка */
+    var i18nHandler = null;
+
+    /**
+     * Обновляет видимость и текст офлайн-бара с учётом состояния сети и outbox.
+     * 
+     * Логика отображения:
+     * - disconnected: плашка скрыта (нет соединения — нет смысла показывать очередь).
+     * - connected + outbox > 0: показывается как «Офлайн-очередь» с количеством.
+     * - connected + outbox = 0: плашка скрыта.
+     * - reconnecting/failed: показывается как «Нет сети», с количеством очереди если есть.
+     * 
+     * DOM-элементы берутся при каждом вызове для корректной работы после refreshUI.
+     * 
+     * @returns {void}
+     */
+    function update() {
+      var bar = document.getElementById('offline-bar');
+      var textEl = document.getElementById('offline-text');
+      var queueEl = document.getElementById('offline-queue');
+
+      if (!bar || !textEl || !queueEl) return;
+
+      var status = Net ? Net.getStatus() : 'disconnected';
+      var outboxLength = Net ? Net.getOutboxLength() : 0;
+
+      // Если disconnected – полностью скрываем плашку
+      if (status === 'disconnected') {
+        bar.style.display = 'none';
+        return;
+      }
+
+      // Если connected – показываем только при наличии очереди
+      if (status === 'connected') {
+        if (outboxLength > 0) {
+          bar.style.display = 'block';
+          textEl.textContent = I18n.t('offline.bar');
+          queueEl.style.display = 'inline';
+          queueEl.textContent = '(' + I18n.t('offline.queue', { count: outboxLength }) + ')';
+        } else {
+          bar.style.display = 'none';
+        }
+        return;
+      }
+
+      // Остальные статусы (connecting, reconnecting, failed) – нет сети
+      bar.style.display = 'block';
+      textEl.textContent = I18n.t('offline.disconnected');
+      if (outboxLength > 0) {
+        queueEl.style.display = 'inline';
+        queueEl.textContent = '(' + I18n.t('offline.queue', { count: outboxLength }) + ')';
+      } else {
+        queueEl.style.display = 'none';
+      }
+    }
+
+    /**
+     * Инициализирует компонент: подписывается на события сети и смены языка.
+     * Отображает начальное состояние.
+     * 
+     * @returns {void}
+     */
+    function init() {
+      netStatusHandler = function() { update(); };
+      netOutboxHandler = function() { update(); };
+      i18nHandler = function() { update(); };
+
+      Bus.on('net:status', netStatusHandler);
+      Bus.on('net:outbox', netOutboxHandler);
+      Bus.on('i18n:change', i18nHandler);
+
+      update();
+    }
+
+    /**
+     * Уничтожает компонент: отписывается от всех событий.
+     * 
+     * @returns {void}
+     */
+    function destroy() {
+      if (netStatusHandler) {
+        try { Bus.off('net:status', netStatusHandler); } catch (_) { /* ignore */ }
+      }
+      if (netOutboxHandler) {
+        try { Bus.off('net:outbox', netOutboxHandler); } catch (_) { /* ignore */ }
+      }
+      if (i18nHandler) {
+        try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
+      }
+      netStatusHandler = netOutboxHandler = i18nHandler = null;
+    }
+
+    return {
+      /**
+       * Инициализирует компонент (публичный API).
+       * @returns {void}
+       */
+      init: init,
+
+      /**
+       * Уничтожает компонент (публичный API).
+       * @returns {void}
+       */
+      destroy: destroy
+    };
+  }, ['Bus', 'I18n', 'Net']);
 <!-- NOOMIUM_MODULE_END OfflineBarComponent -->
 
 <!-- NOOMIUM_MODULE_START StreamViewComponent -->
