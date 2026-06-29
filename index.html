@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.4">
+<meta name="app-version" content="1.4.5">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -752,72 +752,232 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END Logger -->
 
 <!-- NOOMIUM_MODULE_START Bus -->
-  DI.register('Bus', function() {
+/**
+ * @typedef {number} SubscriptionID
+ * @description Уникальный идентификатор подписки на событие.
+ */
 
-    /**
-     * Внутренний реестр подписчиков: event -> Set<Function>.
-     * Использование Set обеспечивает O(1) добавление/удаление и автоматическую дедупликацию.
-     * @type {Map<string, Set<Function>>}
-     */
-    var map = new Map();
+/**
+ * @typedef {Object} SubscriptionRecord
+ * @description Внутренняя запись о подписке.
+ * @property {function(*): void} handler - Обработчик события.
+ * @property {AbortSignal} [signal] - Опциональный сигнал для автоотписки.
+ */
 
-    return {
+DI.register('Bus', function() {
+  /**
+   * Реестр подписчиков: event → Map<subscriptionId, SubscriptionRecord>.
+   * Двухуровневая структура обеспечивает O(1) добавление/удаление по ID.
+   * @type {Map<string, Map<SubscriptionID, SubscriptionRecord>>}
+   */
+  var map = new Map();
+  
+  /**
+   * Глобальный счётчик для генерации уникальных ID подписок.
+   * Инкрементируется при каждом вызове on() или subscribe().
+   * @type {number}
+   */
+  var nextId = 1;
 
-      /**
-       * Подписывает обработчик на событие.
-       * Повторная подписка той же функцией игнорируется (гарантия Set).
-       * 
-       * @param {string} event - Имя события.
-       * @param {Function} fn - Обработчик (принимает payload).
-       * @returns {void}
-       */
-      on: function(event, fn) {
-        if (!map.has(event)) map.set(event, new Set());
-        map.get(event).add(fn);
-      },
+  /**
+   * Подписывает обработчик на событие.
+   * Возвращает уникальный ID подписки для последующей отписки через off().
+   * 
+   * @param {string} event - Имя события.
+   * @param {function(*): void} handler - Обработчик (принимает payload).
+   * @returns {SubscriptionID} Уникальный ID подписки.
+   */
+  function on(event, handler) {
+    if (typeof handler !== 'function') {
+      throw new Error('[Bus] handler must be a function');
+    }
+    
+    if (!map.has(event)) {
+      map.set(event, new Map());
+    }
+    
+    var id = nextId++;
+    map.get(event).set(id, { handler: handler });
+    return id;
+  }
 
-      /**
-       * Отписывает обработчик от события.
-       * Если после удаления в Set не остаётся подписчиков, ключ удаляется из Map
-       * для предотвращения утечки памяти на неиспользуемых событиях.
-       * 
-       * @param {string} event - Имя события.
-       * @param {Function} fn - Тот же ссылочный обработчик, что был передан в on().
-       * @returns {void}
-       */
-      off: function(event, fn) {
-        var set = map.get(event);
-        if (set) {
-          set.delete(fn);
-          if (set.size === 0) map.delete(event);
-        }
-      },
+  /**
+   * Подписывает обработчик на событие с опциональной автоотпиской через AbortSignal.
+   * Если signal передан и уже aborted, подписка не создаётся.
+   * При срабатывании signal.abort автоматически вызывает off(id).
+   * 
+   * @param {string} event - Имя события.
+   * @param {function(*): void} handler - Обработчик события.
+   * @param {AbortSignal} [signal] - Опциональный сигнал для автоотписки.
+   * @returns {SubscriptionID | null} ID подписки или null, если signal уже aborted.
+   */
+  function subscribe(event, handler, signal) {
+    // Проверка: если signal уже aborted, не создаём подписку
+    if (signal && signal.aborted) {
+      return null;
+    }
+    
+    var id = on(event, handler);
+    
+    // Если передан signal, регистрируем автоотписку
+    if (signal) {
+      var record = map.get(event).get(id);
+      record.signal = signal;
+      
+      // Обработчик abort для автоотписки
+      var onAbort = function() {
+        off(id);
+        signal.removeEventListener('abort', onAbort);
+      };
+      
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+    
+    return id;
+  }
 
-      /**
-       * Публикует событие всем подписчикам.
-       * Создаёт массив-копию слушателей перед итерацией, чтобы удаление/добавление
-       * подписок внутри самих обработчиков не ломало цикл итерации.
-       * Ошибки в отдельных обработчиках перехватываются, чтобы один упавший
-       * слушатель не прерывал уведомление остальных.
-       * 
-       * @param {string} event - Имя события.
-       * @param {*} [payload] - Данные события.
-       * @returns {void}
-       */
-      emit: function(event, payload) {
-        var set = map.get(event);
-        if (!set) return;
-        var listeners = Array.from(set);
-        for (var i = 0; i < listeners.length; i++) {
-          try {
-            listeners[i](payload);
-          } catch (err) {
-            console.error('[Bus] Error in listener for "' + event + '":', err);
+  /**
+   * Отписывает обработчик от события.
+   * Поддерживает два режима:
+   * 1. Передача subscriptionId (рекомендуется) — удаляет конкретную подписку.
+   * 2. Передача функции (legacy, для обратной совместимости) — ищет и удаляет
+   *    первую найденную подписку с этим handler.
+   * 
+   * Если после удаления в Map не остаётся подписчиков, ключ события удаляется
+   * для предотвращения утечки памяти на неиспользуемых событиях.
+   * 
+   * @param {string | SubscriptionID} eventOrId - Имя события или ID подписки.
+   * @param {function(*): void} [handler] - Обработчик (только если первый аргумент — event).
+   * @returns {boolean} true, если подписка была найдена и удалена.
+   */
+  function off(eventOrId, handler) {
+    // Режим 1: передан subscriptionId (число)
+    if (typeof eventOrId === 'number') {
+      var targetId = eventOrId;
+      var found = false;
+      
+      // Ищем подписку по всем событиям
+      map.forEach(function(subMap, event) {
+        if (subMap.has(targetId)) {
+          var record = subMap.get(targetId);
+          
+          // Очищаем listener abort, если был
+          if (record.signal) {
+            record.signal.removeEventListener('abort', record.abortHandler);
+          }
+          
+          subMap.delete(targetId);
+          found = true;
+          
+          // Удаляем пустую Map события
+          if (subMap.size === 0) {
+            map.delete(event);
           }
         }
+      });
+      
+      return found;
+    }
+    
+    // Режим 2: передан event + handler (legacy)
+    var event = eventOrId;
+    var subMap = map.get(event);
+    
+    if (!subMap) return false;
+    
+    var foundId = null;
+    subMap.forEach(function(record, id) {
+      if (record.handler === handler && !foundId) {
+        foundId = id;
       }
-    };
-  }, []);
+    });
+    
+    if (foundId !== null) {
+      var record = subMap.get(foundId);
+      if (record.signal) {
+        record.signal.removeEventListener('abort', record.abortHandler);
+      }
+      
+      subMap.delete(foundId);
+      
+      // Удаляем пустую Map события
+      if (subMap.size === 0) {
+        map.delete(event);
+      }
+      
+      return true;
+    }
+    
+    return false;
+  }
+
+  /**
+   * Публикует событие всем подписчикам.
+   * Создаёт массив-копию слушателей перед итерацией, чтобы удаление/добавление
+   * подписок внутри самих обработчиков не ломало цикл итерации.
+   * Ошибки в отдельных обработчиках перехватываются, чтобы один упавший
+   * слушатель не прерывал уведомление остальных.
+   * 
+   * @param {string} event - Имя события.
+   * @param {*} [payload] - Данные события.
+   * @returns {void}
+   */
+  function emit(event, payload) {
+    var subMap = map.get(event);
+    if (!subMap) return;
+    
+    // Создаём копию для безопасной итерации
+    var records = Array.from(subMap.values());
+    
+    for (var i = 0; i < records.length; i++) {
+      try {
+        records[i].handler(payload);
+      } catch (err) {
+        console.error('[Bus] Error in listener for "' + event + '":', err);
+      }
+    }
+  }
+
+  /**
+   * Возвращает количество активных подписчиков на событие.
+   * Полезно для отладки и мониторинга.
+   * 
+   * @param {string} event - Имя события.
+   * @returns {number} Количество подписчиков.
+   */
+  function listenerCount(event) {
+    var subMap = map.get(event);
+    return subMap ? subMap.size : 0;
+  }
+
+  /**
+   * Полностью очищает все подписки.
+   * Вызывается при уничтожении приложения или глобальном reset.
+   * 
+   * @returns {void}
+   */
+  function clear() {
+    // Очищаем все abort listeners
+    map.forEach(function(subMap) {
+      subMap.forEach(function(record) {
+        if (record.signal) {
+          record.signal.removeEventListener('abort', record.abortHandler);
+        }
+      });
+    });
+    
+    map.clear();
+  }
+
+  return {
+    on: on,
+    off: off,
+    emit: emit,
+    subscribe: subscribe,
+    listenerCount: listenerCount,
+    clear: clear
+  };
+}, []);
 <!-- NOOMIUM_MODULE_END Bus -->
 
 <!-- NOOMIUM_MODULE_START Store -->
@@ -4649,125 +4809,187 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
 <!-- NOOMIUM_MODULE_END EditorComponent -->
 
 <!-- NOOMIUM_MODULE_START FocusBarComponent -->
-  DI.register('FocusBarComponent', function(Bus, I18n, StateManager, SearchService) {
+/**
+ * Компонент панели фокуса (Focus Bar).
+ * 
+ * Отображает закреплённую заметку вверху интерфейса при активном Focus Mode.
+ * Позволяет пользователю видеть текущий контекст поиска и снимать фокус.
+ * 
+ * Безопасность:
+ * - Не использует innerHTML с пользовательскими данными (XSS-safe).
+ * - Все текстовые данные вставляются через textContent.
+ * 
+ * Управление памятью:
+ * - Использует AbortController для автоматической отписки при destroy().
+ * - DOM-ссылки обновляются при каждом render() (защита от устаревших нод).
+ * 
+ * @module FocusBarComponent
+ */
+DI.register('FocusBarComponent', function(Bus, I18n, StateManager, SearchService) {
 
-    /** @type {HTMLDivElement | null} Контейнер для панели фокуса */
-    var container = null;
+  /** @type {HTMLDivElement | null} Контейнер для панели фокуса */
+  var container = null;
+  
+  /** @type {AbortController | null} Контроллер для автоотписки */
+  var abortController = null;
 
-    /** @type {function(AppState): void | null} Обработчик изменений состояния */
-    var stateHandler = null;
+  /**
+   * Обновляет ссылку на DOM-контейнер.
+   * Вызывается при каждом рендере, так как DOM может быть пересоздан после refreshUI.
+   * @returns {void}
+   */
+  function ensureDOM() {
+    container = document.getElementById('focus-bar');
+  }
 
-    /** @type {function(): void | null} Обработчик смены языка */
-    var i18nHandler = null;
-
-    /**
-     * Обновляет ссылку на DOM-контейнер.
-     * Вызывается при каждом рендере, так как DOM может быть пересоздан после refreshUI.
-     * @returns {void}
-     */
-    function ensureDOM() {
-      container = document.getElementById('focus-bar');
-    }
-
-    /**
-     * Рендерит панель фокуса в зависимости от текущего состояния.
-     * 
-     * Логика отображения:
-     * - Если focusMode && focusedItem: показываем панель, скрываем seg-блок.
-     * - Иначе: скрываем панель, показываем seg-блок.
-     * 
-     * @returns {void}
-     */
-    function render() {
-      if (!container) ensureDOM();
-      if (!container) return;
+  /**
+   * Создаёт DOM-структуру панели фокуса.
+   * Безопасная альтернатива innerHTML: все элементы создаются через createElement,
+   * текстовые данные вставляются через textContent (защита от XSS).
+   * 
+   * @param {string} text - Текст закреплённой заметки (экранируется автоматически).
+   * @param {string} peer - Идентификатор пира или "вы" (экранируется автоматически).
+   * @returns {HTMLDivElement} Корневой элемент панели.
+   */
+  function buildFocusBarUI(text, peer) {
+    var wrapper = document.createElement('div');
+    wrapper.className = 'focus-bar-inner';
+    
+    // Текстовый блок
+    var textEl = document.createElement('div');
+    textEl.className = 'focus-text';
+    textEl.textContent = text; // textContent автоматически экранирует HTML
+    wrapper.appendChild(textEl);
+    
+    // Мета-блок (peer + кнопка закрытия)
+    var metaEl = document.createElement('div');
+    metaEl.className = 'focus-meta';
+    
+    var peerEl = document.createElement('span');
+    peerEl.className = 'focus-peer';
+    peerEl.textContent = peer; // textContent автоматически экранирует HTML
+    metaEl.appendChild(peerEl);
+    
+    var unfocusBtn = document.createElement('button');
+    unfocusBtn.className = 'focus-unfocus';
+    unfocusBtn.setAttribute('aria-label', I18n.t('btn.unfocus'));
+    unfocusBtn.textContent = '✕';
+    
+    unfocusBtn.onclick = function() {
+      // Объединяем два setState в один вызов (оптимизация)
+      var lists = StateManager.getState().lists;
+      StateManager.setState({ 
+        focusMode: false, 
+        focusedItem: null,
+        lists: Object.assign({}, lists, { focus: [] })
+      });
       
-      var state = StateManager.getState();
-      var segBlock = document.querySelector('.seg');
-
-      if (state.focusMode && state.focusedItem) {
-        container.style.display = 'block';
-        if (segBlock) segBlock.style.display = 'none';
-
-        var text = state.focusedItem.text || '';
-        if (text.length > 100) text = text.substring(0, 100) + '…';
-        var peer = state.focusedItem.peer || I18n.t('focus.you');
-
-        container.innerHTML = '<div class="focus-bar-inner">' +
-          '<div class="focus-text">' + text + '</div>' +
-          '<div class="focus-meta"><span class="focus-peer">' + peer + '</span>' +
-          '<button class="focus-unfocus" aria-label="' + I18n.t('btn.unfocus') + '">✕</button></div></div>';
-
-        var btn = container.querySelector('.focus-unfocus');
-        if (btn) {
-          btn.onclick = function() {
-            // 🔑 ОПТИМИЗАЦИЯ: Объединяем два setState в один вызов (ПРОБЛЕМА #3)
-            var lists = StateManager.getState().lists;
-            StateManager.setState({ 
-              focusMode: false, 
-              focusedItem: null,
-              lists: Object.assign({}, lists, { focus: [] })
-            });
-            
-            // Запускаем поиск с текущим текстом редактора
-            // Это вернёт UI к live stream (если редактор пуст) или к текстовому поиску
-            var editorVal = document.getElementById('ed-ta') ? document.getElementById('ed-ta').value.trim() : '';
-            SearchService.search(editorVal, true);
-          };
-        }
-      } else {
-        container.style.display = 'none';
-        if (segBlock) segBlock.style.display = '';
-      }
-    }
-
-    /**
-     * Инициализирует компонент: подписывается на изменения состояния и смену языка.
-     * Выполняет первый рендер.
-     * 
-     * @returns {void}
-     */
-    function init() {
-      ensureDOM();
-      
-      stateHandler = function() { render(); };
-      i18nHandler = function() { render(); };
-      
-      StateManager.subscribe(stateHandler);
-      Bus.on('i18n:change', i18nHandler);
-      
-      render();
-    }
-
-    /**
-     * Уничтожает компонент: отписывается от шины событий.
-     * Примечание: отписка от StateManager не требуется, так как subscribe возвращает
-     * функцию unsubscribe, но в текущей архитектуре StateManager живет весь lifecycle приложения.
-     * 
-     * @returns {void}
-     */
-    function destroy() {
-      if (i18nHandler) {
-        try { Bus.off('i18n:change', i18nHandler); } catch (_) {}
-        i18nHandler = null;
-      }
-      stateHandler = null;
-    }
-
-    return {
-      /**
-       * Инициализирует компонент (публичный API).
-       * @returns {void}
-       */
-      init: init,
-
-      /**
-       * Уничтожает компонент (публичный API).
-       * @returns {void}
-       */
-      destroy: destroy
+      // Запускаем поиск с текущим текстом редактора
+      // Это вернёт UI к live stream (если редактор пуст) или к текстовому поиску
+      var editorVal = document.getElementById('ed-ta') ? document.getElementById('ed-ta').value.trim() : '';
+      SearchService.search(editorVal, true);
     };
-  }, ['Bus', 'I18n', 'StateManager', 'SearchService']);
+    
+    metaEl.appendChild(unfocusBtn);
+    wrapper.appendChild(metaEl);
+    
+    return wrapper;
+  }
+
+  /**
+   * Рендерит панель фокуса в зависимости от текущего состояния.
+   * 
+   * Логика отображения:
+   * - Если focusMode && focusedItem: показываем панель, скрываем seg-блок.
+   * - Иначе: скрываем панель, показываем seg-блок.
+   * 
+   * @returns {void}
+   */
+  function render() {
+    if (!container) ensureDOM();
+    if (!container) return;
+    
+    var state = StateManager.getState();
+    var segBlock = document.querySelector('.seg');
+
+    if (state.focusMode && state.focusedItem) {
+      container.style.display = 'block';
+      if (segBlock) segBlock.style.display = 'none';
+
+      // Очистка старого содержимого
+      while (container.firstChild) {
+        container.removeChild(container.firstChild);
+      }
+
+      // Безопасное построение UI
+      var text = state.focusedItem.text || '';
+      if (text.length > 100) text = text.substring(0, 100) + '…';
+      var peer = state.focusedItem.peer || I18n.t('focus.you');
+
+      var ui = buildFocusBarUI(text, peer);
+      container.appendChild(ui);
+    } else {
+      container.style.display = 'none';
+      if (segBlock) segBlock.style.display = '';
+    }
+  }
+
+  /**
+   * Инициализирует компонент: подписывается на изменения состояния и смену языка.
+   * Использует AbortController для автоматической отписки при destroy().
+   * Выполняет первый рендер.
+   * 
+   * @returns {void}
+   */
+  function init() {
+    ensureDOM();
+    
+    // Создаём AbortController для автоотписки
+    abortController = new AbortController();
+    var signal = abortController.signal;
+    
+    // Подписка на изменения состояния с автоотпиской
+    var stateUnsubscribe = StateManager.subscribe(render);
+    
+    // Регистрируем отписку через signal
+    signal.addEventListener('abort', function() {
+      stateUnsubscribe();
+    }, { once: true });
+    
+    // Подписка на смену языка с автоотпиской
+    Bus.subscribe('i18n:change', render, signal);
+    
+    render();
+  }
+
+  /**
+   * Уничтожает компонент: отписывается от всех событий через AbortController.
+   * Очищает DOM-ссылки для предотвращения утечек памяти.
+   * 
+   * @returns {void}
+   */
+  function destroy() {
+    if (abortController) {
+      abortController.abort(); // Автоматически отписывает все Bus.subscribe
+      abortController = null;
+    }
+    container = null;
+  }
+
+  return {
+    /**
+     * Инициализирует компонент (публичный API).
+     * @returns {void}
+     */
+    init: init,
+
+    /**
+     * Уничтожает компонент (публичный API).
+     * @returns {void}
+     */
+    destroy: destroy
+  };
+}, ['Bus', 'I18n', 'StateManager', 'SearchService']);
 <!-- NOOMIUM_MODULE_END FocusBarComponent -->
 
 <!-- NOOMIUM_MODULE_START AuthService -->
