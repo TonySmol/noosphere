@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.11">
+<meta name="app-version" content="1.4.12">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -4185,153 +4185,312 @@ DI.register('StateManager', function() {
 }, []);
 <!-- NOOMIUM_MODULE_END StateManager -->
 
-<!-- NOOMIUM_MODULE_START SearchService -->
+<!-- NOOMIUM_MODULE_START LiveStreamStrategy -->
+/**
+ * Стратегия Live Stream (режим IDLE).
+ * 
+ * Отвечает за:
+ * - Управление подпиской на поток новых заметок из сети
+ * - Хранение streamItems в памяти (эфемерно, привязано к пирам)
+ * - Сортировку по created_at (новизна)
+ * - Автоматическую очистку при отключении пиров
+ * 
+ * Архитектурные решения:
+ * - **Stateless execute:** принимает state, возвращает обновлённые данные
+ * - **Эфемерность:** streamItems живут только в памяти, не сохраняются в БД
+ * - **Привязка к пирам:** каждый элемент содержит peerPubkey для очистки
+ * - **FIFO limit:** максимум 50 элементов для защиты от OOM
+ * 
+ * @module LiveStreamStrategy
+ */
+DI.register('LiveStreamStrategy', function(Bus, Net, Config) {
+
   /**
-   * Сервис семантического поиска и управления заметками.
-   * 
-   * Отвечает за:
-   * - Поиск по локальной базе (local) и сети (world) через векторные эмбеддинги
-   * - Режим озарений (seren) — близкие, но ниже порога совпадения
-   * - Режим фокуса (focus) — поиск по вектору закреплённой заметки
-   * - Live Stream control — остановка/запуск живой ленты
-   * - Сохранение заметок с поддержкой Parent/Child связей
-   * 
-   * Приоритеты режимов (в search()):
-   * 1. Текст в редакторе → обычный поиск (local/world/seren)
-   * 2. Нет текста, но есть focusMode → поиск по вектору фокуса
-   * 3. Нет текста и фокуса → включение Live Stream
-   * 
-   * @module SearchService
+   * Контроллер для управления подпиской на stream-события.
+   * @type {AbortController | null}
    */
-  DI.register('SearchService', function(AI, DB, Net, Config, Bus, StateManager, I18n, Toast, Logger, Utils) {
+  var streamController = null;
 
-    /** @type {Vector | null} Вектор последнего выполненного поискового запроса */
-    var lastVec = null;
+  /**
+   * Запускает подписку на Live Stream, если она ещё не активна.
+   * Вызывается при переходе в режим IDLE.
+   * 
+   * @returns {void}
+   */
+  function start() {
+    if (streamController) return; // Уже запущен
+    
+    streamController = new AbortController();
+    var signal = streamController.signal;
+    
+    // Подписка на stream-события с автоотпиской
+    Bus.subscribe('net:stream-event', function(payload) {
+      if (!payload || !payload.note) return;
+      // Данные обрабатываются в Coordinator через dispatch('update-stream')
+    }, signal);
+    
+    // Подписка на отключение пиров для очистки streamItems
+    Bus.subscribe('net:peer-offline', function(payload) {
+      if (!payload || !payload.pubkey) return;
+      // Coordinator должен удалить все заметки этого пира из streamData
+    }, signal);
+    
+    // Запуск сетевой подписки через Net
+    if (Net && typeof Net.startLiveStream === 'function') {
+      Net.startLiveStream();
+    }
+  }
 
-    /** @type {number} Timestamp последнего поискового запроса */
-    var lastQuery = 0;
+  /**
+   * Останавливает подписку на Live Stream.
+   * Вызывается при выходе из режима IDLE.
+   * 
+   * @returns {void}
+   */
+  function stop() {
+    if (streamController) {
+      streamController.abort();
+      streamController = null;
+    }
+    
+    if (Net && typeof Net.stopLiveStream === 'function') {
+      Net.stopLiveStream();
+    }
+  }
 
-    /** @type {AbortController | null} Контроллер для отмены предыдущего поиска */
-    var searchAbortController = null;
+  /**
+   * Выполняет стратегию: возвращает текущие streamItems.
+   * Stateless метод для консистентности с другими стратегиями.
+   * 
+   * @param {AppState} state - Текущее состояние приложения.
+   * @returns {Object} Объект с обновлёнными данными для dispatch.
+   */
+  function execute(state) {
+    // Live Stream не выполняет поиск, только управляет подпиской
+    // Данные приходят через net:stream-event и обновляются Coordinator'ом
+    return {
+      streamActive: true,
+      streamData: state.streamData || []
+    };
+  }
 
-    /** @type {Note[] | null} Кэш всех локальных заметок */
-    var allNotesCache = null;
+  /**
+   * Обновляет streamData: добавляет новую заметку в начало (FIFO).
+   * Обрезает до лимита для защиты от OOM.
+   * 
+   * @param {SearchResult[]} currentData - Текущий массив streamData.
+   * @param {SearchResult} newNote - Новая заметка для добавления.
+   * @returns {SearchResult[]} Обновлённый массив.
+   */
+  function addStreamItem(currentData, newNote) {
+    var newData = [newNote].concat(currentData || []);
+    var limit = 50; // FIFO limit
+    if (newData.length > limit) {
+      newData = newData.slice(0, limit);
+    }
+    return newData;
+  }
 
-    /** @type {number} Timestamp последнего обновления кэша заметок */
-    var allNotesCacheTime = 0;
+  /**
+   * Удаляет все заметки от указанного пира из streamData.
+   * Вызывается при получении net:peer-offline.
+   * 
+   * @param {SearchResult[]} currentData - Текущий массив streamData.
+   * @param {string} pubkey - Публичный ключ пира для удаления.
+   * @returns {SearchResult[]} Отфильтрованный массив.
+   */
+  function removePeerItems(currentData, pubkey) {
+    return (currentData || []).filter(function(item) {
+      return item.fullPubkey !== pubkey;
+    });
+  }
 
-    /** @type {number} Время жизни кэша всех заметок (5 минут) */
-    var ALL_NOTES_TTL = 5 * 60 * 1000;
+  return {
+    start: start,
+    stop: stop,
+    execute: execute,
+    addStreamItem: addStreamItem,
+    removePeerItems: removePeerItems
+  };
+}, ['Bus', 'Net', 'Config']);
+<!-- NOOMIUM_MODULE_END LiveStreamStrategy -->
 
-    /** 
-     * Максимальное количество результатов в каждом списке (local, world, seren, focus).
-     * Защита от тормозов UI при большой базе (10000+ заметок).
-     * @type {number}
-     */
-    var MAX_RESULTS_PER_LIST = 100;
+<!-- NOOMIUM_MODULE_START TextSearchStrategy -->
+/**
+ * Стратегия текстового поиска (режим SEARCH).
+ * 
+ * Отвечает за:
+ * - Семантический поиск по локальной базе (local)
+ * - Поиск по сетевым ответам (world)
+ * - Режим озарений (seren) — близкие, но ниже порога
+ * - Отправку запроса в сеть с вектором
+ * 
+ * Архитектурные решения:
+ * - **AbortController:** каждый поиск создаёт свой контроллер для отмены
+ * - **LRU-кэш:** использует AI.embed с внутренним кэшированием
+ * - **Фильтрация по порогам:** local/world >= threshold, seren = threshold - serendipity
+ * - **MAX_RESULTS_PER_LIST:** защита от тормозов UI при большой базе
+ * 
+ * @module TextSearchStrategy
+ */
+DI.register('TextSearchStrategy', function(AI, DB, Net, Config, StateManager) {
 
-    /**
-     * Возвращает все заметки из базы, используя кэш для оптимизации.
-     * Если кэш истёк, запрашивает свежие данные из DB.
-     * 
-     * @returns {Promise<Note[]>} Promise с массивом всех заметок.
-     */
-    function getAllNotesCached() {
-      var now = Date.now();
-      if (allNotesCache && (now - allNotesCacheTime < ALL_NOTES_TTL)) {
-        return Promise.resolve(allNotesCache);
-      }
-      return DB.all().then(function(notes) {
-        allNotesCache = notes;
-        allNotesCacheTime = now;
-        return notes;
+  /**
+   * Максимальное количество результатов в каждом списке.
+   * Защита от тормозов UI при большой базе (10000+ заметок).
+   * @type {number}
+   */
+  var MAX_RESULTS_PER_LIST = 100;
+
+  /**
+   * Контроллер для отмены предыдущего поиска.
+   * @type {AbortController | null}
+   */
+  var searchController = null;
+
+  /**
+   * Вектор последнего выполненного поискового запроса.
+   * Используется для дедупликации сетевых запросов.
+   * @type {Vector | null}
+   */
+  var lastVec = null;
+
+  /**
+   * Timestamp последнего поискового запроса.
+   * @type {number}
+   */
+  var lastQuery = 0;
+
+  /**
+   * Кэш всех локальных заметок для оптимизации.
+   * @type {Note[] | null}
+   */
+  var allNotesCache = null;
+
+  /**
+   * Timestamp последнего обновления кэша.
+   * @type {number}
+   */
+  var allNotesCacheTime = 0;
+
+  /**
+   * Время жизни кэша (5 минут).
+   * @type {number}
+   */
+  var ALL_NOTES_TTL = 5 * 60 * 1000;
+
+  /**
+   * Возвращает все заметки из базы, используя кэш.
+   * @returns {Promise<Note[]>}
+   */
+  function getAllNotesCached() {
+    var now = Date.now();
+    if (allNotesCache && (now - allNotesCacheTime < ALL_NOTES_TTL)) {
+      return Promise.resolve(allNotesCache);
+    }
+    return DB.all().then(function(notes) {
+      allNotesCache = notes;
+      allNotesCacheTime = now;
+      return notes;
+    });
+  }
+
+  /**
+   * Сбрасывает кэш заметок (вызывается после мутаций БД).
+   * @returns {void}
+   */
+  function invalidateNotesCache() {
+    allNotesCache = null;
+  }
+
+  /**
+   * Выполняет семантический поиск по тексту.
+   * 
+   * Алгоритм:
+   * 1. Вычисляет вектор запроса через AI.embed
+   * 2. Отправляет запрос в сеть (если вектор изменился)
+   * 3. Ищет похожие заметки в локальной базе
+   * 4. Фильтрует по порогам (local/world/seren)
+   * 5. Возвращает списки для dispatch('update-lists')
+   * 
+   * @param {string} text - Поисковый запрос.
+   * @param {boolean} [force=false] - Принудительная отправка в сеть.
+   * @returns {Promise<Object>} Объект с lists для dispatch.
+   */
+  function execute(text, force) {
+    var trimmed = (text || '').trim();
+    
+    // Если текст пуст, очищаем результаты
+    if (!trimmed || !AI.ready()) {
+      return Promise.resolve({
+        lists: { local: [], world: [], seren: [], focus: [] }
       });
     }
 
-    /**
-     * Принудительно сбрасывает кэш всех заметок.
-     * Вызывается после редактирования/удаления для гарантии актуальности данных.
-     * @returns {void}
-     */
-    function invalidateNotesCache() {
-      allNotesCache = null;
+    // Отменяем предыдущий поиск
+    if (searchController) {
+      searchController.abort();
     }
+    searchController = new AbortController();
+    var signal = searchController.signal;
 
-    /**
-     * Возвращает текущий режим отправки (Личное/Мир) из StateManager.
-     * @returns {SendMode}
-     */
-    function getSendMode() {
-      return StateManager.getState().sendMode;
-    }
+    return AI.embed(trimmed).then(function(vec) {
+      if (signal.aborted) return null;
+      if (!vec) return null;
 
-    /**
-     * Устанавливает режим отправки в StateManager.
-     * @param {SendMode} mode - Новый режим.
-     * @returns {void}
-     */
-    function setSendMode(mode) {
-      StateManager.setState({ sendMode: mode });
-    }
-
-    /**
-     * Проверяет, заблокирована ли сейчас кнопка отправки (идёт ли процесс сохранения).
-     * @returns {boolean}
-     */
-    function isSending() {
-      return StateManager.getState().sendLock;
-    }
-
-    /**
-     * Выполняет семантический поиск по готовому вектору (для режима фокуса).
-     * Не вычисляет эмбеддинг повторно, использует переданный вектор.
-     * Результаты объединяются в единый список State.lists.focus с лимитом MAX_RESULTS_PER_LIST.
-     * 
-     * @param {Vector} vector - Вектор запроса (уже вычисленный).
-     * @returns {Promise<void>}
-     */
-    function searchByVector(vector) {
-      if (!vector || !AI.ready()) return Promise.resolve();
-      
-      // Отменяем предыдущий поиск
-      if (searchAbortController) {
-        searchAbortController.abort();
+      // Определение необходимости отправки запроса в сеть
+      var shouldSendToNet = false;
+      if (!lastVec || AI.cosine(vec, lastVec) < Config.get('vectorSimilarityThreshold', 0.98) || force) {
+        lastVec = vec;
+        lastQuery = Date.now();
+        shouldSendToNet = true;
       }
-      var controller = new AbortController();
-      searchAbortController = controller;
-      var signal = controller.signal;
 
       return getAllNotesCached().then(function(notes) {
-        if (signal.aborted) return;
+        if (signal.aborted) return null;
+
+        // Отправка запроса в сеть (если нужно)
+        if (shouldSendToNet && AI.getMode() === 'model') {
+          var st = StateManager.getState();
+          if (st.netAuthorized && Net && typeof Net.send === 'function') {
+            Net.send(vec);
+          }
+        }
 
         // Подготовка локальных кандидатов
         var localCandidates = [];
         var localDataMap = new Map();
         for (var i = 0; i < notes.length; i++) {
-          if (notes[i] && notes[i].vector) {
-            localCandidates.push({ id: notes[i].id, vector: notes[i].vector });
-            localDataMap.set(notes[i].id, notes[i]);
+          var note = notes[i];
+          if (note && note.vector) {
+            localCandidates.push({ id: note.id, vector: note.vector });
+            localDataMap.set(note.id, note);
           }
         }
 
-        // Запрос в AI (Worker или fallback)
+        // Получение активных ответов из сети
+        var st2 = StateManager.getState();
+        var worldAnswers = st2.netAuthorized && Net ? Net.activeAnswers() : [];
+
+        // Запрос в AI для локальных заметок
         var processLocal = localCandidates.length > 0 
-          ? AI.cosineBatch(vector, localCandidates, signal) 
+          ? AI.cosineBatch(vec, localCandidates, signal) 
           : Promise.resolve([]);
 
         return processLocal.then(function(localScores) {
-          if (signal.aborted) return;
+          if (signal.aborted) return null;
 
-          // Формирование списка локальных результатов
+          // Формирование локальных результатов
           var localScored = [];
           for (var k = 0; k < localScores.length; k++) {
-            var note = localDataMap.get(localScores[k].id);
+            var s = localScores[k];
+            var note = localDataMap.get(s.id);
             if (note) {
               localScored.push({
                 id: note.id,
                 text: note.text,
                 vector: note.vector,
-                score: localScores[k].score,
+                score: s.score,
                 shared: note.shared,
                 createdAt: note.createdAt,
                 parentId: note.parentId,
@@ -4340,9 +4499,7 @@ DI.register('StateManager', function() {
             }
           }
 
-          // Получение активных ответов из сети (если авторизованы)
-          var state = StateManager.getState();
-          var worldAnswers = state.netAuthorized && Net ? Net.activeAnswers() : [];
+          // Формирование сетевых результатов
           var worldScored = [];
           for (var j = 0; j < worldAnswers.length; j++) {
             var answer = worldAnswers[j];
@@ -4361,369 +4518,717 @@ DI.register('StateManager', function() {
             }
           }
 
-          // В режиме фокуса всё объединяем в одну ленту, сортируем по score
-          // и ОБРЕЗАЕМ до MAX_RESULTS_PER_LIST для защиты от тормозов UI
-          var combined = localScored.concat(worldScored)
-            .sort(function(a, b) { return b.score - a.score; })
-            .slice(0, MAX_RESULTS_PER_LIST);
+          // Фильтрация по порогам
+          var threshold = Config.get('threshold', 0.7);
+          var serendipityDelta = Config.get('serendipity', 0.3);
+          var serenMin = threshold - serendipityDelta;
 
-          var currentLists = StateManager.getState().lists;
-          StateManager.setState({ 
-            lists: Object.assign({}, currentLists, { focus: combined }) 
-          });
-          
-          if (Bus && Bus.emit) {
-            try { Bus.emit('state:lists-changed'); } catch (_) {}
-          }
-        });
-      }).catch(function(err) {
-        if (signal.aborted) return;
-        if (Logger) Logger.warn('SearchService.searchByVector error', String(err && err.message || err));
-      }).finally(function() {
-        searchAbortController = null;
-      });
-    }
-
-    /**
-     * Выполняет семантический поиск по локальной базе и ответам из сети.
-     * Управляет жизненным циклом Live Stream и приоритетом режима фокуса.
-     * 
-     * Логика приоритетов:
-     * 1. Если есть текст → обычный поиск (выключает Live Stream).
-     * 2. Если текста нет, но есть focusMode → поиск по вектору фокуса.
-     * 3. Если текста нет и focusMode выключен → включает Live Stream.
-     * 
-     * Защита от race condition: Net.send() вызывается ТОЛЬКО после повторной
-     * проверки signal.aborted, чтобы предотвратить отправку устаревших запросов
-     * при быстрой смене текста в редакторе.
-     * 
-     * @param {string} text - Поисковый запрос (текст из редактора).
-     * @param {boolean} [force=false] - Принудительная отправка запроса в сеть.
-     * @returns {Promise<void>}
-     */
-    function search(text, force) {
-      var state = StateManager.getState();
-      var trimmed = (text || '').trim();
-
-      // Остановка Live Stream при любом поиске
-      if (state.streamActive && Net && typeof Net.stopLiveStream === 'function') {
-        Net.stopLiveStream();
-        StateManager.setState({ streamActive: false });
-      }
-
-      // Приоритет фокуса, если текст пуст
-      if (!trimmed && state.focusMode && state.focusedItem && state.focusedItem.vector) {
-        return searchByVector(state.focusedItem.vector);
-      }
-
-      // Если текста нет и фокуса нет — очистка результатов и включение Live Stream
-      if (!trimmed || !AI.ready()) {
-        StateManager.setState({ lists: { local: [], world: [], seren: [], focus: [] } });
-        if (Bus && Bus.emit) {
-          try { Bus.emit('state:lists-changed'); } catch (_) {}
-        }
-        
-        // Возврат к Live Stream, если редактор пуст и фокус снят
-        if (!trimmed && !state.focusMode && Net && typeof Net.startLiveStream === 'function') {
-          Net.startLiveStream();
-          StateManager.setState({ streamActive: true });
-        }
-        return Promise.resolve();
-      }
-
-      // Отмена предыдущего поиска
-      if (searchAbortController) {
-        searchAbortController.abort();
-      }
-      var controller = new AbortController();
-      searchAbortController = controller;
-      var signal = controller.signal;
-
-      return AI.embed(text).then(function(vec) {
-        if (signal.aborted) return;
-        if (!vec) return;
-
-        // Определение необходимости отправки запроса в сеть
-        var shouldSendToNet = false;
-        if (!lastVec || AI.cosine(vec, lastVec) < Config.get('vectorSimilarityThreshold', 0.98) || force) {
-          lastVec = vec;
-          lastQuery = Date.now();
-          shouldSendToNet = true;
-        }
-
-        return getAllNotesCached().then(function(notes) {
-          if (signal.aborted) return;
-
-          // 🔑 КРИТИЧНО: ПОВТОРНАЯ проверка signal.aborted ПЕРЕД Net.send
-          // Это предотвращает отправку устаревших запросов в сеть,
-          // если пользователь быстро изменил текст в редакторе
-          if (shouldSendToNet && AI.getMode() === 'model') {
-            if (signal.aborted) return;
-            var st = StateManager.getState();
-            if (st.netAuthorized && Net && typeof Net.send === 'function') {
-              Net.send(vec);
-            }
-          }
-
-          // Подготовка локальных кандидатов
-          var localCandidates = [];
-          var localDataMap = new Map();
-          for (var i = 0; i < notes.length; i++) {
-            var note = notes[i];
-            if (note && note.vector) {
-              localCandidates.push({ id: note.id, vector: note.vector });
-              localDataMap.set(note.id, note);
-            }
-          }
-
-          // Получение активных ответов из сети
-          var st2 = StateManager.getState();
-          var worldAnswers = st2.netAuthorized && Net ? Net.activeAnswers() : [];
-
-          // Запрос в AI для локальных заметок
-          var processLocal = localCandidates.length > 0 
-            ? AI.cosineBatch(vec, localCandidates, signal) 
-            : Promise.resolve([]);
-
-          return processLocal.then(function(localScores) {
-            if (signal.aborted) return;
-
-            // Формирование локальных результатов
-            var localScored = [];
-            for (var k = 0; k < localScores.length; k++) {
-              var s = localScores[k];
-              var note = localDataMap.get(s.id);
-              if (note) {
-                localScored.push({
-                  id: note.id,
-                  text: note.text,
-                  vector: note.vector,
-                  score: s.score,
-                  shared: note.shared,
-                  createdAt: note.createdAt,
-                  parentId: note.parentId,
-                  children: note.children
-                });
-              }
-            }
-
-            // Формирование сетевых результатов
-            var worldScored = [];
-            for (var j = 0; j < worldAnswers.length; j++) {
-              var answer = worldAnswers[j];
-              if (answer && typeof answer.score === 'number') {
-                worldScored.push({
-                  id: answer.id,
-                  text: answer.text,
-                  vector: answer.vector,
-                  score: answer.score,
-                  shared: true,
-                  peer: answer.peer,
-                  createdAt: answer.createdAt,
-                  parentId: answer.parentId,
-                  children: answer.children
-                });
-              }
-            }
-
-            // Фильтрация по порогам
-            var threshold = Config.get('threshold', 0.7);
-            var serendipityDelta = Config.get('serendipity', 0.3);
-            var serenMin = threshold - serendipityDelta;
-
-            var focusMode = StateManager.getState().focusMode;
-            var newLists;
-
-            if (focusMode) {
-              // В режиме фокуса всё объединяем в одну ленту с лимитом
-              var combined = localScored.concat(worldScored)
-                .sort(function(a, b) { return b.score - a.score; })
-                .slice(0, MAX_RESULTS_PER_LIST);
-              newLists = {
-                local: [],
-                world: [],
-                seren: [],
-                focus: combined
-              };
-            } else {
-              // Обычный режим с сегментами — каждый список ограничен MAX_RESULTS_PER_LIST
-              newLists = {
-                local: localScored
-                  .filter(function(n) { return n.score >= threshold; })
-                  .sort(function(a, b) { return b.score - a.score; })
-                  .slice(0, MAX_RESULTS_PER_LIST),
-                world: worldScored
-                  .filter(function(n) { return n.score >= threshold; })
-                  .sort(function(a, b) { return b.score - a.score; })
-                  .slice(0, MAX_RESULTS_PER_LIST),
-                seren: localScored.concat(worldScored)
-                  .filter(function(n) { return n.score >= serenMin && n.score < threshold; })
-                  .sort(function(a, b) { return b.score - a.score; })
-                  .slice(0, MAX_RESULTS_PER_LIST),
-                focus: StateManager.getState().lists.focus // сохраняем, если было
-              };
-            }
-
-            StateManager.setState({ lists: newLists });
-            if (Bus && Bus.emit) {
-              try { Bus.emit('state:lists-changed'); } catch (_) {}
-            }
-          });
-        });
-      }).catch(function(err) {
-        if (signal.aborted) return;
-        Toast.show('err', String(err && err.message || err) || 'Search failed');
-        if (Logger) Logger.warn('SearchService.search error', String(err && err.message || err));
-      }).finally(function() {
-        searchAbortController = null;
-      });
-    }
-
-    /**
-     * Сохраняет новую мысль в локальную базу и опционально публикует в сеть.
-     * Поддерживает parentId для создания связей parent/child.
-     * Блокирует повторные вызовы через sendLock.
-     * 
-     * @param {string} text - Текст мысли.
-     * @param {SendMode} mode - Режим отправки ('private' или 'world').
-     * @param {string} [parentId] - ID родительской заметки (если активен фокус).
-     * @returns {Promise<void>}
-     */
-    function send(text, mode, parentId) {
-      if (StateManager.getState().sendLock) return Promise.resolve();
-
-      var trimmedText = (text || '').trim();
-      if (!trimmedText) {
-        Toast.show('warn', I18n.t('toast.empty'));
-        return Promise.resolve();
-      }
-
-      if (!AI.ready()) {
-        Toast.show('err', I18n.t('toast.ai.notready'));
-        return Promise.resolve();
-      }
-
-      var state = StateManager.getState();
-      if (mode === 'world' && !state.netAuthorized) {
-        if (state.requestNetworkAuth) {
-          state.requestNetworkAuth(function() {
-            send(trimmedText, mode, parentId);
-          });
-        }
-        return Promise.resolve();
-      }
-
-      var isWorld = mode === 'world';
-      StateManager.setState({ sendLock: true });
-
-      var newId = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-
-      return AI.embed(trimmedText)
-        .then(function(vector) {
-          var noteObj = {
-            id: newId,
-            text: trimmedText,
-            vector: vector,
-            shared: !!isWorld,
-            createdAt: Date.now()
+          var newLists = {
+            local: localScored
+              .filter(function(n) { return n.score >= threshold; })
+              .sort(function(a, b) { return b.score - a.score; })
+              .slice(0, MAX_RESULTS_PER_LIST),
+            world: worldScored
+              .filter(function(n) { return n.score >= threshold; })
+              .sort(function(a, b) { return b.score - a.score; })
+              .slice(0, MAX_RESULTS_PER_LIST),
+            seren: localScored.concat(worldScored)
+              .filter(function(n) { return n.score >= serenMin && n.score < threshold; })
+              .sort(function(a, b) { return b.score - a.score; })
+              .slice(0, MAX_RESULTS_PER_LIST),
+            focus: [] // В режиме SEARCH focus пуст
           };
-          if (parentId) noteObj.parentId = parentId;
-          return DB.put(noteObj).then(function() { return noteObj; });
-        })
-        .then(function(savedNote) {
-          // Обновление локального родителя (если он есть в БД)
-          if (parentId) {
-            DB.addChild(parentId, savedNote.id);
-          }
-          // Публикация в сеть с тегом ответа (если shared)
-          if (savedNote.shared && Net && typeof Net.publishNote === 'function') {
-            Net.publishNote(savedNote, parentId);
-          }
-          lastVec = null;
-          Toast.show('ok', isWorld ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
-        })
-        .catch(function(err) {
-          Toast.show('err', String(err && err.message || err) || 'Send failed');
-          if (Logger) Logger.warn('SearchService.send error', String(err && err.message || err));
-        })
-        .finally(function() {
-          StateManager.setState({ sendLock: false });
+
+          return { lists: newLists };
         });
-    }
-
-    /**
-     * Инициализирует сервис: подписывается на изменения базы для сброса кэша.
-     * @returns {void}
-     */
-    function init() {
-      Bus.on('db:change', function() {
-        allNotesCache = null;
       });
+    }).catch(function(err) {
+      if (signal.aborted) return null;
+      console.warn('[TextSearchStrategy] Search error:', err);
+      return { lists: { local: [], world: [], seren: [], focus: [] } };
+    }).finally(function() {
+      searchController = null;
+    });
+  }
+
+  /**
+   * Очищает состояние стратегии (вызывается при destroy).
+   * @returns {void}
+   */
+  function cleanup() {
+    if (searchController) {
+      searchController.abort();
+      searchController = null;
+    }
+    lastVec = null;
+    lastQuery = 0;
+    allNotesCache = null;
+  }
+
+  return {
+    execute: execute,
+    getAllNotesCached: getAllNotesCached,
+    invalidateNotesCache: invalidateNotesCache,
+    cleanup: cleanup
+  };
+}, ['AI', 'DB', 'Net', 'Config', 'StateManager']);
+<!-- NOOMIUM_MODULE_END TextSearchStrategy -->
+
+<!-- NOOMIUM_MODULE_START FocusSearchStrategy -->
+/**
+ * Стратегия поиска по вектору фокуса (режим FOCUS).
+ * 
+ * Отвечает за:
+ * - Поиск похожих заметок по вектору закреплённой заметки
+ * - Отправку вектора в сеть как поисковый запрос
+ * - Throttle для предотвращения спама запросов при быстром "дрейфе"
+ * - Объединение локальных и сетевых результатов в единый список
+ * 
+ * Архитектурные решения:
+ * - **Throttle 1.5с:** защита от rate limit при быстром переключении фокуса
+ * - **Единый список focus:** результаты не делятся на local/world/seren
+ * - **MAX_RESULTS_PER_LIST:** защита от тормозов UI
+ * - **AbortController:** отмена предыдущего поиска при смене фокуса
+ * 
+ * @module FocusSearchStrategy
+ */
+DI.register('FocusSearchStrategy', function(AI, DB, Net, Config, StateManager) {
+
+  /**
+   * Максимальное количество результатов в списке focus.
+   * @type {number}
+   */
+  var MAX_RESULTS_PER_LIST = 100;
+
+  /**
+   * Задержка throttle для сетевых запросов (1.5 секунды).
+   * @type {number}
+   */
+  var THROTTLE_DELAY = 1500;
+
+  /**
+   * Контроллер для отмены предыдущего поиска.
+   * @type {AbortController | null}
+   */
+  var searchController = null;
+
+  /**
+   * Timestamp последнего сетевого запроса (для throttle).
+   * @type {number}
+   */
+  var lastRequestTime = 0;
+
+  /**
+   * Отложенный вектор для отправки после throttle.
+   * @type {Vector | null}
+   */
+  var pendingVector = null;
+
+  /**
+   * ID таймера throttle.
+   * @type {number | null}
+   */
+  var throttleTimer = null;
+
+  /**
+   * Кэш всех локальных заметок.
+   * @type {Note[] | null}
+   */
+  var allNotesCache = null;
+
+  /**
+   * Timestamp последнего обновления кэша.
+   * @type {number}
+   */
+  var allNotesCacheTime = 0;
+
+  /**
+   * Время жизни кэша (5 минут).
+   * @type {number}
+   */
+  var ALL_NOTES_TTL = 5 * 60 * 1000;
+
+  /**
+   * Возвращает все заметки из базы, используя кэш.
+   * @returns {Promise<Note[]>}
+   */
+  function getAllNotesCached() {
+    var now = Date.now();
+    if (allNotesCache && (now - allNotesCacheTime < ALL_NOTES_TTL)) {
+      return Promise.resolve(allNotesCache);
+    }
+    return DB.all().then(function(notes) {
+      allNotesCache = notes;
+      allNotesCacheTime = now;
+      return notes;
+    });
+  }
+
+  /**
+   * Сбрасывает кэш заметок.
+   * @returns {void}
+   */
+  function invalidateNotesCache() {
+    allNotesCache = null;
+  }
+
+  /**
+   * Отправляет вектор в сеть с throttle.
+   * Если запрос был менее 1.5с назад, откладывает отправку.
+   * 
+   * @param {Vector} vector - Вектор для отправки.
+   * @returns {void}
+   */
+  function sendWithThrottle(vector) {
+    var now = Date.now();
+    
+    // Если прошло достаточно времени, отправляем сразу
+    if (now - lastRequestTime >= THROTTLE_DELAY) {
+      lastRequestTime = now;
+      var st = StateManager.getState();
+      if (st.netAuthorized && Net && typeof Net.send === 'function') {
+        Net.send(vector);
+      }
+      pendingVector = null;
+      return;
+    }
+    
+    // Иначе откладываем
+    pendingVector = vector;
+    if (throttleTimer) clearTimeout(throttleTimer);
+    
+    throttleTimer = setTimeout(function() {
+      if (pendingVector) {
+        lastRequestTime = Date.now();
+        var st = StateManager.getState();
+        if (st.netAuthorized && Net && typeof Net.send === 'function') {
+          Net.send(pendingVector);
+        }
+        pendingVector = null;
+      }
+      throttleTimer = null;
+    }, THROTTLE_DELAY - (now - lastRequestTime));
+  }
+
+  /**
+   * Выполняет поиск по вектору фокуса.
+   * 
+   * Алгоритм:
+   * 1. Отправляет вектор в сеть (с throttle)
+   * 2. Ищет похожие заметки в локальной базе
+   * 3. Получает ответы из сети
+   * 4. Объединяет и сортирует по score
+   * 5. Возвращает единый список focus
+   * 
+   * @param {Vector} vector - Вектор закреплённой заметки.
+   * @returns {Promise<Object>} Объект с lists для dispatch.
+   */
+  function execute(vector) {
+    if (!vector || !AI.ready()) {
+      return Promise.resolve({ lists: { local: [], world: [], seren: [], focus: [] } });
     }
 
-    return {
-      /**
-       * Выполняет семантический поиск.
-       * @param {string} text
-       * @param {boolean} [force]
-       * @returns {Promise<void>}
-       */
-      search: search,
+    // Отменяем предыдущий поиск
+    if (searchController) {
+      searchController.abort();
+    }
+    searchController = new AbortController();
+    var signal = searchController.signal;
 
-      /**
-       * Поиск по готовому вектору (для фокуса).
-       * @param {Vector} vector
-       * @returns {Promise<void>}
-       */
-      searchByVector: searchByVector,
+    // Отправляем вектор в сеть с throttle
+    sendWithThrottle(vector);
 
-      /**
-       * Сохраняет и публикует заметку.
-       * @param {string} text
-       * @param {SendMode} mode
-       * @param {string} [parentId]
-       * @returns {Promise<void>}
-       */
-      send: send,
+    return getAllNotesCached().then(function(notes) {
+      if (signal.aborted) return null;
 
-      /**
-       * Возвращает режим отправки.
-       * @returns {SendMode}
-       */
-      getSendMode: getSendMode,
+      // Подготовка локальных кандидатов
+      var localCandidates = [];
+      var localDataMap = new Map();
+      for (var i = 0; i < notes.length; i++) {
+        if (notes[i] && notes[i].vector) {
+          localCandidates.push({ id: notes[i].id, vector: notes[i].vector });
+          localDataMap.set(notes[i].id, notes[i]);
+        }
+      }
 
-      /**
-       * Устанавливает режим отправки.
-       * @param {SendMode} mode
-       * @returns {void}
-       */
-      setSendMode: setSendMode,
+      // Запрос в AI для локальных заметок
+      var processLocal = localCandidates.length > 0 
+        ? AI.cosineBatch(vector, localCandidates, signal) 
+        : Promise.resolve([]);
 
-      /**
-       * Проверяет, идёт ли отправка.
-       * @returns {boolean}
-       */
-      isSending: isSending,
+      return processLocal.then(function(localScores) {
+        if (signal.aborted) return null;
 
-      /**
-       * Возвращает кэш всех заметок.
-       * @returns {Promise<Note[]>}
-       */
-      getAllNotesCached: getAllNotesCached,
+        // Формирование списка локальных результатов
+        var localScored = [];
+        for (var k = 0; k < localScores.length; k++) {
+          var note = localDataMap.get(localScores[k].id);
+          if (note) {
+            localScored.push({
+              id: note.id,
+              text: note.text,
+              vector: note.vector,
+              score: localScores[k].score,
+              shared: note.shared,
+              createdAt: note.createdAt,
+              parentId: note.parentId,
+              children: note.children
+            });
+          }
+        }
 
-      /**
-       * Сбрасывает кэш заметок.
-       * @returns {void}
-       */
-      invalidateNotesCache: invalidateNotesCache,
+        // Получение активных ответов из сети
+        var state = StateManager.getState();
+        var worldAnswers = state.netAuthorized && Net ? Net.activeAnswers() : [];
+        var worldScored = [];
+        for (var j = 0; j < worldAnswers.length; j++) {
+          var answer = worldAnswers[j];
+          if (answer && typeof answer.score === 'number') {
+            worldScored.push({
+              id: answer.id,
+              text: answer.text,
+              vector: answer.vector,
+              score: answer.score,
+              shared: true,
+              peer: answer.peer,
+              createdAt: answer.createdAt,
+              parentId: answer.parentId,
+              children: answer.children
+            });
+          }
+        }
 
-      /**
-       * Инициализирует сервис.
-       * @returns {void}
-       */
-      init: init
-    };
-  }, ['AI', 'DB', 'Net', 'Config', 'Bus', 'StateManager', 'I18n', 'Toast', 'Logger', 'Utils']);
+        // В режиме фокуса всё объединяем в одну ленту
+        var combined = localScored.concat(worldScored)
+          .sort(function(a, b) { return b.score - a.score; })
+          .slice(0, MAX_RESULTS_PER_LIST);
+
+        return {
+          lists: {
+            local: [],
+            world: [],
+            seren: [],
+            focus: combined
+          }
+        };
+      });
+    }).catch(function(err) {
+      if (signal.aborted) return null;
+      console.warn('[FocusSearchStrategy] Search error:', err);
+      return { lists: { local: [], world: [], seren: [], focus: [] } };
+    }).finally(function() {
+      searchController = null;
+    });
+  }
+
+  /**
+   * Очищает состояние стратегии.
+   * @returns {void}
+   */
+  function cleanup() {
+    if (searchController) {
+      searchController.abort();
+      searchController = null;
+    }
+    if (throttleTimer) {
+      clearTimeout(throttleTimer);
+      throttleTimer = null;
+    }
+    pendingVector = null;
+    lastRequestTime = 0;
+    allNotesCache = null;
+  }
+
+  return {
+    execute: execute,
+    getAllNotesCached: getAllNotesCached,
+    invalidateNotesCache: invalidateNotesCache,
+    cleanup: cleanup
+  };
+}, ['AI', 'DB', 'Net', 'Config', 'StateManager']);
+<!-- NOOMIUM_MODULE_END FocusSearchStrategy -->
+
+<!-- NOOMIUM_MODULE_START SearchCoordinator -->
+/**
+ * Координатор поисковых стратегий.
+ * 
+ * Отвечает за:
+ * - Подписку на события смены контекста (ввод текста, фокус, очистка)
+ * - Выбор стратегии на основе текущего uiMode
+ * - Вызов StateManager.dispatch для переходов между режимами
+ * - Делегирование работы стратегиям и передачу результатов обратно
+ * 
+ * Архитектурные решения:
+ * - **Event-driven:** реагирует на события Bus, а не вызывается напрямую
+ * - **State machine aware:** использует StateManager.dispatch для переходов
+ * - **Strategy pattern:** делегирует работу LiveStream/TextSearch/FocusSearch
+ * - **AbortController:** все подписки привязаны к signal для автоочистки
+ * 
+ * @module SearchCoordinator
+ */
+DI.register('SearchCoordinator', function(
+  Bus, StateManager, LiveStreamStrategy, TextSearchStrategy, FocusSearchStrategy
+) {
+
+  /**
+   * Контроллер для управления всеми подписками.
+   * @type {AbortController | null}
+   */
+  var abortController = null;
+
+  /**
+   * Инициализирует координатор: подписывается на события и запускает начальную стратегию.
+   * 
+   * @returns {void}
+   */
+  function init() {
+    if (abortController) return; // Уже инициализирован
+    
+    abortController = new AbortController();
+    var signal = abortController.signal;
+
+    // Подписка на запрос поиска из редактора
+    Bus.subscribe('editor:search-request', function(payload) {
+      var state = StateManager.getState();
+      var editor = document.getElementById('ed-ta');
+      var text = editor ? editor.value.trim() : '';
+      
+      if (text) {
+        // Есть текст → переход в SEARCH
+        StateManager.dispatch('to-search');
+        executeTextSearch(text, payload && payload.force);
+      } else if (state.uiMode === 'focus') {
+        // Нет текста, но есть фокус → выполняем поиск по вектору фокуса
+        executeFocusSearch(state.focusedItem.vector);
+      } else {
+        // Нет текста и фокуса → переход в IDLE
+        StateManager.dispatch('to-idle');
+        LiveStreamStrategy.start();
+      }
+    }, signal);
+
+    // Подписка на завершение отправки заметки (нужно обновить списки)
+    Bus.subscribe('editor:send-complete', function() {
+      var state = StateManager.getState();
+      var editor = document.getElementById('ed-ta');
+      var text = editor ? editor.value.trim() : '';
+      
+      if (state.uiMode === 'search' && text) {
+        executeTextSearch(text, true);
+      } else if (state.uiMode === 'focus' && state.focusedItem) {
+        executeFocusSearch(state.focusedItem.vector);
+      }
+    }, signal);
+
+    // Подписка на stream-события для обновления streamData
+    Bus.subscribe('net:stream-event', function(payload) {
+      if (!payload || !payload.note) return;
+      var state = StateManager.getState();
+      
+      if (state.uiMode === 'idle') {
+        var newData = LiveStreamStrategy.addStreamItem(state.streamData, payload.note);
+        StateManager.dispatch('update-stream', { streamData: newData });
+      }
+    }, signal);
+
+    // Подписка на отключение пиров для очистки streamData
+    Bus.subscribe('net:peer-offline', function(payload) {
+      if (!payload || !payload.pubkey) return;
+      var state = StateManager.getState();
+      
+      if (state.uiMode === 'idle') {
+        var filteredData = LiveStreamStrategy.removePeerItems(state.streamData, payload.pubkey);
+        StateManager.dispatch('update-stream', { streamData: filteredData });
+      }
+    }, signal);
+
+    // Подписка на изменения StateManager для реакции на переходы
+    var stateUnsubscribe = StateManager.subscribe(function(newState) {
+      // Реагируем на смену uiMode
+      if (newState.uiMode === 'idle') {
+        LiveStreamStrategy.start();
+      } else {
+        LiveStreamStrategy.stop();
+      }
+    });
+    
+    // Регистрируем отписку через signal
+    signal.addEventListener('abort', function() {
+      stateUnsubscribe();
+    }, { once: true });
+
+    // Запуск начальной стратегии на основе текущего состояния
+    var initialState = StateManager.getState();
+    if (initialState.uiMode === 'idle') {
+      LiveStreamStrategy.start();
+    }
+  }
+
+  /**
+   * Выполняет текстовый поиск через TextSearchStrategy.
+   * Результат передаётся через dispatch('update-lists').
+   * 
+   * @param {string} text - Поисковый запрос.
+   * @param {boolean} [force=false] - Принудительная отправка в сеть.
+   * @returns {void}
+   */
+  function executeTextSearch(text, force) {
+    TextSearchStrategy.execute(text, force).then(function(result) {
+      if (result && result.lists) {
+        StateManager.dispatch('update-lists', { lists: result.lists });
+      }
+    });
+  }
+
+  /**
+   * Выполняет поиск по вектору фокуса через FocusSearchStrategy.
+   * Результат передаётся через dispatch('update-lists').
+   * 
+   * @param {Vector} vector - Вектор закреплённой заметки.
+   * @returns {void}
+   */
+  function executeFocusSearch(vector) {
+    FocusSearchStrategy.execute(vector).then(function(result) {
+      if (result && result.lists) {
+        StateManager.dispatch('update-lists', { lists: result.lists });
+      }
+    });
+  }
+
+  /**
+   * Публичный метод для запуска текстового поиска извне.
+   * Используется EditorComponent при вводе текста.
+   * 
+   * @param {string} text - Поисковый запрос.
+   * @param {boolean} [force=false] - Принудительная отправка в сеть.
+   * @returns {Promise<void>}
+   */
+  function search(text, force) {
+    var trimmed = (text || '').trim();
+    
+    if (trimmed) {
+      StateManager.dispatch('to-search');
+      return TextSearchStrategy.execute(trimmed, force).then(function(result) {
+        if (result && result.lists) {
+          StateManager.dispatch('update-lists', { lists: result.lists });
+        }
+      });
+    } else {
+      var state = StateManager.getState();
+      if (state.uiMode === 'focus' && state.focusedItem) {
+        return executeFocusSearch(state.focusedItem.vector);
+      } else {
+        StateManager.dispatch('to-idle');
+        LiveStreamStrategy.start();
+        return Promise.resolve();
+      }
+    }
+  }
+
+  /**
+   * Публичный метод для запуска поиска по вектору извне.
+   * Используется при активации фокуса.
+   * 
+   * @param {Vector} vector - Вектор для поиска.
+   * @returns {Promise<void>}
+   */
+  function searchByVector(vector) {
+    return executeFocusSearch(vector);
+  }
+
+  /**
+   * Уничтожает координатор: отписывается от всех событий.
+   * 
+   * @returns {void}
+   */
+  function destroy() {
+    if (abortController) {
+      abortController.abort();
+      abortController = null;
+    }
+    LiveStreamStrategy.stop();
+    TextSearchStrategy.cleanup();
+    FocusSearchStrategy.cleanup();
+  }
+
+  return {
+    init: init,
+    destroy: destroy,
+    search: search,
+    searchByVector: searchByVector
+  };
+}, ['Bus', 'StateManager', 'LiveStreamStrategy', 'TextSearchStrategy', 'FocusSearchStrategy']);
+<!-- NOOMIUM_MODULE_END SearchCoordinator -->
+  
+<!-- NOOMIUM_MODULE_START SearchService -->
+/**
+ * Фасад для обратной совместимости с существующим API.
+ * 
+ * Делегирует всю работу SearchCoordinator и стратегиям.
+ * Сохраняет публичный API для компонентов, которые ещё не мигрированы.
+ * 
+ * @module SearchService
+ */
+DI.register('SearchService', function(
+  SearchCoordinator, TextSearchStrategy, FocusSearchStrategy, StateManager, Bus, I18n, Toast, Logger, Utils, AI, Net, DB
+) {
+
+  /**
+   * Инициализирует сервис (запускает координатор).
+   * @returns {void}
+   */
+  function init() {
+    SearchCoordinator.init();
+    
+    // Подписка на изменения БД для сброса кэша
+    Bus.on('db:change', function() {
+      TextSearchStrategy.invalidateNotesCache();
+      FocusSearchStrategy.invalidateNotesCache();
+    });
+  }
+
+  /**
+   * Выполняет семантический поиск (делегирование в Coordinator).
+   * 
+   * @param {string} text - Поисковый запрос.
+   * @param {boolean} [force=false] - Принудительная отправка в сеть.
+   * @returns {Promise<void>}
+   */
+  function search(text, force) {
+    return SearchCoordinator.search(text, force);
+  }
+
+  /**
+   * Поиск по готовому вектору (делегирование в Coordinator).
+   * 
+   * @param {Vector} vector - Вектор запроса.
+   * @returns {Promise<void>}
+   */
+  function searchByVector(vector) {
+    return SearchCoordinator.searchByVector(vector);
+  }
+
+  /**
+   * Сохраняет новую мысль в локальную базу и опционально публикует в сеть.
+   * 
+   * @param {string} text - Текст мысли.
+   * @param {SendMode} mode - Режим отправки ('private' или 'world').
+   * @param {string} [parentId] - ID родительской заметки.
+   * @returns {Promise<void>}
+   */
+  function send(text, mode, parentId) {
+    if (StateManager.getState().sendLock) return Promise.resolve();
+
+    var trimmedText = (text || '').trim();
+    if (!trimmedText) {
+      Toast.show('warn', I18n.t('toast.empty'));
+      return Promise.resolve();
+    }
+
+    if (!AI.ready()) {
+      Toast.show('err', I18n.t('toast.ai.notready'));
+      return Promise.resolve();
+    }
+
+    var state = StateManager.getState();
+    if (mode === 'world' && !state.netAuthorized) {
+      if (state.requestNetworkAuth) {
+        state.requestNetworkAuth(function() {
+          send(trimmedText, mode, parentId);
+        });
+      }
+      return Promise.resolve();
+    }
+
+    var isWorld = mode === 'world';
+    StateManager.setState({ sendLock: true });
+
+    var newId = 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+    return AI.embed(trimmedText)
+      .then(function(vector) {
+        var noteObj = {
+          id: newId,
+          text: trimmedText,
+          vector: vector,
+          shared: !!isWorld,
+          createdAt: Date.now()
+        };
+        if (parentId) noteObj.parentId = parentId;
+        return DB.put(noteObj).then(function() { return noteObj; });
+      })
+      .then(function(savedNote) {
+        if (parentId) {
+          DB.addChild(parentId, savedNote.id);
+        }
+        if (savedNote.shared && Net && typeof Net.publishNote === 'function') {
+          Net.publishNote(savedNote, parentId);
+        }
+        Toast.show('ok', isWorld ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
+      })
+      .catch(function(err) {
+        Toast.show('err', String(err && err.message || err) || 'Send failed');
+        if (Logger) Logger.warn('SearchService.send error', String(err && err.message || err));
+      })
+      .finally(function() {
+        StateManager.setState({ sendLock: false });
+      });
+  }
+
+  /**
+   * Возвращает режим отправки.
+   * @returns {SendMode}
+   */
+  function getSendMode() {
+    return StateManager.getState().sendMode;
+  }
+
+  /**
+   * Устанавливает режим отправки.
+   * @param {SendMode} mode - Новый режим.
+   * @returns {void}
+   */
+  function setSendMode(mode) {
+    StateManager.setState({ sendMode: mode });
+  }
+
+  /**
+   * Проверяет, заблокирована ли кнопка отправки.
+   * @returns {boolean}
+   */
+  function isSending() {
+    return StateManager.getState().sendLock;
+  }
+
+  /**
+   * Возвращает кэш всех заметок.
+   * @returns {Promise<Note[]>}
+   */
+  function getAllNotesCached() {
+    return TextSearchStrategy.getAllNotesCached();
+  }
+
+  /**
+   * Сбрасывает кэш заметок.
+   * @returns {void}
+   */
+  function invalidateNotesCache() {
+    TextSearchStrategy.invalidateNotesCache();
+    FocusSearchStrategy.invalidateNotesCache();
+  }
+
+  return {
+    init: init,
+    search: search,
+    searchByVector: searchByVector,
+    send: send,
+    getSendMode: getSendMode,
+    setSendMode: setSendMode,
+    isSending: isSending,
+    getAllNotesCached: getAllNotesCached,
+    invalidateNotesCache: invalidateNotesCache
+  };
+}, ['SearchCoordinator', 'TextSearchStrategy', 'FocusSearchStrategy', 'StateManager', 'Bus', 'I18n', 'Toast', 'Logger', 'Utils', 'AI', 'Net', 'DB']);
 <!-- NOOMIUM_MODULE_END SearchService -->
 
 <!-- NOOMIUM_MODULE_START EditorComponent -->
