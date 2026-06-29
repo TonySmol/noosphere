@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.5">
+<meta name="app-version" content="1.4.6">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -762,6 +762,7 @@ kbd{padding:2px 6px;background:var(--surface-3);border:1px solid var(--line);
  * @description Внутренняя запись о подписке.
  * @property {function(*): void} handler - Обработчик события.
  * @property {AbortSignal} [signal] - Опциональный сигнал для автоотписки.
+ * @property {function(): void} [abortHandler] - Ссылка на обработчик abort для очистки.
  */
 
 DI.register('Bus', function() {
@@ -830,6 +831,9 @@ DI.register('Bus', function() {
         signal.removeEventListener('abort', onAbort);
       };
       
+      // 🔑 ИСПРАВЛЕНИЕ: сохраняем ссылку на обработчик для ручной очистки
+      record.abortHandler = onAbort;
+      
       signal.addEventListener('abort', onAbort, { once: true });
     }
     
@@ -862,7 +866,7 @@ DI.register('Bus', function() {
           var record = subMap.get(targetId);
           
           // Очищаем listener abort, если был
-          if (record.signal) {
+          if (record.signal && record.abortHandler) {
             record.signal.removeEventListener('abort', record.abortHandler);
           }
           
@@ -894,7 +898,9 @@ DI.register('Bus', function() {
     
     if (foundId !== null) {
       var record = subMap.get(foundId);
-      if (record.signal) {
+      
+      // Очищаем listener abort, если был
+      if (record.signal && record.abortHandler) {
         record.signal.removeEventListener('abort', record.abortHandler);
       }
       
@@ -960,7 +966,7 @@ DI.register('Bus', function() {
     // Очищаем все abort listeners
     map.forEach(function(subMap) {
       subMap.forEach(function(record) {
-        if (record.signal) {
+        if (record.signal && record.abortHandler) {
           record.signal.removeEventListener('abort', record.abortHandler);
         }
       });
@@ -4494,318 +4500,336 @@ DI.register('Bus', function() {
 <!-- NOOMIUM_MODULE_END SearchService -->
 
 <!-- NOOMIUM_MODULE_START EditorComponent -->
-  DI.register('EditorComponent', function(Bus, I18n, Utils, SearchService, Config, StateManager, Net) {
+/**
+ * Компонент редактора мыслей.
+ * 
+ * Отвечает за:
+ * - Поле ввода текста (textarea)
+ * - Счётчик символов
+ * - Переключатель режима отправки (Личное/Мир)
+ * - Кнопку отправки с индикатором загрузки
+ * - Debounce поисковых запросов
+ * - Управление Live Stream при вводе текста
+ * 
+ * Безопасность:
+ * - Все пользовательские данные вставляются через textContent (XSS-safe).
+ * - Placeholder экранируется через Utils.esc при генерации HTML.
+ * 
+ * Управление памятью:
+ * - Использует AbortController для автоматической отписки при destroy().
+ * - Все DOM-обработчики привязываются к signal.
+ * - Таймеры (debounce) очищаются при destroy().
+ * 
+ * @module EditorComponent
+ */
+DI.register('EditorComponent', function(Bus, I18n, Utils, SearchService, Config, StateManager, Net) {
 
-    /** @type {HTMLTextAreaElement | null} */
-    var editor = null;
+  /** @type {HTMLTextAreaElement | null} */
+  var editor = null;
 
-    /** @type {HTMLElement | null} */
-    var counter = null;
+  /** @type {HTMLElement | null} */
+  var counter = null;
 
-    /** @type {HTMLButtonElement | null} */
-    var sendBtn = null;
+  /** @type {HTMLButtonElement | null} */
+  var sendBtn = null;
 
-    /** @type {HTMLElement | null} */
-    var modeToggle = null;
+  /** @type {HTMLElement | null} */
+  var modeToggle = null;
 
-    /** @type {number | null} ID таймера debounce для поиска */
-    var searchTimer = null;
+  /** @type {number | null} ID таймера debounce для поиска */
+  var searchTimer = null;
 
-    /** @type {function(): void | null} Обработчик смены языка */
-    var i18nHandler = null;
+  /** @type {AbortController | null} Контроллер для автоотписки */
+  var abortController = null;
 
-    /** @type {function(): void | null} Ссылка на обработчик ввода текста */
-    var onInput = null;
+  /** @type {function(Event): void | null} Ссылка на обработчик ввода текста */
+  var onInput = null;
 
-    /** @type {function(): void | null} Ссылка на обработчик клика по кнопке отправки */
-    var onSendClick = null;
+  /** @type {function(Event): void | null} Ссылка на обработчик клика по кнопке отправки */
+  var onSendClick = null;
 
-    /** @type {function(MouseEvent): void | null} Ссылка на обработчик переключения режима */
-    var onModeClick = null;
+  /** @type {function(MouseEvent): void | null} Ссылка на обработчик переключения режима */
+  var onModeClick = null;
 
-    /**
-     * Обновляет ссылки на DOM-элементы.
-     * Вызывается при каждом обращении, так как DOM может быть пересоздан после refreshUI.
-     * @returns {void}
-     */
-    function refreshDOM() {
-      editor = document.getElementById('ed-ta');
-      counter = document.getElementById('ed-cnt');
-      sendBtn = document.getElementById('btn-send');
-      modeToggle = document.getElementById('mode-toggle');
+  /**
+   * Обновляет ссылки на DOM-элементы.
+   * Вызывается при каждом обращении, так как DOM может быть пересоздан после refreshUI.
+   * @returns {void}
+   */
+  function refreshDOM() {
+    editor = document.getElementById('ed-ta');
+    counter = document.getElementById('ed-cnt');
+    sendBtn = document.getElementById('btn-send');
+    modeToggle = document.getElementById('mode-toggle');
+  }
+
+  /**
+   * Возвращает текущий текст из поля ввода.
+   * @returns {string}
+   */
+  function getValue() {
+    if (!editor) refreshDOM();
+    return editor ? editor.value : '';
+  }
+
+  /**
+   * Устанавливает текст в поле ввода и обновляет счётчик символов.
+   * @param {string} val - Новый текст.
+   * @returns {void}
+   */
+  function setValue(val) {
+    if (!editor) refreshDOM();
+    if (editor) {
+      editor.value = val;
+      updateCounter();
     }
+  }
 
-    /**
-     * Возвращает текущий текст из поля ввода.
-     * @returns {string}
-     */
-    function getValue() {
-      if (!editor) refreshDOM();
-      return editor ? editor.value : '';
+  /**
+   * Очищает поле ввода.
+   * @returns {void}
+   */
+  function clear() {
+    setValue('');
+  }
+
+  /**
+   * Пересчитывает и отображает количество символов в UI с учетом локализации.
+   * @returns {void}
+   */
+  function updateCounter() {
+    if (!counter) refreshDOM();
+    if (counter) {
+      var value = getValue();
+      counter.textContent = Utils.word('symbols', value.length, I18n.getLang());
     }
+  }
 
-    /**
-     * Устанавливает текст в поле ввода и обновляет счётчик символов.
-     * @param {string} val - Новый текст.
-     * @returns {void}
-     */
-    function setValue(val) {
-      if (!editor) refreshDOM();
-      if (editor) {
-        editor.value = val;
-        updateCounter();
+  /**
+   * Обновляет визуальное состояние переключателя режима отправки (Личное/Мир).
+   * Синхронизирует UI с состоянием SearchService.
+   * 
+   * @param {SendMode} mode - Активный режим ('private' | 'world').
+   * @returns {void}
+   */
+  function updateSendMode(mode) {
+    SearchService.setSendMode(mode);
+    if (!modeToggle) refreshDOM();
+    if (!modeToggle) return;
+    
+    modeToggle.setAttribute('data-mode', mode);
+    var opts = modeToggle.querySelectorAll('.tog-sw-opt');
+    for (var i = 0; i < opts.length; i++) {
+      var opt = opts[i];
+      if (opt.getAttribute('data-v') === mode) {
+        opt.classList.add('on');
+      } else {
+        opt.classList.remove('on');
       }
     }
+  }
 
-    /**
-     * Очищает поле ввода.
-     * @returns {void}
-     */
-    function clear() {
-      setValue('');
+  /**
+   * Переключает визуальное состояние кнопки отправки (иконка / спиннер).
+   * Блокирует кнопку на время отправки для предотвращения дублей.
+   * 
+   * @param {boolean} isSending - true, если идёт процесс отправки.
+   * @returns {void}
+   */
+  function setSendingState(isSending) {
+    if (!sendBtn) refreshDOM();
+    if (!sendBtn) return;
+    
+    if (isSending) {
+      sendBtn.classList.add('sending');
+      sendBtn.disabled = true;
+      sendBtn.innerHTML = SPINNER_SVG;
+    } else {
+      sendBtn.classList.remove('sending');
+      sendBtn.disabled = false;
+      sendBtn.innerHTML = PAPER_PLANE_SVG;
     }
+  }
 
-    /**
-     * Пересчитывает и отображает количество символов в UI с учетом локализации.
-     * @returns {void}
-     */
-    function updateCounter() {
-      if (!counter) refreshDOM();
-      if (counter) {
-        var value = getValue();
-        counter.textContent = Utils.word('symbols', value.length, I18n.getLang());
-      }
+  /**
+   * Применяет переводы к элементам редактора (placeholder, кнопки, режимы).
+   * @returns {void}
+   */
+  function applyI18n() {
+    if (!editor) refreshDOM();
+    if (editor) {
+      editor.placeholder = I18n.t('ed.placeholder');
     }
-
-    /**
-     * Обновляет визуальное состояние переключателя режима отправки (Личное/Мир).
-     * Синхронизирует UI с состоянием SearchService.
-     * 
-     * @param {SendMode} mode - Активный режим ('private' | 'world').
-     * @returns {void}
-     */
-    function updateSendMode(mode) {
-      SearchService.setSendMode(mode);
-      if (!modeToggle) refreshDOM();
-      if (!modeToggle) return;
-      
-      modeToggle.setAttribute('data-mode', mode);
+    updateCounter();
+    
+    if (!modeToggle) refreshDOM();
+    if (modeToggle) {
       var opts = modeToggle.querySelectorAll('.tog-sw-opt');
       for (var i = 0; i < opts.length; i++) {
         var opt = opts[i];
-        if (opt.getAttribute('data-v') === mode) {
-          opt.classList.add('on');
-        } else {
-          opt.classList.remove('on');
+        var v = opt.getAttribute('data-v');
+        if (v === 'private') opt.textContent = I18n.t('btn.private');
+        else if (v === 'world') opt.textContent = I18n.t('btn.public');
+      }
+    }
+    
+    if (sendBtn) {
+      sendBtn.setAttribute('aria-label', I18n.t('btn.send'));
+    }
+  }
+
+  /**
+   * Обрабатывает клик по кнопке отправки:
+   * 1. Сбрасывает таймер поиска.
+   * 2. Извлекает parentId из StateManager (если активен фокус).
+   * 3. Запускает сохранение через SearchService.
+   * 4. Очищает поле и эмитит событие завершения.
+   * 
+   * @returns {void}
+   */
+  function handleSend() {
+    // Сбрасываем отложенный поиск, чтобы избежать гонки с отправкой
+    if (searchTimer) {
+      clearTimeout(searchTimer);
+      searchTimer = null;
+    }
+
+    var text = getValue().trim();
+    var mode = SearchService.getSendMode();
+    var state = StateManager.getState();
+    var parentId = null;
+
+    // Логика Parent/Child: если активен фокус, привязываем заметку к родителю
+    if (state.focusMode && state.focusedItem && state.focusedItem.id) {
+      parentId = state.focusedItem.id;
+    }
+
+    setSendingState(true);
+
+    SearchService.send(text, mode, parentId)
+      .then(function() {
+        clear();
+        if (Bus && Bus.emit) {
+          try { Bus.emit('editor:send-complete'); } catch (_) { /* ignore */ }
         }
-      }
-    }
+      })
+      .catch(function() {
+        /* Ошибки уже обработаны в SearchService через Toast */
+      })
+      .finally(function() {
+        setSendingState(false);
+      });
+  }
 
-    /**
-     * Переключает визуальное состояние кнопки отправки (иконка / спиннер).
-     * Блокирует кнопку на время отправки для предотвращения дублей.
-     * 
-     * @param {boolean} isSending - true, если идёт процесс отправки.
-     * @returns {void}
-     */
-    function setSendingState(isSending) {
-      if (!sendBtn) refreshDOM();
-      if (!sendBtn) return;
-      
-      if (isSending) {
-        sendBtn.classList.add('sending');
-        sendBtn.disabled = true;
-        sendBtn.innerHTML = SPINNER_SVG;
-      } else {
-        sendBtn.classList.remove('sending');
-        sendBtn.disabled = false;
-        sendBtn.innerHTML = PAPER_PLANE_SVG;
-      }
-    }
+  /**
+   * Навешивает обработчики событий на DOM-элементы редактора.
+   * Реализует логику управления Live Stream и debounce поиска.
+   * Все обработчики привязываются к AbortSignal для автоматической очистки.
+   * 
+   * @returns {void}
+   */
+  function bindDOMEvents() {
+    refreshDOM();
+    
+    if (!abortController) return;
+    var signal = abortController.signal;
 
-    /**
-     * Применяет переводы к элементам редактора (placeholder, кнопки, режимы).
-     * @returns {void}
-     */
-    function applyI18n() {
-      if (!editor) refreshDOM();
-      if (editor) {
-        editor.placeholder = I18n.t('ed.placeholder');
-      }
-      updateCounter();
-      
-      if (!modeToggle) refreshDOM();
-      if (modeToggle) {
-        var opts = modeToggle.querySelectorAll('.tog-sw-opt');
-        for (var i = 0; i < opts.length; i++) {
-          var opt = opts[i];
-          var v = opt.getAttribute('data-v');
-          if (v === 'private') opt.textContent = I18n.t('btn.private');
-          else if (v === 'world') opt.textContent = I18n.t('btn.public');
+    if (editor) {
+      onInput = function() {
+        updateCounter();
+        var val = getValue().trim();
+        var state = StateManager.getState();
+
+        // Если пользователь начал печатать, немедленно останавливаем Live Stream
+        // для корректного переключения UI в режим поиска
+        if (val && state.streamActive && Net && typeof Net.stopLiveStream === 'function') {
+          Net.stopLiveStream();
+          StateManager.setState({ streamActive: false });
         }
-      }
-      
-      if (sendBtn) {
-        sendBtn.setAttribute('aria-label', I18n.t('btn.send'));
-      }
-    }
 
-    /**
-     * Обрабатывает клик по кнопке отправки:
-     * 1. Сбрасывает таймер поиска.
-     * 2. Извлекает parentId из StateManager (если активен фокус).
-     * 3. Запускает сохранение через SearchService.
-     * 4. Очищает поле и эмитит событие завершения.
-     * 
-     * @returns {void}
-     */
-    function handleSend() {
-      // Сбрасываем отложенный поиск, чтобы избежать гонки с отправкой
-      if (searchTimer) {
-        clearTimeout(searchTimer);
-        searchTimer = null;
-      }
-
-      var text = getValue().trim();
-      var mode = SearchService.getSendMode();
-      var state = StateManager.getState();
-      var parentId = null;
-
-      // Логика Parent/Child: если активен фокус, привязываем заметку к родителю
-      if (state.focusMode && state.focusedItem && state.focusedItem.id) {
-        parentId = state.focusedItem.id;
-      }
-
-      setSendingState(true);
-
-      SearchService.send(text, mode, parentId)
-        .then(function() {
-          clear();
+        if (searchTimer) clearTimeout(searchTimer);
+        
+        // Debounce запроса на поиск
+        searchTimer = setTimeout(function() {
           if (Bus && Bus.emit) {
-            try { Bus.emit('editor:send-complete'); } catch (_) { /* ignore */ }
+            try { Bus.emit('editor:search-request', { force: false }); } catch (_) { /* ignore */ }
           }
-        })
-        .catch(function() {
-          /* Ошибки уже обработаны в SearchService через Toast */
-        })
-        .finally(function() {
-          setSendingState(false);
-        });
+        }, Config.get('debounce', 800));
+      };
+      editor.addEventListener('input', onInput, { signal: signal });
     }
 
-    /**
-     * Навешивает обработчики событий на DOM-элементы редактора.
-     * Реализует логику управления Live Stream и debounce поиска.
-     * 
-     * @returns {void}
-     */
-    function bindDOMEvents() {
-      refreshDOM();
-
-      if (editor) {
-        onInput = function() {
-          updateCounter();
-          var val = getValue().trim();
-          var state = StateManager.getState();
-
-          // Если пользователь начал печатать, немедленно останавливаем Live Stream
-          // для корректного переключения UI в режим поиска
-          if (val && state.streamActive && Net && typeof Net.stopLiveStream === 'function') {
-            Net.stopLiveStream();
-            StateManager.setState({ streamActive: false });
-          }
-
-          if (searchTimer) clearTimeout(searchTimer);
-          
-          // Debounce запроса на поиск
-          searchTimer = setTimeout(function() {
-            if (Bus && Bus.emit) {
-              try { Bus.emit('editor:search-request', { force: false }); } catch (_) { /* ignore */ }
-            }
-          }, Config.get('debounce', 800));
-        };
-        editor.addEventListener('input', onInput);
-      }
-
-      if (sendBtn) {
-        onSendClick = function() { handleSend(); };
-        sendBtn.addEventListener('click', onSendClick);
-      }
-
-      if (modeToggle) {
-        onModeClick = function(e) {
-          var opt = e.target.closest('.tog-sw-opt');
-          if (opt) {
-            var value = opt.getAttribute('data-v');
-            if (value) updateSendMode(value);
-          }
-        };
-        modeToggle.addEventListener('click', onModeClick);
-      }
+    if (sendBtn) {
+      onSendClick = function() { handleSend(); };
+      sendBtn.addEventListener('click', onSendClick, { signal: signal });
     }
 
-    /**
-     * Снимает обработчики событий и обнуляет ссылки на DOM.
-     * Критично для предотвращения утечек памяти при refreshUI.
-     * 
-     * @returns {void}
-     */
-    function unbindDOMEvents() {
-      if (editor && onInput) {
-        try { editor.removeEventListener('input', onInput); } catch (_) { /* ignore */ }
-      }
-      if (sendBtn && onSendClick) {
-        try { sendBtn.removeEventListener('click', onSendClick); } catch (_) { /* ignore */ }
-      }
-      if (modeToggle && onModeClick) {
-        try { modeToggle.removeEventListener('click', onModeClick); } catch (_) { /* ignore */ }
-      }
-      editor = counter = sendBtn = modeToggle = null;
-      onInput = onSendClick = onModeClick = null;
-      if (searchTimer) {
-        clearTimeout(searchTimer);
-        searchTimer = null;
-      }
+    if (modeToggle) {
+      onModeClick = function(e) {
+        var opt = e.target.closest('.tog-sw-opt');
+        if (opt) {
+          var value = opt.getAttribute('data-v');
+          if (value) updateSendMode(value);
+        }
+      };
+      modeToggle.addEventListener('click', onModeClick, { signal: signal });
     }
+  }
 
-    /**
-     * Инициализирует компонент: привязывает события и применяет начальные переводы.
-     * @returns {void}
-     */
-    function init() {
-      bindDOMEvents();
+  /**
+   * Инициализирует компонент: привязывает события и применяет начальные переводы.
+   * Использует AbortController для автоматической отписки при destroy().
+   * @returns {void}
+   */
+  function init() {
+    // Создаём AbortController для автоотписки
+    abortController = new AbortController();
+    var signal = abortController.signal;
+    
+    bindDOMEvents();
 
-      i18nHandler = function() { applyI18n(); };
-      Bus.on('i18n:change', i18nHandler);
+    // Подписка на смену языка с автоотпиской
+    Bus.subscribe('i18n:change', applyI18n, signal);
 
-      var currentMode = SearchService.getSendMode();
-      updateSendMode(currentMode);
-      applyI18n();
+    var currentMode = SearchService.getSendMode();
+    updateSendMode(currentMode);
+    applyI18n();
+  }
+
+  /**
+   * Уничтожает компонент: отписывается от всех событий через AbortController.
+   * Очищает таймеры и DOM-ссылки для предотвращения утечек памяти.
+   * @returns {void}
+   */
+  function destroy() {
+    // Очищаем таймер debounce
+    if (searchTimer) {
+      clearTimeout(searchTimer);
+      searchTimer = null;
     }
-
-    /**
-     * Уничтожает компонент: отвязывает события и отписывается от шины.
-     * @returns {void}
-     */
-    function destroy() {
-      unbindDOMEvents();
-      if (i18nHandler) {
-        try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
-        i18nHandler = null;
-      }
+    
+    // Отписываемся от всех событий через AbortController
+    if (abortController) {
+      abortController.abort(); // Автоматически удаляет все DOM-listeners и Bus-подписки
+      abortController = null;
     }
+    
+    // Очищаем ссылки на DOM
+    editor = counter = sendBtn = modeToggle = null;
+    onInput = onSendClick = onModeClick = null;
+  }
 
-    return {
-      init: init,
-      destroy: destroy,
-      getValue: getValue,
-      setValue: setValue,
-      clear: clear,
-      updateCounter: updateCounter,
-      updateSendMode: updateSendMode,
-      setSendingState: setSendingState
-    };
-  }, ['Bus', 'I18n', 'Utils', 'SearchService', 'Config', 'StateManager', 'Net']);
+  return {
+    init: init,
+    destroy: destroy,
+    getValue: getValue,
+    setValue: setValue,
+    clear: clear,
+    updateCounter: updateCounter,
+    updateSendMode: updateSendMode,
+    setSendingState: setSendingState
+  };
+}, ['Bus', 'I18n', 'Utils', 'SearchService', 'Config', 'StateManager', 'Net']);
 <!-- NOOMIUM_MODULE_END EditorComponent -->
 
 <!-- NOOMIUM_MODULE_START FocusBarComponent -->
