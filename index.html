@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.15">
+<meta name="app-version" content="1.4.16">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -7423,43 +7423,39 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
 /**
  * Компонент вкладки "База" (локальное хранилище заметок).
  * 
+ * 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ЭТАПА 2 (ЭФЕМЕРНОСТЬ):
+ * - **Удалена функция `openNetworkNoteView`** — сетевые заметки больше не отображаются
+ *   в NoteView, так как они не хранятся локально (принцип эфемерности).
+ * - **Удалён fallback на `Net.getNetworkNote`** в `openNoteView`. Если заметки нет
+ *   в локальной БД, показывается тост "Note not found" без попыток найти её в сети.
+ * - **Удалена зависимость `Net`** из DI — компонент больше не взаимодействует
+ *   с сетевым модулем. Это соответствует SRP: BaseViewComponent отвечает только
+ *   за локальные данные.
+ * 
+ * Принцип: "Сетевые заметки живут, пока пир в сети. Локальная база — только свои мысли."
+ * 
  * Ключевые возможности:
  * - **Виртуальный скролл:** рендерит только видимые карточки (POOL_SIZE = 15)
- *   из potentially 100,000+ заметок. Использует absolute positioning и
- *   translateY для позиционирования элементов пула.
- * 
+ *   из potentially 100,000+ заметок.
  * - **NoteView:** полноэкранное модальное окно для просмотра/редактирования
- *   заметки. Поддерживает локальные и сетевые заметки (read-only для сетевых).
- *   Навигация по Parent/Child связям через рекурсивные вызовы openNoteView().
- * 
- * - **Экспорт/Импорт:** сохранение всех заметок в JSON-файл и загрузка из файла
- *   с валидацией структуры и дедупликацией ID.
- * 
- * - **Фильтрация и сортировка:** текстовый поиск по заметкам + сортировка
- *   по дате (новые/старые) или алфавиту.
+ *   **локальных** заметок. Навигация по Parent/Child связям через рекурсивные
+ *   вызовы openNoteView().
+ * - **Экспорт/Импорт:** сохранение всех заметок в JSON-файл и загрузка с валидацией.
+ * - **Фильтрация и сортировка:** текстовый поиск + сортировка по дате или алфавиту.
  * 
  * Архитектурные решения:
- * - **DOM-запросы при каждом рендере:** ссылки на `base-list`, `base-q`,
- *   `base-sort` берутся через `getElementById` при каждом вызове `renderBase()`.
- *   Это защищает от устаревших ссылок после `refreshUI()`.
- * 
- * - **AbortController:** все подписки (Bus, DOM, window) привязаны к единому
- *   сигналу. При `destroy()` достаточно вызвать `abort()` — браузер и Bus
- *   автоматически удалят все listeners. `requestAnimationFrame` отменяется
- *   вручную, NoteView закрывается принудительно.
- * 
- * - **Виртуальный скролл:** пул из 15 DOM-элементов переиспользуется через
- *   `fillBaseItem()`. При скролле вычисляется `startIdx` и элементы пула
- *   перемещаются через `transform: translateY()`.
+ * - **DOM-запросы при каждом рендере:** ссылки на элементы берутся через
+ *   `getElementById` для защиты от устаревания после `refreshUI()`.
+ * - **AbortController:** все подписки привязаны к signal для автоочистки.
+ * - **Виртуальный скролл:** пул из 15 DOM-элементов переиспользуется через `fillBaseItem`.
  * 
  * Безопасность:
  * - Все текстовые данные вставляются через `textContent` (XSS-safe).
- * - `innerHTML` не используется с пользовательскими данными.
  * - Экспорт/импорт валидирует структуру JSON перед записью в БД.
  * 
  * @module BaseViewComponent
  */
-DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast, SearchService, Net) {
+DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast, SearchService) {
   
   /** @type {number} Высота одной карточки в пикселях (включая border) */
   var ITEM_HEIGHT = 100;
@@ -7552,7 +7548,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
    * Безопасность: все текстовые данные вставляются через textContent (XSS-safe).
    * 
    * @param {HTMLDivElement} element - Целевой DOM-узел из пула.
-   * @param {Note} note - Данные заметки.
+   * @param {Note} note - Данные заметки (только локальные).
    * @returns {void}
    */
   function fillBaseItem(element, note) {
@@ -7576,7 +7572,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     tagEl.textContent = note.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
     meta.appendChild(tagEl);
 
-    // 🔑 КЛИКАБЕЛЬНАЯ ссылка на родителя
+    // 🔑 КЛИКАБЕЛЬНАЯ ссылка на родителя (только для локальных заметок)
     if (note.parentId) {
       var parentLink = document.createElement('a');
       parentLink.href = '#';
@@ -7868,86 +7864,16 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     }
   }
 
-  /**
-   * Открывает read-only NoteView для сетевой заметки.
-   * Позволяет пользователям просматривать заметки от пиров и навигировать по цепочке Parent/Child.
-   * 
-   * @param {NetworkNote} netNote - Сетевая заметка из in-memory кэша Net.
-   * @returns {void}
-   */
-  function openNetworkNoteView(netNote) {
-    if (activeNoteView) {
-      closeNoteView(activeNoteView);
-    }
-
-    var nvOverlay = document.createElement('div');
-    nvOverlay.className = 'nv on';
-    document.body.appendChild(nvOverlay);
-    activeNoteView = nvOverlay;
-
-    // Верхний бар (только кнопка закрытия)
-    var topFooter = document.createElement('div');
-    topFooter.className = 'nv-f';
-    var closeBtn = document.createElement('button');
-    closeBtn.className = 'nv-act';
-    closeBtn.textContent = I18n.t('btn.close');
-    closeBtn.onclick = function() { closeNoteView(nvOverlay); };
-    topFooter.appendChild(closeBtn);
-    nvOverlay.appendChild(topFooter);
-
-    // Тело (read-only)
-    var body = document.createElement('div');
-    body.className = 'nv-b';
-
-    var infoRow = document.createElement('div');
-    infoRow.className = 'info-row';
-
-    var peerEl = document.createElement('span');
-    peerEl.className = 'bi-tag';
-    peerEl.textContent = '· ' + netNote.peer;
-    infoRow.appendChild(peerEl);
-
-    // Ссылка на родителя (если есть)
-    if (netNote.parentId) {
-      var parentLink = document.createElement('a');
-      parentLink.href = '#';
-      parentLink.className = 'fi-parent';
-      parentLink.textContent = '↳ ' + I18n.t('note.parent');
-      parentLink.onclick = function(e) {
-        e.preventDefault();
-        closeNoteView(nvOverlay);
-        setTimeout(function() { openNoteView(netNote.parentId); }, 250);
-      };
-      infoRow.appendChild(parentLink);
-    }
-
-    // Индикатор дочерних ответов (если есть)
-    if (netNote.children && netNote.children.length > 0) {
-      var childCount = document.createElement('span');
-      childCount.className = 'fi-children';
-      childCount.textContent = '💬 ' + netNote.children.length + ' ' + I18n.t('note.children');
-      infoRow.appendChild(childCount);
-    }
-
-    body.appendChild(infoRow);
-
-    var textEl = document.createElement('div');
-    textEl.className = 'nv-text';
-    textEl.textContent = netNote.text;
-    body.appendChild(textEl);
-
-    nvOverlay.appendChild(body);
-
-    // Escape handler привязывается к signal для автоочистки
-    var signal = abortController ? abortController.signal : null;
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') closeNoteView(nvOverlay);
-    }, { signal: signal });
-  }
+  // 🔑 УДАЛЕНО: openNetworkNoteView — сетевые заметки не отображаются в NoteView
+  // (принцип эфемерности: они живут только в Live Stream, пока пир в сети)
 
   /**
    * Открывает полноэкранное модальное окно редактирования заметки (NoteView).
-   * Поддерживает как локальные, так и сетевые заметки (через openNetworkNoteView).
+   * 
+   * 🔑 ИЗМЕНЕНИЕ ЭТАПА 2:
+   * - Работает **только с локальными заметками** из БД.
+   * - Если заметки нет в БД — показывает тост "Note not found" и выходит.
+   * - Удалён fallback на `Net.getNetworkNote` (сетевые заметки не кэшируются).
    * 
    * @param {string} id - ID заметки для открытия.
    * @returns {void}
@@ -7958,15 +7884,8 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     }
 
     DB.get(id).then(function(record) {
+      // 🔑 ИЗМЕНЕНИЕ: Если заметки нет в БД — это ошибка, а не повод искать в сети
       if (!record) {
-        // 🔑 КРИТИЧНО: Если заметки нет в БД, ищем в сетевом кэше (БАГ #1)
-        if (Net && Net.getNetworkNote) {
-          var netNote = Net.getNetworkNote(id);
-          if (netNote) {
-            openNetworkNoteView(netNote);
-            return;
-          }
-        }
         Toast.show('warn', 'Note not found');
         return;
       }
@@ -8018,7 +7937,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
       tagEl.textContent = record.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
       infoRow.appendChild(tagEl);
 
-      // Ссылка на родителя
+      // Ссылка на родителя (только для локальных родителей)
       if (record.parentId) {
         var parentLink = document.createElement('a');
         parentLink.href = '#';
@@ -8310,7 +8229,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     exportData: exportData,
     importData: importData
   };
-}, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'AI', 'Toast', 'SearchService', 'Net']);
+}, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'AI', 'Toast', 'SearchService']);
 <!-- NOOMIUM_MODULE_END BaseViewComponent -->
 
 <!-- NOOMIUM_MODULE_START App.State -->
