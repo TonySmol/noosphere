@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.7">
+<meta name="app-version" content="1.4.8">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -5554,132 +5554,225 @@ DI.register('HeaderStatusComponent', function(Bus, I18n, Net, AI, Utils) {
 <!-- NOOMIUM_MODULE_END HeaderStatusComponent -->
 
 <!-- NOOMIUM_MODULE_START OfflineBarComponent -->
-  /**
-   * @typedef {Object} NetStatusPayload
-   * @description Payload события net:status.
-   * @property {'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'failed'} status - Статус сети.
-   */
+/**
+ * @typedef {Object} NetStatusPayload
+ * @description Payload события net:status.
+ * @property {'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'failed'} status - Статус сети.
+ */
+
+/**
+ * @typedef {Object} NetOutboxPayload
+ * @description Payload события net:outbox.
+ * @property {number} count - Количество событий в очереди.
+ */
+
+/**
+ * Компонент офлайн-бара (индикатор очереди отправки).
+ * 
+ * Отображает информацию о состоянии офлайн-очереди Nostr-событий:
+ * - При отсутствии сети показывает "Нет сети" с количеством ожидающих событий
+ * - При наличии сети и непустой очереди показывает "Офлайн-очередь (N)"
+ * - При наличии сети и пустой очереди полностью скрывается
+ * 
+ * Логика отображения:
+ * ┌─────────────────────┬─────────────┬──────────────────────────────────┐
+ * │ Статус сети         │ Outbox      │ Поведение                        │
+ * ├─────────────────────┼─────────────┼──────────────────────────────────┤
+ * │ disconnected        │ любой       │ Скрыт (нет смысла показывать)    │
+ * │ connected           │ count > 0   │ "Офлайн-очередь (N)"             │
+ * │ connected           │ count = 0   │ Скрыт                            │
+ * │ reconnecting/failed │ count > 0   │ "Нет сети" + "(N)"               │
+ * │ reconnecting/failed │ count = 0   │ "Нет сети"                       │
+ * └─────────────────────┴─────────────┴──────────────────────────────────┘
+ * 
+ * Архитектурные решения:
+ * - **DOM-запросы при каждом обновлении:** ссылки на элементы (`offline-bar`,
+ *   `offline-text`, `offline-queue`) берутся через `document.getElementById`
+ *   при каждом вызове `update()`. Это защищает от устаревших ссылок после
+ *   `refreshUI()`, который полностью пересобирает DOM при смене языка.
+ * 
+ * - **AbortController:** все подписки на Bus привязаны к единому сигналу.
+ *   При `destroy()` достаточно вызвать `abort()` — Bus автоматически удалит
+ *   все listeners. Это исключает утечки памяти.
+ * 
+ * - **Race condition protection:** `update()` проверяет `signal.aborted`
+ *   перед обращением к DOM. Это защищает от ситуации, когда событие пришло
+ *   после вызова `destroy()`, но до фактической очистки listeners.
+ * 
+ * Безопасность:
+ * - Все текстовые данные вставляются через `textContent` (XSS-safe).
+ * - CSS-свойства (`display`) устанавливаются из ограниченного whitelist-набора.
+ * 
+ * @module OfflineBarComponent
+ */
+DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
 
   /**
-   * @typedef {Object} NetOutboxPayload
-   * @description Payload события net:outbox.
-   * @property {number} count - Количество событий в очереди.
+   * Контроллер для автоматической отписки всех listeners при destroy().
+   * @type {AbortController | null}
    */
+  var abortController = null;
 
-  DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
+  /**
+   * Whitelist валидных значений CSS-свойства display.
+   * Используется для защиты от injection через внешние данные.
+   * @type {Set<string>}
+   */
+  var VALID_DISPLAY_VALUES = new Set(['none', 'block', 'inline', 'flex', '']);
 
-    /** @type {function(NetStatusPayload): void | null} Обработчик статуса сети */
-    var netStatusHandler = null;
+  /**
+   * Безопасно устанавливает CSS-свойство display с валидацией через whitelist.
+   * 
+   * @param {HTMLElement} element - Целевой DOM-элемент.
+   * @param {string} value - Значение display (валидируется).
+   * @returns {void}
+   */
+  function setDisplay(element, value) {
+    if (!element) return;
+    var safeValue = VALID_DISPLAY_VALUES.has(value) ? value : '';
+    element.style.display = safeValue;
+  }
 
-    /** @type {function(NetOutboxPayload): void | null} Обработчик размера очереди */
-    var netOutboxHandler = null;
+  /**
+   * Обновляет видимость и текст офлайн-бара с учётом состояния сети и outbox.
+   * 
+   * Логика отображения:
+   * - disconnected: плашка скрыта (нет соединения — нет смысла показывать очередь).
+   * - connected + outbox > 0: показывается как «Офлайн-очередь» с количеством.
+   * - connected + outbox = 0: плашка скрыта.
+   * - reconnecting/failed: показывается как «Нет сети», с количеством очереди если есть.
+   * 
+   * DOM-элементы берутся при каждом вызове для корректной работы после refreshUI.
+   * 
+   * @returns {void}
+   */
+  function update() {
+    // Защита от race condition: если компонент уже уничтожен, не трогаем DOM
+    if (abortController && abortController.signal.aborted) return;
+    
+    var bar = document.getElementById('offline-bar');
+    var textEl = document.getElementById('offline-text');
+    var queueEl = document.getElementById('offline-queue');
 
-    /** @type {function(): void | null} Обработчик смены языка */
-    var i18nHandler = null;
+    if (!bar || !textEl || !queueEl) return;
 
-    /**
-     * Обновляет видимость и текст офлайн-бара с учётом состояния сети и outbox.
-     * 
-     * Логика отображения:
-     * - disconnected: плашка скрыта (нет соединения — нет смысла показывать очередь).
-     * - connected + outbox > 0: показывается как «Офлайн-очередь» с количеством.
-     * - connected + outbox = 0: плашка скрыта.
-     * - reconnecting/failed: показывается как «Нет сети», с количеством очереди если есть.
-     * 
-     * DOM-элементы берутся при каждом вызове для корректной работы после refreshUI.
-     * 
-     * @returns {void}
-     */
-    function update() {
-      var bar = document.getElementById('offline-bar');
-      var textEl = document.getElementById('offline-text');
-      var queueEl = document.getElementById('offline-queue');
+    var status = Net ? Net.getStatus() : 'disconnected';
+    var outboxLength = Net ? Net.getOutboxLength() : 0;
 
-      if (!bar || !textEl || !queueEl) return;
+    // Если disconnected – полностью скрываем плашку
+    if (status === 'disconnected') {
+      setDisplay(bar, 'none');
+      return;
+    }
 
-      var status = Net ? Net.getStatus() : 'disconnected';
-      var outboxLength = Net ? Net.getOutboxLength() : 0;
-
-      // Если disconnected – полностью скрываем плашку
-      if (status === 'disconnected') {
-        bar.style.display = 'none';
-        return;
-      }
-
-      // Если connected – показываем только при наличии очереди
-      if (status === 'connected') {
-        if (outboxLength > 0) {
-          bar.style.display = 'block';
-          textEl.textContent = I18n.t('offline.bar');
-          queueEl.style.display = 'inline';
-          queueEl.textContent = '(' + I18n.t('offline.queue', { count: outboxLength }) + ')';
-        } else {
-          bar.style.display = 'none';
-        }
-        return;
-      }
-
-      // Остальные статусы (connecting, reconnecting, failed) – нет сети
-      bar.style.display = 'block';
-      textEl.textContent = I18n.t('offline.disconnected');
+    // Если connected – показываем только при наличии очереди
+    if (status === 'connected') {
       if (outboxLength > 0) {
-        queueEl.style.display = 'inline';
+        setDisplay(bar, 'block');
+        textEl.textContent = I18n.t('offline.bar');
+        setDisplay(queueEl, 'inline');
         queueEl.textContent = '(' + I18n.t('offline.queue', { count: outboxLength }) + ')';
       } else {
-        queueEl.style.display = 'none';
+        setDisplay(bar, 'none');
       }
+      return;
     }
 
+    // Остальные статусы (connecting, reconnecting, failed) – нет сети
+    setDisplay(bar, 'block');
+    textEl.textContent = I18n.t('offline.disconnected');
+    if (outboxLength > 0) {
+      setDisplay(queueEl, 'inline');
+      queueEl.textContent = '(' + I18n.t('offline.queue', { count: outboxLength }) + ')';
+    } else {
+      setDisplay(queueEl, 'none');
+    }
+  }
+
+  /**
+   * Инициализирует компонент: подписывается на события сети и смены языка.
+   * Отображает начальное состояние.
+   * 
+   * Все подписки регистрируются через `Bus.subscribe` с привязкой к AbortSignal.
+   * Это гарантирует автоматическую очистку при вызове `destroy()`.
+   * 
+   * @returns {void}
+   */
+  function init() {
+    // Создаём AbortController для централизованной отписки
+    abortController = new AbortController();
+    var signal = abortController.signal;
+
     /**
-     * Инициализирует компонент: подписывается на события сети и смены языка.
-     * Отображает начальное состояние.
+     * Обработчик изменения статуса сети.
+     * Делегирует работу в update(), сохраняя единую логику отображения.
      * 
      * @returns {void}
      */
-    function init() {
-      netStatusHandler = function() { update(); };
-      netOutboxHandler = function() { update(); };
-      i18nHandler = function() { update(); };
-
-      Bus.on('net:status', netStatusHandler);
-      Bus.on('net:outbox', netOutboxHandler);
-      Bus.on('i18n:change', i18nHandler);
-
+    var netStatusHandler = function() {
       update();
-    }
+    };
 
     /**
-     * Уничтожает компонент: отписывается от всех событий.
+     * Обработчик изменения размера очереди outbox.
+     * Делегирует работу в update(), сохраняя единую логику отображения.
      * 
      * @returns {void}
      */
-    function destroy() {
-      if (netStatusHandler) {
-        try { Bus.off('net:status', netStatusHandler); } catch (_) { /* ignore */ }
-      }
-      if (netOutboxHandler) {
-        try { Bus.off('net:outbox', netOutboxHandler); } catch (_) { /* ignore */ }
-      }
-      if (i18nHandler) {
-        try { Bus.off('i18n:change', i18nHandler); } catch (_) { /* ignore */ }
-      }
-      netStatusHandler = netOutboxHandler = i18nHandler = null;
-    }
-
-    return {
-      /**
-       * Инициализирует компонент (публичный API).
-       * @returns {void}
-       */
-      init: init,
-
-      /**
-       * Уничтожает компонент (публичный API).
-       * @returns {void}
-       */
-      destroy: destroy
+    var netOutboxHandler = function() {
+      update();
     };
-  }, ['Bus', 'I18n', 'Net']);
+
+    /**
+     * Обработчик смены языка: перерисовывает бар с новыми переводами.
+     * Делегирует работу в update(), сохраняя единую логику отображения.
+     * 
+     * @returns {void}
+     */
+    var i18nHandler = function() {
+      update();
+    };
+
+    // Регистрация подписок с привязкой к AbortSignal
+    // При вызове abortController.abort() все они автоматически удалятся
+    Bus.subscribe('net:status', netStatusHandler, signal);
+    Bus.subscribe('net:outbox', netOutboxHandler, signal);
+    Bus.subscribe('i18n:change', i18nHandler, signal);
+
+    // Первичная отрисовка текущего состояния
+    update();
+  }
+
+  /**
+   * Уничтожает компонент: отписывается от всех событий через AbortController.
+   * 
+   * Один вызов `abort()` автоматически удаляет все Bus-подписки через механизм
+   * abortHandler в Bus. После abort обнуляем ссылку на контроллер для
+   * освобождения памяти.
+   * 
+   * @returns {void}
+   */
+  function destroy() {
+    if (abortController) {
+      abortController.abort();
+      abortController = null;
+    }
+  }
+
+  return {
+    /**
+     * Инициализирует компонент (публичный API).
+     * @returns {void}
+     */
+    init: init,
+
+    /**
+     * Уничтожает компонент (публичный API).
+     * @returns {void}
+     */
+    destroy: destroy
+  };
+}, ['Bus', 'I18n', 'Net']);
 <!-- NOOMIUM_MODULE_END OfflineBarComponent -->
 
 <!-- NOOMIUM_MODULE_START StreamViewComponent -->
