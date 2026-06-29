@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.14">
+<meta name="app-version" content="1.4.15">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2451,18 +2451,24 @@ DI.register('Bus', function() {
    */
 
   /**
-   * @typedef {Object} NetworkNote
-   * @description In-memory представление сетевой заметки для резолвинга parent/child.
-   * @property {string} id
-   * @property {string} text
-   * @property {Vector} vector
-   * @property {string} peer
-   * @property {string} fullPubkey
-   * @property {number} createdAt
-   * @property {string} [parentId]
-   * @property {string[]} children
+   * Сетевой модуль: управление Nostr-подключениями, P2P-обмен, шифрование ключей.
+   * 
+   * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ ЭТАПА 2 (ЭФЕМЕРНОСТЬ):
+   * - **Удалён `networkNotesMap`** — сетевые заметки больше не кэшируются локально.
+   *   Они живут только в `LiveStreamStrategy` (в памяти компонента), привязаны к пирам.
+   * - **Добавлено событие `net:peer-offline`** — эмитится при удалении пира из `peers`
+   *   в heartbeat. Позволяет `LiveStreamStrategy` очистить streamData от заметок
+   *   ушедшего пира.
+   * - **Фильтрация офлайн-пиров** — при получении KA-события проверяется
+   *   `peers.has(pubkey)`. Ответы от пиров, которых нет в активных, игнорируются.
+   * - **Удалён `getNetworkNote()`** — сетевые заметки недоступны по ID вне Live Stream.
+   * 
+   * Принцип эфемерности: "сетевые заметки живут, пока пир в сети".
+   * Это соответствует концепту пользователя и предотвращает показ "фантомных"
+   * заметок от офлайн-пиров.
+   * 
+   * @module Net
    */
-
   DI.register('Net', function(cfg, DB, AI, log, bus) {
 
     /** @type {Object | null} Nostr SimplePool instance */
@@ -2480,7 +2486,7 @@ DI.register('Bus', function() {
     /** @type {Map<string, number>} Активные пиры: pubkey -> timestamp последнего события */
     var peers = new Map();
 
-    /** @type {NetworkAnswer[]} Кэш полученных ответов */
+    /** @type {NetworkAnswer[]} Кэш полученных ответов (на наши поисковые запросы) */
     var answers = [];
 
     /** @type {function(): void | null} Колбэк обновления UI */
@@ -2533,9 +2539,6 @@ DI.register('Bus', function() {
 
     /** @type {Object | null} Активная подписка для Live Stream */
     var liveStreamSubscription = null;
-
-    /** @type {Map<string, NetworkNote>} In-memory кэш сетевых заметок для резолвинга parent/child */
-    var networkNotesMap = new Map();
 
     /** @type {number} Жёсткий лимит длины текста для P2P-ответов (защита от OOM) */
     var MAX_P2P_TEXT_LENGTH = 2000;
@@ -2769,9 +2772,11 @@ DI.register('Bus', function() {
      * Обрабатывает входящее Nostr-событие.
      * Порядок проверок: структура → подпись → валидность → дубликат → обработка.
      * 
-     * 🔑 КРИТИЧНО: Добавлена валидация длины вектора (БАГ #4 из аудита).
-     * Отклоняет события с некорректной размерностью вектора для защиты от DoS-атак,
-     * где злоумышленник отправляет гигантские векторы (10000+ элементов) для OOM/CPU spike.
+     * 🔑 КРИТИЧНО:
+     * - Валидация длины вектора (БАГ #4 из аудита) — защита от DoS-атак.
+     * - Проверка `peers.has(pubkey)` для KA-событий — игнорируем ответы от офлайн-пиров.
+     * - Сетевые заметки НЕ сохраняются (эфемерность). Они эмитятся в Live Stream
+     *   и обрабатываются `LiveStreamStrategy`, который привязывает их к пирам.
      * 
      * @param {NostrEvent} ev
      * @returns {void}
@@ -2901,6 +2906,10 @@ DI.register('Bus', function() {
 
         // Обработка ответов (Kind Answer)
         if (ev.kind === KA) {
+          // 🔑 КРИТИЧНО: Проверка, что пир в сети (эфемерность)
+          // Если пира нет в активных, игнорируем событие
+          if (!peers.has(ev.pubkey)) return;
+
           var eTag = null;
           for (var i = 0; i < ev.tags.length; i++) {
             var tg = ev.tags[i];
@@ -2953,7 +2962,9 @@ DI.register('Bus', function() {
             }
           }
 
-          // Обновление in-memory кэша и Live Stream для всех KA событий
+          // 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ЭТАПА 2:
+          // Вместо сохранения в networkNotesMap формируем netNote "на лету"
+          // и эмитим в Live Stream. Данные живут только в подписчиках события.
           if (Array.isArray(data.vector) && typeof data.text === 'string') {
             var netNote = {
               id: ev.id,
@@ -2965,26 +2976,18 @@ DI.register('Bus', function() {
               parentId: parentId,
               children: []
             };
-            var existing = networkNotesMap.get(ev.id);
-            if (existing) netNote.children = existing.children;
-            networkNotesMap.set(ev.id, netNote);
 
-            // Обновление родителя в in-memory кэше
+            // Обновление локального родителя в БД (только если он локальный)
+            // DB.addChild внутри проверяет наличие родителя через DB.get(parentId)
+            // и игнорирует операцию, если родителя нет в БД (сетевой родитель).
+            // Это правильно: Parent/Child связи для локальных заметок хранятся
+            // в локальной БД, для сетевых — только в Nostr-тегах.
             if (parentId) {
-              if (networkNotesMap.has(parentId)) {
-                var parentNote = networkNotesMap.get(parentId);
-                if (parentNote.children.indexOf(ev.id) === -1) {
-                  parentNote.children.push(ev.id);
-                  if (bus && bus.emit) {
-                    try { bus.emit('net:parent-updated', { id: parentId }); } catch (_) {}
-                  }
-                }
-              }
-              // Попытка обновить локального родителя в БД
               DB.addChild(parentId, ev.id);
             }
 
             // Эмит для Live Stream (игнорируем ответы на наши запросы)
+            // LiveStreamStrategy.addStreamItem() добавит заметку в streamData
             if (!eTag || eTag !== queryId) {
               if (bus && bus.emit) {
                 try { bus.emit('net:stream-event', { note: netNote }); } catch (_) {}
@@ -2999,25 +3002,44 @@ DI.register('Bus', function() {
 
     /**
      * Запускает heartbeat для очистки устаревших пиров и ответов.
+     * 
+     * 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ЭТАПА 2:
+     * При удалении пира эмитится событие `net:peer-offline` с payload `{ pubkey }`.
+     * Это позволяет `LiveStreamStrategy` очистить streamData от заметок ушедшего пира
+     * через метод `removePeerItems()`.
+     * 
      * @returns {void}
      */
     function startHeartbeat() {
       if (hbTimer) clearInterval(hbTimer);
       hbTimer = setInterval(function() {
         var now = Date.now();
-        var removed = 0;
+        var removedPeers = [];
+        
         peers.forEach(function(ts, pubkey) {
           if (now - ts > cfg.get('peerTTL', 60000)) {
             peers.delete(pubkey);
-            removed++;
+            removedPeers.push(pubkey);
           }
         });
-        if (removed > 0) {
+        
+        if (removedPeers.length > 0) {
           notifyPeers();
+          
+          // 🔑 NEW: Эмитим событие для каждого ушедшего пира
+          for (var i = 0; i < removedPeers.length; i++) {
+            if (bus && bus.emit) {
+              try { 
+                bus.emit('net:peer-offline', { pubkey: removedPeers[i] }); 
+              } catch (_) {}
+            }
+          }
+          
           if (typeof onUpdate === 'function') {
             try { onUpdate(); } catch (_) {}
           }
         }
+        
         var cutoff = now - cfg.get('answersTTL', 300000);
         for (var i = answers.length - 1; i >= 0; i--) {
           if (!peers.has(answers[i].fullPubkey) || answers[i].createdAt < cutoff) {
@@ -3186,15 +3208,6 @@ DI.register('Bus', function() {
     }
 
     /**
-     * Возвращает сетевую заметку из in-memory кэша.
-     * @param {string} id
-     * @returns {NetworkNote | undefined}
-     */
-    function getNetworkNote(id) {
-      return networkNotesMap.get(id);
-    }
-
-    /**
      * Проактивно публикует заметку в сеть с тегом ответа.
      * @param {Note} note - Объект заметки.
      * @param {string} [parentId] - ID родительской заметки.
@@ -3342,7 +3355,7 @@ DI.register('Bus', function() {
           try { bus.off('db:change', invalidateSharedCache); } catch (_) {}
         }
         stopLiveStream();
-        networkNotesMap.clear();
+        // 🔑 ИЗМЕНЕНИЕ: networkNotesMap удалён, очищать нечего
         started = false;
         subscription = null;
         pool = null;
@@ -3380,12 +3393,7 @@ DI.register('Bus', function() {
        */
       stopLiveStream: stopLiveStream,
 
-      /**
-       * Возвращает сетевую заметку по ID.
-       * @param {string} id
-       * @returns {NetworkNote | undefined}
-       */
-      getNetworkNote: getNetworkNote,
+      // 🔑 ИЗМЕНЕНИЕ: getNetworkNote удалён (сетевые заметки не хранятся)
 
       /**
        * Публикует заметку в сеть с тегом ответа.
