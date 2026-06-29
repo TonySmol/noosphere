@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.16">
+<meta name="app-version" content="1.4.17">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2451,21 +2451,55 @@ DI.register('Bus', function() {
    */
 
   /**
+   * @typedef {Object} QueryPayloadV1
+   * @description Формат поискового запроса v1 (legacy).
+   * @property {Vector} vector - Вектор запроса.
+   */
+
+  /**
+   * @typedef {Object} QueryPayloadV2
+   * @description Формат поискового запроса v2 (с порогами).
+   * @property {Vector} vector - Вектор запроса.
+   * @property {number} threshold - Порог схожести (0..1).
+   * @property {number} serendipity - Дельта озарений (0..1).
+   * @property {number} protocol_version - Всегда 2.
+   */
+
+  /**
    * Сетевой модуль: управление Nostr-подключениями, P2P-обмен, шифрование ключей.
    * 
-   * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ ЭТАПА 2 (ЭФЕМЕРНОСТЬ):
-   * - **Удалён `networkNotesMap`** — сетевые заметки больше не кэшируются локально.
-   *   Они живут только в `LiveStreamStrategy` (в памяти компонента), привязаны к пирам.
-   * - **Добавлено событие `net:peer-offline`** — эмитится при удалении пира из `peers`
-   *   в heartbeat. Позволяет `LiveStreamStrategy` очистить streamData от заметок
-   *   ушедшего пира.
-   * - **Фильтрация офлайн-пиров** — при получении KA-события проверяется
-   *   `peers.has(pubkey)`. Ответы от пиров, которых нет в активных, игнорируются.
-   * - **Удалён `getNetworkNote()`** — сетевые заметки недоступны по ID вне Live Stream.
+   * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ ЭТАПА 3 (СЕТЕВОЙ ПРОТОКОЛ V2):
    * 
-   * Принцип эфемерности: "сетевые заметки живут, пока пир в сети".
-   * Это соответствует концепту пользователя и предотвращает показ "фантомных"
-   * заметок от офлайн-пиров.
+   * **Принцип "фильтрация на стороне отправителя":**
+   * Раньше Вася получал ВСЕ shared-заметки Пети и фильтровал у себя, что создавало
+   * огромный сетевой трафик. Теперь Петя фильтрует у себя и отправляет только
+   * релевантные ответы.
+   * 
+   * **Формат запроса (Kind 21000):**
+   * ```json
+   * {
+   *   "vector": [...],
+   *   "threshold": 0.7,
+   *   "serendipity": 0.3,
+   *   "protocol_version": 2
+   * }
+   * ```
+   * 
+   * **Обработка входящего запроса (v2):**
+   * 1. Фильтруем shared-заметки: `score >= threshold - serendipity`
+   * 2. Вычисляем Z-score только для отфильтрованных кандидатов
+   * 3. Сортируем по score (desc)
+   * 4. Отправляем топ-N (maxAnswersPerQuery)
+   * 
+   * **Обратная совместимость с v1:**
+   * - Если в запросе нет `protocol_version` → считаем v1
+   * - Для v1: старая логика (Z-score >= 1, без фильтрации по threshold)
+   * - Старые клиенты корректно обрабатываются
+   * 
+   * **DoS-защита:**
+   * - Валидация `threshold` и `serendipity` (0..1)
+   * - Валидация длины вектора (expectedDim)
+   * - Fallback на локальные пороги при невалидных входных данных
    * 
    * @module Net
    */
@@ -2542,6 +2576,13 @@ DI.register('Bus', function() {
 
     /** @type {number} Жёсткий лимит длины текста для P2P-ответов (защита от OOM) */
     var MAX_P2P_TEXT_LENGTH = 2000;
+
+    /**
+     * Текущая версия сетевого протокола.
+     * v2 включает пороги threshold/serendipity для фильтрации на стороне отправителя.
+     * @type {number}
+     */
+    var PROTOCOL_VERSION = 2;
 
     /**
      * Выводит AES-GCM ключ из пароля через PBKDF2 (100k итераций, SHA-256).
@@ -2769,6 +2810,182 @@ DI.register('Bus', function() {
     }
 
     /**
+     * 🔑 НОВАЯ ФУНКЦИЯ ЭТАПА 3: Валидация и нормализация входящего запроса.
+     * 
+     * Поддерживает как старый формат v1 `{vector}`, так и новый v2
+     * `{vector, threshold, serendipity, protocol_version}`.
+     * При невалидных данных делает fallback на локальные пороги из Config.
+     * 
+     * @param {Object} raw - Сырой распарсенный объект запроса.
+     * @returns {{vector: Vector, threshold: number, serendipity: number, version: number} | null}
+     *   Нормализованный запрос или null при критической ошибке (нет вектора).
+     */
+    function normalizeQuery(raw) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+      if (!Array.isArray(raw.vector) || raw.vector.length === 0) return null;
+
+      // Определение версии протокола
+      var version = 1;
+      if (typeof raw.protocol_version === 'number' && 
+          Number.isInteger(raw.protocol_version) && 
+          raw.protocol_version >= 2) {
+        version = 2;
+      }
+
+      // Локальные пороги по умолчанию (fallback)
+      var localThreshold = cfg.get('threshold', 0.7);
+      var localSerendipity = cfg.get('serendipity', 0.3);
+
+      // Для v2 валидируем пороги, для v1 — используем локальные
+      var threshold, serendipity;
+      if (version === 2) {
+        // Валидация threshold: число в диапазоне [0, 1]
+        if (typeof raw.threshold === 'number' && 
+            isFinite(raw.threshold) && 
+            raw.threshold >= 0 && raw.threshold <= 1) {
+          threshold = raw.threshold;
+        } else {
+          threshold = localThreshold;
+          if (log) log.warn('Query v2: invalid threshold, fallback to local', { got: raw.threshold });
+        }
+
+        // Валидация serendipity: число в диапазоне [0, 1]
+        if (typeof raw.serendipity === 'number' && 
+            isFinite(raw.serendipity) && 
+            raw.serendipity >= 0 && raw.serendipity <= 1) {
+          serendipity = raw.serendipity;
+        } else {
+          serendipity = localSerendipity;
+          if (log) log.warn('Query v2: invalid serendipity, fallback to local', { got: raw.serendipity });
+        }
+      } else {
+        // v1: используем локальные пороги (обратная совместимость)
+        threshold = localThreshold;
+        serendipity = localSerendipity;
+      }
+
+      return {
+        vector: raw.vector,
+        threshold: threshold,
+        serendipity: serendipity,
+        version: version
+      };
+    }
+
+    /**
+     * 🔑 НОВАЯ ФУНКЦИЯ ЭТАПА 3: Построение ответа на входящий запрос.
+     * 
+     * Для v2 (новые клиенты):
+     * - Фильтрует candidates по `score >= threshold - serendipity`
+     * - Вычисляет Z-score только для отфильтрованных кандидатов
+     * - Сортирует по score (desc) и ограничивает до maxAnswersPerQuery
+     * 
+     * Для v1 (старые клиенты, обратная совместимость):
+     * - Вычисляет Z-score для всех shared-заметок
+     * - Оставляет только те, у которых Z-score >= 1 (старая логика)
+     * - Сортирует и ограничивает
+     * 
+     * @param {Vector} queryVector - Вектор запроса.
+     * @param {Note[]} sharedNotes - Массив shared-заметок локальной БД.
+     * @param {number} threshold - Порог схожести.
+     * @param {number} serendipity - Дельта озарений.
+     * @param {number} version - Версия протокола (1 или 2).
+     * @returns {Array<Object>} Массив кандидатов для ответа.
+     */
+    function buildAnswerCandidates(queryVector, sharedNotes, threshold, serendipity, version) {
+      var maxAnswers = cfg.get('maxAnswersPerQuery', 5);
+
+      if (version === 2) {
+        // 🔑 V2 ЛОГИКА: фильтрация на стороне отправителя
+        var minScore = threshold - serendipity;
+        var filtered = [];
+
+        // 1. Предварительная фильтрация по абсолютному score
+        for (var i = 0; i < sharedNotes.length; i++) {
+          var score = AI.cosineSimilarity(queryVector, sharedNotes[i].vector);
+          if (score >= minScore) {
+            filtered.push({
+              id: sharedNotes[i].id,
+              text: sharedNotes[i].text,
+              vector: sharedNotes[i].vector,
+              score: score
+            });
+          }
+        }
+
+        // Если после фильтрации ничего не осталось — возвращаем пустой массив
+        if (filtered.length === 0) return [];
+
+        // 2. Вычисление Z-score для отфильтрованных кандидатов
+        var count = filtered.length;
+        var mean = 0;
+        for (var i = 0; i < count; i++) mean += filtered[i].score;
+        mean /= count;
+
+        var stddev = 0;
+        if (count > 1) {
+          var sumSq = 0;
+          for (var i = 0; i < count; i++) {
+            var diff = filtered[i].score - mean;
+            sumSq += diff * diff;
+          }
+          stddev = Math.sqrt(sumSq / (count - 1));
+        }
+
+        // 3. Добавление Z-score к каждому кандидату
+        for (var i = 0; i < count; i++) {
+          var raw = filtered[i].score;
+          filtered[i].z_score = stddev > 0 ? (raw - mean) / stddev : 0;
+        }
+
+        // 4. Сортировка по score (desc) и обрезка до лимита
+        filtered.sort(function(a, b) { return b.score - a.score; });
+        return filtered.slice(0, maxAnswers);
+      }
+
+      // 🔑 V1 ЛОГИКА: обратная совместимость (старая логика)
+      var rawScores = [];
+      for (var i = 0; i < sharedNotes.length; i++) {
+        rawScores.push(AI.cosineSimilarity(queryVector, sharedNotes[i].vector));
+      }
+
+      var count = rawScores.length;
+      if (count === 0) return [];
+
+      var mean = 0;
+      for (var i = 0; i < count; i++) mean += rawScores[i];
+      mean /= count;
+
+      var stddev = 0;
+      if (count > 1) {
+        var sumSq = 0;
+        for (var i = 0; i < count; i++) {
+          var diff = rawScores[i] - mean;
+          sumSq += diff * diff;
+        }
+        stddev = Math.sqrt(sumSq / (count - 1));
+      }
+
+      var candidates = [];
+      for (var i = 0; i < count; i++) {
+        var raw = rawScores[i];
+        var z = stddev > 0 ? (raw - mean) / stddev : 0;
+        if (z >= 1) {
+          candidates.push({
+            id: sharedNotes[i].id,
+            text: sharedNotes[i].text,
+            vector: sharedNotes[i].vector,
+            score: raw,
+            z_score: z
+          });
+        }
+      }
+
+      candidates.sort(function(a, b) { return b.score - a.score; });
+      return candidates.slice(0, maxAnswers);
+    }
+
+    /**
      * Обрабатывает входящее Nostr-событие.
      * Порядок проверок: структура → подпись → валидность → дубликат → обработка.
      * 
@@ -2826,9 +3043,10 @@ DI.register('Bus', function() {
           if (!sk) return;
           var q;
           try { q = JSON.parse(ev.content); } catch (_) { return; }
-          if (!q || typeof q !== 'object' || Array.isArray(q)) return;
-          var qKeys = Object.keys(q);
-          if (qKeys.length !== 1 || qKeys[0] !== 'vector' || !Array.isArray(q.vector)) return;
+
+          // 🔑 ЭТАП 3: нормализация запроса (поддержка v1 и v2)
+          var normalized = normalizeQuery(q);
+          if (!normalized) return;
 
           DB.all().then(function(allNotes) {
             var checkRelays = cfg.get('relays', []);
@@ -2847,40 +3065,18 @@ DI.register('Bus', function() {
             }
             if (sharedNotes.length === 0) return;
 
-            var rawScores = [];
-            for (var i = 0; i < sharedNotes.length; i++) {
-              rawScores.push(AI.cosineSimilarity(q.vector, sharedNotes[i].vector));
-            }
-            var count = rawScores.length;
-            var mean = 0;
-            for (var i = 0; i < count; i++) mean += rawScores[i];
-            mean /= count;
-            var stddev = 0;
-            if (count > 1) {
-              var sumSq = 0;
-              for (var i = 0; i < count; i++) {
-                var diff = rawScores[i] - mean;
-                sumSq += diff * diff;
-              }
-              stddev = Math.sqrt(sumSq / (count - 1));
-            }
-            var candidates = [];
-            for (var i = 0; i < count; i++) {
-              var raw = rawScores[i];
-              var z = stddev > 0 ? (raw - mean) / stddev : 0;
-              if (z >= 1) {
-                candidates.push({
-                  id: sharedNotes[i].id,
-                  text: sharedNotes[i].text,
-                  vector: sharedNotes[i].vector,
-                  score: raw,
-                  z_score: z
-                });
-              }
-            }
-            candidates.sort(function(a, b) { return b.score - a.score; });
-            var limited = candidates.slice(0, cfg.get('maxAnswersPerQuery', 5));
+            // 🔑 ЭТАП 3: построение ответа с учётом версии протокола
+            var limited = buildAnswerCandidates(
+              normalized.vector,
+              sharedNotes,
+              normalized.threshold,
+              normalized.serendipity,
+              normalized.version
+            );
 
+            if (limited.length === 0) return;
+
+            // Отправка ответов со stagger delay
             for (var j = 0; j < limited.length; j++) {
               try {
                 var ans = nostr.finalizeEvent({
@@ -2906,8 +3102,7 @@ DI.register('Bus', function() {
 
         // Обработка ответов (Kind Answer)
         if (ev.kind === KA) {
-          // 🔑 КРИТИЧНО: Проверка, что пир в сети (эфемерность)
-          // Если пира нет в активных, игнорируем событие
+          // 🔑 ЭФЕМЕРНОСТЬ: Проверка, что пир в сети
           if (!peers.has(ev.pubkey)) return;
 
           var eTag = null;
@@ -2924,9 +3119,7 @@ DI.register('Bus', function() {
           if (typeof data.text !== 'string' || !data.text || data.text.length > MAX_P2P_TEXT_LENGTH) return;
           if (!Array.isArray(data.vector) || typeof data.score !== 'number') return;
 
-          // 🔑 КРИТИЧНО: ВАЛИДАЦИЯ ДЛИНЫ ВЕКТОРА (БАГ #4)
-          // Защита от DoS-атак, где злоумышленник отправляет гигантские векторы
-          // (10000+ элементов вместо ожидаемых 384) для вызова OOM/CPU spike
+          // 🔑 ВАЛИДАЦИЯ ДЛИНЫ ВЕКТОРА (БАГ #4)
           var expectedDim = cfg.get('dim', 384);
           if (data.vector.length !== expectedDim) {
             if (log) log.warn('Invalid vector dimension', { 
@@ -2934,7 +3127,7 @@ DI.register('Bus', function() {
               got: data.vector.length,
               eventId: ev.id 
             });
-            return; // Отклоняем событие с некорректной размерностью
+            return;
           }
 
           // Сохранение как ответ на наш запрос
@@ -2962,9 +3155,7 @@ DI.register('Bus', function() {
             }
           }
 
-          // 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ЭТАПА 2:
-          // Вместо сохранения в networkNotesMap формируем netNote "на лету"
-          // и эмитим в Live Stream. Данные живут только в подписчиках события.
+          // Эмит в Live Stream (эфемерность)
           if (Array.isArray(data.vector) && typeof data.text === 'string') {
             var netNote = {
               id: ev.id,
@@ -2977,17 +3168,10 @@ DI.register('Bus', function() {
               children: []
             };
 
-            // Обновление локального родителя в БД (только если он локальный)
-            // DB.addChild внутри проверяет наличие родителя через DB.get(parentId)
-            // и игнорирует операцию, если родителя нет в БД (сетевой родитель).
-            // Это правильно: Parent/Child связи для локальных заметок хранятся
-            // в локальной БД, для сетевых — только в Nostr-тегах.
             if (parentId) {
               DB.addChild(parentId, ev.id);
             }
 
-            // Эмит для Live Stream (игнорируем ответы на наши запросы)
-            // LiveStreamStrategy.addStreamItem() добавит заметку в streamData
             if (!eTag || eTag !== queryId) {
               if (bus && bus.emit) {
                 try { bus.emit('net:stream-event', { note: netNote }); } catch (_) {}
@@ -3003,7 +3187,6 @@ DI.register('Bus', function() {
     /**
      * Запускает heartbeat для очистки устаревших пиров и ответов.
      * 
-     * 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ЭТАПА 2:
      * При удалении пира эмитится событие `net:peer-offline` с payload `{ pubkey }`.
      * Это позволяет `LiveStreamStrategy` очистить streamData от заметок ушедшего пира
      * через метод `removePeerItems()`.
@@ -3026,7 +3209,6 @@ DI.register('Bus', function() {
         if (removedPeers.length > 0) {
           notifyPeers();
           
-          // 🔑 NEW: Эмитим событие для каждого ушедшего пира
           for (var i = 0; i < removedPeers.length; i++) {
             if (bus && bus.emit) {
               try { 
@@ -3056,7 +3238,6 @@ DI.register('Bus', function() {
 
     /**
      * Планирует попытку переподключения с экспоненциальным backoff.
-     * Сохраняет ID таймера для гарантированной очистки в stop().
      * @returns {void}
      */
     function scheduleReconnect() {
@@ -3235,47 +3416,19 @@ DI.register('Bus', function() {
     }
 
     return {
-      /**
-       * Подписывает функцию на изменение количества пиров.
-       * @param {function(number): void} fn
-       * @returns {void}
-       */
       onPeers: function(fn) {
         if (typeof fn === 'function') peerListeners.push(fn);
       },
 
-      /**
-       * Отписывает функцию от изменений количества пиров.
-       * @param {function(number): void} fn
-       * @returns {void}
-       */
       offPeers: function(fn) {
         var idx = peerListeners.indexOf(fn);
         if (idx > -1) peerListeners.splice(idx, 1);
       },
 
-      /**
-       * Возвращает текущий статус сети.
-       * @returns {'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'failed'}
-       */
       getStatus: function() { return netStatus; },
-
-      /**
-       * Возвращает количество событий в offline-очереди.
-       * @returns {number}
-       */
       getOutboxLength: function() { return outbox.size; },
-
-      /**
-       * Проверяет, загружен ли секретный ключ.
-       * @returns {boolean}
-       */
       hasKey: function() { return sk !== null; },
 
-      /**
-       * Проверяет, зашифрован ли ключ в localStorage.
-       * @returns {boolean}
-       */
       isKeyEncrypted: function() {
         try {
           var stored = localStorage.getItem('noomium:sk');
@@ -3283,17 +3436,25 @@ DI.register('Bus', function() {
         } catch (e) { return false; }
       },
 
-      /**
-       * Инициализирует сеть.
-       * @param {function(): void} callback
-       * @param {string} password
-       * @returns {Promise<void>}
-       */
       init: init,
 
       /**
-       * Отправляет поисковый запрос в сеть.
-       * @param {Vector} vector
+       * 🔑 ЭТАП 3: Отправляет поисковый запрос в сеть с протоколом v2.
+       * 
+       * Формат content:
+       * ```json
+       * {
+       *   "vector": [...],
+       *   "threshold": 0.7,
+       *   "serendipity": 0.3,
+       *   "protocol_version": 2
+       * }
+       * ```
+       * 
+       * Старые клиенты (v1) корректно обработают запрос, игнорируя неизвестные поля,
+       * и ответят по старой логике (все shared заметки с Z-score >= 1).
+       * 
+       * @param {Vector} vector - Вектор запроса.
        * @returns {void}
        */
       send: function(vector) {
@@ -3303,11 +3464,19 @@ DI.register('Bus', function() {
         lastQueryTime = now;
         answers.length = 0;
         try {
+          // 🔑 ЭТАП 3: формат v2 с порогами и версией протокола
+          var payload = {
+            vector: vector,
+            threshold: cfg.get('threshold', 0.7),
+            serendipity: cfg.get('serendipity', 0.3),
+            protocol_version: PROTOCOL_VERSION
+          };
+
           var ev = nostr.finalizeEvent({
             kind: cfg.get('kQuery', 21000),
             created_at: Math.floor(Date.now() / 1000),
             tags: [['t', cfg.get('room', 'noomium-main')]],
-            content: JSON.stringify({ vector: vector })
+            content: JSON.stringify(payload)
           }, sk);
           queryId = ev.id;
           safePublish(ev);
@@ -3319,10 +3488,6 @@ DI.register('Bus', function() {
         }
       },
 
-      /**
-       * Возвращает активные ответы от пиров, которые ещё в сети.
-       * @returns {NetworkAnswer[]}
-       */
       activeAnswers: function() {
         var out = [];
         for (var i = 0; i < answers.length; i++) {
@@ -3331,16 +3496,8 @@ DI.register('Bus', function() {
         return out;
       },
 
-      /**
-       * Возвращает текущее количество активных пиров.
-       * @returns {number}
-       */
       peerCount: function() { return peers.size; },
 
-      /**
-       * Останавливает сеть: закрывает подписки, очищает состояние.
-       * @returns {void}
-       */
       stop: function() {
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
@@ -3355,7 +3512,6 @@ DI.register('Bus', function() {
           try { bus.off('db:change', invalidateSharedCache); } catch (_) {}
         }
         stopLiveStream();
-        // 🔑 ИЗМЕНЕНИЕ: networkNotesMap удалён, очищать нечего
         started = false;
         subscription = null;
         pool = null;
@@ -3370,37 +3526,13 @@ DI.register('Bus', function() {
         emitOutboxCount();
       },
 
-      /**
-       * Перезапускает сеть (stop + init).
-       * @param {function(): void} callback
-       * @param {string} password
-       * @returns {Promise<void>}
-       */
       restart: function(callback, password) {
         this.stop();
         return this.init(callback, password);
       },
 
-      /**
-       * Запускает live stream.
-       * @returns {void}
-       */
       startLiveStream: startLiveStream,
-
-      /**
-       * Останавливает live stream.
-       * @returns {void}
-       */
       stopLiveStream: stopLiveStream,
-
-      // 🔑 ИЗМЕНЕНИЕ: getNetworkNote удалён (сетевые заметки не хранятся)
-
-      /**
-       * Публикует заметку в сеть с тегом ответа.
-       * @param {Note} note
-       * @param {string} [parentId]
-       * @returns {void}
-       */
       publishNote: publishNote
     };
   }, ['Config', 'DB', 'AI', 'Logger', 'Bus']);
