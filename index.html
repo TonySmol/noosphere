@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.12">
+<meta name="app-version" content="1.4.13">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -6511,10 +6511,13 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
 /**
  * Компонент карусели результатов поиска и Live Stream.
  * 
- * Отображает результаты в трёх режимах:
- * - **IDLE (Live Stream):** свежие заметки из сети по времени
- * - **SEARCH:** результаты текстового поиска по сегментам (local/world/seren)
- * - **FOCUS:** результаты поиска по вектору закреплённой заметки
+ * Отображает результаты в трёх режимах state machine:
+ * - **IDLE:** свежие заметки из `state.streamData` (Live Stream)
+ * - **FOCUS:** результаты поиска по вектору закреплённой заметки из `state.lists.focus`
+ * - **SEARCH:** результаты текстового поиска из `state.lists[seg]` (local/world/seren)
+ * 
+ * Видимость плашки сегментов управляется вычисляемым полем `state.showSegments`
+ * (true только в SEARCH).
  * 
  * Ключевые возможности:
  * - Snap-scroll карусель с плавной прокруткой
@@ -6524,22 +6527,17 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
  * - Адаптивный snapStep (пересчитывается при resize/orientationchange)
  * 
  * Архитектурные решения:
- * - **DOM-запросы при каждом рендере:** ссылки на `carousel`, `carousel-dots`,
- *   `carousel-counter` берутся через `getElementById` при каждом вызове `renderPage()`.
- *   Это защищает от устаревших ссылок после `refreshUI()`.
- * 
- * - **AbortController:** все подписки (Bus, DOM, window) привязаны к единому сигналу.
- *   При `destroy()` достаточно вызвать `abort()` — браузер и Bus автоматически
- *   удалят все listeners. `requestAnimationFrame` отменяется вручную.
- * 
- * - **RegExp кэширование:** `cachedQuery` и `cachedRegex` переиспользуются между
- *   вызовами `highlightText()` для оптимизации при скролле. Сбрасываются при
- *   смене языка или обновлении списков.
+ * - **State machine aware:** источник данных и видимость сегментов определяются
+ *   через `StateManager.getUIMode()` и `StateManager.shouldShowSegments()`.
+ * - **Dispatch для фокуса:** кнопка «Фокус» вызывает `StateManager.dispatch('to-focus')`
+ *   вместо прямого setState, что гарантирует валидные переходы.
+ * - **DOM-запросы при каждом рендере:** ссылки на элементы берутся через `getElementById`
+ *   для защиты от устаревания после `refreshUI()`.
+ * - **AbortController:** все подписки привязаны к signal для автоочистки.
  * 
  * Безопасность:
  * - Подсветка текста использует `DocumentFragment` + `textContent` (XSS-safe).
- * - Все карточки строятся через `createElement`, пользовательские данные
- *   вставляются через `textContent`.
+ * - Все карточки строятся через `createElement`, пользовательские данные через `textContent`.
  * 
  * @module StreamViewComponent
  */
@@ -6807,7 +6805,21 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     
     var pageItems = uiState.pages[pageIndex] || [];
     var state = StateManager.getState();
-    var mode = state.focusMode ? 'focus' : (state.streamActive ? 'world' : state.seg);
+    
+    // 🔑 NEW: Режим определяется через uiMode, а не через флаги
+    var mode;
+    switch (state.uiMode) {
+      case 'idle':
+        mode = 'world'; // Live Stream отображается как "мир"
+        break;
+      case 'focus':
+        mode = 'focus';
+        break;
+      case 'search':
+      default:
+        mode = state.seg;
+        break;
+    }
 
     if (pageItems.length === 0) {
       while (uiState.dotsContainer.firstChild) {
@@ -6912,8 +6924,13 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
   }
 
   /**
-   * Инициализирует или пересобирает карусель на основе текущего состояния StateManager.
+   * Инициализирует или пересобирает карусель на основе текущего state machine.
    * Показывает empty-state, если данных нет.
+   * 
+   * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ:
+   * - Источник данных выбирается через switch по uiMode
+   * - Видимость плашки сегментов через state.showSegments
+   * - Режим для renderItemHTML через uiMode
    * 
    * @returns {void}
    */
@@ -6928,13 +6945,24 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     var state = StateManager.getState();
     var list = [];
     
-    // Приоритет отображения: Фокус -> Live Stream -> Обычный поиск
-    if (state.focusMode) {
-      list = state.lists.focus;
-    } else if (state.streamActive) {
-      list = state.streamData;
-    } else {
-      list = state.lists[state.seg];
+    // 🔑 NEW: Выбор источника данных через state machine (uiMode)
+    switch (state.uiMode) {
+      case 'idle':
+        list = state.streamData || [];
+        break;
+      case 'focus':
+        list = state.lists.focus || [];
+        break;
+      case 'search':
+      default:
+        list = state.lists[state.seg] || [];
+        break;
+    }
+
+    // 🔑 NEW: Управление видимостью плашки сегментов через showSegments
+    var segBlock = document.querySelector('.seg');
+    if (segBlock) {
+      segBlock.style.display = state.showSegments ? '' : 'none';
     }
 
     paginate(list);
@@ -6953,9 +6981,14 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         var emptyT = document.createElement('div'); 
         emptyT.className = 'feed-empty-t'; 
         
-        if (state.streamActive) emptyT.textContent = I18n.t('stream.live');
-        else if (state.focusMode) emptyT.textContent = 'No focus results';
-        else emptyT.textContent = I18n.t('empty.local.t');
+        // Текст empty-state зависит от текущего режима
+        if (state.uiMode === 'idle') {
+          emptyT.textContent = I18n.t('stream.live');
+        } else if (state.uiMode === 'focus') {
+          emptyT.textContent = 'No focus results';
+        } else {
+          emptyT.textContent = I18n.t('empty.local.t');
+        }
         
         emptyDiv.appendChild(emptyT);
         wrap.appendChild(emptyDiv);
@@ -6987,22 +7020,26 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     var state = StateManager.getState();
     ['local', 'world', 'seren'].forEach(function(key) {
       var el = document.getElementById('c-' + key); 
-      if (el) el.textContent = state.lists[key].length;
+      if (el) el.textContent = (state.lists[key] || []).length;
     });
   }
 
   /**
    * Переключает активный сегмент (local/world/seren) и перерисовывает карусель.
-   * Сбрасывает режим фокуса и live stream.
+   * Использует dispatch для строгого перехода state machine.
    * 
    * @param {Segment} segKey - Ключ сегмента.
    * @returns {void}
    */
   function setSegment(segKey) {
-    StateManager.setState({ seg: segKey, focusMode: false, focusedItem: null, streamActive: false });
+    // 🔑 NEW: Используем dispatch вместо прямого setState
+    StateManager.dispatch('switch-segment', { seg: segKey });
+    
+    // Обновляем визуальное состояние кнопок
     document.querySelectorAll('.seg-b').forEach(function(b) { 
       b.classList.toggle('on', b.getAttribute('data-k') === segKey); 
     });
+    
     cachedQuery = null; 
     cachedRegex = null; 
     uiState.currentPage = 0; 
@@ -7044,6 +7081,9 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
   /**
    * Обрабатывает клики по действиям внутри карточки (focus, edit, copy, del, toggle).
    * 
+   * 🔑 ИЗМЕНЕНИЕ: действие 'focus' теперь вызывает StateManager.dispatch('to-focus')
+   * вместо прямого setState. Это гарантирует валидные переходы state machine.
+   * 
    * @param {string} action - Имя действия (из data-act).
    * @param {HTMLElement} element - DOM-элемент кнопки.
    * @returns {void}
@@ -7053,22 +7093,41 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     var id = element.getAttribute('data-id');
     var state = StateManager.getState();
     
+    // 🔑 NEW: Фокус через dispatch (state machine)
     if (action === 'focus') {
       var item = null;
-      // Ищем заметку в текущем активном списке или в in-memory кэше Net
-      if (state.streamActive) {
-        for (var i=0; i<state.streamData.length; i++) if (state.streamData[i].id === id) { item = state.streamData[i]; break; }
+      
+      // Ищем заметку в текущем активном списке в зависимости от uiMode
+      if (state.uiMode === 'idle') {
+        for (var i = 0; i < state.streamData.length; i++) {
+          if (state.streamData[i].id === id) { item = state.streamData[i]; break; }
+        }
+      } else if (state.uiMode === 'focus') {
+        for (var i = 0; i < state.lists.focus.length; i++) {
+          if (state.lists.focus[i].id === id) { item = state.lists.focus[i]; break; }
+        }
       } else {
-        for (var i=0; i<state.lists.world.length; i++) if (state.lists.world[i].id === id) { item = state.lists.world[i]; break; }
+        var segList = state.lists[state.seg] || [];
+        for (var i = 0; i < segList.length; i++) {
+          if (segList[i].id === id) { item = segList[i]; break; }
+        }
       }
-      if (!item && Net && Net.getNetworkNote) item = Net.getNetworkNote(id);
+      
+      if (!item && Net && Net.getNetworkNote) {
+        item = Net.getNetworkNote(id);
+      }
       
       if (item && item.vector) {
-        StateManager.setState({ 
-          focusMode: true, 
-          focusedItem: { id: item.id, text: item.text, vector: item.vector, peer: item.peer }, 
-          streamActive: false 
+        // 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: dispatch вместо setState
+        StateManager.dispatch('to-focus', {
+          item: {
+            id: item.id,
+            text: item.text,
+            vector: item.vector,
+            peer: item.peer
+          }
         });
+        // Запускаем поиск по вектору через SearchService (делегирование в Coordinator)
         SearchService.searchByVector(item.vector);
       }
       return;
@@ -7080,9 +7139,24 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     }
     
     if (action === 'copy') {
-      var list = state.focusMode ? state.lists.focus : (state.streamActive ? state.streamData : state.lists[state.seg]);
       var copyItem = null;
-      for (var i=0; i<list.length; i++) if (list[i].id === id) { copyItem = list[i]; break; }
+      
+      // Ищем в текущем списке по uiMode
+      if (state.uiMode === 'idle') {
+        for (var i = 0; i < state.streamData.length; i++) {
+          if (state.streamData[i].id === id) { copyItem = state.streamData[i]; break; }
+        }
+      } else if (state.uiMode === 'focus') {
+        for (var i = 0; i < state.lists.focus.length; i++) {
+          if (state.lists.focus[i].id === id) { copyItem = state.lists.focus[i]; break; }
+        }
+      } else {
+        var segList = state.lists[state.seg] || [];
+        for (var i = 0; i < segList.length; i++) {
+          if (segList[i].id === id) { copyItem = segList[i]; break; }
+        }
+      }
+      
       if (copyItem) copyToClipboard(copyItem.text); 
       return;
     }
@@ -7237,26 +7311,19 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     
     Bus.subscribe('net:stream-event', function(payload) {
       if (!payload || !payload.note) return;
-      var currentState = StateManager.getState();
-      var newData = [payload.note].concat(currentState.streamData);
-      if (newData.length > 50) newData = newData.slice(0, 50); // FIFO limit
-      StateManager.setState({ streamData: newData });
-      
-      if (currentState.streamActive) { 
-        cachedQuery = null; 
-        cachedRegex = null; 
-        uiState.currentPage = 0; 
-        initCarousel(); 
-      }
+      // 🔑 NEW: Добавление в streamData делегировано в Coordinator через dispatch
+      // Здесь только реагируем на изменения state через StateManager.subscribe
     }, signal);
 
     Bus.subscribe('net:parent-updated', function() {
       // Перерисовываем карусель, чтобы обновить счетчики детей, если мы не в live stream
-      if (!StateManager.getState().streamActive) initCarousel();
+      if (StateManager.getUIMode() !== 'idle') initCarousel();
     }, signal);
 
     // StateManager.subscribe не поддерживает signal, сохраняем функцию отписки
-    stateUnsubscribe = StateManager.subscribe(function() { initCarousel(); });
+    stateUnsubscribe = StateManager.subscribe(function() { 
+      initCarousel(); 
+    });
     
     // Регистрируем отписку через signal
     signal.addEventListener('abort', function() {
