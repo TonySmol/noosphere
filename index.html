@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.13">
+<meta name="app-version" content="1.4.14">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -5242,6 +5242,7 @@ DI.register('SearchService', function(
  * - Кнопку отправки с индикатором загрузки
  * - Debounce поисковых запросов
  * - Управление Live Stream при вводе текста
+ * - **State machine transitions:** dispatch('to-search') при вводе, dispatch('to-idle') при очистке
  * 
  * Безопасность:
  * - Все пользовательские данные вставляются через textContent (XSS-safe).
@@ -5432,7 +5433,7 @@ DI.register('EditorComponent', function(Bus, I18n, Utils, SearchService, Config,
     var parentId = null;
 
     // Логика Parent/Child: если активен фокус, привязываем заметку к родителю
-    if (state.focusMode && state.focusedItem && state.focusedItem.id) {
+    if (state.uiMode === 'focus' && state.focusedItem && state.focusedItem.id) {
       parentId = state.focusedItem.id;
     }
 
@@ -5455,8 +5456,12 @@ DI.register('EditorComponent', function(Bus, I18n, Utils, SearchService, Config,
 
   /**
    * Навешивает обработчики событий на DOM-элементы редактора.
-   * Реализует логику управления Live Stream и debounce поиска.
+   * Реализует логику управления state machine и debounce поиска.
    * Все обработчики привязываются к AbortSignal для автоматической очистки.
+   * 
+   * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ ЭТАПА 1:
+   * - При вводе текста → dispatch('to-search')
+   * - При очистке текста (и отсутствии фокуса) → dispatch('to-idle')
    * 
    * @returns {void}
    */
@@ -5472,11 +5477,25 @@ DI.register('EditorComponent', function(Bus, I18n, Utils, SearchService, Config,
         var val = getValue().trim();
         var state = StateManager.getState();
 
-        // Если пользователь начал печатать, немедленно останавливаем Live Stream
-        // для корректного переключения UI в режим поиска
-        if (val && state.streamActive && Net && typeof Net.stopLiveStream === 'function') {
-          Net.stopLiveStream();
-          StateManager.setState({ streamActive: false });
+        // 🔑 NEW: State machine transitions при вводе/очистке текста
+        if (val) {
+          // Есть текст → переход в SEARCH (фокус автоматически снимется через dispatch)
+          StateManager.dispatch('to-search');
+          
+          // Если пользователь начал печатать, немедленно останавливаем Live Stream
+          // для корректного переключения UI в режим поиска
+          if (state.streamActive && Net && typeof Net.stopLiveStream === 'function') {
+            Net.stopLiveStream();
+          }
+        } else {
+          // Текст очищен
+          if (state.uiMode === 'focus') {
+            // Если был фокус → остаёмся в FOCUS, запускаем поиск по вектору фокуса
+            // (dispatch не нужен, мы уже в правильном режиме)
+          } else {
+            // Нет текста и нет фокуса → переход в IDLE (Live Stream)
+            StateManager.dispatch('to-idle');
+          }
         }
 
         if (searchTimer) clearTimeout(searchTimer);
@@ -5571,6 +5590,10 @@ DI.register('EditorComponent', function(Bus, I18n, Utils, SearchService, Config,
  * Отображает закреплённую заметку вверху интерфейса при активном Focus Mode.
  * Позволяет пользователю видеть текущий контекст поиска и снимать фокус.
  * 
+ * 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ЭТАПА 1:
+ * - Кнопка «Снять фокус» вызывает `StateManager.dispatch('to-idle')` вместо прямого setState.
+ * - Это гарантирует валидные переходы state machine и автоматическое обновление вычисляемых полей.
+ * 
  * Безопасность:
  * - Не использует innerHTML с пользовательскими данными (XSS-safe).
  * - Все текстовые данные вставляются через textContent.
@@ -5632,13 +5655,12 @@ DI.register('FocusBarComponent', function(Bus, I18n, StateManager, SearchService
     unfocusBtn.textContent = '✕';
     
     unfocusBtn.onclick = function() {
-      // Объединяем два setState в один вызов (оптимизация)
-      var lists = StateManager.getState().lists;
-      StateManager.setState({ 
-        focusMode: false, 
-        focusedItem: null,
-        lists: Object.assign({}, lists, { focus: [] })
-      });
+      // 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ЭТАПА 1: dispatch вместо прямого setState
+      // Это гарантирует:
+      // 1. Валидный переход state machine (FOCUS → IDLE или FOCUS → SEARCH)
+      // 2. Автоматическое обновление вычисляемых полей (showSegments, streamActive)
+      // 3. Идемпотентность (повторный вызов не вызовет лишних обновлений)
+      StateManager.dispatch('to-idle');
       
       // Запускаем поиск с текущим текстом редактора
       // Это вернёт UI к live stream (если редактор пуст) или к текстовому поиску
@@ -5656,8 +5678,8 @@ DI.register('FocusBarComponent', function(Bus, I18n, StateManager, SearchService
    * Рендерит панель фокуса в зависимости от текущего состояния.
    * 
    * Логика отображения:
-   * - Если focusMode && focusedItem: показываем панель, скрываем seg-блок.
-   * - Иначе: скрываем панель, показываем seg-блок.
+   * - Если uiMode === 'focus' && focusedItem: показываем панель, скрываем seg-блок.
+   * - Иначе: скрываем панель, показываем seg-блок (если showSegments).
    * 
    * @returns {void}
    */
@@ -5668,7 +5690,7 @@ DI.register('FocusBarComponent', function(Bus, I18n, StateManager, SearchService
     var state = StateManager.getState();
     var segBlock = document.querySelector('.seg');
 
-    if (state.focusMode && state.focusedItem) {
+    if (state.uiMode === 'focus' && state.focusedItem) {
       container.style.display = 'block';
       if (segBlock) segBlock.style.display = 'none';
 
@@ -5686,7 +5708,8 @@ DI.register('FocusBarComponent', function(Bus, I18n, StateManager, SearchService
       container.appendChild(ui);
     } else {
       container.style.display = 'none';
-      if (segBlock) segBlock.style.display = '';
+      // Видимость seg-блока управляется через state.showSegments в StreamViewComponent
+      if (segBlock) segBlock.style.display = state.showSegments ? '' : 'none';
     }
   }
 
