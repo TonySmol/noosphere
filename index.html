@@ -5472,7 +5472,26 @@ DI.register('SearchService', function(
  * - Кнопку отправки с индикатором загрузки
  * - Debounce поисковых запросов
  * - Управление Live Stream при вводе текста
- * - **State machine transitions:** dispatch('to-search') при вводе, dispatch('to-idle') при очистке
+ * - 🔑 State machine transitions с учётом закрепа (v1.4.18)
+ * 
+ * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ v1.4.18 (СТАБИЛИЗАЦИЯ ЗАКРЕПА):
+ * 
+ * Логика `onInput` переработана для корректной работы с закрепом:
+ * 
+ * - **При вводе текста:** `dispatch('to-search')` — переход в режим поиска.
+ *   Благодаря изменениям в StateManager, `focusedItem` НЕ сбрасывается,
+ *   поэтому закреп остаётся видимым. Поиск идёт по тексту (обрабатывается
+ *   в SearchCoordinator).
+ * 
+ * - **При очистке текста с закрепом:** `dispatch('to-focus', {item})` —
+ *   возврат в режим фокуса с автоматическим запуском поиска по вектору
+ *   закреплённой заметки через `SearchService.searchByVector()`.
+ * 
+ * - **При очистке текста без закрепа:** `dispatch('to-idle')` — переход
+ *   в Live Stream.
+ * 
+ * Это обеспечивает плавное переключение между режимами без потери контекста
+ * и без flickering интерфейса.
  * 
  * Безопасность:
  * - Все пользовательские данные вставляются через textContent (XSS-safe).
@@ -5689,9 +5708,19 @@ DI.register('EditorComponent', function(Bus, I18n, Utils, SearchService, Config,
    * Реализует логику управления state machine и debounce поиска.
    * Все обработчики привязываются к AbortSignal для автоматической очистки.
    * 
-   * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ ЭТАПА 1:
-   * - При вводе текста → dispatch('to-search')
-   * - При очистке текста (и отсутствии фокуса) → dispatch('to-idle')
+   * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ v1.4.18:
+   * 
+   * Логика `onInput` переработана для корректной работы с закрепом:
+   * 
+   * - **При вводе текста:** `dispatch('to-search')` — благодаря изменениям
+   *   в StateManager, `focusedItem` НЕ сбрасывается, закреп остаётся видимым.
+   * 
+   * - **При очистке текста с закрепом:** `dispatch('to-focus', {item})` —
+   *   возврат в режим фокуса с автоматическим запуском поиска по вектору
+   *   закреплённой заметки через `SearchService.searchByVector()`.
+   * 
+   * - **При очистке текста без закрепа:** `dispatch('to-idle')` — переход
+   *   в Live Stream.
    * 
    * @returns {void}
    */
@@ -5707,23 +5736,23 @@ DI.register('EditorComponent', function(Bus, I18n, Utils, SearchService, Config,
         var val = getValue().trim();
         var state = StateManager.getState();
 
-        // 🔑 NEW: State machine transitions при вводе/очистке текста
+        // 🔑 NEW v1.4.18: State machine transitions с учётом закрепа
         if (val) {
-          // Есть текст → переход в SEARCH (фокус автоматически снимется через dispatch)
+          // Есть текст → переход в SEARCH (без сброса закрепа благодаря новому StateManager)
           StateManager.dispatch('to-search');
           
           // Если пользователь начал печатать, немедленно останавливаем Live Stream
-          // для корректного переключения UI в режим поиска
           if (state.streamActive && Net && typeof Net.stopLiveStream === 'function') {
             Net.stopLiveStream();
           }
         } else {
           // Текст очищен
-          if (state.uiMode === 'focus') {
-            // Если был фокус → остаёмся в FOCUS, запускаем поиск по вектору фокуса
-            // (dispatch не нужен, мы уже в правильном режиме)
+          if (state.focusedItem) {
+            // Есть закреп → остаёмся в FOCUS, запускаем поиск по вектору закрепа
+            StateManager.dispatch('to-focus', { item: state.focusedItem });
+            SearchService.searchByVector(state.focusedItem.vector);
           } else {
-            // Нет текста и нет фокуса → переход в IDLE (Live Stream)
+            // Нет закрепа → переход в IDLE (Live Stream)
             StateManager.dispatch('to-idle');
           }
         }
@@ -5820,9 +5849,23 @@ DI.register('EditorComponent', function(Bus, I18n, Utils, SearchService, Config,
  * Отображает закреплённую заметку вверху интерфейса при активном Focus Mode.
  * Позволяет пользователю видеть текущий контекст поиска и снимать фокус.
  * 
- * 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ЭТАПА 1:
- * - Кнопка «Снять фокус» вызывает `StateManager.dispatch('to-idle')` вместо прямого setState.
- * - Это гарантирует валидные переходы state machine и автоматическое обновление вычисляемых полей.
+ * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ v1.4.18 (СТАБИЛИЗАЦИЯ ЗАКРЕПА):
+ * 
+ * Логика кнопки «Снять фокус» (✕) переработана с учётом состояния редактора:
+ * 
+ * - **При наличии текста в редакторе:** сбрасывает только `focusedItem` через
+ *   `StateManager.setState({ focusedItem: null })`, НЕ меняя `uiMode`.
+ *   Благодаря обновлённому `syncDerivedFields()` в StateManager, `showSegments`
+ *   автоматически становится `true` (так как `uiMode === 'search'` и
+ *   `focusedItem === null`), и плашка сегментов мгновенно появляется без
+ *   мерцания. Затем запускается поиск по текущему тексту через
+ *   `SearchService.search(editorVal, true)`.
+ * 
+ * - **При пустом редакторе:** выполняется стандартный переход
+ *   `StateManager.dispatch('to-idle')` с активацией Live Stream.
+ * 
+ * Это обеспечивает плавное UX-переключение без мерцания интерфейса и без
+ * потери контекста поиска при снятии закрепа.
  * 
  * Безопасность:
  * - Не использует innerHTML с пользовательскими данными (XSS-safe).
@@ -5884,25 +5927,45 @@ DI.register('FocusBarComponent', function(Bus, I18n, StateManager, SearchService
     unfocusBtn.setAttribute('aria-label', I18n.t('btn.unfocus'));
     unfocusBtn.textContent = '✕';
     
+    /**
+     * 🔑 КЛЮЧЕВОЙ ОБРАБОТЧИК v1.4.18:
+     * 
+     * Снятие фокуса с учётом состояния редактора:
+     * 
+     * 1. Если в редакторе есть текст:
+     *    - Сбрасываем ТОЛЬКО `focusedItem` через setState (без смены uiMode)
+     *    - `StateManager.syncDerivedFields()` автоматически пересчитает `showSegments = true`,
+     *      потому что uiMode='search' и focusedItem=null
+     *    - Принудительно показываем плашку сегментов (для мгновенной реакции UI)
+     *    - Запускаем поиск по текущему тексту
+     *    - Результат: плавное появление сегментов без мерцания
+     * 
+     * 2. Если редактор пуст:
+     *    - Стандартный переход в IDLE (Live Stream)
+     *    - `dispatch('to-idle')` сбросит focusedItem и активирует streamActive
+     */
     unfocusBtn.onclick = function() {
       var editor = document.getElementById('ed-ta');
       var editorVal = editor ? editor.value.trim() : '';
       
       if (editorVal) {
-        // Текст есть: сбрасываем только focusedItem, не меняя uiMode (остаёмся в search)
+        // Текст есть: сбрасываем только focusedItem, не меняя uiMode
+        // syncDerivedFields() в StateManager автоматически пересчитает showSegments
         StateManager.setState({ focusedItem: null });
         
-        // Принудительно показываем плашку сегментов, так как showSegments вычисляется из uiMode
+        // Принудительно показываем плашку сегментов для мгновенной визуальной реакции
+        // (до того, как сработает подписчик StateManager)
         var segBlock = document.querySelector('.seg');
         if (segBlock) {
           segBlock.style.display = '';
         }
         
-        // Запускаем поиск по текущему тексту
+        // Запускаем поиск по текущему тексту (force=true для принудительной сетевой отправки)
         SearchService.search(editorVal, true);
       } else {
         // Текст пуст: стандартный переход в IDLE (Live Stream)
         StateManager.dispatch('to-idle');
+        // Запускаем поиск с пустым текстом для корректной инициализации Live Stream
         SearchService.search('', true);
       }
     };
@@ -5918,7 +5981,9 @@ DI.register('FocusBarComponent', function(Bus, I18n, StateManager, SearchService
    * 
    * Логика отображения:
    * - Если uiMode === 'focus' && focusedItem: показываем панель, скрываем seg-блок.
-   * - Иначе: скрываем панель, показываем seg-блок (если showSegments).
+   * - Если uiMode === 'search' && focusedItem: показываем панель, скрываем seg-блок.
+   *   (Это состояние возникает, когда пользователь ввёл текст при активном закрепе)
+   * - Иначе: скрываем панель, видимость seg-блока управляется через showSegments.
    * 
    * @returns {void}
    */
@@ -5929,7 +5994,13 @@ DI.register('FocusBarComponent', function(Bus, I18n, StateManager, SearchService
     var state = StateManager.getState();
     var segBlock = document.querySelector('.seg');
 
-    if (state.uiMode === 'focus' && state.focusedItem) {
+    // 🔑 ИЗМЕНЕНИЕ v1.4.18: показываем FocusBar не только в режиме focus,
+    // но и в режиме search, если есть focusedItem (когда пользователь вводит
+    // текст при активном закрепе)
+    var shouldShowFocusBar = state.focusedItem && 
+                             (state.uiMode === 'focus' || state.uiMode === 'search');
+
+    if (shouldShowFocusBar) {
       container.style.display = 'block';
       if (segBlock) segBlock.style.display = 'none';
 
@@ -5947,7 +6018,8 @@ DI.register('FocusBarComponent', function(Bus, I18n, StateManager, SearchService
       container.appendChild(ui);
     } else {
       container.style.display = 'none';
-      // Видимость seg-блока управляется через state.showSegments в StreamViewComponent
+      // Видимость seg-блока управляется через state.showSegments
+      // (который теперь корректно вычисляется в StateManager)
       if (segBlock) segBlock.style.display = state.showSegments ? '' : 'none';
     }
   }
