@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.17">
+<meta name="app-version" content="1.4.18">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -4334,12 +4334,14 @@ DI.register('StateManager', function() {
  * - Хранение streamItems в памяти (эфемерно, привязано к пирам)
  * - Сортировку по created_at (новизна)
  * - Автоматическую очистку при отключении пиров
+ * - Дедупликацию событий, пришедших с разных Nostr-релеев
  * 
  * Архитектурные решения:
  * - **Stateless execute:** принимает state, возвращает обновлённые данные
  * - **Эфемерность:** streamItems живут только в памяти, не сохраняются в БД
  * - **Привязка к пирам:** каждый элемент содержит peerPubkey для очистки
  * - **FIFO limit:** максимум 50 элементов для защиты от OOM
+ * - **Дедупликация:** проверка уникальности id перед добавлением
  * 
  * @module LiveStreamStrategy
  */
@@ -4416,6 +4418,8 @@ DI.register('LiveStreamStrategy', function(Bus, Net, Config) {
 
   /**
    * Обновляет streamData: добавляет новую заметку в начало (FIFO).
+   * 🔑 ИСПРАВЛЕНИЕ: Добавлена дедупликация по id для защиты от повторов,
+   * когда одно и то же Nostr-событие приходит через несколько релеев.
    * Обрезает до лимита для защиты от OOM.
    * 
    * @param {SearchResult[]} currentData - Текущий массив streamData.
@@ -4423,11 +4427,28 @@ DI.register('LiveStreamStrategy', function(Bus, Net, Config) {
    * @returns {SearchResult[]} Обновлённый массив.
    */
   function addStreamItem(currentData, newNote) {
-    var newData = [newNote].concat(currentData || []);
-    var limit = 50; // FIFO limit
+    // Защита от невалидных входных данных
+    if (!newNote || !newNote.id) return currentData || [];
+    
+    var data = currentData || [];
+    
+    // Дедупликация: проверяем, есть ли уже элемент с таким id
+    var exists = data.some(function(item) {
+      return item && item.id === newNote.id;
+    });
+    
+    // Если дубликат найден — возвращаем исходный массив без изменений
+    if (exists) return data;
+    
+    // Добавляем новую заметку в начало (FIFO: самое свежее сверху)
+    var newData = [newNote].concat(data);
+    
+    // Ограничение размера для защиты от OOM
+    var limit = 50;
     if (newData.length > limit) {
       newData = newData.slice(0, limit);
     }
+    
     return newData;
   }
 
@@ -5795,17 +5816,26 @@ DI.register('FocusBarComponent', function(Bus, I18n, StateManager, SearchService
     unfocusBtn.textContent = '✕';
     
     unfocusBtn.onclick = function() {
-      // 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ЭТАПА 1: dispatch вместо прямого setState
-      // Это гарантирует:
-      // 1. Валидный переход state machine (FOCUS → IDLE или FOCUS → SEARCH)
-      // 2. Автоматическое обновление вычисляемых полей (showSegments, streamActive)
-      // 3. Идемпотентность (повторный вызов не вызовет лишних обновлений)
-      StateManager.dispatch('to-idle');
+      var editor = document.getElementById('ed-ta');
+      var editorVal = editor ? editor.value.trim() : '';
       
-      // Запускаем поиск с текущим текстом редактора
-      // Это вернёт UI к live stream (если редактор пуст) или к текстовому поиску
-      var editorVal = document.getElementById('ed-ta') ? document.getElementById('ed-ta').value.trim() : '';
-      SearchService.search(editorVal, true);
+      if (editorVal) {
+        // Текст есть: сбрасываем только focusedItem, не меняя uiMode (остаёмся в search)
+        StateManager.setState({ focusedItem: null });
+        
+        // Принудительно показываем плашку сегментов, так как showSegments вычисляется из uiMode
+        var segBlock = document.querySelector('.seg');
+        if (segBlock) {
+          segBlock.style.display = '';
+        }
+        
+        // Запускаем поиск по текущему тексту
+        SearchService.search(editorVal, true);
+      } else {
+        // Текст пуст: стандартный переход в IDLE (Live Stream)
+        StateManager.dispatch('to-idle');
+        SearchService.search('', true);
+      }
     };
     
     metaEl.appendChild(unfocusBtn);
@@ -6688,6 +6718,7 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
  * - Подсветка поискового запроса через <mark>
  * - Действия над карточками: фокус, редактирование, копирование, удаление, toggle shared
  * - Адаптивный snapStep (пересчитывается при resize/orientationchange)
+ * - 🔑 Визуальная индикация «мёртвых» родительских связей (fi-parent-dead)
  * 
  * Архитектурные решения:
  * - **State machine aware:** источник данных и видимость сегментов определяются
@@ -6697,6 +6728,8 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
  * - **DOM-запросы при каждом рендере:** ссылки на элементы берутся через `getElementById`
  *   для защиты от устаревания после `refreshUI()`.
  * - **AbortController:** все подписки привязаны к signal для автоочистки.
+ * - **Async parent check:** проверка статуса родителя идёт асинхронно через DB.get()
+ *   после синхронного рендеринга ссылки, чтобы не блокировать отрисовку карусели.
  * 
  * Безопасность:
  * - Подсветка текста использует `DocumentFragment` + `textContent` (XSS-safe).
@@ -6704,7 +6737,7 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
  * 
  * @module StreamViewComponent
  */
-DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent, Net, SearchService) {
+DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, Toast, EditorComponent, Net, SearchService, Modal) {
   
   /** @type {number} Количество карточек на одной странице */
   var PAGE_SIZE = 10;
@@ -6800,6 +6833,11 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
    * Генерирует DOM-структуру карточки (fi) для переданного элемента.
    * Отображает бейджи, связи parent/child, score и кнопки действий.
    * 
+   * 🔑 ИЗМЕНЕНИЕ: Родительская ссылка проходит асинхронную проверку статуса.
+   * Если родитель отсутствует в локальной БД (сетевая заметка ушла в офлайн
+   * или была удалена), ссылке добавляется класс `fi-parent-dead` и обработчик
+   * клика меняется на показ модалки с объяснением.
+   * 
    * Безопасность: все элементы создаются через createElement, текстовые данные
    * вставляются через textContent (XSS-safe).
    * 
@@ -6829,19 +6867,59 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     badge.textContent = typeLabel; 
     header.appendChild(badge);
 
-    // Отображение связи с родителем (Parent/Child)
+    // 🔑 Отображение связи с родителем (Parent/Child) с асинхронной проверкой статуса
     if (item.parentId) {
       var parentLink = document.createElement('a');
       parentLink.href = '#'; 
       parentLink.className = 'fi-parent';
       parentLink.setAttribute('data-parent-id', item.parentId);
       parentLink.textContent = '↳ ' + I18n.t('note.parent');
+      
+      // Оптимистичный обработчик: по умолчанию считаем, что родитель жив
       parentLink.onclick = function(e) { 
         e.preventDefault(); 
         e.stopPropagation(); 
         try { Bus.emit('editor:edit-note', { id: item.parentId }); } catch(_){} 
       };
+      
       header.appendChild(parentLink);
+      
+      // Асинхронная проверка статуса родителя через DB.get
+      // Не блокируем рендеринг карусели, обновляем ссылку после получения результата
+      (function(link, parentId) {
+        DB.get(parentId).then(function(parent) {
+          // Защита от race condition: проверяем, что ссылка ещё в DOM
+          // и её data-parent-id не изменился (актуально при переиспользовании нод)
+          if (!link.parentNode) return;
+          if (link.getAttribute('data-parent-id') !== parentId) return;
+          
+          if (!parent) {
+            // Родитель недоступен (офлайн/удалён) — помечаем ссылку как «мёртвую»
+            link.classList.add('fi-parent-dead');
+            link.onclick = function(e) {
+              e.preventDefault();
+              e.stopPropagation();
+              try {
+                Modal.open({
+                  title: I18n.t('note.parent.unavailable.title', null, 'Связь недоступна'),
+                  body: I18n.t('note.parent.unavailable.body', null, 'Автор этой мысли больше не в сети или удалил её. Связь сохранена как часть истории.'),
+                  buttons: [
+                    {
+                      text: I18n.t('btn.close', null, 'Закрыть'),
+                      primary: true,
+                      onClick: function() { Modal.close(); }
+                    }
+                  ]
+                });
+              } catch(_) {
+                Toast.show('warn', 'Parent unavailable');
+              }
+            };
+          }
+        }).catch(function() {
+          // При ошибке БД не трогаем ссылку — оставляем оптимистичное поведение
+        });
+      })(parentLink, item.parentId);
     }
 
     // Отображение количества дочерних ответов
@@ -6969,7 +7047,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     var pageItems = uiState.pages[pageIndex] || [];
     var state = StateManager.getState();
     
-    // 🔑 NEW: Режим определяется через uiMode, а не через флаги
+    // Режим определяется через uiMode, а не через флаги
     var mode;
     switch (state.uiMode) {
       case 'idle':
@@ -7090,10 +7168,8 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
    * Инициализирует или пересобирает карусель на основе текущего state machine.
    * Показывает empty-state, если данных нет.
    * 
-   * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ:
-   * - Источник данных выбирается через switch по uiMode
-   * - Видимость плашки сегментов через state.showSegments
-   * - Режим для renderItemHTML через uiMode
+   * Источник данных выбирается через switch по uiMode.
+   * Видимость плашки сегментов через state.showSegments.
    * 
    * @returns {void}
    */
@@ -7108,7 +7184,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     var state = StateManager.getState();
     var list = [];
     
-    // 🔑 NEW: Выбор источника данных через state machine (uiMode)
+    // Выбор источника данных через state machine (uiMode)
     switch (state.uiMode) {
       case 'idle':
         list = state.streamData || [];
@@ -7122,7 +7198,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         break;
     }
 
-    // 🔑 NEW: Управление видимостью плашки сегментов через showSegments
+    // Управление видимостью плашки сегментов через showSegments
     var segBlock = document.querySelector('.seg');
     if (segBlock) {
       segBlock.style.display = state.showSegments ? '' : 'none';
@@ -7195,7 +7271,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
    * @returns {void}
    */
   function setSegment(segKey) {
-    // 🔑 NEW: Используем dispatch вместо прямого setState
     StateManager.dispatch('switch-segment', { seg: segKey });
     
     // Обновляем визуальное состояние кнопок
@@ -7244,8 +7319,8 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
   /**
    * Обрабатывает клики по действиям внутри карточки (focus, edit, copy, del, toggle).
    * 
-   * 🔑 ИЗМЕНЕНИЕ: действие 'focus' теперь вызывает StateManager.dispatch('to-focus')
-   * вместо прямого setState. Это гарантирует валидные переходы state machine.
+   * Действие 'focus' вызывает StateManager.dispatch('to-focus'),
+   * что гарантирует валидные переходы state machine.
    * 
    * @param {string} action - Имя действия (из data-act).
    * @param {HTMLElement} element - DOM-элемент кнопки.
@@ -7256,7 +7331,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     var id = element.getAttribute('data-id');
     var state = StateManager.getState();
     
-    // 🔑 NEW: Фокус через dispatch (state machine)
     if (action === 'focus') {
       var item = null;
       
@@ -7281,7 +7355,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       }
       
       if (item && item.vector) {
-        // 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: dispatch вместо setState
         StateManager.dispatch('to-focus', {
           item: {
             id: item.id,
@@ -7474,7 +7547,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     
     Bus.subscribe('net:stream-event', function(payload) {
       if (!payload || !payload.note) return;
-      // 🔑 NEW: Добавление в streamData делегировано в Coordinator через dispatch
+      // Добавление в streamData делегировано в Coordinator через dispatch
       // Здесь только реагируем на изменения state через StateManager.subscribe
     }, signal);
 
@@ -7548,7 +7621,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     init: init, 
     destroy: destroy 
   };
-}, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'Toast', 'EditorComponent', 'Net', 'SearchService']);
+}, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'Toast', 'EditorComponent', 'Net', 'SearchService', 'Modal']);
 <!-- NOOMIUM_MODULE_END StreamViewComponent -->
   
 <!-- NOOMIUM_MODULE_START BaseViewComponent -->
@@ -7563,6 +7636,13 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
  * - **Удалена зависимость `Net`** из DI — компонент больше не взаимодействует
  *   с сетевым модулем. Это соответствует SRP: BaseViewComponent отвечает только
  *   за локальные данные.
+ * 
+ * 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ЭТАПА 3 (ГЕНЕАЛОГИЯ):
+ * - **Визуальная индикация «мёртвых» родительских связей:** в `fillBaseItem`
+ *   добавлена асинхронная проверка наличия родителя в локальной БД.
+ *   Если родитель отсутствует (сетевая заметка ушла в офлайн или удалена),
+ *   ссылке добавляется CSS-класс `fi-parent-dead` и обработчик клика меняется
+ *   на показ модалки с объяснением. Связь остаётся видимой как часть истории.
  * 
  * Принцип: "Сетевые заметки живут, пока пир в сети. Локальная база — только свои мысли."
  * 
@@ -7580,6 +7660,8 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
  *   `getElementById` для защиты от устаревания после `refreshUI()`.
  * - **AbortController:** все подписки привязаны к signal для автоочистки.
  * - **Виртуальный скролл:** пул из 15 DOM-элементов переиспользуется через `fillBaseItem`.
+ * - **Async parent check:** проверка статуса родителя идёт асинхронно через DB.get()
+ *   после синхронного рендеринга, чтобы не блокировать отрисовку виртуального списка.
  * 
  * Безопасность:
  * - Все текстовые данные вставляются через `textContent` (XSS-safe).
@@ -7587,7 +7669,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
  * 
  * @module BaseViewComponent
  */
-DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast, SearchService) {
+DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast, SearchService, Modal) {
   
   /** @type {number} Высота одной карточки в пикселях (включая border) */
   var ITEM_HEIGHT = 100;
@@ -7677,6 +7759,12 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
    * Заполняет DOM-элемент пула данными конкретной заметки.
    * Отображает текст, теги, дату и кликабельные индикаторы Parent/Child.
    * 
+   * 🔑 ИЗМЕНЕНИЕ: Родительская ссылка проходит асинхронную проверку статуса.
+   * Если родитель отсутствует в локальной БД (сетевая заметка ушла в офлайн
+   * или была удалена), ссылке добавляется класс `fi-parent-dead` и обработчик
+   * клика меняется на показ модалки с объяснением. Связь сохраняется визуально
+   * как часть генеалогического древа.
+   * 
    * Безопасность: все текстовые данные вставляются через textContent (XSS-safe).
    * 
    * @param {HTMLDivElement} element - Целевой DOM-узел из пула.
@@ -7704,18 +7792,60 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     tagEl.textContent = note.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
     meta.appendChild(tagEl);
 
-    // 🔑 КЛИКАБЕЛЬНАЯ ссылка на родителя (только для локальных заметок)
+    // 🔑 КЛИКАБЕЛЬНАЯ ссылка на родителя с асинхронной проверкой статуса
     if (note.parentId) {
       var parentLink = document.createElement('a');
       parentLink.href = '#';
       parentLink.className = 'fi-parent';
+      parentLink.setAttribute('data-parent-id', note.parentId);
       parentLink.textContent = '↳ ' + I18n.t('note.parent');
+      
+      // Оптимистичный обработчик: по умолчанию считаем, что родитель жив
       parentLink.onclick = function(e) {
         e.preventDefault();
         e.stopPropagation();
         openNoteView(note.parentId);
       };
       meta.appendChild(parentLink);
+      
+      // Асинхронная проверка статуса родителя через DB.get
+      // Не блокируем рендеринг виртуального списка, обновляем ссылку после результата
+      (function(link, parentId, parentNoteId) {
+        DB.get(parentId).then(function(parent) {
+          // Защита от race condition: проверяем, что ссылка ещё в DOM,
+          // принадлежит той же заметке (актуально при переиспользовании пула нод)
+          if (!link.parentNode) return;
+          var currentEl = link.closest('.bi');
+          if (!currentEl || currentEl.getAttribute('data-id') !== parentNoteId) return;
+          if (link.getAttribute('data-parent-id') !== parentId) return;
+          
+          if (!parent) {
+            // Родитель недоступен (офлайн/удалён) — помечаем ссылку как «мёртвую»
+            link.classList.add('fi-parent-dead');
+            link.onclick = function(e) {
+              e.preventDefault();
+              e.stopPropagation();
+              try {
+                Modal.open({
+                  title: I18n.t('note.parent.unavailable.title', null, 'Связь недоступна'),
+                  body: I18n.t('note.parent.unavailable.body', null, 'Автор этой мысли больше не в сети или удалил её. Связь сохранена как часть истории.'),
+                  buttons: [
+                    {
+                      text: I18n.t('btn.close', null, 'Закрыть'),
+                      primary: true,
+                      onClick: function() { Modal.close(); }
+                    }
+                  ]
+                });
+              } catch(_) {
+                Toast.show('warn', 'Parent unavailable');
+              }
+            };
+          }
+        }).catch(function() {
+          // При ошибке БД не трогаем ссылку — оставляем оптимистичное поведение
+        });
+      })(parentLink, note.parentId, note.id);
     }
 
     // 🔑 КЛИКАБЕЛЬНЫЙ индикатор дочерних ответов
@@ -8361,7 +8491,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     exportData: exportData,
     importData: importData
   };
-}, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'AI', 'Toast', 'SearchService']);
+}, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'AI', 'Toast', 'SearchService', 'Modal']);
 <!-- NOOMIUM_MODULE_END BaseViewComponent -->
 
 <!-- NOOMIUM_MODULE_START App.State -->
@@ -8973,6 +9103,13 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
    * При showOnboarding=true отображает чекбокс «Больше не показывать»
    * и сохраняет выбор пользователя в Config.onboarded.
    * 
+   * 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ЭТАПА 4 (SECURITY HARDENING):
+   * - Полностью удалено использование `innerHTML` при построении DOM.
+   * - Все элементы создаются через `document.createElement`.
+   * - Все текстовые данные вставляются через `textContent` (автоматический XSS-эскейпинг).
+   * - Введён внутренний хелпер `buildSection()` для устранения дублирования кода
+   *   при построении однотипных секций справки.
+   * 
    * Использует глобальные хелперы translate() и сервисы Modal, Config из App.State.
    * 
    * @param {boolean} showOnboarding - Показывать ли как онбординг (первый запуск).
@@ -8980,28 +9117,106 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
    */
   function openHelp(showOnboarding) {
     var body = document.createElement('div');
-    body.innerHTML =
-      '<div class="help-sec"><div class="help-st">' + translate('seg.local') + '</div><div class="help-sd">' + translate('help.local') + '</div></div>' +
-      '<div class="help-sec"><div class="help-st">' + translate('seg.world') + '</div><div class="help-sd">' + translate('help.world') + '</div></div>' +
-      '<div class="help-sec"><div class="help-st">' + translate('seg.seren') + '</div><div class="help-sd">' + translate('help.seren') + '</div></div>' +
-      '<div class="help-box">' + translate('help.philosophy') + '</div>' +
-      '<div class="help-box">' + translate('help.gestures') + '</div>' +
-      '<div class="help-keys-wrapper"><div class="help-st">' + translate('help.keys') + '</div>' +
-      '<div class="help-keys"><div>' + translate('help.k1') + '</div><div>' + translate('help.k2') + '</div></div></div>';
 
+    /**
+     * Внутренний хелпер: создаёт секцию справки с заголовком и описанием.
+     * Эквивалент структуры: <div class="help-sec"><div class="help-st">...</div><div class="help-sd">...</div></div>
+     * 
+     * @param {string} titleKey - Ключ перевода для заголовка.
+     * @param {string} descKey - Ключ перевода для описания.
+     * @returns {HTMLDivElement} Готовая секция.
+     */
+    function buildSection(titleKey, descKey) {
+      var sec = document.createElement('div');
+      sec.className = 'help-sec';
+      
+      var st = document.createElement('div');
+      st.className = 'help-st';
+      st.textContent = translate(titleKey);
+      sec.appendChild(st);
+      
+      var sd = document.createElement('div');
+      sd.className = 'help-sd';
+      sd.textContent = translate(descKey);
+      sec.appendChild(sd);
+      
+      return sec;
+    }
+
+    /**
+     * Внутренний хелпер: создаёт текстовый блок-коробку.
+     * Эквивалент структуры: <div class="help-box">...</div>
+     * 
+     * @param {string} textKey - Ключ перевода для содержимого.
+     * @returns {HTMLDivElement} Готовый блок.
+     */
+    function buildBox(textKey) {
+      var box = document.createElement('div');
+      box.className = 'help-box';
+      box.textContent = translate(textKey);
+      return box;
+    }
+
+    /**
+     * Внутренний хелпер: создаёт секцию горячих клавиш с заголовком и списком биндов.
+     * Эквивалент структуры:
+     *   <div class="help-keys-wrapper">
+     *     <div class="help-st">...</div>
+     *     <div class="help-keys"><div>...</div><div>...</div></div>
+     *   </div>
+     * 
+     * @param {string} titleKey - Ключ перевода для заголовка секции.
+     * @param {string[]} keysList - Массив ключей перевода для отдельных горячих клавиш.
+     * @returns {HTMLDivElement} Готовая секция с клавишами.
+     */
+    function buildKeysSection(titleKey, keysList) {
+      var wrapper = document.createElement('div');
+      wrapper.className = 'help-keys-wrapper';
+      
+      var st = document.createElement('div');
+      st.className = 'help-st';
+      st.textContent = translate(titleKey);
+      wrapper.appendChild(st);
+      
+      var keys = document.createElement('div');
+      keys.className = 'help-keys';
+      
+      for (var i = 0; i < keysList.length; i++) {
+        var row = document.createElement('div');
+        row.textContent = translate(keysList[i]);
+        keys.appendChild(row);
+      }
+      
+      wrapper.appendChild(keys);
+      return wrapper;
+    }
+
+    // --- Построение основных секций справки ---
+    body.appendChild(buildSection('seg.local', 'help.local'));
+    body.appendChild(buildSection('seg.world', 'help.world'));
+    body.appendChild(buildSection('seg.seren', 'help.seren'));
+    body.appendChild(buildBox('help.philosophy'));
+    body.appendChild(buildBox('help.gestures'));
+    body.appendChild(buildKeysSection('help.keys', ['help.k1', 'help.k2']));
+
+    // --- Онбординг-чекбокс (только при первом запуске) ---
     var checkbox = null;
     if (showOnboarding) {
       var row = document.createElement('label');
       row.className = 'onb-row';
+      
       checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
+      row.appendChild(checkbox);
+      
       var span = document.createElement('span');
       span.textContent = translate('onb.dontshow');
-      row.appendChild(checkbox);
       row.appendChild(span);
+      
       body.appendChild(row);
     }
 
+    // --- Кнопки футера модального окна ---
     var buttons = [];
     if (showOnboarding) {
       buttons.push({
