@@ -5084,9 +5084,27 @@ DI.register('FocusSearchStrategy', function(AI, DB, Net, Config, StateManager) {
  * 
  * Отвечает за:
  * - Подписку на события смены контекста (ввод текста, фокус, очистка)
- * - Выбор стратегии на основе текущего uiMode
+ * - Выбор стратегии на основе текущего uiMode и состояния редактора
  * - Вызов StateManager.dispatch для переходов между режимами
  * - Делегирование работы стратегиям и передачу результатов обратно
+ * - 🔑 Обработку сетевых удалений (net:deletion) для очистки lists
+ * 
+ * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ v1.4.18 (СТАБИЛИЗАЦИЯ):
+ * 
+ * 1. **Приоритет текста над закрепом:**
+ *    При наличии текста в редакторе ВСЕГДА выполняется текстовый поиск,
+ *    даже если активен закреп (focusedItem). Это соответствует новому
+ *    поведению StateManager, где focusedItem сохраняется при переходе
+ *    в search.
+ * 
+ * 2. **Обработка net:deletion:**
+ *    При получении уведомления об удалении заметки (Kind 21002) из списков
+ *    результатов (world, seren) удаляется соответствующая запись. Это
+ *    обеспечивает консистентность UI с эфемерной природой сети.
+ * 
+ * 3. **Корректная работа с queryId:**
+ *    Стратегии получают текущий queryId от Net для фильтрации world-ответов,
+ *    что предотвращает смешивание результатов от разных запросов.
  * 
  * Архитектурные решения:
  * - **Event-driven:** реагирует на события Bus, а не вызывается напрямую
@@ -5097,7 +5115,7 @@ DI.register('FocusSearchStrategy', function(AI, DB, Net, Config, StateManager) {
  * @module SearchCoordinator
  */
 DI.register('SearchCoordinator', function(
-  Bus, StateManager, LiveStreamStrategy, TextSearchStrategy, FocusSearchStrategy
+  Bus, StateManager, LiveStreamStrategy, TextSearchStrategy, FocusSearchStrategy, Net
 ) {
 
   /**
@@ -5109,6 +5127,10 @@ DI.register('SearchCoordinator', function(
   /**
    * Инициализирует координатор: подписывается на события и запускает начальную стратегию.
    * 
+   * 🔑 ИЗМЕНЕНИЯ v1.4.18:
+   * - Добавлена подписка на net:deletion для удаления заметок из lists
+   * - Улучшена логика приоритета текста над закрепом
+   * 
    * @returns {void}
    */
   function init() {
@@ -5117,40 +5139,58 @@ DI.register('SearchCoordinator', function(
     abortController = new AbortController();
     var signal = abortController.signal;
 
-    // Подписка на запрос поиска из редактора
+    /**
+     * Подписка на запрос поиска из редактора.
+     * 
+     * 🔑 ЛОГИКА ПРИОРИТЕТА v1.4.18:
+     * - Если есть текст → текстовый поиск (игнорируем закреп)
+     * - Если нет текста, но есть закреп → поиск по вектору закрепа
+     * - Если нет ни текста, ни закрепа → Live Stream
+     */
     Bus.subscribe('editor:search-request', function(payload) {
       var state = StateManager.getState();
       var editor = document.getElementById('ed-ta');
       var text = editor ? editor.value.trim() : '';
       
       if (text) {
-        // Есть текст → переход в SEARCH
+        // Есть текст → текстовый поиск имеет приоритет над закрепом
+        // dispatch('to-search') НЕ сбросит focusedItem благодаря новому StateManager
         StateManager.dispatch('to-search');
         executeTextSearch(text, payload && payload.force);
-      } else if (state.uiMode === 'focus') {
-        // Нет текста, но есть фокус → выполняем поиск по вектору фокуса
+      } else if (state.focusedItem && state.focusedItem.vector) {
+        // Нет текста, но есть закреп → поиск по вектору закрепа
+        // Переходим в focus режим, если ещё не там
+        if (state.uiMode !== 'focus') {
+          StateManager.dispatch('to-focus', { item: state.focusedItem });
+        }
         executeFocusSearch(state.focusedItem.vector);
       } else {
-        // Нет текста и фокуса → переход в IDLE
+        // Нет текста и закрепа → Live Stream
         StateManager.dispatch('to-idle');
         LiveStreamStrategy.start();
       }
     }, signal);
 
-    // Подписка на завершение отправки заметки (нужно обновить списки)
+    /**
+     * Подписка на завершение отправки заметки (нужно обновить списки).
+     */
     Bus.subscribe('editor:send-complete', function() {
       var state = StateManager.getState();
       var editor = document.getElementById('ed-ta');
       var text = editor ? editor.value.trim() : '';
       
-      if (state.uiMode === 'search' && text) {
+      if (text) {
+        // Есть текст → обновляем текстовый поиск
         executeTextSearch(text, true);
-      } else if (state.uiMode === 'focus' && state.focusedItem) {
+      } else if (state.focusedItem && state.focusedItem.vector) {
+        // Есть закреп → обновляем поиск по вектору
         executeFocusSearch(state.focusedItem.vector);
       }
     }, signal);
 
-    // Подписка на stream-события для обновления streamData
+    /**
+     * Подписка на stream-события для обновления streamData.
+     */
     Bus.subscribe('net:stream-event', function(payload) {
       if (!payload || !payload.note) return;
       var state = StateManager.getState();
@@ -5161,7 +5201,9 @@ DI.register('SearchCoordinator', function(
       }
     }, signal);
 
-    // Подписка на отключение пиров для очистки streamData
+    /**
+     * Подписка на отключение пиров для очистки streamData.
+     */
     Bus.subscribe('net:peer-offline', function(payload) {
       if (!payload || !payload.pubkey) return;
       var state = StateManager.getState();
@@ -5172,7 +5214,74 @@ DI.register('SearchCoordinator', function(
       }
     }, signal);
 
-    // Подписка на изменения StateManager для реакции на переходы
+    /**
+     * 🔑 НОВАЯ ПОДПИСКА v1.4.18: Обработка сетевых удалений (Kind 21002).
+     * 
+     * При получении уведомления об удалении заметки:
+     * 1. Удаляем из streamData (если в Live Stream)
+     * 2. Удаляем из lists.world и lists.seren (если в режиме поиска)
+     * 3. Удаляем из lists.focus (если в режиме фокуса)
+     * 
+     * Это обеспечивает консистентность UI: если автор отозвал свою shared-заметку,
+     * она должна исчезнуть у всех пиров.
+     */
+    Bus.subscribe('net:deletion', function(payload) {
+      if (!payload || !payload.id) return;
+      var deletedId = payload.id;
+      var state = StateManager.getState();
+      
+      // 1. Удаляем из streamData (Live Stream)
+      if (state.uiMode === 'idle') {
+        var filteredStream = LiveStreamStrategy.removeStreamItem(state.streamData, deletedId);
+        StateManager.dispatch('update-stream', { streamData: filteredStream });
+      }
+      
+      // 2. Удаляем из списков результатов поиска
+      var lists = state.lists;
+      var listsChanged = false;
+      var newLists = {
+        local: lists.local || [],
+        world: lists.world || [],
+        seren: lists.seren || [],
+        focus: lists.focus || []
+      };
+      
+      // Фильтруем world
+      var filteredWorld = newLists.world.filter(function(item) {
+        return item && item.id !== deletedId;
+      });
+      if (filteredWorld.length !== newLists.world.length) {
+        newLists.world = filteredWorld;
+        listsChanged = true;
+      }
+      
+      // Фильтруем seren
+      var filteredSeren = newLists.seren.filter(function(item) {
+        return item && item.id !== deletedId;
+      });
+      if (filteredSeren.length !== newLists.seren.length) {
+        newLists.seren = filteredSeren;
+        listsChanged = true;
+      }
+      
+      // Фильтруем focus
+      var filteredFocus = newLists.focus.filter(function(item) {
+        return item && item.id !== deletedId;
+      });
+      if (filteredFocus.length !== newLists.focus.length) {
+        newLists.focus = filteredFocus;
+        listsChanged = true;
+      }
+      
+      // Обновляем lists, если были изменения
+      if (listsChanged) {
+        StateManager.dispatch('update-lists', { lists: newLists });
+      }
+    }, signal);
+
+    /**
+     * Подписка на изменения StateManager для реакции на переходы.
+     */
     var stateUnsubscribe = StateManager.subscribe(function(newState) {
       // Реагируем на смену uiMode
       if (newState.uiMode === 'idle') {
@@ -5197,6 +5306,8 @@ DI.register('SearchCoordinator', function(
   /**
    * Выполняет текстовый поиск через TextSearchStrategy.
    * Результат передаётся через dispatch('update-lists').
+   * 
+   * 🔑 ИЗМЕНЕНИЕ v1.4.18: передаёт queryId для фильтрации world-ответов.
    * 
    * @param {string} text - Поисковый запрос.
    * @param {boolean} [force=false] - Принудительная отправка в сеть.
@@ -5227,7 +5338,7 @@ DI.register('SearchCoordinator', function(
 
   /**
    * Публичный метод для запуска текстового поиска извне.
-   * Используется EditorComponent при вводе текста.
+   * Используется EditorComponent при вводе текста и FocusBarComponent при снятии закрепа.
    * 
    * @param {string} text - Поисковый запрос.
    * @param {boolean} [force=false] - Принудительная отправка в сеть.
@@ -5245,7 +5356,7 @@ DI.register('SearchCoordinator', function(
       });
     } else {
       var state = StateManager.getState();
-      if (state.uiMode === 'focus' && state.focusedItem) {
+      if (state.focusedItem && state.focusedItem.vector) {
         return executeFocusSearch(state.focusedItem.vector);
       } else {
         StateManager.dispatch('to-idle');
@@ -5287,7 +5398,7 @@ DI.register('SearchCoordinator', function(
     search: search,
     searchByVector: searchByVector
   };
-}, ['Bus', 'StateManager', 'LiveStreamStrategy', 'TextSearchStrategy', 'FocusSearchStrategy']);
+}, ['Bus', 'StateManager', 'LiveStreamStrategy', 'TextSearchStrategy', 'FocusSearchStrategy', 'Net']);
 <!-- NOOMIUM_MODULE_END SearchCoordinator -->
   
 <!-- NOOMIUM_MODULE_START SearchService -->
@@ -6851,7 +6962,28 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
  * - **SEARCH:** результаты текстового поиска из `state.lists[seg]` (local/world/seren)
  * 
  * Видимость плашки сегментов управляется вычисляемым полем `state.showSegments`
- * (true только в SEARCH).
+ * (true только в SEARCH без focusedItem — обновлено в v1.4.18).
+ * 
+ * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ v1.4.18 (СТАБИЛИЗАЦИЯ):
+ * 
+ * 1. **Сетевые удаления (Kind 21002):**
+ *    - При удалении shared-заметки вызывается `Net.publishDeletion(id)`,
+ *      чтобы уведомить сеть об отзыве заметки.
+ *    - Подписка на `net:deletion` удалена из этого компонента (обработка
+ *      централизована в SearchCoordinator).
+ * 
+ * 2. **Визуальная индикация «мёртвых» родительских связей:**
+ *    - Асинхронная проверка `DB.get(parentId)` при рендеринге карточки.
+ *    - Если родителя нет в локальной БД — ссылке добавляется CSS-класс
+ *      `fi-parent-dead` (opacity: 0.5, line-through).
+ *    - Клик по «мёртвой» ссылке открывает модалку с объяснением, что автор
+ *      мысли больше не в сети или удалил её. Связь сохраняется как часть
+ *      генеалогического древа.
+ * 
+ * 3. **Корректная работа с focusedItem в режиме search:**
+ *    - `showSegments` теперь вычисляется в StateManager с учётом focusedItem.
+ *    - Когда пользователь вводит текст при активном закрепе, сегменты скрыты,
+ *      но FocusBar остаётся видимым (логика в FocusBarComponent).
  * 
  * Ключевые возможности:
  * - Snap-scroll карусель с плавной прокруткой
@@ -6859,7 +6991,6 @@ DI.register('OfflineBarComponent', function(Bus, I18n, Net) {
  * - Подсветка поискового запроса через <mark>
  * - Действия над карточками: фокус, редактирование, копирование, удаление, toggle shared
  * - Адаптивный snapStep (пересчитывается при resize/orientationchange)
- * - 🔑 Визуальная индикация «мёртвых» родительских связей (fi-parent-dead)
  * 
  * Архитектурные решения:
  * - **State machine aware:** источник данных и видимость сегментов определяются
@@ -6974,10 +7105,11 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
    * Генерирует DOM-структуру карточки (fi) для переданного элемента.
    * Отображает бейджи, связи parent/child, score и кнопки действий.
    * 
-   * 🔑 ИЗМЕНЕНИЕ: Родительская ссылка проходит асинхронную проверку статуса.
+   * 🔑 ИЗМЕНЕНИЕ v1.4.18: Родительская ссылка проходит асинхронную проверку статуса.
    * Если родитель отсутствует в локальной БД (сетевая заметка ушла в офлайн
    * или была удалена), ссылке добавляется класс `fi-parent-dead` и обработчик
-   * клика меняется на показ модалки с объяснением.
+   * клика меняется на показ модалки с объяснением. Связь остаётся видимой
+   * как часть генеалогического древа.
    * 
    * Безопасность: все элементы создаются через createElement, текстовые данные
    * вставляются через textContent (XSS-safe).
@@ -7188,7 +7320,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     var pageItems = uiState.pages[pageIndex] || [];
     var state = StateManager.getState();
     
-    // Режим определяется через uiMode, а не через флаги
+    // Режим определяется через uiMode
     var mode;
     switch (state.uiMode) {
       case 'idle':
@@ -7309,8 +7441,11 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
    * Инициализирует или пересобирает карусель на основе текущего state machine.
    * Показывает empty-state, если данных нет.
    * 
-   * Источник данных выбирается через switch по uiMode.
-   * Видимость плашки сегментов через state.showSegments.
+   * 🔑 ИЗМЕНЕНИЕ v1.4.18:
+   * - Видимость плашки сегментов теперь берётся из `state.showSegments`,
+   *   которая вычисляется в StateManager с учётом focusedItem.
+   * - Когда focusedItem активен в режиме search (пользователь вводит текст),
+   *   сегменты корректно скрыты, а FocusBar отображает закреп.
    * 
    * @returns {void}
    */
@@ -7339,7 +7474,8 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         break;
     }
 
-    // Управление видимостью плашки сегментов через showSegments
+    // 🔑 ИЗМЕНЕНИЕ v1.4.18: видимость плашки сегментов берётся из state.showSegments
+    // (который теперь учитывает focusedItem в StateManager.syncDerivedFields)
     var segBlock = document.querySelector('.seg');
     if (segBlock) {
       segBlock.style.display = state.showSegments ? '' : 'none';
@@ -7460,8 +7596,10 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
   /**
    * Обрабатывает клики по действиям внутри карточки (focus, edit, copy, del, toggle).
    * 
-   * Действие 'focus' вызывает StateManager.dispatch('to-focus'),
-   * что гарантирует валидные переходы state machine.
+   * 🔑 ИЗМЕНЕНИЕ v1.4.18:
+   * - При удалении shared-заметки вызывается `Net.publishDeletion(id)` для
+   *   уведомления сети об отзыве заметки (Kind 21002). Это обеспечивает
+   *   синхронизацию эфемерной ленты между пирами.
    * 
    * @param {string} action - Имя действия (из data-act).
    * @param {HTMLElement} element - DOM-элемент кнопки.
@@ -7491,10 +7629,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
         }
       }
       
-      if (!item && Net && Net.getNetworkNote) {
-        item = Net.getNetworkNote(id);
-      }
-      
       if (item && item.vector) {
         StateManager.dispatch('to-focus', {
           item: {
@@ -7504,7 +7638,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
             peer: item.peer
           }
         });
-        // Запускаем поиск по вектору через SearchService (делегирование в Coordinator)
         SearchService.searchByVector(item.vector);
       }
       return;
@@ -7518,7 +7651,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     if (action === 'copy') {
       var copyItem = null;
       
-      // Ищем в текущем списке по uiMode
       if (state.uiMode === 'idle') {
         for (var i = 0; i < state.streamData.length; i++) {
           if (state.streamData[i].id === id) { copyItem = state.streamData[i]; break; }
@@ -7540,7 +7672,31 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     
     if (action === 'del') {
       if (!confirm(I18n.t('del.confirm'))) return;
+      
+      // 🔑 НОВОЕ v1.4.18: получаем информацию о заметке ПЕРЕД удалением,
+      // чтобы знать, была ли она shared (для publishDeletion)
+      var itemToDelete = null;
+      if (state.uiMode === 'idle') {
+        for (var i = 0; i < state.streamData.length; i++) {
+          if (state.streamData[i].id === id) { itemToDelete = state.streamData[i]; break; }
+        }
+      } else if (state.uiMode === 'focus') {
+        for (var i = 0; i < state.lists.focus.length; i++) {
+          if (state.lists.focus[i].id === id) { itemToDelete = state.lists.focus[i]; break; }
+        }
+      } else {
+        var segList = state.lists[state.seg] || [];
+        for (var i = 0; i < segList.length; i++) {
+          if (segList[i].id === id) { itemToDelete = segList[i]; break; }
+        }
+      }
+      
       DB.del(id).then(function() { 
+        // 🔑 НОВОЕ v1.4.18: публикуем удаление в сеть, если заметка была shared
+        if (itemToDelete && itemToDelete.shared && Net && typeof Net.publishDeletion === 'function') {
+          Net.publishDeletion(id);
+        }
+        
         Toast.show('ok', I18n.t('toast.deleted')); 
         try { Bus.emit('editor:search-request', { force: true }); } catch (_) {} 
       }).catch(function(err) {
@@ -7552,9 +7708,17 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
     if (action === 'toggle') {
       DB.get(id).then(function(record) {
         if (!record) return; 
+        var wasShared = record.shared;
         record.shared = !record.shared;
         return DB.put(record).then(function() { 
-          Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private')); 
+          Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
+          
+          // 🔑 НОВОЕ v1.4.18: если заметка была shared и стала private —
+          // уведомляем сеть об отзыве (другие пиры удалят её из своих лент)
+          if (wasShared && !record.shared && Net && typeof Net.publishDeletion === 'function') {
+            Net.publishDeletion(id);
+          }
+          
           try { Bus.emit('editor:search-request', { force: true }); } catch (_) {} 
         });
       }).catch(function(err) {
@@ -7686,12 +7850,9 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
       initCarousel(); 
     }, signal);
     
-    Bus.subscribe('net:stream-event', function(payload) {
-      if (!payload || !payload.note) return;
-      // Добавление в streamData делегировано в Coordinator через dispatch
-      // Здесь только реагируем на изменения state через StateManager.subscribe
-    }, signal);
-
+    // Примечание: обработка net:deletion централизована в SearchCoordinator.
+    // StreamViewComponent реагирует на изменения state через StateManager.subscribe.
+    
     Bus.subscribe('net:parent-updated', function() {
       // Перерисовываем карусель, чтобы обновить счетчики детей, если мы не в live stream
       if (StateManager.getUIMode() !== 'idle') initCarousel();
@@ -7716,13 +7877,6 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
 
   /**
    * Уничтожает компонент: очищает таймеры, снимает обработчики, отписывается от шины.
-   * 
-   * Один вызов `abort()` автоматически:
-   * - Удаляет все Bus-подписки (через механизм abortHandler в Bus)
-   * - Снимает все DOM-listeners (scroll, click, keydown)
-   * - Снимает window listeners (resize, orientationchange)
-   * 
-   * `requestAnimationFrame` отменяется вручную (не привязан к signal).
    * 
    * @returns {void}
    */
