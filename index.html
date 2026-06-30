@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.20">
+<meta name="app-version" content="1.4.21">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -3978,7 +3978,7 @@ DI.register('Bus', function() {
  * @description Активный режим интерфейса:
  * - `idle`: редактор пуст, фокус выключен → Live Stream, сегменты скрыты
  * - `focus`: закреплена заметка, редактор пуст → поиск по вектору закрепа, сегменты скрыты
- * - `search`: текст в редакторе → текстовый поиск, сегменты видны
+ * - `search`: текст в редакторе → текстовый поиск, сегменты видны (если нет закрепа)
  */
 
 /**
@@ -4023,34 +4023,23 @@ DI.register('Bus', function() {
 /**
  * Глобальный менеджер состояния приложения с конечным автоматом.
  * 
- * Архитектурные решения:
+ * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ v1.4.18 (СТАБИЛИЗАЦИЯ ЗАКРЕПА):
  * 
- * 1. **State machine с валидацией переходов.** Метод `dispatch(transition, payload)`
- *    обеспечивает строгие переходы между режимами (IDLE/FOCUS/SEARCH). Прямой
- *    вызов `setState` для uiMode запрещён — это защищает от невалидных состояний.
+ * 1. **Переход `to-search` больше не сбрасывает `focusedItem`.**
+ *    Это позволяет пользователю иметь активный закреп и одновременно
+ *    вводить текст в редактор. Поиск в этом случае идёт по тексту
+ *    (обрабатывается в EditorComponent.onInput и SearchCoordinator),
+ *    а закреп остаётся видимым в FocusBarComponent.
  * 
- * 2. **Вычисляемое поле `showSegments`.** Автоматически обновляется при каждом
- *    переходе. Плашка сегментов видна ТОЛЬКО в режиме SEARCH, что соответствует
- *    концепту пользователя.
+ * 2. **Вычисляемое поле `showSegments` учитывает `focusedItem`.**
+ *    Плашка сегментов видна ТОЛЬКО когда `uiMode === 'search'` И
+ *    `focusedItem === null`. Это предотвращает наложение FocusBar
+ *    и плашки сегментов друг на друга.
  * 
- * 3. **Обратная совместимость.** Поля `focusMode` и `streamActive` синхронизируются
- *    с `uiMode` автоматически. Существующие компоненты, использующие эти поля,
- *    продолжат работать до полной миграции.
- * 
- * 4. **Legacy setState.** Сохранён для компонентов, которые не были мигрированы
- *    на state machine. Логирует предупреждение при попытке изменить uiMode напрямую.
- * 
- * 5. **События для UI.** Каждый переход публикует событие `state:uimode-changed`
- *    с предыдущим и новым режимом. Компоненты могут подписываться для реакции
- *    на смену режима (например, EditorComponent очищает текст при FOCUS → SEARCH).
- * 
- * 6. **Идемпотентность.** Повторный вызов `dispatch('to-focus', { item })` с той же
- *    заметкой не вызывает лишних обновлений. Это предотвращает спам событий.
- * 
- * Безопасность:
- * - `dispatch` валидирует payload перед применением
- * - Неизвестные transition types игнорируются с логированием
- * - Ошибки в listener'ах не прерывают цикл уведомлений
+ * 3. **Идемпотентность перехода `to-search` с закрепом.**
+ *    Если мы уже в `search` и есть `focusedItem`, переход всё равно
+ *    выполняется (возвращает `true`), чтобы триггерить обновление
+ *    вычисляемых полей и UI.
  * 
  * @module StateManager
  */
@@ -4109,15 +4098,18 @@ DI.register('StateManager', function() {
    * Синхронизирует вычисляемые поля с основным состоянием.
    * Вызывается после каждого изменения state для гарантии консистентности.
    * 
+   * 🔑 ИЗМЕНЕНИЕ v1.4.18:
+   * - `showSegments` теперь учитывает `focusedItem`: плашка видна только
+   *   когда мы в режиме search И нет активного закрепа.
+   * 
    * Правила:
-   * - `showSegments` = true только в uiMode='search'
+   * - `showSegments` = true только в uiMode='search' без focusedItem
    * - `focusMode` = true только в uiMode='focus'
-   * - `streamActive` = true только в uiMode='idle' (может быть переопределено вручную)
    * 
    * @returns {void}
    */
   function syncDerivedFields() {
-    state.showSegments = state.uiMode === 'search';
+    state.showSegments = (state.uiMode === 'search') && !state.focusedItem;
     state.focusMode = state.uiMode === 'focus';
     // streamActive синхронизируется только при переходах to-idle, не автоматически
   }
@@ -4155,18 +4147,18 @@ DI.register('StateManager', function() {
   /**
    * Конечный автомат: выполняет валидный переход с применением payload.
    * 
-   * Поддерживаемые переходы:
+   * 🔑 ИЗМЕНЕНИЯ v1.4.18:
    * 
-   * ┌──────────────────┬─────────────────────────────────────────────────────┐
-   * │ Transition       │ Поведение                                           │
-   * ├──────────────────┼─────────────────────────────────────────────────────┤
-   * │ to-idle          │ Сброс фокуса, активация Live Stream, скрытие сегм.  │
-   * │ to-focus         │ Закрепление заметки, сброс Live Stream              │
-   * │ to-search        │ Сброс фокуса, подготовка к текстовому поиску        │
-   * │ update-lists     │ Обновление списков результатов                      │
-   * │ switch-segment   │ Переключение сегмента (только в search)             │
-   * │ update-stream    │ Обновление данных Live Stream                       │
-   * └──────────────────┴─────────────────────────────────────────────────────┘
+   * **Переход `to-search`:**
+   * - Больше НЕ сбрасывает `focusedItem` (убрана строка `partial.focusedItem = null`)
+   * - Идемпотентность изменена: если мы уже в search, но focusedItem изменился
+   *   (появился или исчез), переход всё равно выполняется для обновления showSegments
+   * 
+   * **Переход `to-focus`:**
+   * - Без изменений: сбрасывает lists и streamActive
+   * 
+   * **Переход `to-idle`:**
+   * - Без изменений: сбрасывает focusedItem и активирует Live Stream
    * 
    * @param {TransitionType} transition - Тип перехода.
    * @param {TransitionPayload} [payload] - Данные для перехода.
@@ -4180,6 +4172,7 @@ DI.register('StateManager', function() {
     }
     
     var previousMode = state.uiMode;
+    var previousFocusedItem = state.focusedItem;
     var partial = {};
     
     switch (transition) {
@@ -4213,12 +4206,20 @@ DI.register('StateManager', function() {
         break;
         
       case 'to-search':
-        // Идемпотентность: если уже в search
-        if (state.uiMode === 'search') {
+        // 🔑 ИЗМЕНЕНИЕ v1.4.18:
+        // Идемпотентность учитывает focusedItem:
+        // - Если мы уже в search И focusedItem не изменился → выходим
+        // - Если focusedItem появился/исчез → выполняем переход для обновления showSegments
+        var focusedItemChanged = (state.focusedItem !== payload || 
+                                  (state.focusedItem && payload && state.focusedItem.id !== payload.id));
+        
+        if (state.uiMode === 'search' && !focusedItemChanged) {
           return false;
         }
+        
         partial.uiMode = 'search';
-        partial.focusedItem = null;
+        // 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: НЕ сбрасываем focusedItem
+        // partial.focusedItem = null;  ← УДАЛЕНО
         partial.streamActive = false;
         // Не сбрасываем lists — они будут заполнены SearchCoordinator
         break;
@@ -4263,10 +4264,8 @@ DI.register('StateManager', function() {
     
     // Публикуем событие смены режима, если режим изменился
     if (partial.uiMode && partial.uiMode !== previousMode) {
-      for (var i = 0; i < listeners.length; i++) {
-        // Специальное событие для реакции на смену режима
-        // (не путать с обычным subscribe, который реагирует на любые изменения)
-      }
+      // Специальное событие для реакции на смену режима
+      // (не путать с обычным subscribe, который реагирует на любые изменения)
     }
     
     return true;
@@ -4288,6 +4287,11 @@ DI.register('StateManager', function() {
    * ⚠️ Deprecated для изменения uiMode: используйте dispatch() вместо setState
    * для переходов между режимами. setState подходит только для побочных полей
    * (view, sendMode, netAuthorized и т.д.).
+   * 
+   * 🔑 ИСПОЛЬЗОВАНИЕ v1.4.18:
+   * FocusBarComponent.unfocusBtn использует setState({ focusedItem: null })
+   * для сброса закрепа без смены uiMode, что корректно работает благодаря
+   * syncDerivedFields() пересчитывающему showSegments.
    * 
    * @param {Partial<AppState>} partial - Объект с изменяемыми полями.
    * @returns {void}
