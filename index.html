@@ -7923,21 +7923,24 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
 /**
  * Компонент вкладки "База" (локальное хранилище заметок).
  * 
- * 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ЭТАПА 2 (ЭФЕМЕРНОСТЬ):
- * - **Удалена функция `openNetworkNoteView`** — сетевые заметки больше не отображаются
- *   в NoteView, так как они не хранятся локально (принцип эфемерности).
- * - **Удалён fallback на `Net.getNetworkNote`** в `openNoteView`. Если заметки нет
- *   в локальной БД, показывается тост "Note not found" без попыток найти её в сети.
- * - **Удалена зависимость `Net`** из DI — компонент больше не взаимодействует
- *   с сетевым модулем. Это соответствует SRP: BaseViewComponent отвечает только
- *   за локальные данные.
+ * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ ЭТАПА СТАБИЛИЗАЦИИ v1.4.18:
  * 
- * 🔑 КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ЭТАПА 3 (ГЕНЕАЛОГИЯ):
- * - **Визуальная индикация «мёртвых» родительских связей:** в `fillBaseItem`
- *   добавлена асинхронная проверка наличия родителя в локальной БД.
- *   Если родитель отсутствует (сетевая заметка ушла в офлайн или удалена),
- *   ссылке добавляется CSS-класс `fi-parent-dead` и обработчик клика меняется
- *   на показ модалки с объяснением. Связь остаётся видимой как часть истории.
+ * 1. **Сетевые удаления (Kind 21002):**
+ *    - При удалении shared-заметки вызывается `Net.publishDeletion(id)`,
+ *      чтобы уведомить сеть об отзыве заметки.
+ *    - При переключении shared→private (toggle) также публикуется удаление,
+ *      так как заметка больше не должна отображаться у других пиров.
+ * 
+ * 2. **Визуальная индикация «мёртвых» родительских связей:**
+ *    - В `fillBaseItem` добавлена асинхронная проверка наличия родителя
+ *      в локальной БД через `DB.get(parentId)`.
+ *    - Если родитель недоступен (сетевая заметка ушла в офлайн или удалена),
+ *      ссылке добавляется CSS-класс `fi-parent-dead` (opacity: 0.5, line-through).
+ *    - Клик по «мёртвой» ссылке открывает модалку с объяснением, что автор
+ *      мысли больше не в сети. Связь сохраняется как часть генеалогического древа.
+ *    - Проверка выполнена асинхронно после синхронного рендеринга, чтобы не
+ *      блокировать виртуальный скролл. Защита от race condition через проверку
+ *      актуальности data-id (важно при переиспользовании пула DOM-элементов).
  * 
  * Принцип: "Сетевые заметки живут, пока пир в сети. Локальная база — только свои мысли."
  * 
@@ -7964,7 +7967,7 @@ DI.register('StreamViewComponent', function(Bus, I18n, Utils, StateManager, Conf
  * 
  * @module BaseViewComponent
  */
-DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast, SearchService, Modal) {
+DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config, DB, AI, Toast, SearchService, Modal, Net) {
   
   /** @type {number} Высота одной карточки в пикселях (включая border) */
   var ITEM_HEIGHT = 100;
@@ -8054,7 +8057,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
    * Заполняет DOM-элемент пула данными конкретной заметки.
    * Отображает текст, теги, дату и кликабельные индикаторы Parent/Child.
    * 
-   * 🔑 ИЗМЕНЕНИЕ: Родительская ссылка проходит асинхронную проверку статуса.
+   * 🔑 ИЗМЕНЕНИЕ v1.4.18: Родительская ссылка проходит асинхронную проверку статуса.
    * Если родитель отсутствует в локальной БД (сетевая заметка ушла в офлайн
    * или была удалена), ссылке добавляется класс `fi-parent-dead` и обработчик
    * клика меняется на показ модалки с объяснением. Связь сохраняется визуально
@@ -8328,18 +8331,35 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
 
   /**
    * Обрабатывает удаление заметки из NoteView.
+   * 
+   * 🔑 ИЗМЕНЕНИЕ v1.4.18:
+   * - Перед удалением получаем record, чтобы проверить, была ли заметка shared.
+   * - Если была shared, после успешного удаления вызываем `Net.publishDeletion(id)`
+   *   для уведомления сети об отзыве заметки (Kind 21002).
+   * 
    * @param {string} id - ID заметки.
    * @param {HTMLDivElement} nvOverlay - Оверлей NoteView.
    * @returns {void}
    */
   function handleDelete(id, nvOverlay) {
     if (!confirm(I18n.t('nv.delete.confirm'))) return;
-    DB.del(id).then(function() {
-      Toast.show('ok', I18n.t('toast.deleted'));
-      closeNoteView(nvOverlay);
-      renderBase();
-      try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
-      try { Bus.emit('state:lists-changed'); } catch (_) {}
+    
+    // Получаем информацию о заметке ПЕРЕД удалением, чтобы знать, была ли она shared
+    DB.get(id).then(function(record) {
+      var wasShared = record && record.shared;
+      
+      return DB.del(id).then(function() {
+        // 🔑 НОВОЕ v1.4.18: публикуем удаление в сеть, если заметка была shared
+        if (wasShared && Net && typeof Net.publishDeletion === 'function') {
+          Net.publishDeletion(id);
+        }
+        
+        Toast.show('ok', I18n.t('toast.deleted'));
+        closeNoteView(nvOverlay);
+        renderBase();
+        try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
+        try { Bus.emit('state:lists-changed'); } catch (_) {}
+      });
     }).catch(function(err) {
       Toast.show('err', String(err && err.message || err) || 'Delete failed');
     });
@@ -8347,18 +8367,31 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
 
   /**
    * Обрабатывает переключение видимости заметки (личное/открытое).
+   * 
+   * 🔑 ИЗМЕНЕНИЕ v1.4.18:
+   * - Если заметка была shared и стала private — уведомляем сеть об отзыве
+   *   через `Net.publishDeletion(id)`. Другие пиры удалят её из своих лент.
+   * 
    * @param {string} id - ID заметки.
    * @param {Note} record - Объект заметки.
    * @param {HTMLButtonElement} toggleBtn - Кнопка переключения.
    * @returns {void}
    */
   function handleToggle(id, record, toggleBtn) {
+    var wasShared = record.shared;
     record.shared = !record.shared;
     DB.put(record).then(function() {
       Toast.show('ok', record.shared ? I18n.t('toast.saved.public') : I18n.t('toast.saved.private'));
       toggleBtn.setAttribute('aria-label', record.shared ? I18n.t('btn.toggle.priv') : I18n.t('btn.toggle.pub'));
       toggleBtn.textContent = record.shared ? I18n.t('btn.toggle.priv') : I18n.t('btn.toggle.pub');
       renderBase();
+      
+      // 🔑 НОВОЕ v1.4.18: если заметка была shared и стала private —
+      // уведомляем сеть об отзыве (другие пиры удалят её из своих лент)
+      if (wasShared && !record.shared && Net && typeof Net.publishDeletion === 'function') {
+        Net.publishDeletion(id);
+      }
+      
       try { Bus.emit('editor:search-request', { force: true }); } catch (_) {}
       try { Bus.emit('state:lists-changed'); } catch (_) {}
     }).catch(function(err) {
@@ -8421,16 +8454,11 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     }
   }
 
-  // 🔑 УДАЛЕНО: openNetworkNoteView — сетевые заметки не отображаются в NoteView
-  // (принцип эфемерности: они живут только в Live Stream, пока пир в сети)
-
   /**
    * Открывает полноэкранное модальное окно редактирования заметки (NoteView).
    * 
-   * 🔑 ИЗМЕНЕНИЕ ЭТАПА 2:
-   * - Работает **только с локальными заметками** из БД.
-   * - Если заметки нет в БД — показывает тост "Note not found" и выходит.
-   * - Удалён fallback на `Net.getNetworkNote` (сетевые заметки не кэшируются).
+   * Работает **только с локальными заметками** из БД.
+   * Если заметки нет в БД — показывает тост "Note not found" и выходит.
    * 
    * @param {string} id - ID заметки для открытия.
    * @returns {void}
@@ -8441,7 +8469,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     }
 
     DB.get(id).then(function(record) {
-      // 🔑 ИЗМЕНЕНИЕ: Если заметки нет в БД — это ошибка, а не повод искать в сети
       if (!record) {
         Toast.show('warn', 'Note not found');
         return;
@@ -8737,13 +8764,6 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
   /**
    * Уничтожает компонент: закрывает NoteView, отменяет RAF, отписывается от всех событий.
    * 
-   * Один вызов `abort()` автоматически:
-   * - Удаляет все Bus-подписки (через механизм abortHandler в Bus)
-   * - Снимает все DOM-listeners (click, input, change, scroll, keydown)
-   * 
-   * `requestAnimationFrame` отменяется вручную (не привязан к signal).
-   * NoteView закрывается принудительно для очистки DOM.
-   * 
    * @returns {void}
    */
   function destroy() {
@@ -8786,7 +8806,7 @@ DI.register('BaseViewComponent', function(Bus, I18n, Utils, StateManager, Config
     exportData: exportData,
     importData: importData
   };
-}, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'AI', 'Toast', 'SearchService', 'Modal']);
+}, ['Bus', 'I18n', 'Utils', 'StateManager', 'Config', 'DB', 'AI', 'Toast', 'SearchService', 'Modal', 'Net']);
 <!-- NOOMIUM_MODULE_END BaseViewComponent -->
 
 <!-- NOOMIUM_MODULE_START App.State -->
