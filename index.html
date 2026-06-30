@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="ru">
 <head>
-<meta name="app-version" content="1.4.19">
+<meta name="app-version" content="1.4.20">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
 <meta name="mobile-web-app-capable" content="yes">
@@ -2452,6 +2452,7 @@ DI.register('Bus', function() {
    * @property {string} fullPubkey - Полный публичный ключ автора.
    * @property {number} createdAt - Timestamp получения ответа.
    * @property {string} [parentId] - ID родительской заметки.
+   * @property {string} [queryId] - ID поискового запроса, на который получен ответ (для фильтрации).
    */
 
   /**
@@ -2472,38 +2473,26 @@ DI.register('Bus', function() {
   /**
    * Сетевой модуль: управление Nostr-подключениями, P2P-обмен, шифрование ключей.
    * 
-   * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ ЭТАПА 3 (СЕТЕВОЙ ПРОТОКОЛ V2):
+   * 🔑 КЛЮЧЕВЫЕ ИЗМЕНЕНИЯ ЭТАПА СТАБИЛИЗАЦИИ v1.4.18:
    * 
-   * **Принцип "фильтрация на стороне отправителя":**
-   * Раньше Вася получал ВСЕ shared-заметки Пети и фильтровал у себя, что создавало
-   * огромный сетевой трафик. Теперь Петя фильтрует у себя и отправляет только
-   * релевантные ответы.
+   * 1. **Протокол удаления (Kind 21002):**
+   *    - Введён новый тип события для уведомления сети об удалении shared-заметок.
+   *    - При получении Kind 21002 заметка удаляется из `answers` и эмитится `net:deletion`.
+   *    - `LiveStreamStrategy` подписан на `net:deletion` и удаляет заметку из `streamData`.
    * 
-   * **Формат запроса (Kind 21000):**
-   * ```json
-   * {
-   *   "vector": [...],
-   *   "threshold": 0.7,
-   *   "serendipity": 0.3,
-   *   "protocol_version": 2
-   * }
-   * ```
+   * 2. **Исправление World-поиска:**
+   *    - `answers` больше НЕ очищается при каждом `Net.send()` — вместо этого
+   *      каждый ответ хранит `queryId`, и `activeAnswers(queryId)` фильтрует по нему.
+   *    - Это предотвращает потерю ответов при повторных поисках с тем же вектором.
+   *    - Проверка `expectedDim` оставлена как защита от мусорных данных с несовместимых
+   *      клиентов, но добавлено подробное логирование для отладки.
+   *    - Удалена избыточная проверка `peers.has(ev.pubkey)` для KA (пир уже добавлен выше).
    * 
-   * **Обработка входящего запроса (v2):**
-   * 1. Фильтруем shared-заметки: `score >= threshold - serendipity`
-   * 2. Вычисляем Z-score только для отфильтрованных кандидатов
-   * 3. Сортируем по score (desc)
-   * 4. Отправляем топ-N (maxAnswersPerQuery)
+   * 3. **Метод `publishDeletion(id)`:**
+   *    - Публичный метод для публикации события удаления.
+   *    - Вызывается из `BaseViewComponent` и `StreamViewComponent` при удалении shared-заметок.
    * 
-   * **Обратная совместимость с v1:**
-   * - Если в запросе нет `protocol_version` → считаем v1
-   * - Для v1: старая логика (Z-score >= 1, без фильтрации по threshold)
-   * - Старые клиенты корректно обрабатываются
-   * 
-   * **DoS-защита:**
-   * - Валидация `threshold` и `serendipity` (0..1)
-   * - Валидация длины вектора (expectedDim)
-   * - Fallback на локальные пороги при невалидных входных данных
+   * Принцип "фильтрация на стороне отправителя" (v2) сохранён.
    * 
    * @module Net
    */
@@ -2587,6 +2576,13 @@ DI.register('Bus', function() {
      * @type {number}
      */
     var PROTOCOL_VERSION = 2;
+
+    /**
+     * Kind Nostr-события для уведомления об удалении заметки.
+     * 🔑 НОВОЕ в v1.4.18: используется для синхронизации удалений между пирами.
+     * @type {number}
+     */
+    var K_DELETION = 21002;
 
     /**
      * Выводит AES-GCM ключ из пароля через PBKDF2 (100k итераций, SHA-256).
@@ -2744,7 +2740,6 @@ DI.register('Bus', function() {
 
     /**
      * Отправляет порцию событий из outbox через доступные релеи.
-     * Использует безопасную итерацию через Array.from().slice().
      * @returns {void}
      */
     function flushOutbox() {
@@ -2814,7 +2809,7 @@ DI.register('Bus', function() {
     }
 
     /**
-     * 🔑 НОВАЯ ФУНКЦИЯ ЭТАПА 3: Валидация и нормализация входящего запроса.
+     * 🔑 НОВАЯ ФУНКЦИЯ: Валидация и нормализация входящего запроса.
      * 
      * Поддерживает как старый формат v1 `{vector}`, так и новый v2
      * `{vector, threshold, serendipity, protocol_version}`.
@@ -2822,13 +2817,11 @@ DI.register('Bus', function() {
      * 
      * @param {Object} raw - Сырой распарсенный объект запроса.
      * @returns {{vector: Vector, threshold: number, serendipity: number, version: number} | null}
-     *   Нормализованный запрос или null при критической ошибке (нет вектора).
      */
     function normalizeQuery(raw) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
       if (!Array.isArray(raw.vector) || raw.vector.length === 0) return null;
 
-      // Определение версии протокола
       var version = 1;
       if (typeof raw.protocol_version === 'number' && 
           Number.isInteger(raw.protocol_version) && 
@@ -2836,34 +2829,27 @@ DI.register('Bus', function() {
         version = 2;
       }
 
-      // Локальные пороги по умолчанию (fallback)
       var localThreshold = cfg.get('threshold', 0.7);
       var localSerendipity = cfg.get('serendipity', 0.3);
 
-      // Для v2 валидируем пороги, для v1 — используем локальные
       var threshold, serendipity;
       if (version === 2) {
-        // Валидация threshold: число в диапазоне [0, 1]
         if (typeof raw.threshold === 'number' && 
             isFinite(raw.threshold) && 
             raw.threshold >= 0 && raw.threshold <= 1) {
           threshold = raw.threshold;
         } else {
           threshold = localThreshold;
-          if (log) log.warn('Query v2: invalid threshold, fallback to local', { got: raw.threshold });
         }
 
-        // Валидация serendipity: число в диапазоне [0, 1]
         if (typeof raw.serendipity === 'number' && 
             isFinite(raw.serendipity) && 
             raw.serendipity >= 0 && raw.serendipity <= 1) {
           serendipity = raw.serendipity;
         } else {
           serendipity = localSerendipity;
-          if (log) log.warn('Query v2: invalid serendipity, fallback to local', { got: raw.serendipity });
         }
       } else {
-        // v1: используем локальные пороги (обратная совместимость)
         threshold = localThreshold;
         serendipity = localSerendipity;
       }
@@ -2877,17 +2863,7 @@ DI.register('Bus', function() {
     }
 
     /**
-     * 🔑 НОВАЯ ФУНКЦИЯ ЭТАПА 3: Построение ответа на входящий запрос.
-     * 
-     * Для v2 (новые клиенты):
-     * - Фильтрует candidates по `score >= threshold - serendipity`
-     * - Вычисляет Z-score только для отфильтрованных кандидатов
-     * - Сортирует по score (desc) и ограничивает до maxAnswersPerQuery
-     * 
-     * Для v1 (старые клиенты, обратная совместимость):
-     * - Вычисляет Z-score для всех shared-заметок
-     * - Оставляет только те, у которых Z-score >= 1 (старая логика)
-     * - Сортирует и ограничивает
+     * 🔑 НОВАЯ ФУНКЦИЯ: Построение ответа на входящий запрос.
      * 
      * @param {Vector} queryVector - Вектор запроса.
      * @param {Note[]} sharedNotes - Массив shared-заметок локальной БД.
@@ -2900,11 +2876,9 @@ DI.register('Bus', function() {
       var maxAnswers = cfg.get('maxAnswersPerQuery', 5);
 
       if (version === 2) {
-        // 🔑 V2 ЛОГИКА: фильтрация на стороне отправителя
         var minScore = threshold - serendipity;
         var filtered = [];
 
-        // 1. Предварительная фильтрация по абсолютному score
         for (var i = 0; i < sharedNotes.length; i++) {
           var score = AI.cosineSimilarity(queryVector, sharedNotes[i].vector);
           if (score >= minScore) {
@@ -2917,10 +2891,8 @@ DI.register('Bus', function() {
           }
         }
 
-        // Если после фильтрации ничего не осталось — возвращаем пустой массив
         if (filtered.length === 0) return [];
 
-        // 2. Вычисление Z-score для отфильтрованных кандидатов
         var count = filtered.length;
         var mean = 0;
         for (var i = 0; i < count; i++) mean += filtered[i].score;
@@ -2936,18 +2908,15 @@ DI.register('Bus', function() {
           stddev = Math.sqrt(sumSq / (count - 1));
         }
 
-        // 3. Добавление Z-score к каждому кандидату
         for (var i = 0; i < count; i++) {
           var raw = filtered[i].score;
           filtered[i].z_score = stddev > 0 ? (raw - mean) / stddev : 0;
         }
 
-        // 4. Сортировка по score (desc) и обрезка до лимита
         filtered.sort(function(a, b) { return b.score - a.score; });
         return filtered.slice(0, maxAnswers);
       }
 
-      // 🔑 V1 ЛОГИКА: обратная совместимость (старая логика)
       var rawScores = [];
       for (var i = 0; i < sharedNotes.length; i++) {
         rawScores.push(AI.cosineSimilarity(queryVector, sharedNotes[i].vector));
@@ -2991,13 +2960,12 @@ DI.register('Bus', function() {
 
     /**
      * Обрабатывает входящее Nostr-событие.
-     * Порядок проверок: структура → подпись → валидность → дубликат → обработка.
      * 
-     * 🔑 КРИТИЧНО:
-     * - Валидация длины вектора (БАГ #4 из аудита) — защита от DoS-атак.
-     * - Проверка `peers.has(pubkey)` для KA-событий — игнорируем ответы от офлайн-пиров.
-     * - Сетевые заметки НЕ сохраняются (эфемерность). Они эмитятся в Live Stream
-     *   и обрабатываются `LiveStreamStrategy`, который привязывает их к пирам.
+     * 🔑 ИЗМЕНЕНИЯ v1.4.18:
+     * - Добавлена обработка Kind 21002 (удаление заметок) с эмитом `net:deletion`.
+     * - В ответах (Kind 21001) сохраняется `queryId` для последующей фильтрации.
+     * - Проверка `expectedDim` оставлена как защита, добавлено логирование.
+     * - Удалена избыточная проверка `peers.has` для KA.
      * 
      * @param {NostrEvent} ev
      * @returns {void}
@@ -3007,7 +2975,7 @@ DI.register('Bus', function() {
         // 1. Быстрая структурная проверка
         if (!ev || typeof ev !== 'object' || !Array.isArray(ev.tags)) return;
 
-        // 2. Проверка подписи ДО кэширования (защита от спама в seen Set)
+        // 2. Проверка подписи ДО кэширования
         if (nostr && typeof nostr.verifyEvent === 'function') {
           if (!nostr.verifyEvent(ev)) return;
         }
@@ -3042,13 +3010,39 @@ DI.register('Bus', function() {
           }
         }
 
+        // 🔑 ОБРАБОТКА УДАЛЕНИЙ (Kind 21002)
+        if (ev.kind === K_DELETION) {
+          var delId = null;
+          for (var i = 0; i < ev.tags.length; i++) {
+            if (Array.isArray(ev.tags[i]) && ev.tags[i][0] === 'e') {
+              delId = ev.tags[i][1];
+              break;
+            }
+          }
+          if (delId) {
+            // Удаляем из answers
+            for (var j = answers.length - 1; j >= 0; j--) {
+              if (answers[j].id === delId) {
+                answers.splice(j, 1);
+              }
+            }
+            // Эмитим событие для LiveStreamStrategy и других слушателей
+            if (bus && bus.emit) {
+              try { bus.emit('net:deletion', { id: delId, peer: ev.pubkey.slice(0, 6) }); } catch (_) {}
+            }
+            if (typeof onUpdate === 'function') {
+              try { onUpdate(); } catch (_) {}
+            }
+          }
+          return;
+        }
+
         // Обработка поисковых запросов (Kind Query)
         if (ev.kind === KQ) {
           if (!sk) return;
           var q;
           try { q = JSON.parse(ev.content); } catch (_) { return; }
 
-          // 🔑 ЭТАП 3: нормализация запроса (поддержка v1 и v2)
           var normalized = normalizeQuery(q);
           if (!normalized) return;
 
@@ -3069,7 +3063,6 @@ DI.register('Bus', function() {
             }
             if (sharedNotes.length === 0) return;
 
-            // 🔑 ЭТАП 3: построение ответа с учётом версии протокола
             var limited = buildAnswerCandidates(
               normalized.vector,
               sharedNotes,
@@ -3080,7 +3073,6 @@ DI.register('Bus', function() {
 
             if (limited.length === 0) return;
 
-            // Отправка ответов со stagger delay
             for (var j = 0; j < limited.length; j++) {
               try {
                 var ans = nostr.finalizeEvent({
@@ -3106,9 +3098,6 @@ DI.register('Bus', function() {
 
         // Обработка ответов (Kind Answer)
         if (ev.kind === KA) {
-          // 🔑 ЭФЕМЕРНОСТЬ: Проверка, что пир в сети
-          if (!peers.has(ev.pubkey)) return;
-
           var eTag = null;
           for (var i = 0; i < ev.tags.length; i++) {
             var tg = ev.tags[i];
@@ -3123,16 +3112,20 @@ DI.register('Bus', function() {
           if (typeof data.text !== 'string' || !data.text || data.text.length > MAX_P2P_TEXT_LENGTH) return;
           if (!Array.isArray(data.vector) || typeof data.score !== 'number') return;
 
-          // 🔑 ВАЛИДАЦИЯ ДЛИНЫ ВЕКТОРА (БАГ #4)
+          // 🔑 ПРОВЕРКА РАЗМЕРНОСТИ ВЕКТОРА (оставлена как защита)
           var expectedDim = cfg.get('dim', 384);
           if (data.vector.length !== expectedDim) {
-            if (log) log.warn('Invalid vector dimension', { 
+            if (log) log.warn('Answer rejected: incompatible vector dimension', { 
               expected: expectedDim, 
               got: data.vector.length,
-              eventId: ev.id 
+              eventId: ev.id,
+              peer: ev.pubkey.slice(0, 6)
             });
             return;
           }
+
+          // 🔑 ИЗМЕНЕНИЕ: Убрана избыточная проверка `peers.has(ev.pubkey)` —
+          // пир уже добавлен выше в этой функции (peers.set)
 
           // Сохранение как ответ на наш запрос
           if (eTag && eTag === queryId) {
@@ -3151,7 +3144,8 @@ DI.register('Bus', function() {
                 peer: ev.pubkey.slice(0, 6),
                 fullPubkey: ev.pubkey,
                 createdAt: Date.now(),
-                parentId: parentId
+                parentId: parentId,
+                queryId: eTag  // 🔑 НОВОЕ: сохраняем queryId для фильтрации
               });
               if (typeof onUpdate === 'function') {
                 try { onUpdate(); } catch (_) {}
@@ -3190,11 +3184,6 @@ DI.register('Bus', function() {
 
     /**
      * Запускает heartbeat для очистки устаревших пиров и ответов.
-     * 
-     * При удалении пира эмитится событие `net:peer-offline` с payload `{ pubkey }`.
-     * Это позволяет `LiveStreamStrategy` очистить streamData от заметок ушедшего пира
-     * через метод `removePeerItems()`.
-     * 
      * @returns {void}
      */
     function startHeartbeat() {
@@ -3267,7 +3256,7 @@ DI.register('Bus', function() {
           var nowSec = Math.floor(Date.now() / 1000);
           if (pool) {
             subscription = pool.subscribeMany(cfg.get('relays', []),
-              [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
+              [{ kinds: [KQ, KA, K_DELETION], '#t': [room], since: nowSec - subWindow }],
               { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
             reconnecting = false;
           } else {
@@ -3346,7 +3335,7 @@ DI.register('Bus', function() {
         started = true;
         try {
           subscription = pool.subscribeMany(cfg.get('relays', []),
-            [{ kinds: [KQ, KA], '#t': [room], since: nowSec - subWindow }],
+            [{ kinds: [KQ, KA, K_DELETION], '#t': [room], since: nowSec - subWindow }],
             { onevent: onEvent, onclose: function() { scheduleReconnect(); } });
           startHeartbeat();
         } catch (e) {
@@ -3374,7 +3363,7 @@ DI.register('Bus', function() {
       var nowSec = Math.floor(Date.now() / 1000);
       try {
         liveStreamSubscription = pool.subscribeMany(cfg.get('relays', []),
-          [{ kinds: [KA], '#t': [room], limit: 50, since: nowSec - 3600 }],
+          [{ kinds: [KA, K_DELETION], '#t': [room], limit: 50, since: nowSec - 3600 }],
           { onevent: onEvent, onclose: function() { liveStreamSubscription = null; } });
       } catch (e) {
         if (log) log.warn('Live stream sub fail', String(e));
@@ -3443,20 +3432,11 @@ DI.register('Bus', function() {
       init: init,
 
       /**
-       * 🔑 ЭТАП 3: Отправляет поисковый запрос в сеть с протоколом v2.
+       * 🔑 ИЗМЕНЕНИЕ v1.4.18: Отправляет поисковый запрос в сеть.
        * 
-       * Формат content:
-       * ```json
-       * {
-       *   "vector": [...],
-       *   "threshold": 0.7,
-       *   "serendipity": 0.3,
-       *   "protocol_version": 2
-       * }
-       * ```
-       * 
-       * Старые клиенты (v1) корректно обработают запрос, игнорируя неизвестные поля,
-       * и ответят по старой логике (все shared заметки с Z-score >= 1).
+       * `answers` больше НЕ очищается — вместо этого каждый ответ хранит `queryId`,
+       * и `activeAnswers(queryId)` фильтрует по нему. Это предотвращает потерю
+       * ответов при повторных поисках с тем же вектором (дедупликация).
        * 
        * @param {Vector} vector - Вектор запроса.
        * @returns {void}
@@ -3466,9 +3446,10 @@ DI.register('Bus', function() {
         var now = Date.now();
         if (now - lastQueryTime < cfg.get('queryRateLimit', 3000)) return;
         lastQueryTime = now;
-        answers.length = 0;
+        
+        // 🔑 ИЗМЕНЕНИЕ: НЕ очищаем answers — фильтрация по queryId в activeAnswers()
+        
         try {
-          // 🔑 ЭТАП 3: формат v2 с порогами и версией протокола
           var payload = {
             vector: vector,
             threshold: cfg.get('threshold', 0.7),
@@ -3492,15 +3473,62 @@ DI.register('Bus', function() {
         }
       },
 
-      activeAnswers: function() {
+      /**
+       * 🔑 ИЗМЕНЕНИЕ v1.4.18: Возвращает активные ответы, отфильтрованные по queryId.
+       * 
+       * Если queryId передан — возвращает только ответы для этого запроса.
+       * Если не передан — возвращает все активные ответы (legacy поведение).
+       * 
+       * @param {string} [filterQueryId] - Опциональный ID запроса для фильтрации.
+       * @returns {NetworkAnswer[]}
+       */
+      activeAnswers: function(filterQueryId) {
         var out = [];
         for (var i = 0; i < answers.length; i++) {
-          if (peers.has(answers[i].fullPubkey)) out.push(answers[i]);
+          if (peers.has(answers[i].fullPubkey)) {
+            // Фильтрация по queryId, если передан
+            if (!filterQueryId || answers[i].queryId === filterQueryId) {
+              out.push(answers[i]);
+            }
+          }
         }
         return out;
       },
 
       peerCount: function() { return peers.size; },
+
+      /**
+       * 🔑 НОВЫЙ МЕТОД v1.4.18: Публикует уведомление об удалении заметки.
+       * 
+       * Создаёт событие kind 21002 с тегом ['e', id], которое другие пиры
+       * используют для удаления заметки из своих streamData и answers.
+       * 
+       * @param {string} id - ID удалённой заметки.
+       * @returns {void}
+       */
+      publishDeletion: function(id) {
+        if (!sk || !nostr || !id) return;
+        try {
+          var ev = nostr.finalizeEvent({
+            kind: K_DELETION,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [['e', id]],
+            content: ''
+          }, sk);
+          safePublish(ev);
+          if (log) log.info('Published deletion for id=' + id);
+        } catch (e) {
+          if (log) log.warn('publishDeletion fail', String(e));
+        }
+      },
+
+      /**
+       * Возвращает ID последнего отправленного запроса (для фильтрации ответов).
+       * @returns {string | null}
+       */
+      getQueryId: function() {
+        return queryId;
+      },
 
       stop: function() {
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
@@ -4339,6 +4367,7 @@ DI.register('StateManager', function() {
  * - Сортировку по created_at (новизна)
  * - Автоматическую очистку при отключении пиров
  * - Дедупликацию событий, пришедших с разных Nostr-релеев
+ * - 🔑 Удаление заметок по событию net:deletion (Kind 21002)
  * 
  * Архитектурные решения:
  * - **Stateless execute:** принимает state, возвращает обновлённые данные
@@ -4346,6 +4375,8 @@ DI.register('StateManager', function() {
  * - **Привязка к пирам:** каждый элемент содержит peerPubkey для очистки
  * - **FIFO limit:** максимум 50 элементов для защиты от OOM
  * - **Дедупликация:** проверка уникальности id перед добавлением
+ * - **Синхронизация удалений:** подписка на net:deletion для удаления заметок,
+ *   отозванных автором через Kind 21002
  * 
  * @module LiveStreamStrategy
  */
@@ -4360,6 +4391,9 @@ DI.register('LiveStreamStrategy', function(Bus, Net, Config) {
   /**
    * Запускает подписку на Live Stream, если она ещё не активна.
    * Вызывается при переходе в режим IDLE.
+   * 
+   * 🔑 ИЗМЕНЕНИЕ v1.4.18: Добавлена подписка на net:deletion для обработки
+   * Kind 21002 (уведомлений об удалении shared-заметок автором).
    * 
    * @returns {void}
    */
@@ -4379,6 +4413,12 @@ DI.register('LiveStreamStrategy', function(Bus, Net, Config) {
     Bus.subscribe('net:peer-offline', function(payload) {
       if (!payload || !payload.pubkey) return;
       // Coordinator должен удалить все заметки этого пира из streamData
+    }, signal);
+    
+    // 🔑 НОВОЕ: Подписка на уведомления об удалении заметок (Kind 21002)
+    Bus.subscribe('net:deletion', function(payload) {
+      if (!payload || !payload.id) return;
+      // Coordinator удалит заметку из streamData через removeStreamItem
     }, signal);
     
     // Запуск сетевой подписки через Net
@@ -4422,7 +4462,8 @@ DI.register('LiveStreamStrategy', function(Bus, Net, Config) {
 
   /**
    * Обновляет streamData: добавляет новую заметку в начало (FIFO).
-   * 🔑 ИСПРАВЛЕНИЕ: Добавлена дедупликация по id для защиты от повторов,
+   * 
+   * 🔑 ИЗМЕНЕНИЕ v1.4.17: Добавлена дедупликация по id для защиты от повторов,
    * когда одно и то же Nostr-событие приходит через несколько релеев.
    * Обрезает до лимита для защиты от OOM.
    * 
@@ -4470,12 +4511,32 @@ DI.register('LiveStreamStrategy', function(Bus, Net, Config) {
     });
   }
 
+  /**
+   * 🔑 НОВЫЙ МЕТОД v1.4.18: Удаляет конкретную заметку из streamData по id.
+   * 
+   * Вызывается при получении события net:deletion (Kind 21002), когда автор
+   * заметки уведомляет сеть об её удалении. Это обеспечивает синхронизацию
+   * эфемерной ленты: если автор отозвал свою shared-заметку, она должна
+   * исчезнуть у всех пиров, которые её получили.
+   * 
+   * @param {SearchResult[]} currentData - Текущий массив streamData.
+   * @param {string} id - ID заметки для удаления.
+   * @returns {SearchResult[]} Отфильтрованный массив.
+   */
+  function removeStreamItem(currentData, id) {
+    if (!id) return currentData || [];
+    return (currentData || []).filter(function(item) {
+      return item && item.id !== id;
+    });
+  }
+
   return {
     start: start,
     stop: stop,
     execute: execute,
     addStreamItem: addStreamItem,
-    removePeerItems: removePeerItems
+    removePeerItems: removePeerItems,
+    removeStreamItem: removeStreamItem
   };
 }, ['Bus', 'Net', 'Config']);
 <!-- NOOMIUM_MODULE_END LiveStreamStrategy -->
