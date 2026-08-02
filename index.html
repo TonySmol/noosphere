@@ -1,78 +1,850 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#10131a">
 <title>NOOmium — лента смыслов</title>
+
+<!-- ═══ CDN LIBS ═══
+     nostr-tools и transformers — ESM-only, импортируются ВНУТРИ модулей
+     (NOSTR — статический import; EMBEDDER — ленивый dynamic import, модель ~40МБ).
+     Fallback-стратегия описана в соответствующих модулях. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Manrope:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Spectral:wght@500;700&family=Manrope:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
 <style>
-  :root{
-    --bg:#0f141b; --card:#171e28; --line:#242e3c;
-    --text:#e8ecf1; --dim:#8b97a8;
-    --coral:#ff8a5c; --teal:#5eead4;
-  }
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{
-    min-height:100vh; background:var(--bg); color:var(--text);
-    font:15px/1.55 'Manrope',sans-serif;
-    background-image:
-      radial-gradient(700px 400px at 8% -5%, rgba(94,234,212,.07), transparent 60%),
-      radial-gradient(700px 420px at 95% 105%, rgba(255,138,92,.07), transparent 60%);
-  }
-  .wrap{max-width:640px;margin:0 auto;padding:32px 20px 80px}
-  header{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px}
-  h1{font:700 26px 'Unbounded',sans-serif;letter-spacing:-.02em}
-  h1 em{font-style:normal;color:var(--coral)}
-  #me{font:400 11px 'JetBrains Mono',monospace;color:var(--dim)}
-  #status{font:400 12px 'JetBrains Mono',monospace;color:var(--teal);margin-bottom:24px;min-height:18px}
+/* ═══════════════════════════════════════════════════════════
+   СТИЛИ: ТЁМНАЯ ПАЛИТРА «ЧЕРНИЛА + ЯНТАРЬ», ПОЛНЫЕ
+   ═══════════════════════════════════════════════════════════ */
+:root{
+  --bg:#10131a; --bg-2:#161b24; --surface:#1a2029; --surface-2:#212936; --surface-3:#2a3342;
+  --line:rgba(255,255,255,.07); --line-2:rgba(255,255,255,.13);
+  --text:#e7e3da; --text-2:#a3a89f; --text-3:#6b7069;
+  --amber:#e8a33d; --amber-glow:rgba(232,163,61,.14);
+  --teal:#56c2b8;  --teal-glow:rgba(86,194,184,.13);
+  --rose:#e5646e;  --rose-glow:rgba(229,100,110,.14);
+  --green:#6bbf7a;
+  --font:'Manrope',system-ui,sans-serif;
+  --display:'Spectral',Georgia,serif;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --r:12px; --r-sm:8px;
+  --ease:cubic-bezier(.2,.7,.2,1);
+  --hdr-h:52px; --tab-h:56px;
+  --safe-top:env(safe-area-inset-top,0px); --safe-bot:env(safe-area-inset-bottom,0px);
+}
+[data-theme="light"]{
+  --bg:#f4f1ea; --bg-2:#ffffff; --surface:#ffffff; --surface-2:#f0ede5; --surface-3:#e6e2d8;
+  --line:rgba(0,0,0,.08); --line-2:rgba(0,0,0,.15);
+  --text:#22262e; --text-2:#5a5f57; --text-3:#8a8f86;
+  --amber:#c47f17; --teal:#2c8f86; --rose:#c23b46; --green:#3f9455;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);
+  font:15px/1.55 var(--font);-webkit-font-smoothing:antialiased}
+body{background-image:
+  radial-gradient(720px 460px at 92% -6%,var(--amber-glow),transparent 60%),
+  radial-gradient(720px 480px at -6% 108%,var(--teal-glow),transparent 60%)}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+button:disabled{opacity:.45;cursor:not-allowed}
+input,textarea,select{font:inherit;color:inherit}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:3px}
+::-webkit-scrollbar-track{background:transparent}
 
-  .composer{display:flex;gap:10px;margin-bottom:28px}
-  textarea{
-    flex:1;resize:none;min-height:52px;padding:14px 16px;
-    background:var(--card);border:1px solid var(--line);border-radius:12px;
-    color:var(--text);font:inherit;outline:none;transition:border-color .15s;
-  }
-  textarea:focus{border-color:var(--coral)}
-  button{
-    padding:0 22px;border:none;border-radius:12px;cursor:pointer;
-    background:var(--coral);color:#1a0f08;font:600 14px 'Manrope',sans-serif;
-    transition:transform .1s,filter .15s;
-  }
-  button:hover:not(:disabled){filter:brightness(1.1)}
-  button:active:not(:disabled){transform:scale(.96)}
-  button:disabled{opacity:.5;cursor:not-allowed}
+/* ─── LAYOUT ─── */
+#app{display:none;flex-direction:column;height:100vh;height:100dvh}
+body.ready #app{display:flex}
 
-  .hint{font-size:12px;color:var(--dim);margin-bottom:14px}
-  .hint b{color:var(--teal);font-weight:600}
+/* ─── HEADER ─── */
+#hdr{display:flex;align-items:center;gap:12px;padding:10px 16px;
+  padding-top:calc(10px + var(--safe-top));min-height:var(--hdr-h);
+  background:var(--surface);border-bottom:1px solid var(--line);flex-shrink:0}
+.logo{font:700 19px var(--display);letter-spacing:-.01em}
+.logo b{color:var(--amber);font-weight:700}
+#hdr-status{display:flex;align-items:center;gap:12px;flex:1;justify-content:flex-end;
+  font:400 11px var(--mono);color:var(--text-3);overflow:hidden}
+.st{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.st .dot{width:6px;height:6px;border-radius:50%;background:var(--text-3)}
+.st .dot.ok{background:var(--green)} .st .dot.warn{background:var(--amber)}
+.st .dot.err{background:var(--rose)} .st .dot.load{background:var(--teal);animation:pulse 1.4s infinite}
+@keyframes pulse{50%{opacity:.3}}
+#btn-menu{width:40px;height:40px;border-radius:10px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:4px;transition:background .15s var(--ease)}
+#btn-menu:active{background:var(--surface-2)}
+#btn-menu i{width:16px;height:2px;background:var(--text-2);border-radius:1px;display:block}
 
-  .note{
-    background:var(--card);border:1px solid var(--line);border-radius:12px;
-    padding:16px;margin-bottom:10px;cursor:pointer;
-    transition:border-color .15s,transform .15s;
-    animation:in .25s ease both;
-  }
-  .note:hover{border-color:var(--teal);transform:translateY(-1px)}
-  .note.pinned{border-color:var(--coral)}
-  .note-text{white-space:pre-wrap;word-break:break-word;margin-bottom:10px}
-  .note-meta{display:flex;gap:12px;font:400 11px 'JetBrains Mono',monospace;color:var(--dim)}
-  .sim{color:var(--coral);font-weight:600}
-  @keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+/* ─── OFFLINE BAR ─── */
+#offline-bar{display:none;background:var(--rose-glow);color:var(--rose);
+  font:500 11px var(--mono);padding:5px 16px;text-align:center;border-bottom:1px solid var(--line-2)}
+
+/* ─── WORKSPACE ─── */
+#ws{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0}
+
+/* ─── CONTEXT BANNER (пин/ввод) ─── */
+#ctx-banner{display:none;align-items:center;gap:10px;margin:10px 14px 0;padding:9px 12px;
+  background:var(--amber-glow);border:1px solid var(--line-2);border-radius:var(--r-sm);
+  font-size:12px;color:var(--text)}
+#ctx-banner.on{display:flex}
+#ctx-banner .ctx-txt{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#ctx-banner .ctx-x{color:var(--text-3);font-size:16px;padding:0 4px}
+
+/* ─── SEGMENTS (Моё/Мир/Озарения) ─── */
+#seg{display:flex;gap:2px;margin:10px 14px;padding:5px 3px;background:var(--surface);
+  border:1px solid var(--line);border-radius:var(--r-sm);flex-shrink:0}
+.seg-b{flex:1;padding:8px 6px;border-radius:6px;font-size:13px;font-weight:600;color:var(--text-3);
+  display:flex;align-items:center;justify-content:center;gap:6px;transition:all .15s var(--ease)}
+.seg-b.on{background:var(--surface-2);color:var(--text)}
+.seg-b .cnt{font:600 10px var(--mono);padding:1px 6px;border-radius:9px;background:var(--surface-3);min-width:16px;text-align:center}
+.seg-b.on .cnt{background:var(--amber-glow);color:var(--amber)}
+
+/* ─── FEED / CLOUD ─── */
+#feed-wrap{flex:1;position:relative;overflow:hidden;min-height:0}
+#feed{position:absolute;inset:0;overflow-y:auto;padding:4px 14px 12px;-webkit-overflow-scrolling:touch}
+.note{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  padding:14px;margin-bottom:10px;cursor:pointer;transition:border-color .15s var(--ease),transform .15s var(--ease);
+  animation:noteIn .25s var(--ease) both}
+.note:hover{border-color:var(--line-2)}
+.note.pinned{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber-glow)}
+@keyframes noteIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.note-txt{font-size:15px;white-space:pre-wrap;word-break:break-word;margin-bottom:10px}
+.note-txt mark{background:var(--amber-glow);color:var(--amber);border-radius:3px;padding:0 2px}
+.note-meta{display:flex;align-items:center;gap:10px;font:400 11px var(--mono);color:var(--text-3);flex-wrap:wrap}
+.note-tag{padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+.note-tag.priv{background:var(--surface-3);color:var(--text-2)}
+.note-tag.world{background:var(--teal-glow);color:var(--teal)}
+.note-sim{color:var(--amber);font-weight:600}
+.note-parent{color:var(--teal)}
+.note-acts{display:flex;gap:6px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);flex-wrap:wrap}
+.na{padding:7px 12px;border-radius:7px;font-size:12px;font-weight:600;color:var(--text-2);
+  border:1px solid var(--line);transition:all .12s var(--ease)}
+.na:active{background:var(--surface-2)}
+.na.primary{background:var(--amber);color:#1a1206;border-color:transparent}
+.na.danger{color:var(--rose);border-color:var(--rose-glow)}
+#feed-empty{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;
+  justify-content:center;text-align:center;padding:32px;color:var(--text-3)}
+#feed-empty.on{display:flex}
+#feed-empty .ic{font:700 30px var(--display);color:var(--text-3);opacity:.5;margin-bottom:12px}
+
+/* ─── COMPOSER ─── */
+#composer{margin:0 14px;padding:10px 12px;background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--r);flex-shrink:0;transition:border-color .15s var(--ease)}
+#composer:focus-within{border-color:var(--amber)}
+#ed-ta{width:100%;min-height:44px;max-height:120px;background:none;border:none;outline:none;
+  resize:none;font:15px/1.5 var(--font);color:var(--text)}
+#ed-ta::placeholder{color:var(--text-3)}
+#ed-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
+#ed-cnt{font:400 11px var(--mono);color:var(--text-3)}
+#ed-acts{display:flex;align-items:center;gap:8px}
+#mode-toggle{display:inline-flex;align-items:center;background:var(--surface-2);border:1px solid var(--line);
+  border-radius:999px;padding:3px;position:relative;height:38px}
+.mt-opt{position:relative;z-index:2;padding:0 14px;height:100%;display:flex;align-items:center;
+  font-size:12px;font-weight:700;color:var(--text-3);transition:color .2s var(--ease)}
+.mt-opt.on{color:var(--text)}
+#mode-toggle[data-mode="world"] .mt-opt[data-v="world"]{color:var(--teal)}
+#mode-toggle[data-mode="private"] .mt-opt[data-v="private"]{color:var(--amber)}
+.mt-thumb{position:absolute;top:3px;bottom:3px;left:3px;width:calc(50% - 3px);background:var(--surface-3);
+  border-radius:999px;transition:left .25s var(--ease),background .2s var(--ease);z-index:1}
+#mode-toggle[data-mode="world"] .mt-thumb{left:50%;background:var(--teal-glow)}
+#mode-toggle[data-mode="private"] .mt-thumb{background:var(--amber-glow)}
+#btn-send{height:38px;min-width:44px;padding:0 16px;border-radius:999px;background:var(--amber);
+  color:#1a1206;font-weight:700;display:flex;align-items:center;justify-content:center;gap:6px;
+  transition:transform .1s var(--ease),filter .15s var(--ease)}
+#btn-send:active:not(:disabled){transform:scale(.95)}
+#btn-send.sending{opacity:.7;pointer-events:none}
+
+/* ─── BASE VIEW ─── */
+#base{display:none;flex-direction:column;flex:1;overflow:hidden;min-height:0}
+#base.on{display:flex}
+#base-h{padding:10px 14px 0;flex-shrink:0}
+#base-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:8px}
+.bstat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:8px;text-align:center}
+.bstat b{display:block;font:700 20px var(--mono)}
+.bstat span{font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em}
+#base-ctrls{display:flex;gap:6px}
+#base-q{flex:1;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:9px 12px;outline:none;transition:border-color .15s var(--ease)}
+#base-q:focus{border-color:var(--amber)}
+#base-sort{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:9px 12px;outline:none;appearance:none;cursor:pointer;color:var(--text-2)}
+#base-list{flex:1;overflow-y:auto;padding:8px 14px;-webkit-overflow-scrolling:touch}
+.bi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px;
+  margin-bottom:8px;cursor:pointer;transition:border-color .15s var(--ease)}
+.bi:active{border-color:var(--line-2)}
+.bi-t{font-size:14px;white-space:pre-wrap;word-break:break-word;margin-bottom:8px;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.bi-f{display:flex;justify-content:space-between;align-items:center;font:400 11px var(--mono);color:var(--text-3)}
+
+/* ─── BOTTOM TABS ─── */
+#tabs{display:flex;padding:5px 8px;padding-bottom:calc(5px + var(--safe-bot));
+  background:var(--surface);border-top:1px solid var(--line);flex-shrink:0}
+.tab-b{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px;
+  border-radius:var(--r-sm);color:var(--text-3);font-size:13px;font-weight:600;transition:all .15s var(--ease)}
+.tab-b.on{background:var(--surface-2);color:var(--text)}
+.tab-b .ic{font-size:15px}
+
+/* ─── MODAL / TOAST / PROGRESS ─── */
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);
+  display:none;align-items:center;justify-content:center;padding:16px;z-index:1000}
+#overlay.on{display:flex}
+#modal{background:var(--surface);border:1px solid var(--line-2);border-radius:var(--r);
+  width:min(460px,100%);max-height:86vh;display:flex;flex-direction:column;
+  box-shadow:0 24px 64px rgba(0,0,0,.5);animation:mIn .2s var(--ease)}
+@keyframes mIn{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:none}}
+#modal-h{display:flex;justify-content:space-between;align-items:center;padding:16px;border-bottom:1px solid var(--line)}
+#modal-t{font:700 17px var(--display)}
+#modal-x{width:32px;height:32px;border-radius:8px;font-size:18px;color:var(--text-3)}
+#modal-b{flex:1;overflow-y:auto;padding:16px}
+#modal-f{display:flex;justify-content:flex-end;gap:8px;padding:14px 16px;border-top:1px solid var(--line)}
+.mbtn{padding:9px 18px;border-radius:8px;font-weight:700;font-size:13px;border:1px solid var(--line);transition:all .12s var(--ease)}
+.mbtn.primary{background:var(--amber);color:#1a1206;border-color:transparent}
+.mbtn.danger{color:var(--rose);border-color:var(--rose-glow)}
+#toasts{position:fixed;left:50%;bottom:calc(76px + var(--safe-bot));transform:translateX(-50%);
+  display:flex;flex-direction:column-reverse;gap:6px;z-index:1100;pointer-events:none;max-width:calc(100vw - 24px)}
+.toast{background:var(--surface);border:1px solid var(--line-2);border-radius:var(--r-sm);
+  padding:9px 14px;box-shadow:0 6px 20px rgba(0,0,0,.3);display:flex;gap:8px;align-items:center;
+  font-size:13px;white-space:nowrap;animation:tIn .2s var(--ease)}
+@keyframes tIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+#progress{position:fixed;inset:0;background:rgba(16,19,26,.85);backdrop-filter:blur(6px);
+  display:none;align-items:center;justify-content:center;z-index:1200;padding:20px}
+#progress.on{display:flex}
+.prog-c{background:var(--surface);border:1px solid var(--line-2);border-radius:var(--r);padding:26px;max-width:340px;width:100%;text-align:center}
+.prog-bar{height:4px;background:var(--surface-3);border-radius:2px;overflow:hidden;margin:14px 0 8px}
+.prog-fill{height:100%;width:0;background:var(--amber);transition:width .3s var(--ease)}
+
+/* ─── NOTE EDITOR OVERLAY (полноэкранный) ─── */
+#noteview{position:fixed;inset:0;background:var(--bg);z-index:900;display:none;flex-direction:column}
+#noteview.on{display:flex}
+
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+@media (max-width:480px){.logo{font-size:17px}#hdr-status .st span.lbl{display:none}}
 </style>
 </head>
-<body>
-<div class="wrap">
-  <header><h1>NOO<em>mium</em></h1><span id="me"></span></header>
-  <div id="status"></div>
+<body data-theme="dark">
 
-  <div class="composer">
-    <textarea id="input" placeholder="О чём думаешь?"></textarea>
-    <button id="send">→</button>
+<!-- ═══════════════════════════════════════════════════════════
+     DOM РАЗМЕТКА (SPA)
+     ═══════════════════════════════════════════════════════════ -->
+<div id="app">
+
+  <!-- HEADER -->
+  <header id="hdr">
+    <div class="logo">NOO<b>·</b>mium</div>
+    <div id="hdr-status">
+      <span class="st"><span class="dot load" id="st-net-dot"></span><span class="lbl" id="st-net-txt">сеть</span></span>
+      <span class="st"><span class="dot load" id="st-ai-dot"></span><span class="lbl" id="st-ai-txt">модель</span></span>
+    </div>
+    <button id="btn-menu" aria-label="Меню"><i></i><i></i><i></i></button>
+  </header>
+
+  <div id="offline-bar"><span id="offline-text"></span></div>
+
+  <!-- WORKSPACE -->
+  <div id="ws">
+
+    <!-- STREAM VIEW -->
+    <div id="stream" style="display:flex;flex-direction:column;flex:1;overflow:hidden;min-height:0">
+      <div id="ctx-banner">
+        <span class="ctx-txt" id="ctx-txt"></span>
+        <button class="ctx-x" id="ctx-x" aria-label="Снять контекст">✕</button>
+      </div>
+
+      <div id="seg">
+        <button class="seg-b on" data-k="local"><span>Моё</span><span class="cnt" id="c-local">0</span></button>
+        <button class="seg-b" data-k="world"><span>Мир</span><span class="cnt" id="c-world">0</span></button>
+        <button class="seg-b" data-k="seren"><span>Озарения</span><span class="cnt" id="c-seren">0</span></button>
+      </div>
+
+      <div id="feed-wrap">
+        <div id="feed"></div>
+        <div id="feed-empty"><div class="ic">◇</div><div id="feed-empty-t"></div></div>
+      </div>
+
+      <div id="composer">
+        <textarea id="ed-ta" placeholder="О чём думаешь?"></textarea>
+        <div id="ed-foot">
+          <span id="ed-cnt">0 симв.</span>
+          <div id="ed-acts">
+            <div id="mode-toggle" data-mode="private">
+              <div class="mt-thumb"></div>
+              <div class="mt-opt on" data-v="private">Личное</div>
+              <div class="mt-opt" data-v="world">Мир</div>
+            </div>
+            <button id="btn-send" aria-label="Отправить">→</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- BASE VIEW -->
+    <div id="base">
+      <div id="base-h">
+        <div id="base-stats">
+          <div class="bstat"><b id="bs-total">0</b><span>всего</span></div>
+          <div class="bstat"><b id="bs-open">0</b><span>открыто</span></div>
+          <div class="bstat"><b id="bs-priv">0</b><span>лично</span></div>
+        </div>
+        <div id="base-ctrls">
+          <input id="base-q" placeholder="поиск...">
+          <select id="base-sort"><option value="new">новые</option><option value="old">старые</option><option value="az">а-я</option></select>
+        </div>
+      </div>
+      <div id="base-list"></div>
+    </div>
+
   </div>
-  <div class="hint">клик по заметке — <b>закрепить</b> и перестроить ленту по смыслу</div>
 
-  <div id="feed"></div>
+  <!-- BOTTOM TABS -->
+  <nav id="tabs">
+    <button class="tab-b on" data-v="stream"><span class="ic">◇</span><span>Поток</span></button>
+    <button class="tab-b" data-v="base"><span class="ic">▤</span><span>База</span></button>
+  </nav>
 </div>
-<script type="module" src="./app.js"></script>
+
+<!-- OVERLAYS -->
+<div id="overlay"><div id="modal">
+  <div id="modal-h"><div id="modal-t"></div><button id="modal-x">✕</button></div>
+  <div id="modal-b"></div><div id="modal-f"></div>
+</div></div>
+<div id="toasts"></div>
+<div id="progress"><div class="prog-c">
+  <div style="font:700 18px var(--display)">Загружаем модель</div>
+  <div style="font-size:13px;color:var(--text-3);margin-top:6px">Один раз, чтобы искать по смыслу</div>
+  <div class="prog-bar"><div class="prog-fill" id="prog-fill"></div></div>
+  <div id="prog-pct" style="font:400 12px var(--mono);color:var(--text-3)">0%</div>
+</div></div>
+<div id="noteview"></div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     JAVASCRIPT: МОДУЛИ (заглушки — наполняем по очереди)
+     ═══════════════════════════════════════════════════════════ -->
+<script type="module">
+'use strict';
+
+// ─── CDN LIBS (стратегия) ────────────────────────────────────
+// nostr-tools@2  → статический import в модуле NOSTR.
+// transformers@2 → ленивый dynamic import в EMBEDDER (тяжёлая модель).
+// Обе — ESM. При недоступности CDN: NOSTR → статус 'failed',
+// EMBEDDER → fallback на hash-эмбеддинг (см. модуль EMBEDDER).
+
+// ─── МОДУЛЬ 1: CORE/Config ─── START ─────────────────────────
+DI.register('Config', function () {
+  const KEY = 'noomium:cfg';
+  const defaults = Object.freeze({
+    version: 1,
+    room: 'noomium-main',
+    theme: 'dark',
+    lang: null,                       // null = автодетект
+    onboarded: false,
+    // AI
+    model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
+    dim: 384,
+    aiCacheLimit: 300,
+    aiEmbedTimeout: 15000,
+    // ранжирование
+    threshold: 0.7,
+    serendipity: 0.3,
+    vectorSimilarityThreshold: 0.98,
+    // сеть
+    relays: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://offchain.pub'],
+    kNote: 1,                         // regular: хранится
+    kQuery: 21000,                    // ephemeral
+    kAnswer: 21001,                   // ephemeral
+    queryRateLimit: 3000,
+    maxResponses: 8,
+    responseWindow: 6000,
+    centroidCount: 12,
+    peerTTL: 60000,
+    heartbeat: 30000,
+    subWindow: 300,
+    relayErrorThreshold: 5,
+    relayCircuitBreakTime: 120000,
+    relayBackoff1: 15000,
+    relayBackoff2: 30000,
+    reconnectMaxAttempts: 10,
+    reconnectBaseDelay: 1000,
+    reconnectMaxDelay: 60000,
+    // данные
+    dbName: 'noomium_v2',
+    storeName: 'notes',
+    cacheStoreName: 'cache',
+    // UI
+    debounce: 350,
+    baseSearchDebounce: 200,
+    truncateTextLength: 140,
+    toastMaxVisible: 3,
+    toastDefaultDuration: 2200,
+    maxPasswordAttempts: 3,
+    influenceWeightByAge: true,
+  });
+
+  const state = Object.assign({}, defaults);
+
+  // Мержим только известные ключи — старая/чужая схема не загрязнит конфиг.
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      if (saved && typeof saved === 'object') {
+        for (const k of Object.keys(defaults)) if (k in saved) state[k] = saved[k];
+      }
+    }
+  } catch (_) { /* битый JSON — живём с дефолтами */ }
+
+  function persist() {
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (_) { /* quota */ }
+  }
+
+  return {
+    get(k, def) { return (k in state) ? state[k] : def; },
+    set(k, v) { state[k] = v; persist(); },   // автосейв: настройки меняются редко
+    save: persist,
+    defaults() { return Object.assign({}, defaults); },
+    all() { return Object.assign({}, state); },
+  };
+});
+// ─── МОДУЛЬ 1: CORE/Config ─── END ───────────────────────────
+
+// ─── МОДУЛЬ 2: CORE/EventBus ─── START ───────────────────────
+DI.register('EventBus', function () {
+  const map = new Map();   // event -> Set<fn>
+  const wild = new Set();  // '*' -> fn(event, payload)
+
+  function on(event, fn) {
+    if (typeof fn !== 'function') return () => {};
+    if (event === '*') { wild.add(fn); return () => wild.delete(fn); }
+    if (!map.has(event)) map.set(event, new Set());
+    map.get(event).add(fn);
+    return () => {
+      const s = map.get(event);
+      if (s) { s.delete(fn); if (!s.size) map.delete(event); }
+    };
+  }
+  function once(event, fn) {
+    const off = on(event, (...a) => { off(); fn(...a); });
+    return off;
+  }
+  function off(event, fn) {
+    if (event === '*') { wild.delete(fn); return; }
+    const s = map.get(event);
+    if (s) { s.delete(fn); if (!s.size) map.delete(event); }
+  }
+  function emit(event, payload) {
+    const s = map.get(event);
+    if (s) for (const fn of Array.from(s)) {
+      try { fn(payload); } catch (e) { console.error('[bus:' + event + ']', e); }
+    }
+    if (wild.size) for (const fn of Array.from(wild)) {
+      try { fn(event, payload); } catch (e) { console.error('[bus:*]', e); }
+    }
+  }
+  return { on, once, off, emit };
+});
+// ─── МОДУЛЬ 2: CORE/EventBus ─── END ─────────────────────────
+
+// ─── МОДУЛЬ 3: CORE/DI ─── START ─────────────────────────────
+const DI = (() => {
+  const factories = new Map();
+  const instances = new Map();
+  function register(name, factory, deps) {
+    factories.set(name, { factory, deps: deps || [] });
+  }
+  function resolve(name, visiting) {
+    if (instances.has(name)) return instances.get(name);
+    const def = factories.get(name);
+    if (!def) throw new Error('Module not found: ' + name);
+    visiting = visiting || new Set();
+    if (visiting.has(name)) throw new Error('Circular dependency: ' + name);
+    visiting.add(name);
+    const args = def.deps.map(d => resolve(d, visiting));
+    visiting.delete(name);                 // diamond-deps: не ложная цикличность
+    const inst = def.factory(...args);
+    instances.set(name, inst);
+    return inst;
+  }
+  return { register, resolve };
+})();
+// ─── МОДУЛЬ 3: CORE/DI ─── END ───────────────────────────────
+
+// ─── МОДУЛЬ 4: CORE/Logger ─── START ─────────────────────────
+DI.register('Logger', function () {
+  const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
+  let threshold = LEVELS.info;
+  const ts = () => new Date().toISOString().substr(11, 8);
+  function emit(level, msg, data) {
+    if (LEVELS[level] < threshold) return;
+    const fn = console[level] || console.log;
+    data === undefined ? fn('[' + ts() + '][' + level + ']', msg)
+                       : fn('[' + ts() + '][' + level + ']', msg, data);
+  }
+  return {
+    setLevel(l) { if (LEVELS[l]) threshold = LEVELS[l]; },
+    debug(m, d) { emit('debug', m, d); },
+    info(m, d) { emit('info', m, d); },
+    warn(m, d) { emit('warn', m, d); },
+    error(m, d) { emit('error', m, d); },
+  };
+});
+// ─── МОДУЛЬ 4: CORE/Logger ─── END ───────────────────────────
+
+// ─── МОДУЛЬ 5: CORE/Utils ─── START ──────────────────────────
+DI.register('Utils', function () {
+  const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ESC[c]); }
+  function escRe(s) { return String(s == null ? '' : s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+  function plural(n, one, few, many) {
+    n = Math.abs(n); const a = n % 10, b = n % 100;
+    if (a === 1 && b !== 11) return one;
+    if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return few;
+    return many;
+  }
+  const words = {
+    symbols:     (n, l) => n + ' ' + (l === 'en' ? plural(n, 'char', 'chars', 'chars') : plural(n, 'символ', 'символа', 'символов')),
+    peers:       (n, l) => n + ' ' + (l === 'en' ? plural(n, 'peer', 'peers', 'peers')  : plural(n, 'узел', 'узла', 'узлов')),
+    thoughts:    (n, l) => n + ' ' + (l === 'en' ? plural(n, 'note', 'notes', 'notes')  : plural(n, 'мысль', 'мысли', 'мыслей')),
+    descendants: (n, l) => n + ' ' + (l === 'en' ? plural(n, 'heir', 'heirs', 'heirs')  : plural(n, 'потомок', 'потомка', 'потомков')),
+  };
+  function word(key, n, lang) { const fn = words[key]; return fn ? fn(n, lang) : String(n); }
+  function fmtDate(ts, lang) {
+    if (!ts) return '';
+    try { return new Date(ts).toLocaleDateString(lang === 'en' ? 'en-US' : 'ru-RU', { day: '2-digit', month: 'short' }); }
+    catch (_) { return ''; }
+  }
+  function fmtTime(ts, lang) {
+    if (!ts) return '';
+    try { return new Date(ts).toLocaleTimeString(lang === 'en' ? 'en-US' : 'ru-RU', { hour: '2-digit', minute: '2-digit' }); }
+    catch (_) { return ''; }
+  }
+  const shortPk = pk => (pk ? pk.slice(0, 8) + '…' : '');
+  return { esc, escRe, plural, word, fmtDate, fmtTime, shortPk };
+});
+// ─── МОДУЛЬ 5: CORE/Utils ─── END ────────────────────────────
+
+// ─── МОДУЛЬ 6: CORE/I18n ─── START ───────────────────────────
+DI.register('I18n', function (Config, bus) {
+  const dicts = Object.create(null);
+  const listeners = [];
+  let current = 'ru';
+
+  const saved = Config.get('lang', null);
+  if (saved === 'ru' || saved === 'en') current = saved;
+  else current = (navigator.language || 'ru').toLowerCase().indexOf('ru') === 0 ? 'ru' : 'en';
+
+  function format(str, params) {
+    const s = String(str == null ? '' : str);
+    if (!params) return s;
+    return s.replace(/\{(\w+)\}/g, (m, k) => (params[k] != null ? String(params[k]) : m));
+  }
+  function t(key, params, fallback) {
+    const d = dicts[current] || {};
+    let val = Object.prototype.hasOwnProperty.call(d, key) ? d[key] : undefined;
+    if (val === undefined) {
+      const en = dicts['en'] || {};
+      val = Object.prototype.hasOwnProperty.call(en, key) ? en[key] : undefined;
+    }
+    return format(val !== undefined ? val : (fallback !== undefined ? fallback : key), params);
+  }
+  function addDict(lang, dict) { dicts[lang] = Object.assign(dicts[lang] || {}, dict || {}); }
+  function setLang(lang) {
+    if (lang !== 'ru' && lang !== 'en') return;
+    current = lang;
+    Config.set('lang', current);
+    for (const fn of listeners.slice()) { try { fn(current); } catch (_) {} }
+    try { bus.emit('i18n:change', { lang: current }); } catch (_) {}
+  }
+  const getLang = () => current;
+  function onChange(fn) { if (typeof fn === 'function') listeners.push(fn); }
+
+  // ── базовые словари (полные UI-строки дополнят UI-модули через addDict) ──
+  addDict('ru', {
+    'app.name': 'NOOmium',
+    'st.net': 'сеть', 'st.ai.loading': 'модель', 'st.ai.ready': 'ии', 'st.ai.demo': 'ии/хеш',
+    'st.net.online': 'онлайн', 'st.net.listen': 'слушаю', 'st.net.connecting': 'соединение',
+    'st.net.reconnecting': 'пересоединение', 'st.net.failed': 'нет сети',
+    'ed.placeholder': 'О чём думаешь?', 'ed.chars': 'симв.',
+    'btn.private': 'Личное', 'btn.public': 'Мир', 'btn.send': 'Отправить',
+    'tab.stream': 'Поток', 'tab.base': 'База',
+    'seg.local': 'Моё', 'seg.world': 'Мир', 'seg.seren': 'Озарения',
+    'ctx.pinned': 'закреплено', 'ctx.input': 'по тексту',
+    'sim.score': 'похожа на', 'inf.resonance': 'резонанс',
+    'empty.local.t': 'Пока нет мыслей', 'empty.local.d': 'Напиши первую выше',
+    'empty.world.t': 'Никто не думает так же', 'empty.world.d': 'Ждём открытые мысли',
+    'empty.seren.t': 'Озарений нет', 'empty.seren.d': 'Попробуй иначе',
+    'empty.base.t': 'База пуста', 'empty.base.d': 'Запиши первую мысль',
+    'base.search': 'поиск...', 'base.sort.new': 'новые', 'base.sort.old': 'старые', 'base.sort.az': 'а-я',
+    'base.stat.total': 'всего', 'base.stat.open': 'открыто', 'base.stat.priv': 'лично',
+    'base.tag.private': 'лично', 'base.tag.shared': 'открыто',
+    'btn.edit': 'Развить', 'btn.del': 'Удалить', 'btn.copy': 'Копия', 'btn.save': 'Сохранить',
+    'btn.cancel': 'Отмена', 'btn.close': 'Закрыть', 'btn.toggle.priv': 'Скрыть', 'btn.toggle.pub': 'Открыть',
+    'toast.saved.private': 'сохранено лично', 'toast.saved.public': 'опубликовано',
+    'toast.copied': 'скопировано', 'toast.deleted': 'удалено', 'toast.copy.fail': 'не удалось',
+    'toast.empty': 'напиши что-нибудь', 'toast.ai.notready': 'ии не готов',
+    'menu.settings': 'Настройки', 'menu.theme': 'Тема', 'menu.lang': 'Язык', 'menu.help': 'Как это работает',
+  });
+  addDict('en', {
+    'app.name': 'NOOmium',
+    'st.net': 'net', 'st.ai.loading': 'model', 'st.ai.ready': 'ai', 'st.ai.demo': 'ai/hash',
+    'st.net.online': 'online', 'st.net.listen': 'listening', 'st.net.connecting': 'connecting',
+    'st.net.reconnecting': 'reconnecting', 'st.net.failed': 'offline',
+    'ed.placeholder': 'What are you thinking?', 'ed.chars': 'chars',
+    'btn.private': 'Private', 'btn.public': 'World', 'btn.send': 'Send',
+    'tab.stream': 'Stream', 'tab.base': 'Base',
+    'seg.local': 'Mine', 'seg.world': 'World', 'seg.seren': 'Insights',
+    'ctx.pinned': 'pinned', 'ctx.input': 'by text',
+    'sim.score': 'similarity', 'inf.resonance': 'resonance',
+    'empty.local.t': 'No thoughts yet', 'empty.local.d': 'Write the first above',
+    'empty.world.t': 'Nobody thinks alike', 'empty.world.d': 'Waiting for open thoughts',
+    'empty.seren.t': 'No insights', 'empty.seren.d': 'Try different wording',
+    'empty.base.t': 'Base is empty', 'empty.base.d': 'Write your first thought',
+    'base.search': 'search...', 'base.sort.new': 'newest', 'base.sort.old': 'oldest', 'base.sort.az': 'a-z',
+    'base.stat.total': 'total', 'base.stat.open': 'open', 'base.stat.priv': 'private',
+    'base.tag.private': 'private', 'base.tag.shared': 'open',
+    'btn.edit': 'Develop', 'btn.del': 'Delete', 'btn.copy': 'Copy', 'btn.save': 'Save',
+    'btn.cancel': 'Cancel', 'btn.close': 'Close', 'btn.toggle.priv': 'Hide', 'btn.toggle.pub': 'Share',
+    'toast.saved.private': 'saved privately', 'toast.saved.public': 'shared',
+    'toast.copied': 'copied', 'toast.deleted': 'deleted', 'toast.copy.fail': 'copy failed',
+    'toast.empty': 'write something', 'toast.ai.notready': 'ai not ready',
+    'menu.settings': 'Settings', 'menu.theme': 'Theme', 'menu.lang': 'Language', 'menu.help': 'How it works',
+  });
+
+  return { t, addDict, setLang, getLang, onChange };
+}, ['Config', 'EventBus']);
+// ─── МОДУЛЬ 6: CORE/I18n ─── END ─────────────────────────────
+
+// ─── МОДУЛЬ 7: CORE/Store ─── START ──────────────────────────
+DI.register('Store', function () {
+  const state = {
+    view: 'stream',            // 'stream' | 'base'
+    mode: 'segments',          // 'feed' | 'context' | 'segments'
+    seg: 'local',              // 'local' | 'world' | 'seren'
+    sendMode: 'private',       // 'private' | 'world'
+    sendLock: false,
+    context: { source: null, noteId: null, text: '', vector: null }, // source: 'pin'|'input'|null
+    lists: { local: [], world: [], seren: [] },
+    netAuthorized: false,
+    theme: 'dark',
+  };
+  const listeners = [];
+
+  function shallowEqual(a, b) {
+    if (Object.is(a, b)) return true;
+    if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+    const ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    for (const k of ka) if (!Object.is(a[k], b[k])) return false;
+    return true;
+  }
+  // Замороженный снимок верхнего уровня. Вложенные структуры меняем
+  // ТОЛЬКО через setState с новым объектом (иммутабельный контракт).
+  const snapshot = () => Object.freeze(Object.assign({}, state));
+
+  function notify() {
+    const snap = snapshot();
+    for (const l of listeners.slice()) { try { l(snap); } catch (e) { console.error('[store]', e); } }
+  }
+  const getState = () => snapshot();
+  const get = k => state[k];
+  function setState(partial) {
+    if (!partial || typeof partial !== 'object') return;
+    Object.assign(state, partial);
+    notify();
+  }
+  // subscribe(fn) — на всё; subscribe(selector, fn, equals?) — только при изменении среза.
+  function subscribe(a, b, equals) {
+    if (typeof b === 'function') {
+      const selector = a, listener = b, eq = equals || Object.is;
+      let prev = selector(state);
+      const wrap = s => { const next = selector(s); if (!eq(next, prev)) { prev = next; listener(next); } };
+      listeners.push(wrap);
+      return () => { const i = listeners.indexOf(wrap); if (i > -1) listeners.splice(i, 1); };
+    }
+    listeners.push(a);
+    return () => { const i = listeners.indexOf(a); if (i > -1) listeners.splice(i, 1); };
+  }
+  return { getState, get, setState, subscribe, shallowEqual };
+});
+// ─── МОДУЛЬ 7: CORE/Store ─── END ────────────────────────────
+
+// ─── МОДУЛЬ 8: DATA/Vec ─── START ────────────────────────────
+// Float32Array <-> base64. cosine. normalize.
+// k-means центроиды (для префильтра и облака).
+// Экспортирует: Vec
+// ─── МОДУЛЬ 8: DATA/Vec ─── END ──────────────────────────────
+
+// ─── МОДУЛЬ 9: DATA/DB ─── START ─────────────────────────────
+// IndexedDB + in-memory fallback (из твоего кода).
+// notes: {id,text,vector,shared,parentId?,parentPubkey?,createdAt,updatedAt}
+// cache: принятые из сети заметки (LRU+TTL).
+// put/get/del/all/bulkPut/getAllPaginated/reset. emit db:change.
+// Экспортирует: DB
+// ─── МОДУЛЬ 9: DATA/DB ─── END ───────────────────────────────
+
+// ─── МОДУЛЬ 10: AI/Embedder ─── START ────────────────────────
+// transformers.js в Worker (из твоего кода). Ленивая загрузка.
+// LRU-кэш векторов. hash-эмбеддинг fallback. progress.
+// embed(text) -> Float32Array. ready/getMode.
+// Экспортирует: Embedder
+// ─── МОДУЛЬ 10: AI/Embedder ─── END ──────────────────────────
+
+// ─── МОДУЛЬ 11: AI/Ranker ─── START ──────────────────────────
+// cosineBatch (сейчас sync, позже GPU-батч в Worker).
+// Разделение relevant (>=threshold) / seren (threshold-d..threshold).
+// Дедупликация по vectorSimilarityThreshold.
+// Экспортирует: Ranker
+// ─── МОДУЛЬ 11: AI/Ranker ─── END ────────────────────────────
+
+// ─── МОДУЛЬ 12: NET/Protocol ─── START ───────────────────────
+// Форматы событий и тегов.
+// NOTE = kind 1 (regular, хранится): content=text,
+//   tags: ['t',room], ['v',b64vector], ['parent',id,pubkey]?
+// QUERY = kind 21000 (ephemeral): {vector,maxResponses,window}
+// ANSWER = kind 21001 (ephemeral): {noteId,text,vector,score}, e-tag на запрос
+// encode/decode/validate. Компактный base64 вектора.
+// Экспортирует: Protocol
+// ─── МОДУЛЬ 12: NET/Protocol ─── END ─────────────────────────
+
+// ─── МОДУЛЬ 13: NET/Nostr ─── START ──────────────────────────
+// SimplePool, ключи (шифрование AES-GCM), relay management.
+// publish (nostr-tools 2.x: ensureRelay+relay.publish, circuit breaker),
+// subscribeMany, reconnect backoff. import nostr-tools здесь.
+// Экспортирует: Nostr
+// ─── МОДУЛЬ 13: NET/Nostr ─── END ────────────────────────────
+
+// ─── МОДУЛЬ 14: NET/NetService ─── START ─────────────────────
+// Оркестрация сети. announceNote (publish kind 1).
+// Входящий QUERY: центроидный префильтр → полн. поиск по кластеру
+//   → ответ с лимитом (maxResponses, backoff, early-termination).
+// Коалесценция чужих запросов. duty-cycling (только когда видимы).
+// peers, heartbeat, outbox, rate limits. activeAnswers.
+// Экспортирует: NetService
+// ─── МОДУЛЬ 14: NET/NetService ─── END ───────────────────────
+
+// ─── МОДУЛЬ 15: NET/IndexClient ─── START ────────────────────
+// (ЗАДЕЛ НА ПОТОМ) REST-клиент к индексатору/Qdrant.
+// search(vector,topK), влияние-лидерборд. Работает опционально.
+// Экспортирует: IndexClient
+// ─── МОДУЛЬ 15: NET/IndexClient ─── END ──────────────────────
+
+// ─── МОДУЛЬ 16: DOMAIN/Notes ─── START ───────────────────────
+// create/edit/delete/toggle(shared). Считает вектор, пишет в DB,
+// при shared — announce через NetService. Инвалидация кэшей.
+// Экспортирует: Notes
+// ─── МОДУЛЬ 16: DOMAIN/Notes ─── END ─────────────────────────
+
+// ─── МОДУЛЬ 17: DOMAIN/Context ─── START ─────────────────────
+// Состояние контекста. Приоритет: input > pin > none.
+// setPin(note)/clearPin. setInput(text, debounce) -> вектор.
+// Отдаёт текущий контекстный вектор в FeedService.
+// Экспортирует: Context
+// ─── МОДУЛЬ 17: DOMAIN/Context ─── END ───────────────────────
+
+// ─── МОДУЛЬ 18: DOMAIN/Feed ─── START ────────────────────────
+// Мердж: локальные + сетевые заметки. Ранжирование по контексту
+//   (через Ranker). Без контекста — хронология (segments).
+// Готовит данные для FeedView и CloudView.
+// Экспортирует: Feed
+// ─── МОДУЛЬ 18: DOMAIN/Feed ─── END ──────────────────────────
+
+// ─── МОДУЛЬ 19: DOMAIN/Provenance ─── START ──────────────────
+// parent-связи, DAG. lineage(noteId) -> цепочка предков.
+// children(noteId). Экспортирует: Provenance
+// ─── МОДУЛЬ 19: DOMAIN/Provenance ─── END ────────────────────
+
+// ─── МОДУЛЬ 20: DOMAIN/Influence ─── START ───────────────────
+// Резонанс: число УНИКАЛЬНЫХ авторов-потомков (Sybil-resistant).
+// Локальный счётчик (что долетело). weight по возрасту аккаунта.
+// Экспортирует: Influence
+// ─── МОДУЛЬ 20: DOMAIN/Influence ─── END ─────────────────────
+
+// ─── МОДУЛЬ 21: UI/Modal ─── START ───────────────────────────
+// open/close, focus-trap, Escape, кнопки. (из твоего кода)
+// Экспортирует: Modal
+// ─── МОДУЛЬ 21: UI/Modal ─── END ─────────────────────────────
+
+// ─── МОДУЛЬ 22: UI/Toast ─── START ───────────────────────────
+// show(type,msg,ms), лимит видимых. (из твоего кода)
+// Экспортирует: Toast
+// ─── МОДУЛЬ 22: UI/Toast ─── END ─────────────────────────────
+
+// ─── МОДУЛЬ 23: UI/Progress ─── START ────────────────────────
+// show/update/hide для загрузки модели. (из твоего кода)
+// Экспортирует: Progress
+// ─── МОДУЛЬ 23: UI/Progress ─── END ──────────────────────────
+
+// ─── МОДУЛЬ 24: UI/HeaderStatus ─── START ────────────────────
+// Индикаторы сеть/ИИ по событиям bus. (из твоего кода)
+// Экспортирует: HeaderStatus
+// ─── МОДУЛЬ 24: UI/HeaderStatus ─── END ──────────────────────
+
+// ─── МОДУЛЬ 25: UI/Composer ─── START ────────────────────────
+// Поле ввода, счётчик, mode-toggle (Личное/Мир), отправка.
+// Debounced ввод -> Context.setInput (живой контекст).
+// Ctrl+Enter — отправить. Экспортирует: Composer
+// ─── МОДУЛЬ 25: UI/Composer ─── END ──────────────────────────
+
+// ─── МОДУЛЬ 26: UI/FeedView ─── START ────────────────────────
+// Рендер ленты/карточек. Клик = пин (Context.setPin).
+// Подсветка совпадений. Действия (edit/copy/del/toggle).
+// Пагинация. Empty-state. Экспортирует: FeedView
+// ─── МОДУЛЬ 26: UI/FeedView ─── END ──────────────────────────
+
+// ─── МОДУЛЬ 27: UI/CloudView ─── START ───────────────────────
+// 2D-проекция заметок (кластеры по центроидам Vec.kmeans).
+// Точки, клик = пин. Переключатель лента/облако.
+// Экспортирует: CloudView
+// ─── МОДУЛЬ 27: UI/CloudView ─── END ─────────────────────────
+
+// ─── МОДУЛЬ 28: UI/BaseView ─── START ────────────────────────
+// Локальная база: статистика, поиск, сортировка, список.
+// NoteView (полноэкранный редактор). export/import.
+// Экспортирует: BaseView
+// ─── МОДУЛЬ 28: UI/BaseView ─── END ──────────────────────────
+
+// ─── МОДУЛЬ 29: UI/MenuView ─── START ────────────────────────
+// Настройки: тема, язык, комната, пороги, релеи, данные, danger.
+// Экспортирует: MenuView
+// ─── МОДУЛЬ 29: UI/MenuView ─── END ──────────────────────────
+
+// ─── МОДУЛЬ 30: AUTH/AuthService ─── START ───────────────────
+// Пароль, PBKDF2+AES-GCM, unlock/createNew/resetStorage.
+// Миграция сырого hex-ключа ТОЛЬКО с паролем. (из твоего + фикс)
+// Экспортирует: AuthService
+// ─── МОДУЛЬ 30: AUTH/AuthService ─── END ─────────────────────
+
+// ─── МОДУЛЬ 31: INPUT/Hotkeys ─── START ──────────────────────
+// '/', Escape, Ctrl+Enter. Один обработчик, сохраняется для cleanup.
+// Экспортирует: Hotkeys
+// ─── МОДУЛЬ 31: INPUT/Hotkeys ─── END ────────────────────────
+
+// ─── МОДУЛЬ 32: BOOT ─── START ───────────────────────────────
+// Резолв DI, mount разметки (уже в DOM), init компонентов,
+// auth-flow, загрузка Embedder, подписка на ленту. cleanup/refreshUI.
+// Экспортирует: boot()
+// ─── МОДУЛЬ 32: BOOT ─── END ─────────────────────────────────
+
+// ─── ЗАГЛУШКА ЗАПУСКА (уберём, когда наполним BOOT) ──────────
+document.body.classList.add('ready');
+console.info('[NOOmium] каркас загружен. Модулей к наполнению: 32.');
+
+// ─── SELF-TEST Пачки A ─── START ─────────────────────────────
+try {
+  const bus = DI.resolve('EventBus');
+  const store = DI.resolve('Store');
+  const i18n = DI.resolve('I18n');
+  let busGot = null, storeGot = null;
+  bus.once('ping', p => { busGot = p; });
+  bus.emit('ping', 'pong');
+  store.subscribe(s => s.view, v => { storeGot = v; });
+  store.setState({ view: 'base' });
+  console.info('[Пачка A] OK · lang=' + i18n.getLang() +
+    ' · bus=' + busGot + ' · store.view=' + store.get('view') +
+    ' · selector=' + storeGot + ' · t=' + i18n.t('seg.local'));
+} catch (e) {
+  console.error('[Пачка A] FAIL', e);
+}
+// ─── SELF-TEST Пачки A ─── END ───────────────────────────────
+
+</script>
 </body>
 </html>
