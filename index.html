@@ -1720,14 +1720,14 @@ DI.register('Notes', function (DB, Embedder, bus, Logger, Utils) {
 
 // ─── МОДУЛЬ 16: DOMAIN/Context ─── START ─────────────────────
 /**
- * Сердце двухрежимного UX. Управляет активным контекстом, от которого
- * Feed ранжирует ленту.
+ * Сердце режимов. Управляет активным контекстом, по которому Feed ранжирует ленту.
  *
- * Приоритет источника: input > pin > none.
- *  - setInput — вызывается Композером на каждый ввод; режим автора включается
- *    МГНОВЕННО (по самому факту текста), а вектор догоняет с debounce.
- *  - setPin — ручной выбор заметки; вектор берётся из неё сразу.
- *  - Очистка ввода откатывается к пину (если есть), иначе — режим просмотра.
+ * Приоритет источника: pin > input > none.
+ *  - setPin — ручной выбор заметки; пока пин жив, он и есть контекст
+ *    (даже если в поле есть текст).
+ *  - setInput — ввод включает автор-режим, только если пина нет; вектор
+ *    догоняет с debounce, сам режим — мгновенно.
+ *  - Снятие пина откатывается к вводу (если есть текст), иначе — просмотр.
  *
  * Пишет в Store.context; подписчики (Feed, FeedView) реагируют сами.
  *
@@ -1740,21 +1740,21 @@ DI.register('Context', function (Store, Embedder, Config, Utils) {
   /** @type {{id:string,text:string,vector:*}|null} */ let pinNote = null;
 
   /**
-   * Текущий активный контекст (input > pin > none).
+   * Активный контекст. Пин доминирует над вводом.
    * @returns {{source:(null|'input'|'pin'), noteId:(string|null), text:string, vector:*}}
    */
   function activeContext() {
-    if (inputText.trim()) return { source: 'input', noteId: null, text: inputText.trim(), vector: inputVector };
     if (pinNote) return { source: 'pin', noteId: pinNote.id, text: pinNote.text, vector: pinNote.vector };
+    if (inputText.trim()) return { source: 'input', noteId: null, text: inputText.trim(), vector: inputVector };
     return { source: null, noteId: null, text: '', vector: null };
   }
 
-  /** Записывает активный контекст в Store (уведомляя подписчиков). */
+  /** Записывает активный контекст в Store. */
   function push() { Store.setState({ context: activeContext() }); }
 
   /**
-   * Отложенный расчёт вектора ввода. Если за время расчёта текст успел
-   * измениться — результат выбрасывается (защита от устаревшего эмбеддинга).
+   * Отложенный расчёт вектора ввода; если текст за это время изменился —
+   * результат выбрасывается.
    */
   const debouncedEmbed = Utils.debounce(() => {
     const t = inputText.trim();
@@ -1765,10 +1765,7 @@ DI.register('Context', function (Store, Embedder, Config, Utils) {
   }, Config.get('debounce', 350));
 
   return {
-    /**
-     * Обновляет текст ввода (режим автора включается сразу, вектор — с debounce).
-     * @param {string} text
-     */
+    /** Обновляет текст ввода (автор-режим, если нет пина). @param {string} text */
     setInput(text) {
       inputText = text || '';
       if (!inputText.trim()) inputVector = null;
@@ -1776,21 +1773,17 @@ DI.register('Context', function (Store, Embedder, Config, Utils) {
       debouncedEmbed();
     },
 
-    /**
-     * Закрепляет заметку (ручной пин). Её вектор становится контекстом,
-     * если нет активного ввода.
-     * @param {{id:string,text:string,vector:*}} note
-     */
+    /** Закрепляет заметку — она становится контекстом поверх ввода. @param {{id,text,vector}} note */
     setPin(note) {
       if (!note || !note.vector) return;
       pinNote = { id: note.id, text: note.text, vector: note.vector };
       push();
     },
 
-    /** Снимает пин (откат к вводу или к просмотру). */
+    /** Снимает пин (откат к вводу или просмотру). */
     clearPin() { pinNote = null; push(); },
 
-    /** Полный сброс контекста (ввод + пин) → режим просмотра. */
+    /** Полный сброс (ввод + пин) → просмотр. */
     clear() {
       inputText = ''; inputVector = null; pinNote = null;
       debouncedEmbed.cancel();
@@ -1799,10 +1792,8 @@ DI.register('Context', function (Store, Embedder, Config, Utils) {
 
     /** Вектор активного контекста (или null). */
     getVector() { return activeContext().vector; },
-
     /** Снимок активного контекста. */
     getActive() { return activeContext(); },
-
     /** Закреплённая заметка (или null). */
     getPin() { return pinNote; },
   };
@@ -2083,11 +2074,13 @@ DI.register('Composer', function (Context, Notes, Store, I18n, bus, Toast, Utils
 
 // ─── МОДУЛЬ 25: UI/FeedView ─── START ────────────────────────
 /**
- * Рендер ленты и «хром» двух режимов.
- *  - view:   хронология из Store.feed; сегменты и баннер скрыты.
- *  - author: активный сегмент из Store.lists; сегменты видны, баннер — только при пине.
- * Клик по заметке с вектором — пин (повторный клик — снять). Карточки появляются
- * каскадом, перерисовка коалесцируется через requestAnimationFrame.
+ * Рендер ленты и хром режимов.
+ *  - просмотр (нет контекста): хронология из Store.feed, всё скрыто.
+ *  - автор (ввод, без пина): бар сегментов виден, лента = Store.lists[seg].
+ *  - пин: бар скрыт, баннер виден, лента = единый список похожего
+ *    (Моё+Мир+Озарения, сортировка по схожести, сама закреплённая исключена).
+ * Клик по заметке с вектором — пин / повторный — снять. Перерисовка
+ * коалесцируется через requestAnimationFrame, карточки — каскадом.
  * @deps Store, Context, I18n, Utils, EventBus
  * @exports FeedView
  */
@@ -2111,7 +2104,6 @@ DI.register('FeedView', function (Store, Context, I18n, Utils, bus) {
     cSeren = document.getElementById('c-seren');
   }
 
-  /** Коалесцирует несколько setState за кадр в одну перерисовку. */
   function scheduleRender() {
     if (rafPending) return;
     rafPending = true;
@@ -2123,13 +2115,8 @@ DI.register('FeedView', function (Store, Context, I18n, Utils, bus) {
     return ctx.source === 'pin' && ctx.noteId === n.id;
   }
 
-  /**
-   * Карточка заметки.
-   * @param {Object} n - Заметка (с own, score?, vector?).
-   * @param {boolean} isAuthor - Режим автора (показывать similarity).
-   * @param {number} i - Индекс для каскадной анимации.
-   */
-  function card(n, isAuthor, i) {
+  /** Карточка заметки. @param {Object} n @param {boolean} isRanked @param {number} i */
+  function card(n, isRanked, i) {
     const el = document.createElement('div');
     el.className = 'note' + (isPinned(n) ? ' pinned' : '');
     el.style.animationDelay = Math.min(i * 25, 300) + 'ms';
@@ -2153,7 +2140,7 @@ DI.register('FeedView', function (Store, Context, I18n, Utils, bus) {
     }
     meta.appendChild(tag);
 
-    if (isAuthor && typeof n.score === 'number') {
+    if (isRanked && typeof n.score === 'number') {
       const sim = document.createElement('span');
       sim.className = 'note-sim';
       sim.textContent = I18n.t('sim.score') + ' ' + Math.round(n.score * 100) + '%';
@@ -2169,7 +2156,6 @@ DI.register('FeedView', function (Store, Context, I18n, Utils, bus) {
     return el;
   }
 
-  /** Пин/отпин по клику. */
   function onNoteClick(n) {
     const ctx = Store.get('context');
     if (ctx.source === 'pin' && ctx.noteId === n.id) Context.clearPin();
@@ -2180,12 +2166,14 @@ DI.register('FeedView', function (Store, Context, I18n, Utils, bus) {
     if (!feedEl) return;
     const state = Store.getState();
     const ctx = state.context;
-    const isAuthor = !!ctx.source;
+    const isPinnedMode = ctx.source === 'pin';
+    const isTyping = ctx.source === 'input';
+    const isRanked = isPinnedMode || isTyping;
 
-    // хром режимов
-    segBar.classList.toggle('on', isAuthor);
-    ctxBanner.classList.toggle('on', ctx.source === 'pin');
-    if (ctx.source === 'pin') {
+    // хром: бар — только ввод без пина; баннер — только пин
+    segBar.classList.toggle('on', isTyping);
+    ctxBanner.classList.toggle('on', isPinnedMode);
+    if (isPinnedMode) {
       ctxSrc.textContent = I18n.t('ctx.pinned');
       ctxTxt.textContent = ctx.text;
     }
@@ -2197,16 +2185,29 @@ DI.register('FeedView', function (Store, Context, I18n, Utils, bus) {
     cWorld.textContent = state.lists.world.length;
     cSeren.textContent = state.lists.seren.length;
 
-    // заметки
-    const notes = isAuthor ? (state.lists[state.seg] || []) : state.feed;
+    // что показываем
+    let notes;
+    if (isPinnedMode) {
+      // единая лента похожего, закреплённая заметка исключена
+      notes = [...state.lists.local, ...state.lists.world, ...state.lists.seren]
+        .filter(n => n.id !== ctx.noteId)
+        .sort((a, b) => (b.score || 0) - (a.score || 0));
+    } else if (isTyping) {
+      notes = state.lists[state.seg] || [];
+    } else {
+      notes = state.feed;
+    }
+
     feedEl.innerHTML = '';
     if (!notes.length) {
       emptyEl.classList.add('on');
-      emptyT.textContent = isAuthor ? I18n.t('empty.' + state.seg + '.t') : I18n.t('empty.local.t');
+      emptyT.textContent = isPinnedMode
+        ? I18n.t('empty.world.t')
+        : (isTyping ? I18n.t('empty.' + state.seg + '.t') : I18n.t('empty.local.t'));
     } else {
       emptyEl.classList.remove('on');
       const frag = document.createDocumentFragment();
-      notes.forEach((n, i) => frag.appendChild(card(n, isAuthor, i)));
+      notes.forEach((n, i) => frag.appendChild(card(n, isRanked, i)));
       feedEl.appendChild(frag);
     }
   }
