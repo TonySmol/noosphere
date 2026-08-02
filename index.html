@@ -924,52 +924,59 @@ DI.register('Store', function () {
 // ─── МОДУЛЬ 7: DATA/Vec ─── START ────────────────────────────
 /**
  * Векторная математика: кодирование для Nostr-тегов, косинусное сходство,
- * нормализация и k-means для центроидов (сетевой префильтр, облако смыслов).
+ * нормализация и k-means для центроидов.
  *
- * Все функции терпят и Float32Array, и обычные массивы чисел.
+ * Сетевая упаковка — Int16-квантование: нормализованные значения [-1,1]
+ * → [-32767,32767]. Размер тега вдвое меньше сырого Float32 (1024 байта
+ * base64 вместо 2048) — влезает в лимиты рэлеев на значение тега.
+ * Локальная точность не страдает: квантуется только упаковка.
+ *
  * @exports Vec
  */
 DI.register('Vec', function () {
-  /**
-   * Приводит вход к Float32Array.
-   * @param {Float32Array|number[]} v
-   * @returns {Float32Array}
-   */
   const f32 = v => (v instanceof Float32Array ? v : Float32Array.from(v || []));
 
   /**
-   * Вектор → base64 (для тега ['v', …] в Nostr-событии).
+   * Вектор → компактный base64 (Int16) для тега ['v', …].
    * @param {Float32Array|number[]} vec
    * @returns {string}
    */
   function toB64(vec) {
     const f = f32(vec);
-    const bytes = new Uint8Array(f.buffer, f.byteOffset, f.byteLength);
+    const i16 = new Int16Array(f.length);
+    for (let i = 0; i < f.length; i++) {
+      let x = f[i];
+      if (x > 1) x = 1; else if (x < -1) x = -1;
+      i16[i] = Math.round(x * 32767);
+    }
+    const bytes = new Uint8Array(i16.buffer, i16.byteOffset, i16.byteLength);
     let bin = '';
     for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
     return btoa(bin);
   }
 
   /**
-   * base64 → вектор. Защитный: на битых/обрезанных данных вернёт null, а не упадёт.
+   * base64 (Int16) → вектор. Защитный: на битых данных вернёт null.
    * @param {string} b64
    * @returns {Float32Array|null}
    */
   function fromB64(b64) {
     try {
       const bin = atob(String(b64 || ''));
-      if (!bin || bin.length % 4 !== 0) return null;   // не кратен 4 байтам → не Float32
+      if (!bin || bin.length < 2 || bin.length % 2 !== 0) return null;
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      return new Float32Array(bytes.buffer);
+      const i16 = new Int16Array(bytes.buffer);
+      const out = new Float32Array(i16.length);
+      for (let i = 0; i < i16.length; i++) out[i] = i16[i] / 32767;
+      return normalize(out);   // ренормализуем после деквантования
     } catch (_) { return null; }
   }
 
   /**
-   * Косинусное сходство нормализованных векторов (= dot product).
-   * @param {Float32Array|number[]} a
-   * @param {Float32Array|number[]} b
-   * @returns {number} [-1..1]; 0 при невалидных входах.
+   * Косинусное сходство нормализованных векторов.
+   * @param {Float32Array|number[]} a @param {Float32Array|number[]} b
+   * @returns {number}
    */
   function cosine(a, b) {
     if (!a || !b) return 0;
@@ -981,9 +988,9 @@ DI.register('Vec', function () {
   }
 
   /**
-   * Нормализует вектор до единичной длины.
+   * Нормализация до единичной длины.
    * @param {Float32Array|number[]} v
-   * @returns {Float32Array} Новый вектор (нулевой → нулевой).
+   * @returns {Float32Array}
    */
   function normalize(v) {
     const f = f32(v);
@@ -996,11 +1003,6 @@ DI.register('Vec', function () {
     return out;
   }
 
-  /**
-   * Квадрат евклидова расстояния (вспомогательная).
-   * @param {Float32Array|number[]} a @param {Float32Array|number[]} b
-   * @returns {number}
-   */
   function sqDist(a, b) {
     const n = Math.min(a.length, b.length);
     let s = 0;
@@ -1010,11 +1012,10 @@ DI.register('Vec', function () {
 
   /**
    * k-means (Ллойд) с детерминированным farthest-point стартом.
-   * Для грубой кластеризации (префильтр/облако) хватает 8–12 итераций.
    * @param {Array<Float32Array|number[]>} vectors
-   * @param {number} k - Число центроидов.
+   * @param {number} k
    * @param {number} [iterations=10]
-   * @returns {Float32Array[]} Центроиды; при n<=k — сами векторы.
+   * @returns {Float32Array[]}
    */
   function kmeans(vectors, k, iterations) {
     const iters = iterations || 10;
@@ -1023,7 +1024,6 @@ DI.register('Vec', function () {
     if (n <= k) return vectors.map(v => f32(v));
     const dim = vectors[0].length;
 
-    // Init: первый + максимально удалённые от уже выбранных (детерминированно).
     const cents = [f32(vectors[0])];
     while (cents.length < k) {
       let bestI = 0, bestD = -1;
@@ -1035,7 +1035,6 @@ DI.register('Vec', function () {
       cents.push(f32(vectors[bestI]));
     }
 
-    // Итерации Ллойда: присвоение → пересчёт центров.
     for (let it = 0; it < iters; it++) {
       const sums = Array.from({ length: k }, () => new Float32Array(dim));
       const counts = new Array(k).fill(0);
@@ -1053,7 +1052,7 @@ DI.register('Vec', function () {
   }
 
   return { toB64, fromB64, cosine, normalize, kmeans };
-});
+}, []);
 // ─── МОДУЛЬ 7: DATA/Vec ─── END ──────────────────────────────
 
 // ─── МОДУЛЬ 8: DATA/DB ─── START ─────────────────────────────
