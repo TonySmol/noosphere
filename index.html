@@ -1974,11 +1974,117 @@ DI.register('Toast', function (Config) {
 // ─── МОДУЛЬ 21: UI/Toast ─── END ─────────────────────────────
 
 // ─── МОДУЛЬ 22: UI/Progress ─── START ────────────────────────
-/** show/update/hide для загрузки модели. @exports Progress {show,update,hide} */
+/**
+ * Полноэкранный оверлей загрузки модели. Слушает 'ai:progress'/'ai:status'.
+ * Показывается с задержкой SHOW_DELAY, чтобы не мигать на быстрой (кэшированной)
+ * загрузке; скрывается при переходе в 'model'/'demo'.
+ * @deps EventBus
+ * @exports Progress
+ */
+DI.register('Progress', function (bus) {
+  let overlay, fill, pctEl;
+  let showTimer = null;
+  const SHOW_DELAY = 300;
+
+  function bind() {
+    overlay = document.getElementById('progress');
+    fill = document.getElementById('prog-fill');
+    pctEl = document.getElementById('prog-pct');
+  }
+  function show() { if (overlay) overlay.classList.add('on'); }
+  function hide() { if (overlay) overlay.classList.remove('on'); }
+
+  /** @param {number} pct 0..100 */
+  function update(pct) {
+    const p = Math.max(0, Math.min(100, Math.round(pct || 0)));
+    if (fill) fill.style.width = p + '%';
+    if (pctEl) pctEl.textContent = p + '%';
+  }
+
+  function init() {
+    bind();
+    bus.on('ai:progress', e => update(e && e.pct));
+    bus.on('ai:status', e => {
+      if (!e) return;
+      if (e.mode === 'loading') {
+        update(e.percent || 0);
+        if (!showTimer && overlay && !overlay.classList.contains('on')) {
+          showTimer = setTimeout(() => { show(); showTimer = null; }, SHOW_DELAY);
+        }
+      } else {
+        if (showTimer) { clearTimeout(showTimer); showTimer = null; }
+        hide();
+      }
+    });
+  }
+
+  return { init, show, hide, update };
+}, ['EventBus']);
 // ─── МОДУЛЬ 22: UI/Progress ─── END ──────────────────────────
 
 // ─── МОДУЛЬ 23: UI/HeaderStatus ─── START ────────────────────
-/** Индикаторы сеть/ИИ по событиям bus. @deps EventBus, I18n, Nostr, Embedder @exports HeaderStatus */
+/**
+ * Индикаторы в шапке: сеть и ИИ. Реагирует на 'ai:status' и 'net:status'.
+ * Пока NET не подключён, сеть показана как offline — оживёт с NetService.
+ * @deps EventBus, I18n, Embedder
+ * @exports HeaderStatus
+ */
+DI.register('HeaderStatus', function (bus, I18n, Embedder) {
+  let netDot, netTxt, aiDot, aiTxt;
+  let unsubs = [];
+
+  function bind() {
+    netDot = document.getElementById('st-net-dot');
+    netTxt = document.getElementById('st-net-txt');
+    aiDot = document.getElementById('st-ai-dot');
+    aiTxt = document.getElementById('st-ai-txt');
+  }
+
+  /** @param {'loading'|'model'|'demo'} mode @param {number} [percent] */
+  function setAI(mode, percent) {
+    if (!aiDot || !aiTxt) return;
+    if (mode === 'model') {
+      aiDot.className = 'dot ok';
+      aiTxt.textContent = I18n.t('st.ai.ready');
+    } else if (mode === 'demo') {
+      aiDot.className = 'dot warn';
+      aiTxt.textContent = I18n.t('st.ai.demo');
+    } else {
+      aiDot.className = 'dot load';
+      aiTxt.textContent = I18n.t('st.ai.loading') + (percent ? ' ' + Math.round(percent) + '%' : '');
+    }
+  }
+
+  /** @param {'disconnected'|'connecting'|'connected'|'reconnecting'|'failed'} status */
+  function setNet(status) {
+    if (!netDot || !netTxt) return;
+    const map = {
+      connected: ['ok', 'st.net.online'],
+      connecting: ['load', 'st.net.connecting'],
+      reconnecting: ['warn', 'st.net.reconnecting'],
+      failed: ['err', 'st.net.failed'],
+    };
+    const [cls, key] = map[status] || ['', 'st.net'];
+    netDot.className = 'dot' + (cls ? ' ' + cls : '');
+    netTxt.textContent = I18n.t(key);
+  }
+
+  function init() {
+    bind();
+    unsubs.push(bus.on('ai:status', e => setAI(e.mode, e.percent)));
+    unsubs.push(bus.on('net:status', e => setNet(e.status)));
+    unsubs.push(bus.on('i18n:change', () => { setAI(Embedder.getMode()); setNet('disconnected'); }));
+    setAI(Embedder.getMode());
+    setNet('disconnected');
+  }
+
+  function destroy() {
+    unsubs.forEach(u => { try { u(); } catch (_) {} });
+    unsubs = [];
+  }
+
+  return { init, destroy };
+}, ['EventBus', 'I18n', 'Embedder']);
 // ─── МОДУЛЬ 23: UI/HeaderStatus ─── END ──────────────────────
 
 // ─── МОДУЛЬ 24: UI/Composer ─── START ────────────────────────
@@ -2275,73 +2381,25 @@ DI.register('FeedView', function (Store, Context, I18n, Utils, bus) {
  */
 // ─── МОДУЛЬ 31: BOOT ─── END ─────────────────────────────────
 
-// ─── SELF-TEST Пачки 5 ─── START ─────────────────────────────
-(async function selfTest5() {
-  try {
-    const Notes = DI.resolve('Notes');
-    const Context = DI.resolve('Context');
-    const Feed = DI.resolve('Feed');
-    const Store = DI.resolve('Store');
-    const Logger = DI.resolve('Logger');
-    const checks = {};
-
-    // Notes: создание (вектор считается, mode влияет на shared)
-    const a = await Notes.create('тестовая мысль про смыслы и разум', 'private');
-    const b = await Notes.create('открытая мысль про синих китов', 'world');
-    checks.notesCreate = !!a && !!a.id && !!b && b.shared === true && a.shared === false;
-    checks.notesVector = Array.isArray(a.vector) && a.vector.length > 0;
-
-    // Context: приоритет input > pin > none
-    Context.setPin(a);
-    checks.ctxPin = Store.get('context').source === 'pin';
-    Context.setInput('ввод перекрывает пин');
-    checks.ctxInputWins = Store.get('context').source === 'input';
-    Context.setInput('');
-    checks.ctxFallbackPin = Store.get('context').source === 'pin';
-    Context.clearPin();
-    checks.ctxNone = Store.get('context').source === null;
-
-    // Feed: просмотр → хронология со всеми заметками
-    await Feed.refresh();
-    const feed = Store.get('feed');
-    checks.feedView = Array.isArray(feed) && feed.some(n => n.id === a.id) && feed.some(n => n.id === b.id);
-
-    // Feed: автор (пин на a) → своя релевантная в lists.local
-    Context.setPin(a);
-    await Feed.refresh();
-    const lists = Store.get('lists');
-    checks.feedAuthor = lists.local.some(n => n.id === a.id) && lists.local[0].score > 0.99;
-    Context.clearPin();
-
-    // Уборка
-    await Notes.remove(a.id);
-    await Notes.remove(b.id);
-
-    const ok = Object.values(checks).every(Boolean);
-    Logger[ok ? 'info' : 'error']('SELF-TEST пачки 5 ' + (ok ? 'пройден ✓' : 'ПРОВАЛЕН'), checks);
-  } catch (e) {
-    console.error('[SELF-TEST 5] FAIL', e);
-  }
-})();
-// ─── SELF-TEST Пачки 5 ─── END ───────────────────────────────
-
-// ─── ВРЕМЕННЫЙ BOOT (локальный цикл; заменит модуль BOOT) ─── START
+// ─── ВРЕМЕННЫЙ BOOT (локальный цикл + индикаторы) ─── START
 (function tempBoot() {
   document.body.classList.add('ready');
+  const Progress = DI.resolve('Progress');
+  const HeaderStatus = DI.resolve('HeaderStatus');
   const Embedder = DI.resolve('Embedder');
   const Feed = DI.resolve('Feed');
   const Composer = DI.resolve('Composer');
   const FeedView = DI.resolve('FeedView');
 
-  // Модель грузится фоном (~40 МБ один раз, кэшируется браузером).
-  // До её готовности embed мгновенно работает через hash-fallback.
-  // Убери эту строку, если хочешь остаться на hash-режиме без загрузки.
-  Embedder.load();
-
+  // индикаторы подписываются ДО load(), чтобы поймать первое 'loading'
+  Progress.init();
+  HeaderStatus.init();
   Feed.init();
   Composer.init();
   FeedView.init();
-  console.info('[NOOmium] локальный цикл запущен: печатай → Ctrl+Enter → клик по заметке (пин)');
+
+  Embedder.load();
+  console.info('[NOOmium] цикл + индикаторы: печатай → Ctrl+Enter → клик (пин)');
 })();
 // ─── ВРЕМЕННЫЙ BOOT ─── END
 
