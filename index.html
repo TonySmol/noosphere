@@ -1741,8 +1741,11 @@ DI.register('Protocol', function (Config, Vec) {
  * Транспорт Nostr: динамический импорт nostr-tools, ключи, SimplePool,
  * публикация/подписка. Низкий уровень — оркестрирует NetService.
  *
- * TODO(security): секретный ключ сейчас хранится в localStorage открыто.
- * Добавить шифрование PBKDF2+AES-GCM по паролю отдельным срезом.
+ * Публикация порелейная (ensureRelay → relay.publish): переживает отказ
+ * отдельных рэлеев, резолвится по первому принявшему.
+ *
+ * TODO(security): секретный ключ сейчас в localStorage открыто.
+ * Шифрование PBKDF2+AES-GCM добавим отдельным срезом.
  *
  * @deps Config, Logger, EventBus
  * @exports Nostr
@@ -1751,13 +1754,12 @@ DI.register('Nostr', function (Config, Logger, bus) {
   const CDN = 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
   const SK_KEY = 'noomium:sk';
 
-  let nostr = null;        // модуль nostr-tools
-  let pool = null;         // SimplePool
-  let sk = null;           // Uint8Array(32)
-  let pk = null;           // hex pubkey
+  let nostr = null;
+  let pool = null;
+  let sk = null;
+  let pk = null;
   let initPromise = null;
 
-  /** Читает сохранённый ключ (hex) или null. */
   function loadKey() {
     try {
       const hex = localStorage.getItem(SK_KEY);
@@ -1767,8 +1769,6 @@ DI.register('Nostr', function (Config, Logger, bus) {
     } catch (_) {}
     return null;
   }
-
-  /** Сохраняет ключ (hex). Молча переживает приватный режим. */
   function saveKey(key) {
     try {
       localStorage.setItem(SK_KEY, Array.from(key).map(b => b.toString(16).padStart(2, '0')).join(''));
@@ -1782,7 +1782,6 @@ DI.register('Nostr', function (Config, Logger, bus) {
   function init() {
     if (initPromise) return initPromise;
     initPromise = import(CDN).then(mod => {
-      // +esm может отдать именованные экспорты или default — терпим оба варианта
       nostr = (typeof mod.generateSecretKey === 'function')
         ? mod
         : (mod.default && typeof mod.default.generateSecretKey === 'function' ? mod.default : mod);
@@ -1795,7 +1794,7 @@ DI.register('Nostr', function (Config, Logger, bus) {
       Logger.info('Nostr: готов, pubkey ' + pk.slice(0, 8) + '…');
       return pk;
     }).catch(err => {
-      initPromise = null;   // даём повторить
+      initPromise = null;
       Logger.error('Nostr: не загрузить nostr-tools', String(err && err.message || err));
       try { bus.emit('net:status', { status: 'failed' }); } catch (_) {}
       throw err;
@@ -1803,13 +1802,13 @@ DI.register('Nostr', function (Config, Logger, bus) {
     return initPromise;
   }
 
-  /** @returns {string[]} Текущие релеи из Config. */
+  /** @returns {string[]} Релеи из Config. */
   function relays() { return Config.get('relays', []); }
 
   /**
-   * Подписывает шаблон события (без публикации) — чтобы узнать id заранее.
+   * Подписывает шаблон (без публикации) — узнать id заранее.
    * @param {Object} template
-   * @returns {Object} Подписанное событие {id, sig, ...}.
+   * @returns {Object} Подписанное событие.
    */
   function sign(template) {
     if (!nostr || !sk) throw new Error('Nostr not ready');
@@ -1817,22 +1816,44 @@ DI.register('Nostr', function (Config, Logger, bus) {
   }
 
   /**
-   * Публикует событие на все релеи.
-   * @param {Object} template - Шаблон (kind/created_at/tags/content).
+   * Публикует событие порелейно. Резолвится по первому принявшему рэлею,
+   * реджектит только если отказали все. Отдельные таймауты не роняют общее.
+   * @param {Object} template
    * @returns {Promise<Object>} Подписанное событие.
    */
   function publish(template) {
     let ev;
     try { ev = sign(template); } catch (e) { return Promise.reject(e); }
     if (!pool) return Promise.reject(new Error('Nostr not ready'));
-    return pool.publish(relays(), ev).then(() => ev);
+    const urls = relays();
+    if (!urls.length) return Promise.reject(new Error('no relays configured'));
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let failures = 0;
+      urls.forEach(url => {
+        pool.ensureRelay(url)
+          .then(relay => relay.publish(ev))
+          .then(() => {
+            if (!settled) { settled = true; resolve(ev); }
+          })
+          .catch(err => {
+            failures++;
+            Logger.warn('Nostr: релей ' + url + ' не принял', String(err && err.message || err));
+            if (!settled && failures === urls.length) {
+              settled = true;
+              reject(new Error('no relay accepted'));
+            }
+          });
+      });
+    });
   }
 
   /**
    * Подписка на многих релеях.
-   * @param {Object[]} filters - Nostr-фильтры.
+   * @param {Object[]} filters
    * @param {{onevent?:Function,onclose?:Function}} handlers
-   * @returns {Object|null} Подписка с методом close().
+   * @returns {Object|null} Подписка с close().
    */
   function subscribe(filters, handlers) {
     if (!pool) return null;
@@ -1840,7 +1861,7 @@ DI.register('Nostr', function (Config, Logger, bus) {
   }
 
   /**
-   * Доступ к конкретному релею (для NetService: per-relay publish + circuit breaker).
+   * Доступ к конкретному релею (для NetService при надобности).
    * @param {string} url
    * @returns {Promise<Object>}
    */
@@ -1849,13 +1870,8 @@ DI.register('Nostr', function (Config, Logger, bus) {
     return pool.ensureRelay(url);
   }
 
-  /** @returns {string|null} hex pubkey. */
   function getPubkey() { return pk; }
-
-  /** @returns {boolean} */
   function isReady() { return !!(nostr && sk && pool); }
-
-  /** Закрывает соединения. */
   function close() {
     if (pool && typeof pool.close === 'function') { try { pool.close(relays()); } catch (_) {} }
   }
