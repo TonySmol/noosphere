@@ -1581,24 +1581,287 @@ DI.register('Ranker', function (Vec, Config) {
 
 // ─── МОДУЛЬ 11: NET/Protocol ─── START ───────────────────────
 /**
- * Форматы событий и тегов.
- *   NOTE = kind 1 (regular, хранится): content=text; tags ['t',room],['v',b64vec],['parent',id,pubkey]?.
- *   QUERY = kind 21000 (ephemeral): {vector,maxResponses,window}.
- *   ANSWER = kind 21001 (ephemeral): {noteId,text,vector,score} + e-tag на запрос.
- * encode/decode/validate. Компактный base64 вектора.
- * @deps Config
+ * Контракт событий NOOmium поверх Nostr. Чистые функции encode/decode/validate.
+ *
+ *   NOTE  = kind 1 (regular, хранится релеями): content = текст;
+ *           теги ['t',room], ['v',b64-вектор], ['parent',id,pubkey]?.
+ *   QUERY = kind 21000 (ephemeral): content = JSON {vector, maxResponses, window}.
+ *   ANSWER= kind 21001 (ephemeral): content = JSON {noteId, text, vector, score};
+ *           тег ['e', queryId] — привязка к запросу.
+ *
+ * Вектор в событиях — компактный base64 от Float32Array.
+ * @deps Config, Vec
  * @exports Protocol
  */
+DI.register('Protocol', function (Config, Vec) {
+  /**
+   * Ищет тег по имени.
+   * @param {Array} tags @param {string} name
+   * @returns {Array|null}
+   */
+  function findTag(tags, name) {
+    if (!Array.isArray(tags)) return null;
+    for (const t of tags) if (Array.isArray(t) && t[0] === name) return t;
+    return null;
+  }
+
+  /**
+   * Шаблон события-заметки (для подписи и публикации).
+   * @param {{id?:string,text:string,vector:*,shared?:boolean,parentId?:string,parentPubkey?:string,createdAt?:number}} note
+   * @param {string} room
+   * @returns {Object} Шаблон Nostr-события (без id/sig).
+   */
+  function noteEvent(note, room) {
+    const tags = [['t', room]];
+    if (note.vector) tags.push(['v', Vec.toB64(note.vector)]);
+    if (note.parentId) tags.push(['parent', note.parentId, note.parentPubkey || '']);
+    return {
+      kind: Config.get('kNote', 1),
+      created_at: Math.floor((note.createdAt || Date.now()) / 1000),
+      tags,
+      content: note.text || '',
+    };
+  }
+
+  /**
+   * Разбирает событие-заметку из сети.
+   * @param {Object} ev - Подписанное событие.
+   * @returns {Object|null} Заметка (shared=true, authorPubkey из ev.pubkey).
+   */
+  function decodeNote(ev) {
+    if (!ev || ev.kind !== Config.get('kNote', 1)) return null;
+    const vTag = findTag(ev.tags, 'v');
+    const pTag = findTag(ev.tags, 'parent');
+    return {
+      id: ev.id,
+      text: ev.content || '',
+      vector: vTag ? Vec.fromB64(vTag[1]) : null,
+      shared: true,
+      authorPubkey: ev.pubkey,
+      parentId: pTag ? pTag[1] : null,
+      parentPubkey: pTag ? (pTag[2] || null) : null,
+      createdAt: (ev.created_at || 0) * 1000,
+    };
+  }
+
+  /**
+   * Шаблон поискового запроса.
+   * @param {Float32Array|number[]} vector
+   * @param {number} maxResponses
+   * @param {number} window - мс
+   * @returns {Object}
+   */
+  function queryEvent(vector, maxResponses, window) {
+    return {
+      kind: Config.get('kQuery', 21000),
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [['t', Config.get('room', 'noomium-main')]],
+      content: JSON.stringify({ vector: Array.from(vector), maxResponses, window }),
+    };
+  }
+
+  /**
+   * Разбирает поисковый запрос (с валидацией вектора).
+   * @param {Object} ev
+   * @returns {{vector:number[],maxResponses:number,window:number,authorPubkey:string,queryId:string}|null}
+   */
+  function decodeQuery(ev) {
+    if (!ev || ev.kind !== Config.get('kQuery', 21000)) return null;
+    let data;
+    try { data = JSON.parse(ev.content); } catch (_) { return null; }
+    if (!data || !Array.isArray(data.vector) || !data.vector.length) return null;
+    for (const x of data.vector) if (typeof x !== 'number' || !isFinite(x)) return null;
+    return {
+      vector: data.vector,
+      maxResponses: typeof data.maxResponses === 'number' ? data.maxResponses : Config.get('maxResponses', 8),
+      window: typeof data.window === 'number' ? data.window : Config.get('responseWindow', 6000),
+      authorPubkey: ev.pubkey,
+      queryId: ev.id,
+    };
+  }
+
+  /**
+   * Шаблон ответа на запрос.
+   * @param {{id:string,text:string,vector:*}} note
+   * @param {number} score
+   * @param {string} queryId - id запроса (тег e).
+   * @param {string} room
+   * @returns {Object}
+   */
+  function answerEvent(note, score, queryId, room) {
+    return {
+      kind: Config.get('kAnswer', 21001),
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [['t', room], ['e', queryId]],
+      content: JSON.stringify({
+        noteId: note.id,
+        text: note.text,
+        vector: note.vector ? Array.from(note.vector) : null,
+        score,
+      }),
+    };
+  }
+
+  /**
+   * Разбирает ответ (с валидацией и защитой от огромного текста).
+   * @param {Object} ev
+   * @returns {{id:string,queryId:string,noteId:string,text:string,vector:number[]|null,score:number,authorPubkey:string,createdAt:number}|null}
+   */
+  function decodeAnswer(ev) {
+    if (!ev || ev.kind !== Config.get('kAnswer', 21001)) return null;
+    const eTag = findTag(ev.tags, 'e');
+    if (!eTag) return null;
+    let data;
+    try { data = JSON.parse(ev.content); } catch (_) { return null; }
+    if (!data || typeof data.text !== 'string') return null;
+    if (data.text.length > Config.get('maxAnswerTextLength', 10000)) return null;
+    let vector = null;
+    if (Array.isArray(data.vector)) {
+      for (const x of data.vector) if (typeof x !== 'number' || !isFinite(x)) return null;
+      vector = data.vector;
+    }
+    return {
+      id: ev.id,
+      queryId: eTag[1],
+      noteId: data.noteId || ev.id,
+      text: data.text,
+      vector,
+      score: typeof data.score === 'number' ? data.score : 0,
+      authorPubkey: ev.pubkey,
+      createdAt: (ev.created_at || 0) * 1000,
+    };
+  }
+
+  return { noteEvent, decodeNote, queryEvent, decodeQuery, answerEvent, decodeAnswer };
+}, ['Config', 'Vec']);
 // ─── МОДУЛЬ 11: NET/Protocol ─── END ─────────────────────────
 
 // ─── МОДУЛЬ 12: NET/Nostr ─── START ──────────────────────────
 /**
- * Транспорт: SimplePool, ключи (функционально: генерация+хранение; шифрование — задел),
- * relay management, publish (nostr-tools 2.x: ensureRelay+relay.publish, circuit breaker),
- * subscribeMany, reconnect backoff. import nostr-tools здесь.
+ * Транспорт Nostr: динамический импорт nostr-tools, ключи, SimplePool,
+ * публикация/подписка. Низкий уровень — оркестрирует NetService.
+ *
+ * TODO(security): секретный ключ сейчас хранится в localStorage открыто.
+ * Добавить шифрование PBKDF2+AES-GCM по паролю отдельным срезом.
+ *
  * @deps Config, Logger, EventBus
  * @exports Nostr
  */
+DI.register('Nostr', function (Config, Logger, bus) {
+  const CDN = 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
+  const SK_KEY = 'noomium:sk';
+
+  let nostr = null;        // модуль nostr-tools
+  let pool = null;         // SimplePool
+  let sk = null;           // Uint8Array(32)
+  let pk = null;           // hex pubkey
+  let initPromise = null;
+
+  /** Читает сохранённый ключ (hex) или null. */
+  function loadKey() {
+    try {
+      const hex = localStorage.getItem(SK_KEY);
+      if (hex && /^[0-9a-f]{64}$/i.test(hex)) {
+        return new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /** Сохраняет ключ (hex). Молча переживает приватный режим. */
+  function saveKey(key) {
+    try {
+      localStorage.setItem(SK_KEY, Array.from(key).map(b => b.toString(16).padStart(2, '0')).join(''));
+    } catch (_) {}
+  }
+
+  /**
+   * Грузит nostr-tools, создаёт/читает ключ и пул. Идемпотентна.
+   * @returns {Promise<string>} hex pubkey.
+   */
+  function init() {
+    if (initPromise) return initPromise;
+    initPromise = import(CDN).then(mod => {
+      // +esm может отдать именованные экспорты или default — терпим оба варианта
+      nostr = (typeof mod.generateSecretKey === 'function')
+        ? mod
+        : (mod.default && typeof mod.default.generateSecretKey === 'function' ? mod.default : mod);
+      if (typeof nostr.generateSecretKey !== 'function') throw new Error('nostr-tools: несовместимый модуль');
+
+      sk = loadKey();
+      if (!sk) { sk = nostr.generateSecretKey(); saveKey(sk); }
+      pk = nostr.getPublicKey(sk);
+      pool = new nostr.SimplePool();
+      Logger.info('Nostr: готов, pubkey ' + pk.slice(0, 8) + '…');
+      return pk;
+    }).catch(err => {
+      initPromise = null;   // даём повторить
+      Logger.error('Nostr: не загрузить nostr-tools', String(err && err.message || err));
+      try { bus.emit('net:status', { status: 'failed' }); } catch (_) {}
+      throw err;
+    });
+    return initPromise;
+  }
+
+  /** @returns {string[]} Текущие релеи из Config. */
+  function relays() { return Config.get('relays', []); }
+
+  /**
+   * Подписывает шаблон события (без публикации) — чтобы узнать id заранее.
+   * @param {Object} template
+   * @returns {Object} Подписанное событие {id, sig, ...}.
+   */
+  function sign(template) {
+    if (!nostr || !sk) throw new Error('Nostr not ready');
+    return nostr.finalizeEvent(template, sk);
+  }
+
+  /**
+   * Публикует событие на все релеи.
+   * @param {Object} template - Шаблон (kind/created_at/tags/content).
+   * @returns {Promise<Object>} Подписанное событие.
+   */
+  function publish(template) {
+    let ev;
+    try { ev = sign(template); } catch (e) { return Promise.reject(e); }
+    if (!pool) return Promise.reject(new Error('Nostr not ready'));
+    return pool.publish(relays(), ev).then(() => ev);
+  }
+
+  /**
+   * Подписка на многих релеях.
+   * @param {Object[]} filters - Nostr-фильтры.
+   * @param {{onevent?:Function,onclose?:Function}} handlers
+   * @returns {Object|null} Подписка с методом close().
+   */
+  function subscribe(filters, handlers) {
+    if (!pool) return null;
+    return pool.subscribeMany(relays(), filters, handlers);
+  }
+
+  /**
+   * Доступ к конкретному релею (для NetService: per-relay publish + circuit breaker).
+   * @param {string} url
+   * @returns {Promise<Object>}
+   */
+  function ensureRelay(url) {
+    if (!pool) return Promise.reject(new Error('Nostr not ready'));
+    return pool.ensureRelay(url);
+  }
+
+  /** @returns {string|null} hex pubkey. */
+  function getPubkey() { return pk; }
+
+  /** @returns {boolean} */
+  function isReady() { return !!(nostr && sk && pool); }
+
+  /** Закрывает соединения. */
+  function close() {
+    if (pool && typeof pool.close === 'function') { try { pool.close(relays()); } catch (_) {} }
+  }
+
+  return { init, sign, publish, subscribe, ensureRelay, getPubkey, isReady, relays, close };
+}, ['Config', 'Logger', 'EventBus']);
 // ─── МОДУЛЬ 12: NET/Nostr ─── END ────────────────────────────
 
 // ─── МОДУЛЬ 13: NET/NetService ─── START ─────────────────────
@@ -2380,6 +2643,56 @@ DI.register('FeedView', function (Store, Context, I18n, Utils, bus) {
  * @exports Boot {mount}
  */
 // ─── МОДУЛЬ 31: BOOT ─── END ─────────────────────────────────
+
+// ─── SELF-TEST NET ─── START ─────────────────────────────────
+(async function selfTestNet() {
+  try {
+    const Protocol = DI.resolve('Protocol');
+    const Nostr = DI.resolve('Nostr');
+    const Vec = DI.resolve('Vec');
+    const Logger = DI.resolve('Logger');
+    const checks = {};
+
+    const vec = Vec.normalize(new Float32Array([1, 2, 3]));
+    const note = { id: 'n1', text: 'мысль про тест', vector: Array.from(vec), shared: true, parentId: 'p1', parentPubkey: 'aa', createdAt: 1700000000000 };
+
+    // NOTE roundtrip
+    const nev = Protocol.noteEvent(note, 'test-room');
+    nev.id = 'f'.repeat(64); nev.pubkey = 'a'.repeat(64);
+    const nb = Protocol.decodeNote(nev);
+    checks.note = nb && nb.text === note.text && nb.parentId === 'p1' && Math.abs(nb.vector[0] - vec[0]) < 1e-5;
+
+    // QUERY roundtrip
+    const qev = Protocol.queryEvent(vec, 5, 6000);
+    qev.id = 'e'.repeat(64); qev.pubkey = 'b'.repeat(64);
+    const q = Protocol.decodeQuery(qev);
+    checks.query = q && q.maxResponses === 5 && Array.isArray(q.vector);
+
+    // ANSWER roundtrip
+    const aev = Protocol.answerEvent(note, 0.87, 'e'.repeat(64), 'test-room');
+    aev.id = 'c'.repeat(64); aev.pubkey = 'd'.repeat(64);
+    const a = Protocol.decodeAnswer(aev);
+    checks.answer = a && a.score === 0.87 && a.queryId === 'e'.repeat(64);
+
+    // защита от мусора
+    checks.rejectsBad = Protocol.decodeQuery({ kind: 21000, content: '{bad' }) === null;
+
+    // Nostr: загрузка либы + ключ (БЕЗ публикации)
+    try {
+      const pk = await Nostr.init();
+      checks.nostrInit = typeof pk === 'string' && /^[0-9a-f]{64}$/i.test(pk);
+    } catch (e) {
+      checks.nostrInit = false;
+      Logger.warn('selfTest: Nostr.init не удался (CDN/сеть?)', String(e));
+    }
+
+    const ok = Object.values(checks).every(Boolean);
+    Logger[ok ? 'info' : 'error']('SELF-TEST NET ' + (ok ? 'пройден ✓' : 'ПРОВАЛЕН'), checks);
+  } catch (e) {
+    console.error('[SELF-TEST NET] FAIL', e);
+  }
+})();
+// ─── SELF-TEST NET ─── END ───────────────────────────────────
 
 // ─── ВРЕМЕННЫЙ BOOT (локальный цикл + индикаторы) ─── START
 (function tempBoot() {
