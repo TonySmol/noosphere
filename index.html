@@ -563,48 +563,709 @@ DI.register('Logger', function () {
 
 // ─── МОДУЛЬ 4: CORE/Utils ─── START ──────────────────────────
 /**
- * Утилиты: esc (HTML), escRe, plural, word (числительные), fmtDate, fmtTime, shortPk.
+ * Чистые утилиты без зависимостей: экранирование, плюрализация,
+ * форматирование дат, генерация id, debounce.
  * @exports Utils
  */
+DI.register('Utils', function () {
+  /** Таблица HTML-экранирования. @readonly */
+  const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+  /**
+   * Экранирует HTML-спецсимволы для безопасной вставки в DOM.
+   * @param {*} s - Любое значение (приводится к строке; null/undefined → '').
+   * @returns {string}
+   */
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ESC[c]); }
+
+  /**
+   * Экранирует спецсимволы регулярных выражений.
+   * @param {*} s
+   * @returns {string} Строка, безопасная для new RegExp().
+   */
+  function escRe(s) { return String(s == null ? '' : s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+  /**
+   * Русская плюрализация.
+   * @param {number} n
+   * @param {string} one - «мысль»
+   * @param {string} few - «мысли»
+   * @param {string} many - «мыслей»
+   * @returns {string}
+   */
+  function plural(n, one, few, many) {
+    n = Math.abs(n); const a = n % 10, b = n % 100;
+    if (a === 1 && b !== 11) return one;
+    if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return few;
+    return many;
+  }
+
+  /** Генераторы строк «N сущность» по языкам. @readonly */
+  const words = {
+    symbols:     (n, l) => n + ' ' + (l === 'en' ? plural(n, 'char', 'chars', 'chars') : plural(n, 'символ', 'символа', 'символов')),
+    peers:       (n, l) => n + ' ' + (l === 'en' ? plural(n, 'peer', 'peers', 'peers')  : plural(n, 'узел', 'узла', 'узлов')),
+    thoughts:    (n, l) => n + ' ' + (l === 'en' ? plural(n, 'note', 'notes', 'notes')  : plural(n, 'мысль', 'мысли', 'мыслей')),
+    descendants: (n, l) => n + ' ' + (l === 'en' ? plural(n, 'heir', 'heirs', 'heirs')  : plural(n, 'потомок', 'потомка', 'потомков')),
+  };
+
+  /**
+   * «N сущностей» на нужном языке.
+   * @param {string} key - 'symbols' | 'peers' | 'thoughts' | 'descendants'.
+   * @param {number} n
+   * @param {string} lang - 'ru' | 'en'.
+   * @returns {string}
+   */
+  function word(key, n, lang) { const fn = words[key]; return fn ? fn(n, lang) : String(n); }
+
+  /**
+   * Короткая дата («05 июн.»).
+   * @param {number} ts - Timestamp, мс.
+   * @param {string} lang
+   * @returns {string} '' при ошибке.
+   */
+  function fmtDate(ts, lang) {
+    if (!ts) return '';
+    try { return new Date(ts).toLocaleDateString(lang === 'en' ? 'en-US' : 'ru-RU', { day: '2-digit', month: 'short' }); }
+    catch (_) { return ''; }
+  }
+
+  /**
+   * Короткое время («14:30»).
+   * @param {number} ts - Timestamp, мс.
+   * @param {string} lang
+   * @returns {string} '' при ошибке.
+   */
+  function fmtTime(ts, lang) {
+    if (!ts) return '';
+    try { return new Date(ts).toLocaleTimeString(lang === 'en' ? 'en-US' : 'ru-RU', { hour: '2-digit', minute: '2-digit' }); }
+    catch (_) { return ''; }
+  }
+
+  /**
+   * Короткий pubkey для UI («8a3f9c21…»).
+   * @param {string} pk
+   * @returns {string}
+   */
+  const shortPk = pk => (pk ? pk.slice(0, 8) + '…' : '');
+
+  /**
+   * Локальный уникальный id (не криптографический — для ключей в БД).
+   * @param {string} [prefix='n']
+   * @returns {string} Например 'nmd3k2x9f4a1'.
+   */
+  function uid(prefix) {
+    return (prefix || 'n') + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  /**
+   * Debounce с возможностью отмены.
+   * @param {Function} fn
+   * @param {number} ms
+   * @returns {Function & {cancel: Function}}
+   */
+  function debounce(fn, ms) {
+    let timer = null;
+    function debounced(...args) {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => { timer = null; fn(...args); }, ms);
+    }
+    debounced.cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    return debounced;
+  }
+
+  return { esc, escRe, plural, word, fmtDate, fmtTime, shortPk, uid, debounce };
+});
 // ─── МОДУЛЬ 4: CORE/Utils ─── END ────────────────────────────
 
 // ─── МОДУЛЬ 5: CORE/I18n ─── START ───────────────────────────
 /**
- * Словари ru/en, t(key,params,fallback) с подстановкой {p}, fallback на en→key.
- * setLang/getLang/onChange/addDict. Автодетект языка, персист в Config.
+ * Интернационализация: словари ru/en, подстановка {param}, fallback-цепочка
+ * «текущий язык → en → fallback → сам ключ». Язык автодетектится, персистится
+ * в Config, смена транслируется через шину ('i18n:change') и onChange-колбэки.
  * @deps Config, EventBus
- * @exports I18n {t,addDict,setLang,getLang,onChange}
+ * @exports I18n
  */
+DI.register('I18n', function (Config, bus) {
+  /** Словари по языкам. @type {Object<string, Object<string,string>>} */
+  const dicts = Object.create(null);
+  /** onChange-подписчики. @type {Function[]} */
+  const listeners = [];
+  /** Текущий язык. @type {'ru'|'en'} */
+  let current = 'ru';
+
+  // Автодетект: сохранённый → язык браузера → ru.
+  const saved = Config.get('lang', null);
+  if (saved === 'ru' || saved === 'en') current = saved;
+  else current = (navigator.language || 'ru').toLowerCase().indexOf('ru') === 0 ? 'ru' : 'en';
+
+  /**
+   * Подставляет {param} из объекта.
+   * @param {string} str
+   * @param {Object<string,*>} [params]
+   * @returns {string}
+   */
+  function format(str, params) {
+    const s = String(str == null ? '' : str);
+    if (!params) return s;
+    return s.replace(/\{(\w+)\}/g, (m, k) => (params[k] != null ? String(params[k]) : m));
+  }
+
+  /**
+   * Перевод по ключу.
+   * @param {string} key
+   * @param {Object<string,*>} [params] - Подстановки {p}.
+   * @param {string} [fallback] - Если ключа нет ни в одном словаре.
+   * @returns {string}
+   */
+  function t(key, params, fallback) {
+    const d = dicts[current] || {};
+    let val = Object.prototype.hasOwnProperty.call(d, key) ? d[key] : undefined;
+    if (val === undefined) {
+      const en = dicts['en'] || {};
+      val = Object.prototype.hasOwnProperty.call(en, key) ? en[key] : undefined;
+    }
+    return format(val !== undefined ? val : (fallback !== undefined ? fallback : key), params);
+  }
+
+  /**
+   * Добавляет/дополняет словарь языка.
+   * @param {'ru'|'en'} lang
+   * @param {Object<string,string>} dict
+   */
+  function addDict(lang, dict) { dicts[lang] = Object.assign(dicts[lang] || {}, dict || {}); }
+
+  /**
+   * Переключает язык, сохраняет и уведомляет (шина + onChange).
+   * @param {'ru'|'en'} lang
+   */
+  function setLang(lang) {
+    if (lang !== 'ru' && lang !== 'en') return;
+    current = lang;
+    Config.set('lang', current);
+    for (const fn of listeners.slice()) { try { fn(current); } catch (_) {} }
+    try { bus.emit('i18n:change', { lang: current }); } catch (_) {}
+  }
+
+  /** @returns {'ru'|'en'} Текущий язык. */
+  const getLang = () => current;
+
+  /**
+   * Подписка на смену языка.
+   * @param {Function} fn - (lang) => void.
+   */
+  function onChange(fn) { if (typeof fn === 'function') listeners.push(fn); }
+
+  // ── Базовые словари (UI-модули дополнят через addDict) ──
+  addDict('ru', {
+    'app.name': 'NOOmium',
+    'st.net': 'сеть', 'st.ai.loading': 'модель', 'st.ai.ready': 'ии', 'st.ai.demo': 'ии/хеш',
+    'st.net.online': 'онлайн', 'st.net.listen': 'слушаю', 'st.net.connecting': 'соединение',
+    'st.net.reconnecting': 'пересоединение', 'st.net.failed': 'нет сети',
+    'ed.placeholder': 'О чём думаешь?', 'ed.chars': 'симв.',
+    'btn.private': 'Личное', 'btn.public': 'Мир', 'btn.send': 'Отправить',
+    'tab.stream': 'Поток', 'tab.base': 'База',
+    'seg.local': 'Моё', 'seg.world': 'Мир', 'seg.seren': 'Озарения',
+    'ctx.pinned': 'пин', 'ctx.input': 'по тексту', 'ctx.clear': 'снять',
+    'sim.score': 'похожа на', 'inf.resonance': 'резонанс',
+    'empty.local.t': 'Пока нет мыслей', 'empty.local.d': 'Напиши первую выше',
+    'empty.world.t': 'Никто не думает так же', 'empty.world.d': 'Ждём открытые мысли',
+    'empty.seren.t': 'Озарений нет', 'empty.seren.d': 'Попробуй иначе',
+    'empty.base.t': 'База пуста', 'empty.base.d': 'Запиши первую мысль',
+    'base.search': 'поиск...', 'base.sort.new': 'новые', 'base.sort.old': 'старые', 'base.sort.az': 'а-я',
+    'base.stat.total': 'всего', 'base.stat.open': 'открыто', 'base.stat.priv': 'лично',
+    'base.tag.private': 'лично', 'base.tag.shared': 'открыто',
+    'btn.edit': 'Развить', 'btn.del': 'Удалить', 'btn.copy': 'Копия', 'btn.save': 'Сохранить',
+    'btn.cancel': 'Отмена', 'btn.close': 'Закрыть', 'btn.toggle.priv': 'Скрыть', 'btn.toggle.pub': 'Открыть',
+    'toast.saved.private': 'сохранено лично', 'toast.saved.public': 'опубликовано',
+    'toast.copied': 'скопировано', 'toast.deleted': 'удалено', 'toast.copy.fail': 'не удалось',
+    'toast.empty': 'напиши что-нибудь', 'toast.ai.notready': 'ии не готов',
+    'menu.settings': 'Настройки', 'menu.theme': 'Тема', 'menu.lang': 'Язык', 'menu.help': 'Как это работает',
+  });
+  addDict('en', {
+    'app.name': 'NOOmium',
+    'st.net': 'net', 'st.ai.loading': 'model', 'st.ai.ready': 'ai', 'st.ai.demo': 'ai/hash',
+    'st.net.online': 'online', 'st.net.listen': 'listening', 'st.net.connecting': 'connecting',
+    'st.net.reconnecting': 'reconnecting', 'st.net.failed': 'offline',
+    'ed.placeholder': 'What are you thinking?', 'ed.chars': 'chars',
+    'btn.private': 'Private', 'btn.public': 'World', 'btn.send': 'Send',
+    'tab.stream': 'Stream', 'tab.base': 'Base',
+    'seg.local': 'Mine', 'seg.world': 'World', 'seg.seren': 'Insights',
+    'ctx.pinned': 'pinned', 'ctx.input': 'by text', 'ctx.clear': 'clear',
+    'sim.score': 'similarity', 'inf.resonance': 'resonance',
+    'empty.local.t': 'No thoughts yet', 'empty.local.d': 'Write the first above',
+    'empty.world.t': 'Nobody thinks alike', 'empty.world.d': 'Waiting for open thoughts',
+    'empty.seren.t': 'No insights', 'empty.seren.d': 'Try different wording',
+    'empty.base.t': 'Base is empty', 'empty.base.d': 'Write your first thought',
+    'base.search': 'search...', 'base.sort.new': 'newest', 'base.sort.old': 'oldest', 'base.sort.az': 'a-z',
+    'base.stat.total': 'total', 'base.stat.open': 'open', 'base.stat.priv': 'private',
+    'base.tag.private': 'private', 'base.tag.shared': 'open',
+    'btn.edit': 'Develop', 'btn.del': 'Delete', 'btn.copy': 'Copy', 'btn.save': 'Save',
+    'btn.cancel': 'Cancel', 'btn.close': 'Close', 'btn.toggle.priv': 'Hide', 'btn.toggle.pub': 'Share',
+    'toast.saved.private': 'saved privately', 'toast.saved.public': 'shared',
+    'toast.copied': 'copied', 'toast.deleted': 'deleted', 'toast.copy.fail': 'copy failed',
+    'toast.empty': 'write something', 'toast.ai.notready': 'ai not ready',
+    'menu.settings': 'Settings', 'menu.theme': 'Theme', 'menu.lang': 'Language', 'menu.help': 'How it works',
+  });
+
+  return { t, addDict, setLang, getLang, onChange };
+}, ['Config', 'EventBus']);
 // ─── МОДУЛЬ 5: CORE/I18n ─── END ─────────────────────────────
 
 // ─── МОДУЛЬ 6: CORE/Store ─── START ──────────────────────────
 /**
- * Единый источник истины. Состояние 2-режимного UI:
- *   view:'feed'|'base'; mode:'view'|'author'; seg:'local'|'world'|'seren';
- *   context:{source:null|'input'|'pin', noteId, text, vector};
- *   sendMode; sendLock; lists:{local,world,seren}; feed:[]; netAuthorized; theme.
- * getState() — замороженный снимок. setState(partial). subscribe(fn|selector,fn,equals?).
- * @exports Store {getState,get,setState,subscribe,shallowEqual}
+ * Единый источник истины для UI-состояния.
+ *
+ * Режим (view/author) НЕ хранится — выводится из context.source методом mode().
+ * Хранимый mode пришлось бы синхронизировать вручную, выводимый не рассинхронится.
+ * Тема — в Config (это настройка, не UI-состояние).
+ *
+ * Контракт: getState() возвращает замороженный снимок верхнего уровня;
+ * вложенные структуры меняем только через setState с НОВЫМ объектом.
+ *
+ * @example
+ *   // Реагировать только на смену режима:
+ *   Store.subscribe(s => s.context.source, src => {
+ *     segBar.classList.toggle('on', src !== null);
+ *     ctxBanner.classList.toggle('on', src === 'pin');
+ *   });
+ *
+ * @exports Store
  */
+DI.register('Store', function () {
+  /** Внутреннее состояние. @type {Object} */
+  const state = {
+    view: 'feed',            // 'feed' | 'base' — активный экран
+    seg: 'local',            // 'local' | 'world' | 'seren' — активный сегмент (author)
+    context: { source: null, noteId: null, text: '', vector: null }, // source: null|'input'|'pin'
+    sendMode: 'private',     // 'private' | 'world' — куда публикуем
+    sendLock: false,         // блокировка отправки (анти-дабл)
+    lists: { local: [], world: [], seren: [] }, // результаты author-режима
+    feed: [],                // свежая лента view-режима
+    netAuthorized: false,    // ключ сети загружен
+  };
+  /** Подписчики. @type {Function[]} */
+  const listeners = [];
+
+  /**
+   * Поверхностное сравнение (для equals в subscribe).
+   * @param {*} a @param {*} b @returns {boolean}
+   */
+  function shallowEqual(a, b) {
+    if (Object.is(a, b)) return true;
+    if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+    const ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    for (const k of ka) if (!Object.is(a[k], b[k])) return false;
+    return true;
+  }
+
+  /** Замороженный снимок верхнего уровня. @returns {Object} */
+  const snapshot = () => Object.freeze(Object.assign({}, state));
+
+  /** Уведомляет подписчиков (копия списка + try/catch на каждого). */
+  function notify() {
+    const snap = snapshot();
+    for (const l of listeners.slice()) { try { l(snap); } catch (e) { console.error('[store]', e); } }
+  }
+
+  /** @returns {Object} Замороженный снимок состояния. */
+  const getState = () => snapshot();
+
+  /**
+   * Прямое чтение поля (для редких случаев; обычно — getState/subscribe).
+   * @param {string} k @returns {*}
+   */
+  const get = k => state[k];
+
+  /**
+   * Частичное обновление + уведомление.
+   * @param {Object} partial - Поля для слияния.
+   */
+  function setState(partial) {
+    if (!partial || typeof partial !== 'object') return;
+    Object.assign(state, partial);
+    notify();
+  }
+
+  /**
+   * Текущий режим — выводится из контекста.
+   * @returns {'view'|'author'}
+   */
+  const mode = () => (state.context.source ? 'author' : 'view');
+
+  /**
+   * Подписка. Две формы:
+   *   subscribe(fn) — на любое изменение, fn(snapshot);
+   *   subscribe(selector, fn, equals?) — fn(selected, snapshot) только при
+   *     изменении выбранного (по умолчанию Object.is; можно shallowEqual).
+   * @param {Function|Function} a - fn или selector.
+   * @param {Function} [b] - listener (для формы с селектором).
+   * @param {Function} [equals] - компаратор.
+   * @returns {Function} Отписка.
+   */
+  function subscribe(a, b, equals) {
+    if (typeof b === 'function') {
+      const selector = a, listener = b, eq = equals || Object.is;
+      let prev = selector(snapshot());
+      const wrap = s => { const next = selector(s); if (!eq(next, prev)) { prev = next; listener(next, s); } };
+      listeners.push(wrap);
+      return () => { const i = listeners.indexOf(wrap); if (i > -1) listeners.splice(i, 1); };
+    }
+    listeners.push(a);
+    return () => { const i = listeners.indexOf(a); if (i > -1) listeners.splice(i, 1); };
+  }
+
+  return { getState, get, setState, subscribe, mode, shallowEqual };
+});
 // ─── МОДУЛЬ 6: CORE/Store ─── END ────────────────────────────
 
 // ═══════════════════ DATA ═══════════════════
 
 // ─── МОДУЛЬ 7: DATA/Vec ─── START ────────────────────────────
 /**
- * Векторная математика: Float32Array<->base64, cosine (dot для нормированных),
- * normalize, k-means центроиды (для префильтра сети и облака).
- * @exports Vec {toB64,fromB64,cosine,normalize,kmeans}
+ * Векторная математика: кодирование для Nostr-тегов, косинусное сходство,
+ * нормализация и k-means для центроидов (сетевой префильтр, облако смыслов).
+ *
+ * Все функции терпят и Float32Array, и обычные массивы чисел.
+ * @exports Vec
  */
+DI.register('Vec', function () {
+  /**
+   * Приводит вход к Float32Array.
+   * @param {Float32Array|number[]} v
+   * @returns {Float32Array}
+   */
+  const f32 = v => (v instanceof Float32Array ? v : Float32Array.from(v || []));
+
+  /**
+   * Вектор → base64 (для тега ['v', …] в Nostr-событии).
+   * @param {Float32Array|number[]} vec
+   * @returns {string}
+   */
+  function toB64(vec) {
+    const f = f32(vec);
+    const bytes = new Uint8Array(f.buffer, f.byteOffset, f.byteLength);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+
+  /**
+   * base64 → вектор. Защитный: на битых/обрезанных данных вернёт null, а не упадёт.
+   * @param {string} b64
+   * @returns {Float32Array|null}
+   */
+  function fromB64(b64) {
+    try {
+      const bin = atob(String(b64 || ''));
+      if (!bin || bin.length % 4 !== 0) return null;   // не кратен 4 байтам → не Float32
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new Float32Array(bytes.buffer);
+    } catch (_) { return null; }
+  }
+
+  /**
+   * Косинусное сходство нормализованных векторов (= dot product).
+   * @param {Float32Array|number[]} a
+   * @param {Float32Array|number[]} b
+   * @returns {number} [-1..1]; 0 при невалидных входах.
+   */
+  function cosine(a, b) {
+    if (!a || !b) return 0;
+    const n = Math.min(a.length, b.length);
+    if (!n) return 0;
+    let s = 0;
+    for (let i = 0; i < n; i++) s += a[i] * b[i];
+    return s;
+  }
+
+  /**
+   * Нормализует вектор до единичной длины.
+   * @param {Float32Array|number[]} v
+   * @returns {Float32Array} Новый вектор (нулевой → нулевой).
+   */
+  function normalize(v) {
+    const f = f32(v);
+    let norm = 0;
+    for (let i = 0; i < f.length; i++) norm += f[i] * f[i];
+    norm = Math.sqrt(norm);
+    const out = new Float32Array(f.length);
+    if (!norm) return out;
+    for (let i = 0; i < f.length; i++) out[i] = f[i] / norm;
+    return out;
+  }
+
+  /**
+   * Квадрат евклидова расстояния (вспомогательная).
+   * @param {Float32Array|number[]} a @param {Float32Array|number[]} b
+   * @returns {number}
+   */
+  function sqDist(a, b) {
+    const n = Math.min(a.length, b.length);
+    let s = 0;
+    for (let i = 0; i < n; i++) { const d = a[i] - b[i]; s += d * d; }
+    return s;
+  }
+
+  /**
+   * k-means (Ллойд) с детерминированным farthest-point стартом.
+   * Для грубой кластеризации (префильтр/облако) хватает 8–12 итераций.
+   * @param {Array<Float32Array|number[]>} vectors
+   * @param {number} k - Число центроидов.
+   * @param {number} [iterations=10]
+   * @returns {Float32Array[]} Центроиды; при n<=k — сами векторы.
+   */
+  function kmeans(vectors, k, iterations) {
+    const iters = iterations || 10;
+    const n = vectors.length;
+    if (!n || !k) return [];
+    if (n <= k) return vectors.map(v => f32(v));
+    const dim = vectors[0].length;
+
+    // Init: первый + максимально удалённые от уже выбранных (детерминированно).
+    const cents = [f32(vectors[0])];
+    while (cents.length < k) {
+      let bestI = 0, bestD = -1;
+      for (let i = 0; i < n; i++) {
+        let minD = Infinity;
+        for (const c of cents) { const d = sqDist(vectors[i], c); if (d < minD) minD = d; }
+        if (minD > bestD) { bestD = minD; bestI = i; }
+      }
+      cents.push(f32(vectors[bestI]));
+    }
+
+    // Итерации Ллойда: присвоение → пересчёт центров.
+    for (let it = 0; it < iters; it++) {
+      const sums = Array.from({ length: k }, () => new Float32Array(dim));
+      const counts = new Array(k).fill(0);
+      for (let i = 0; i < n; i++) {
+        let best = 0, bestD = Infinity;
+        for (let c = 0; c < k; c++) { const d = sqDist(vectors[i], cents[c]); if (d < bestD) { bestD = d; best = c; } }
+        counts[best]++;
+        for (let d = 0; d < dim; d++) sums[best][d] += vectors[i][d];
+      }
+      for (let c = 0; c < k; c++) {
+        if (counts[c]) for (let d = 0; d < dim; d++) cents[c][d] = sums[c][d] / counts[c];
+      }
+    }
+    return cents;
+  }
+
+  return { toB64, fromB64, cosine, normalize, kmeans };
+});
 // ─── МОДУЛЬ 7: DATA/Vec ─── END ──────────────────────────────
 
 // ─── МОДУЛЬ 8: DATA/DB ─── START ─────────────────────────────
 /**
- * IndexedDB + in-memory fallback. notes:{id,text,vector,shared,parentId?,parentPubkey?,createdAt,updatedAt}.
- * put/get/del/all/bulkPut/getAllPaginated/reset. Эмитит db:change.
+ * Персистентное хранилище: IndexedDB с прозрачным in-memory fallback.
+ *
+ * Два объектных хранилища:
+ *   notes — заметки пользователя {id,text,vector,shared,parentId?,parentPubkey?,createdAt,updatedAt};
+ *   cache — принятые из сети заметки (LRU/TTL чистит NetService).
+ *
+ * Мутации notes эмитят 'db:change', мутации cache — 'db:cache'
+ * (по этим событиям инвалидируются кэши Feed/NetService).
+ *
  * @deps Config, EventBus, Logger
  * @exports DB
  */
+DI.register('DB', function (Config, bus, Logger) {
+  /** @type {IDBDatabase|null} */ let db = null;
+  /** @type {Map|null} */ let mem = null;        // fallback: notes
+  /** @type {Map|null} */ let memCache = null;   // fallback: cache
+  /** @type {Promise|null} */ let openPromise = null;
+
+  const NOTES = () => Config.get('storeName', 'notes');
+  const CACHE = () => Config.get('cacheStoreName', 'cache');
+
+  function emitChange() { try { bus.emit('db:change'); } catch (_) {} }
+  function emitCache()  { try { bus.emit('db:cache'); } catch (_) {} }
+
+  /**
+   * Открывает IDB (создаёт хранилища при первом запуске).
+   * При недоступности — in-memory fallback. Кэширует результат.
+   * @returns {Promise<IDBDatabase|null>}
+   */
+  function open() {
+    if (openPromise) return openPromise;
+    openPromise = new Promise(resolve => {
+      if (!window.indexedDB) {
+        mem = new Map(); memCache = new Map();
+        Logger.warn('DB: IndexedDB недоступен, in-memory fallback');
+        return resolve(null);
+      }
+      try {
+        const req = indexedDB.open(Config.get('dbName', 'noomium_v2'), 1);
+        req.onupgradeneeded = e => {
+          const d = e.target.result;
+          if (!d.objectStoreNames.contains(NOTES())) d.createObjectStore(NOTES(), { keyPath: 'id' });
+          if (!d.objectStoreNames.contains(CACHE())) d.createObjectStore(CACHE(), { keyPath: 'id' });
+        };
+        req.onsuccess = e => { db = e.target.result; resolve(db); };
+        req.onerror = () => { mem = new Map(); memCache = new Map(); Logger.warn('DB: ошибка открытия, fallback'); resolve(null); };
+        req.onblocked = () => { mem = new Map(); memCache = new Map(); Logger.warn('DB: open blocked, fallback'); resolve(null); };
+      } catch (err) {
+        mem = new Map(); memCache = new Map();
+        Logger.warn('DB: не поддерживается, fallback', String(err));
+        resolve(null);
+      }
+    });
+    return openPromise;
+  }
+
+  /**
+   *通用 обёртка: выполняет операцию над store, возвращает Promise.
+   * В fallback-режиме синхронно работает с Map.
+   * @param {string} store - Имя хранилища.
+   * @param {'readonly'|'readwrite'} mode
+   * @param {function(ObjectStore):IDBRequest} fn
+   * @returns {Promise<*>}
+   */
+  function withStore(store, mode, fn, memFn) {
+    return open().then(d => {
+      if (!d) return memFn();
+      return new Promise((res, rej) => {
+        try {
+          const r = fn(d.transaction(store, mode).objectStore(store));
+          r.onsuccess = () => res(r.result);
+          r.onerror = () => rej(r.error);
+        } catch (e) { rej(e); }
+      });
+    });
+  }
+
+  // ── NOTES ──
+
+  /**
+   * Создаёт/обновляет заметку. Эмитит db:change.
+   * @param {Object} note - С обязательным id.
+   * @returns {Promise<*>}
+   */
+  function put(note) {
+    return withStore(NOTES(), 'readwrite', s => s.put(note), () => { mem.set(note.id, note); return note.id; })
+      .then(res => { emitChange(); return res; });
+  }
+
+  /**
+   * Читает заметку по id.
+   * @param {string} id
+   * @returns {Promise<Object|undefined>}
+   */
+  function get(id) {
+    return withStore(NOTES(), 'readonly', s => s.get(id), () => mem.get(id));
+  }
+
+  /**
+   * Удаляет заметку. Эмитит db:change.
+   * @param {string} id
+   * @returns {Promise<*>}
+   */
+  function del(id) {
+    return withStore(NOTES(), 'readwrite', s => s.delete(id), () => { mem.delete(id); })
+      .then(res => { emitChange(); return res; });
+  }
+
+  /**
+   * Все заметки.
+   * @returns {Promise<Object[]>}
+   */
+  function all() {
+    return withStore(NOTES(), 'readonly', s => s.getAll(), () => Array.from(mem.values()));
+  }
+
+  /**
+   * Количество заметок.
+   * @returns {Promise<number>}
+   */
+  function count() {
+    return withStore(NOTES(), 'readonly', s => s.count(), () => mem.size);
+  }
+
+  /**
+   * Порция заметок через курсор (экономит память на больших базах).
+   * @param {number} offset - Пропустить.
+   * @param {number} limit - Взять.
+   * @returns {Promise<Object[]>}
+   */
+  function getAllPaginated(offset, limit) {
+    return open().then(d => {
+      if (!d) return Array.from(mem.values()).slice(offset, offset + limit);
+      return new Promise((res, rej) => {
+        const r = d.transaction(NOTES(), 'readonly').objectStore(NOTES()).openCursor();
+        const out = [];
+        let skipped = 0;
+        r.onsuccess = e => {
+          const cur = e.target.result;
+          if (!cur || out.length >= limit) return res(out);
+          if (skipped < offset) { skipped++; cur.continue(); return; }
+          out.push(cur.value);
+          cur.continue();
+        };
+        r.onerror = () => rej(r.error);
+      });
+    });
+  }
+
+  /**
+   * Массовая запись в одной транзакции (импорт). Эмитит db:change.
+   * @param {Object[]} notes
+   * @returns {Promise<number>} Число записанных.
+   */
+  function bulkPut(notes) {
+    return open().then(d => {
+      if (!d) { notes.forEach(n => mem.set(n.id, n)); return notes.length; }
+      return new Promise((res, rej) => {
+        const t = d.transaction(NOTES(), 'readwrite');
+        const s = t.objectStore(NOTES());
+        notes.forEach(n => s.put(n));
+        t.oncomplete = () => res(notes.length);
+        t.onerror = () => rej(t.error);
+        t.onabort = () => rej(t.error);
+      });
+    }).then(n => { emitChange(); return n; });
+  }
+
+  /**
+   * Полная очистка обеих stores (danger zone). Эмитит db:change.
+   * @returns {Promise<void>}
+   */
+  function reset() {
+    return open().then(d => {
+      if (!d) { mem.clear(); memCache.clear(); return; }
+      return new Promise((res, rej) => {
+        const t = d.transaction([NOTES(), CACHE()], 'readwrite');
+        t.objectStore(NOTES()).clear();
+        t.objectStore(CACHE()).clear();
+        t.oncomplete = () => res();
+        t.onerror = () => rej(t.error);
+      });
+    }).then(() => { emitChange(); });
+  }
+
+  // ── CACHE (сетевые заметки) ──
+
+  /** @param {Object} note @returns {Promise<*>} */
+  function cachePut(note) {
+    return withStore(CACHE(), 'readwrite', s => s.put(note), () => { memCache.set(note.id, note); return note.id; })
+      .then(res => { emitCache(); return res; });
+  }
+  /** @param {string} id @returns {Promise<Object|undefined>} */
+  function cacheGet(id) {
+    return withStore(CACHE(), 'readonly', s => s.get(id), () => memCache.get(id));
+  }
+  /** @returns {Promise<Object[]>} */
+  function cacheAll() {
+    return withStore(CACHE(), 'readonly', s => s.getAll(), () => Array.from(memCache.values()));
+  }
+  /** @returns {Promise<void>} */
+  function cacheClear() {
+    return withStore(CACHE(), 'readwrite', s => s.clear(), () => { memCache.clear(); })
+      .then(res => { emitCache(); return res; });
+  }
+
+  return { put, get, del, all, count, getAllPaginated, bulkPut, reset, cachePut, cacheGet, cacheAll, cacheClear };
+});
 // ─── МОДУЛЬ 8: DATA/DB ─── END ───────────────────────────────
 
 // ═══════════════════ AI ═══════════════════
@@ -798,31 +1459,38 @@ DI.register('Logger', function () {
  */
 // ─── МОДУЛЬ 31: BOOT ─── END ─────────────────────────────────
 
-// ─── SELF-TEST Пачки 1 ─── START ─────────────────────────────
-try {
-  const Config = DI.resolve('Config');
-  const bus = DI.resolve('EventBus');
-  const Logger = DI.resolve('Logger');
+// ─── SELF-TEST Пачки 3 ─── START ─────────────────────────────
+(async function selfTest3() {
+  try {
+    const Vec = DI.resolve('Vec');
+    const DB = DI.resolve('DB');
+    const Logger = DI.resolve('Logger');
+    const checks = {};
 
-  Logger.setLevel(Config.get('logLevel', 'info'));
+    // Vec
+    const v = Vec.normalize(new Float32Array([3, 0, 4]));   // → [0.6, 0, 0.8]
+    checks.vecNorm = Math.abs(Vec.cosine(v, v) - 1) < 1e-5;
+    const back = Vec.fromB64(Vec.toB64(v));
+    checks.vecRoundtrip = !!back && back.length === v.length && Math.abs(back[0] - v[0]) < 1e-6;
+    checks.vecBadB64 = Vec.fromB64('!!!not-base64!!!') === null;
+    checks.vecKmeans = Vec.kmeans([[1, 0], [0, 1], [1, 1], [0.9, 0.1], [0.1, 0.9]], 2).length === 2;
 
-  let got = null, wildGot = null;
-  const off = bus.on('selftest:ping', p => { got = p; });
-  const offWild = bus.on('*', ev => { wildGot = ev; });
-  bus.emit('selftest:ping', 'pong');
-  off(); offWild();
-  bus.emit('selftest:ping', 'ignored');   // после отписки — не долетает
+    // DB (асинхронный roundtrip, с уборкой за собой)
+    const id = 'selftest-' + Date.now();
+    await DB.put({ id, text: 'selftest', vector: Array.from(v), shared: false, createdAt: Date.now() });
+    checks.dbPutGet = (await DB.get(id)).text === 'selftest';
+    checks.dbAll = (await DB.all()).some(n => n.id === id);
+    checks.dbCount = (await DB.count()) >= 1;
+    await DB.del(id);
+    checks.dbDel = !(await DB.get(id));
 
-  const ok = got === 'pong' && wildGot === 'selftest:ping'
-          && !!Config.get('room') && Logger.history().length > 0;
-
-  Logger[ok ? 'info' : 'error']('SELF-TEST пачки 1 ' + (ok ? 'пройден ✓' : 'ПРОВАЛЕН'), {
-    bus: got, wildcard: wildGot, room: Config.get('room'), history: Logger.history().length,
-  });
-} catch (e) {
-  console.error('[SELF-TEST] FAIL', e);
-}
-// ─── SELF-TEST Пачки 1 ─── END ───────────────────────────────
+    const ok = Object.values(checks).every(Boolean);
+    Logger[ok ? 'info' : 'error']('SELF-TEST пачки 3 ' + (ok ? 'пройден ✓' : 'ПРОВАЛЕН'), checks);
+  } catch (e) {
+    console.error('[SELF-TEST 3] FAIL', e);
+  }
+})();
+// ─── SELF-TEST Пачки 3 ─── END ───────────────────────────────
 
 // ═══ ВРЕМЕННЫЙ ЗАПУСК (заменит BOOT): показать ракушку + превью 2-режимов ═══
 document.body.classList.add('ready');
