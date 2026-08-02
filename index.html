@@ -1866,13 +1866,217 @@ DI.register('Nostr', function (Config, Logger, bus) {
 
 // ─── МОДУЛЬ 13: NET/NetService ─── START ─────────────────────
 /**
- * Оркестрация сети + нагрузочная устойчивость.
- * announceNote (publish kind 1). Входящий QUERY: центроидный префильтр → поиск по кластеру
- * → ответ с лимитом (maxResponses, backoff, early-termination). Коалесценция чужих запросов.
- * duty-cycling (только когда приложение видимо). peers, heartbeat, outbox, rate limits, activeAnswers.
- * @deps Nostr, Protocol, DB, Ranker, Vec, Config, Logger, EventBus
+ * Оркестратор децентрализованного обмена.
+ *
+ *  - Подписка на комнату: принимает заметки (kind 1), запросы (21000), ответы (21001).
+ *  - Анонсирует открытые заметки пользователя (по 'note:created'/'note:shared').
+ *  - На чужой запрос: центроидный префильтр → ранжирование своих открытых →
+ *    top-N ответов (лимит maxResponses, ступенчатая отправка).
+ *  - На пин шлёт запрос и собирает ответы в кеш (Feed их подхватывает).
+ *
+ * Нагрузочная устойчивость: дедупликация seen, пропуск своих событий,
+ * rate-limit ответов одному пиру, префильтр, лимит ответов, переподключение.
+ *
+ * @deps Nostr, Protocol, DB, Ranker, Vec, Store, Config, Logger, EventBus
  * @exports NetService
  */
+DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Config, Logger, bus) {
+  let started = false;
+  let subscription = null;
+  let hbTimer = null;
+  let activeQueryId = null;
+  let lastQueryVec = null;
+  let lastQueryTime = 0;
+  let centroids = [];
+  let contextUnsub = null;
+  const seen = new Set();            // id обработанных событий
+  const peers = new Map();           // pubkey -> lastSeen
+  const peerQueryTimes = new Map();  // pubkey -> когда последний раз отвечали на его запрос
+
+  const kNote = () => Config.get('kNote', 1);
+  const kQuery = () => Config.get('kQuery', 21000);
+  const kAnswer = () => Config.get('kAnswer', 21001);
+  const room = () => Config.get('room', 'noomium-main');
+
+  function setStatus(s) { try { bus.emit('net:status', { status: s }); } catch (_) {} }
+  function notifyPeers() { try { bus.emit('net:peers', { count: peers.size }); } catch (_) {} }
+
+  function trimSeen() {
+    const max = Config.get('seenMaxSize', 1000);
+    if (seen.size <= max) return;
+    const arr = Array.from(seen);
+    seen.clear();
+    for (let i = arr.length - Math.floor(max / 2); i < arr.length; i++) seen.add(arr[i]);
+  }
+
+  // ── центроидный префильтр: стоит ли вообще искать у себя ──
+  function rebuildCentroids() {
+    DB.all().then(notes => {
+      const vecs = notes.filter(n => n.shared && n.vector).map(n => n.vector);
+      if (!vecs.length) { centroids = []; return; }
+      centroids = Vec.kmeans(vecs, Math.min(Config.get('centroidCount', 12), vecs.length), 8);
+    }).catch(() => {});
+  }
+  function passesPrefilter(queryVector) {
+    if (!centroids.length) return true;
+    const floor = Config.get('threshold', 0.7) - 0.25;   // щедрый запас
+    for (const c of centroids) if (Vec.cosine(queryVector, c) >= floor) return true;
+    return false;
+  }
+
+  // ── входящие события ──
+  function onEvent(ev) {
+    if (!ev || seen.has(ev.id)) return;
+    seen.add(ev.id);
+    trimSeen();
+    if (ev.pubkey === Nostr.getPubkey()) return;   // своё не обрабатываем
+
+    if (ev.kind === kNote()) handleIncomingNote(ev);
+    else if (ev.kind === kQuery()) handleIncomingQuery(ev);
+    else if (ev.kind === kAnswer()) handleIncomingAnswer(ev);
+  }
+
+  function handleIncomingNote(ev) {
+    const note = Protocol.decodeNote(ev);
+    if (!note) return;
+    peers.set(note.authorPubkey, Date.now());
+    DB.cachePut(note);          // эмитит db:cache → Feed обновится
+    notifyPeers();
+  }
+
+  function handleIncomingQuery(ev) {
+    const q = Protocol.decodeQuery(ev);
+    if (!q) return;
+    const now = Date.now();
+    const last = peerQueryTimes.get(ev.pubkey) || 0;
+    if (now - last < Config.get('queryRateLimit', 3000)) return;   // rate-limit на пира
+    peerQueryTimes.set(ev.pubkey, now);
+    if (!passesPrefilter(q.vector)) return;
+
+    DB.all().then(notes => {
+      const candidates = notes.filter(n => n.shared && n.vector);
+      if (!candidates.length) return null;
+      const byId = new Map(candidates.map(n => [n.id, n]));
+      const items = candidates.map(n => ({ id: n.id, vector: n.vector }));
+      return Ranker.cosineBatch(q.vector, items).then(scored => {
+        const top = scored
+          .filter(s => s.score >= Config.get('threshold', 0.7))
+          .slice(0, q.maxResponses || Config.get('maxResponses', 8));
+        top.forEach((s, i) => {
+          const note = byId.get(s.id);
+          if (!note) return;
+          setTimeout(() => {
+            Nostr.publish(Protocol.answerEvent(note, s.score, q.queryId, room()))
+              .catch(e => Logger.warn('NetService: не отправить ответ', String(e)));
+          }, i * 250);   // ступенчато, не залпом
+        });
+      });
+    }).catch(e => Logger.warn('NetService: ошибка обработки запроса', String(e)));
+  }
+
+  function handleIncomingAnswer(ev) {
+    const a = Protocol.decodeAnswer(ev);
+    if (!a) return;
+    if (a.queryId !== activeQueryId) return;   // ответ не на наш запрос
+    peers.set(a.authorPubkey, Date.now());
+    DB.cachePut({
+      id: a.id,
+      text: a.text,
+      vector: a.vector,
+      shared: true,
+      authorPubkey: a.authorPubkey,
+      createdAt: a.createdAt,
+      score: a.score,
+    });
+    notifyPeers();
+  }
+
+  // ── анонс наших открытых заметок ──
+  function announceNote(note) {
+    if (!note || !note.shared || !note.vector) return;
+    Nostr.publish(Protocol.noteEvent(note, room()))
+      .then(() => Logger.info('NetService: анонс заметки ' + note.id))
+      .catch(e => Logger.warn('NetService: не анонсировать', String(e)));
+  }
+
+  // ── запрос при пине ──
+  function maybeSendQuery() {
+    const ctx = Store.get('context');
+    if (ctx.source !== 'pin' || !ctx.vector) { lastQueryVec = null; return; }
+    const now = Date.now();
+    if (now - lastQueryTime < Config.get('queryRateLimit', 3000)) return;
+    if (lastQueryVec && Ranker.isSimilar(lastQueryVec, ctx.vector)) return;
+    lastQueryVec = ctx.vector;
+    lastQueryTime = now;
+    const tpl = Protocol.queryEvent(ctx.vector, Config.get('maxResponses', 8), Config.get('responseWindow', 6000));
+    Nostr.publish(tpl)
+      .then(ev => { activeQueryId = ev.id; Logger.info('NetService: запрос ' + ev.id.slice(0, 8) + '…'); })
+      .catch(e => {
+        lastQueryVec = null; lastQueryTime = 0;   // даём повторить
+        Logger.warn('NetService: не отправить запрос', String(e));
+      });
+  }
+
+  // ── подписка на комнату ──
+  function subscribeToRoom() {
+    const since = Math.floor(Date.now() / 1000) - Config.get('subWindow', 300);
+    const filters = [{ kinds: [kNote(), kQuery(), kAnswer()], '#t': [room()], since }];
+    if (subscription && typeof subscription.close === 'function') { try { subscription.close(); } catch (_) {} }
+    subscription = Nostr.subscribe(filters, {
+      onevent: onEvent,
+      onclose: () => {
+        setStatus('reconnecting');
+        setTimeout(() => { if (started) subscribeToRoom(); }, Config.get('reconnectBaseDelay', 1000));
+      },
+    });
+  }
+
+  // ── heartbeat: чистка пиров и seen ──
+  function startHeartbeat() {
+    if (hbTimer) clearInterval(hbTimer);
+    hbTimer = setInterval(() => {
+      const now = Date.now();
+      const ttl = Config.get('peerTTL', 60000);
+      let changed = false;
+      peers.forEach((ts, pk) => { if (now - ts > ttl) { peers.delete(pk); changed = true; } });
+      if (changed) notifyPeers();
+      trimSeen();
+    }, Config.get('heartbeat', 30000));
+  }
+
+  // ── lifecycle ──
+  function start() {
+    if (started) return Promise.resolve();
+    return Nostr.init().then(() => {
+      started = true;
+      subscribeToRoom();
+      bus.on('note:created', note => { if (note && note.shared) announceNote(note); });
+      bus.on('note:shared', note => { if (note && note.shared) announceNote(note); });
+      bus.on('db:change', () => rebuildCentroids());
+      contextUnsub = Store.subscribe(s => s.context, () => maybeSendQuery());
+      startHeartbeat();
+      rebuildCentroids();
+      setStatus('connected');
+      Logger.info('NetService: запущен, комната #' + room());
+    }).catch(e => {
+      Logger.error('NetService: не стартовать', String(e && e.message || e));
+      setStatus('failed');
+    });
+  }
+
+  function stop() {
+    started = false;
+    if (subscription && typeof subscription.close === 'function') { try { subscription.close(); } catch (_) {} }
+    subscription = null;
+    if (hbTimer) { clearInterval(hbTimer); hbTimer = null; }
+    if (contextUnsub) { try { contextUnsub(); } catch (_) {} contextUnsub = null; }
+    peers.clear();
+    seen.clear();
+    setStatus('disconnected');
+  }
+
+  return { start, stop };
+}, ['Nostr', 'Protocol', 'DB', 'Ranker', 'Vec', 'Store', 'Config', 'Logger', 'EventBus']);
 // ─── МОДУЛЬ 13: NET/NetService ─── END ───────────────────────
 
 // ─── МОДУЛЬ 14: NET/IndexClient ─── START ────────────────────
@@ -2644,57 +2848,7 @@ DI.register('FeedView', function (Store, Context, I18n, Utils, bus) {
  */
 // ─── МОДУЛЬ 31: BOOT ─── END ─────────────────────────────────
 
-// ─── SELF-TEST NET ─── START ─────────────────────────────────
-(async function selfTestNet() {
-  try {
-    const Protocol = DI.resolve('Protocol');
-    const Nostr = DI.resolve('Nostr');
-    const Vec = DI.resolve('Vec');
-    const Logger = DI.resolve('Logger');
-    const checks = {};
-
-    const vec = Vec.normalize(new Float32Array([1, 2, 3]));
-    const note = { id: 'n1', text: 'мысль про тест', vector: Array.from(vec), shared: true, parentId: 'p1', parentPubkey: 'aa', createdAt: 1700000000000 };
-
-    // NOTE roundtrip
-    const nev = Protocol.noteEvent(note, 'test-room');
-    nev.id = 'f'.repeat(64); nev.pubkey = 'a'.repeat(64);
-    const nb = Protocol.decodeNote(nev);
-    checks.note = nb && nb.text === note.text && nb.parentId === 'p1' && Math.abs(nb.vector[0] - vec[0]) < 1e-5;
-
-    // QUERY roundtrip
-    const qev = Protocol.queryEvent(vec, 5, 6000);
-    qev.id = 'e'.repeat(64); qev.pubkey = 'b'.repeat(64);
-    const q = Protocol.decodeQuery(qev);
-    checks.query = q && q.maxResponses === 5 && Array.isArray(q.vector);
-
-    // ANSWER roundtrip
-    const aev = Protocol.answerEvent(note, 0.87, 'e'.repeat(64), 'test-room');
-    aev.id = 'c'.repeat(64); aev.pubkey = 'd'.repeat(64);
-    const a = Protocol.decodeAnswer(aev);
-    checks.answer = a && a.score === 0.87 && a.queryId === 'e'.repeat(64);
-
-    // защита от мусора
-    checks.rejectsBad = Protocol.decodeQuery({ kind: 21000, content: '{bad' }) === null;
-
-    // Nostr: загрузка либы + ключ (БЕЗ публикации)
-    try {
-      const pk = await Nostr.init();
-      checks.nostrInit = typeof pk === 'string' && /^[0-9a-f]{64}$/i.test(pk);
-    } catch (e) {
-      checks.nostrInit = false;
-      Logger.warn('selfTest: Nostr.init не удался (CDN/сеть?)', String(e));
-    }
-
-    const ok = Object.values(checks).every(Boolean);
-    Logger[ok ? 'info' : 'error']('SELF-TEST NET ' + (ok ? 'пройден ✓' : 'ПРОВАЛЕН'), checks);
-  } catch (e) {
-    console.error('[SELF-TEST NET] FAIL', e);
-  }
-})();
-// ─── SELF-TEST NET ─── END ───────────────────────────────────
-
-// ─── ВРЕМЕННЫЙ BOOT (локальный цикл + индикаторы) ─── START
+// ─── ВРЕМЕННЫЙ BOOT (локальный цикл + сеть) ─── START
 (function tempBoot() {
   document.body.classList.add('ready');
   const Progress = DI.resolve('Progress');
@@ -2703,8 +2857,8 @@ DI.register('FeedView', function (Store, Context, I18n, Utils, bus) {
   const Feed = DI.resolve('Feed');
   const Composer = DI.resolve('Composer');
   const FeedView = DI.resolve('FeedView');
+  const NetService = DI.resolve('NetService');
 
-  // индикаторы подписываются ДО load(), чтобы поймать первое 'loading'
   Progress.init();
   HeaderStatus.init();
   Feed.init();
@@ -2712,7 +2866,9 @@ DI.register('FeedView', function (Store, Context, I18n, Utils, bus) {
   FeedView.init();
 
   Embedder.load();
-  console.info('[NOOmium] цикл + индикаторы: печатай → Ctrl+Enter → клик (пин)');
+  NetService.start();   // подключается к комнате, анонсирует, отвечает на запросы
+
+  console.info('[NOOmium] локальный цикл + сеть: две идентичности увидят друг друга');
 })();
 // ─── ВРЕМЕННЫЙ BOOT ─── END
 
