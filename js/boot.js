@@ -1,16 +1,42 @@
 // ─── BOOT ─── START ──────────────────────────────────────────
 /**
- * Точка входа. Резолвит и инициализирует все модули в правильном порядке:
- *  1. Тема (до показа приложения, чтобы не мигнуть неверной темой).
- *  2. Подписчики событий без DOM (Progress, HeaderStatus, Feed, Influence).
- *  3. DOM-модули (Composer, FeedView, NoteView, BaseView, MenuView, Hotkeys).
- *  4. Слушатель wipe:request.
- *  5. Показ приложения (body.ready).
- *  6. Запуск Embedder (шлёт ai-события) и NetService (шлёт net-события).
- *  7. Onboarding последним.
- * Зависимостей через DI не имеет — резолвит модули внутри mount() сам.
+ * Точка входа. Импортирует и инициализирует все модули в правильном порядке.
  * @exports Boot {mount}
  */
+
+// Импорт всех модулей для регистрации в DI
+import './core/di.js';
+import './core/config.js';
+import './core/eventbus.js';
+import './core/logger.js';
+import './core/utils.js';
+import './core/i18n.js';
+import './core/store.js';
+import './data/vec.js';
+import './data/db.js';
+import './ai/embedder.js';
+import './ai/ranker.js';
+import './net/protocol.js';
+import './net/nostr.js';
+import './net/netservice.js';
+import './domain/notes.js';
+import './domain/context.js';
+import './domain/feed.js';
+import './domain/provenance.js';
+import './domain/influence.js';
+import './domain/noteactions.js';
+import './ui/onboarding.js';
+import './ui/modal.js';
+import './ui/toast.js';
+import './ui/progress.js';
+import './ui/headerstatus.js';
+import './ui/composer.js';
+import './ui/feedview.js';
+import './ui/baseview.js';
+import './ui/noteview.js';
+import './ui/menuview.js';
+import './input/hotkeys.js';
+
 DI.register('Boot', function () {
   /** Собирает и запускает приложение. Вызывать один раз. */
   function mount() {
@@ -63,5 +89,3 @@ DI.register('Boot', function () {
 // ─── ЗАПУСК ─── START ────────────────────────────────────────
 DI.resolve('Boot').mount();
 // ─── ЗАПУСК ─── END ──────────────────────────────────────────
-
-</script>
