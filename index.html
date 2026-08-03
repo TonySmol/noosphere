@@ -269,62 +269,69 @@ const DI = (() => {
 
 // ─── МОДУЛЬ 1: CORE/Config ─── START ─────────────────────────
 /**
- * Конфигурация приложения: дефолты + персист в localStorage.
+ * Конфигурация: дефолты + персист в localStorage.
+ * Мержит только известные ключи (защита от чужой/старой схемы).
  *
- * Принципы:
- *  - Дефолты заморожены — единственный источник «правды по умолчанию».
- *  - Из localStorage мержатся ТОЛЬКО известные ключи: чужая/устаревшая схема
- *    не занесёт мусор и не сломает приложение после обновления.
- *  - set() сохраняет автоматически: настройки меняются редко, терять их нельзя.
- *  - Поля «задел» зарезервированы под будущие фичи и уже версионируются.
+ * Миграция рэлеев: поле relaysVersion. Когда дефолтный relaysVersion выше
+ * сохранённого, список relays принудительно берётся из дефолтов и фиксируется.
+ * Это позволяет обновлять список рэлеев у всех без консольных команд.
  *
  * @exports Config
  */
 DI.register('Config', function () {
-  /** Ключ в localStorage. @type {string} */
   const KEY = 'noomium:cfg';
 
   /** Значения по умолчанию (заморожены). @readonly */
   const defaults = Object.freeze({
-    version: 2,                          // версия схемы конфига
+    version: 2,
+    relaysVersion: 3,   // поднять при смене списка рэлеев → авто-обновление у всех
 
     // ── Общее ──
-    room: 'noomium-main',                // Nostr-комната (тег #t)
-    theme: 'dark',                       // 'dark' | 'light'
-    lang: null,                          // null = автодетект; 'ru' | 'en'
-    onboarded: false,                    // пройден ли онбординг
-    logLevel: 'info',                    // 'debug' | 'info' | 'warn' | 'error'
+    room: 'noomium-main',
+    theme: 'dark',
+    lang: null,
+    onboarded: false,
+    logLevel: 'info',
 
     // ── AI ──
     model: 'Xenova/paraphrase-multilingual-MiniLM-L12-v2',
-    dim: 384,                            // размерность вектора
-    aiCacheLimit: 300,                   // LRU-кэш векторов
-    aiEmbedTimeout: 15000,               // таймаут эмбеддинга, мс
+    dim: 384,
+    aiCacheLimit: 300,
+    aiEmbedTimeout: 15000,
 
     // ── Ранжирование ──
-    threshold: 0.7,                      // порог «похожести»
-    serendipity: 0.3,                    // ширина «озарений» ниже порога
-    vectorSimilarityThreshold: 0.98,     // дедупликация запросов
+    threshold: 0.7,
+    serendipity: 0.3,
+    vectorSimilarityThreshold: 0.98,
 
     // ── Сеть ──
-    relays: ['wss://relay.damus.io', 'wss://nos.lol', 'wss://offchain.pub'],
-    kNote: 1,                            // kind заметки (regular → хранится релеями)
-    kQuery: 21000,                       // kind запроса (ephemeral)
-    kAnswer: 21001,                      // kind ответа (ephemeral)
-    queryRateLimit: 3000,                // мин. интервал между запросами, мс
-    maxResponses: 8,                     // лимит ответов на один запрос
-    responseWindow: 6000,                // окно сбора ответов, мс
-    centroidCount: 12,                   // центроидов для сетевого префильтра
-    peerTTL: 60000,                      // время жизни пира, мс
-    heartbeat: 30000,                    // интервал очистки пиров, мс
-    subWindow: 300,                      // окно подписки, сек
-    relayErrorThreshold: 5,              // ошибок до circuit-break
-    relayCircuitBreakTime: 120000,       // блокировка релея, мс
+    // Только открытые релеи без web-of-trust (offchain.pub не подходит: woT).
+    relays: [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.primal.net',
+      'wss://nostr.mom',
+      'wss://relay.snort.social',
+    ],
+    kNote: 1,
+    kQuery: 21000,
+    kAnswer: 21001,
+    queryRateLimit: 3000,
+    maxResponses: 8,
+    responseWindow: 6000,
+    centroidCount: 12,
+    peerTTL: 60000,
+    heartbeat: 30000,
+    subWindow: 300,
+    relayErrorThreshold: 5,
+    relayCircuitBreakTime: 120000,
     relayBackoff1: 15000,
     relayBackoff2: 30000,
     reconnectMaxAttempts: 10,
     reconnectBaseDelay: 1000,
     reconnectMaxDelay: 60000,
+    seenMaxSize: 1000,
+    maxAnswerTextLength: 10000,
 
     // ── Данные ──
     dbName: 'noomium_v2',
@@ -332,7 +339,7 @@ DI.register('Config', function () {
     cacheStoreName: 'cache',
 
     // ── UI ──
-    debounce: 350,                       // ввод → контекст, мс
+    debounce: 350,
     baseSearchDebounce: 200,
     truncateTextLength: 140,
     toastMaxVisible: 3,
@@ -340,58 +347,49 @@ DI.register('Config', function () {
     maxPasswordAttempts: 3,
     influenceWeightByAge: true,
 
-    // ── Задел (зарезервировано, сейчас не используется) ──
-    indexerUrl: null,                    // URL индексатора / Qdrant
-    premiumRelay: null,                  // платный релей (монетизация)
-    gpuRanking: false,                   // ранжирование на GPU
-    cloudView: false,                    // облако смыслов
+    // ── Задел ──
+    indexerUrl: null,
+    premiumRelay: null,
+    gpuRanking: false,
+    cloudView: false,
   });
 
   /** Текущее состояние (дефолты + сохранённое). @type {Object} */
   const state = Object.assign({}, defaults);
 
-  // Загрузка: мержим только известные ключи.
+  // Загрузка: мержим только известные ключи + миграция рэлеев.
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const saved = JSON.parse(raw);
       if (saved && typeof saved === 'object') {
         for (const k of Object.keys(defaults)) if (k in saved) state[k] = saved[k];
+        // если сохранённый relaysVersion устарел — берём релеи из дефолтов
+        if (!saved.relaysVersion || saved.relaysVersion < defaults.relaysVersion) {
+          state.relays = defaults.relays.slice();
+          state.relaysVersion = defaults.relaysVersion;
+          try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (_) {}
+        }
       }
     }
   } catch (_) { /* битый JSON / приватный режим — живём с дефолтами */ }
 
-  /** Сохраняет состояние в localStorage. */
+  /** Сохраняет состояние. */
   function persist() {
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (_) { /* quota */ }
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (_) {}
   }
 
   return {
-    /**
-     * Читает значение.
-     * @param {string} k - Ключ.
-     * @param {*} [def] - Запасное, если ключа нет.
-     * @returns {*}
-     */
+    /** @param {string} k @param {*} [def] @returns {*} */
     get(k, def) { return (k in state) ? state[k] : def; },
-
-    /**
-     * Устанавливает значение и сразу сохраняет.
-     * @param {string} k - Ключ.
-     * @param {*} v - Значение.
-     */
+    /** @param {string} k @param {*} v */
     set(k, v) { state[k] = v; persist(); },
-
-    /** Принудительное сохранение (обычно не нужно). */
     save: persist,
-
-    /** Копия дефолтов — для «сбросить к стандартным». @returns {Object} */
+    /** Копия дефолтов. @returns {Object} */
     defaults() { return Object.assign({}, defaults); },
-
     /** Копия текущего состояния. @returns {Object} */
     all() { return Object.assign({}, state); },
-
-    /** Сбрасывает всё к дефолтам и сохраняет. */
+    /** Сброс к дефолтам. */
     reset() {
       for (const k of Object.keys(defaults)) state[k] = defaults[k];
       persist();
@@ -1883,14 +1881,18 @@ DI.register('Nostr', function (Config, Logger, bus) {
 /**
  * Оркестратор децентрализованного обмена.
  *
- *  - Подписка на комнату: принимает заметки (kind 1), запросы (21000), ответы (21001).
+ *  - Подписка на комнату: заметки (kind 1), запросы (21000), ответы (21001).
  *  - Анонсирует открытые заметки пользователя (по 'note:created'/'note:shared').
- *  - На чужой запрос: центроидный префильтр → ранжирование своих открытых →
- *    top-N ответов (лимит maxResponses, ступенчатая отправка).
- *  - На пин шлёт запрос и собирает ответы в кеш (Feed их подхватывает).
+ *  - На чужой запрос: центроидный префильтр → ранжирование своих открытых → top-N ответов.
+ *  - На пин шлёт запрос и собирает ответы в кеш (Feed подхватывает).
  *
- * Нагрузочная устойчивость: дедупликация seen, пропуск своих событий,
- * rate-limit ответов одному пиру, префильтр, лимит ответов, переподключение.
+ * Дедупликация двух уровней:
+ *  - seen: по ev.id (дёшево, против повторной доставки того же события);
+ *  - contentSeen: по (authorPubkey + текст) — против повторной ПУБЛИКАЦИИ той же
+ *    мысли (новый ev.id, который seen не ловит). Именно она убирает спам-дубли.
+ *
+ * Нагрузочная устойчивость: rate-limit ответов пиру, префильтр, лимит ответов,
+ * ступенчатая отправка, переподключение.
  *
  * @deps Nostr, Protocol, DB, Ranker, Vec, Store, Config, Logger, EventBus
  * @exports NetService
@@ -1904,9 +1906,10 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
   let lastQueryTime = 0;
   let centroids = [];
   let contextUnsub = null;
-  const seen = new Set();            // id обработанных событий
-  const peers = new Map();           // pubkey -> lastSeen
-  const peerQueryTimes = new Map();  // pubkey -> когда последний раз отвечали на его запрос
+  const seen = new Set();             // ev.id обработанных событий
+  const contentSeen = new Map();      // 'pubkey::text' -> true (контентная дедупликация)
+  const peers = new Map();            // pubkey -> lastSeen
+  const peerQueryTimes = new Map();   // pubkey -> когда последний раз отвечали
 
   const kNote = () => Config.get('kNote', 1);
   const kQuery = () => Config.get('kQuery', 21000);
@@ -1924,7 +1927,25 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
     for (let i = arr.length - Math.floor(max / 2); i < arr.length; i++) seen.add(arr[i]);
   }
 
-  // ── центроидный префильтр: стоит ли вообще искать у себя ──
+  /**
+   * Контентная дедупликация: тот же автор + тот же текст уже встречались?
+   * Повторная публикация одной мысли даёт новый ev.id (seen не ловит),
+   * но contentSeen узнаёт её по содержанию.
+   * @param {string} pubkey @param {string} text
+   * @returns {boolean} true = дубль, пропускаем
+   */
+  function isContentDuplicate(pubkey, text) {
+    const key = pubkey + '::' + String(text || '').trim();
+    if (contentSeen.has(key)) return true;
+    contentSeen.set(key, true);
+    if (contentSeen.size > 2000) {
+      const first = contentSeen.keys().next().value;
+      contentSeen.delete(first);
+    }
+    return false;
+  }
+
+  // ── центроидный префильтр ──
   function rebuildCentroids() {
     DB.all().then(notes => {
       const vecs = notes.filter(n => n.shared && n.vector).map(n => n.vector);
@@ -1934,7 +1955,7 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
   }
   function passesPrefilter(queryVector) {
     if (!centroids.length) return true;
-    const floor = Config.get('threshold', 0.7) - 0.25;   // щедрый запас
+    const floor = Config.get('threshold', 0.7) - 0.25;
     for (const c of centroids) if (Vec.cosine(queryVector, c) >= floor) return true;
     return false;
   }
@@ -1954,6 +1975,7 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
   function handleIncomingNote(ev) {
     const note = Protocol.decodeNote(ev);
     if (!note) return;
+    if (isContentDuplicate(note.authorPubkey, note.text)) return;   // контентный дубль
     peers.set(note.authorPubkey, Date.now());
     DB.cachePut(note);          // эмитит db:cache → Feed обновится
     notifyPeers();
@@ -1983,7 +2005,7 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
           setTimeout(() => {
             Nostr.publish(Protocol.answerEvent(note, s.score, q.queryId, room()))
               .catch(e => Logger.warn('NetService: не отправить ответ', String(e)));
-          }, i * 250);   // ступенчато, не залпом
+          }, i * 250);
         });
       });
     }).catch(e => Logger.warn('NetService: ошибка обработки запроса', String(e)));
@@ -1993,6 +2015,7 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
     const a = Protocol.decodeAnswer(ev);
     if (!a) return;
     if (a.queryId !== activeQueryId) return;   // ответ не на наш запрос
+    if (isContentDuplicate(a.authorPubkey, a.text)) return;   // контентный дубль
     peers.set(a.authorPubkey, Date.now());
     DB.cachePut({
       id: a.id,
@@ -2087,6 +2110,7 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
     if (contextUnsub) { try { contextUnsub(); } catch (_) {} contextUnsub = null; }
     peers.clear();
     seen.clear();
+    contentSeen.clear();
     setStatus('disconnected');
   }
 
