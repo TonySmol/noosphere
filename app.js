@@ -1878,21 +1878,525 @@ DI.register('DB', function (Config, bus, Logger) {
 
 // ─── AI/Embedder ─── START ──────────────────────────────────────────────────
 /**
- * [в4] Эмбеддер Granite R2: Web Worker + transformers.js (q8, CLS-pooling),
- *      режимы loading/model/demo, FNV-1a hash-fallback, LRU-кэш 300,
- *      таймауты 120с/15с, события ai:progress / ai:status.
- * Deps: Config, EventBus, Logger
+ * Embedder для Granite R2 (ModernBERT backbone).
+ *
+ * Архитектура модели (из документации IBM):
+ * - granite-encoder-small-multilingual: 12 слоёв, 384-dim, SiLU, RoPE theta 160,000
+ * - Пулинг: [CLS] (формула 3.2 в paper)
+ * - Нормализация: да (косинусное сходство нормализованных векторов)
+ *
+ * Транспортировка:
+ * - Модель грузится в Web Worker через transformers.js
+ * - Fallback: FNV-1a хеш-эмбеддинг при недоступности Worker или ошибке загрузки
+ *
+ * Режимы:
+ * - 'loading' — модель грузится
+ * - 'model'   — модель готова
+ * - 'demo'    — хеш-фолбэк (качество поиска нулевое, приложение не падает)
  */
+DI.register('Embedder', function (Config, bus, Logger) {
+  /**
+   * Код Web Worker'а (строкой — для создания через Blob).
+   * Грузит transformers.js с CDN, строит pipeline, отвечает на запросы embed.
+   * @type {string}
+   */
+  const workerCode = `
+let extractor = null;
+let ready = false;
+let files = new Map();
+
+self.onmessage = async function (e) {
+  const msg = e.data;
+  
+  if (msg.type === 'load') {
+    try {
+      const mod = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@latest');
+      mod.env.allowLocalModels = false;
+      mod.env.useBrowserCache = true;
+      
+      extractor = await mod.pipeline('feature-extraction', msg.model, {
+        dtype: 'q8',
+        progress_callback: function (p) {
+          if (p.status === 'progress') {
+            const fileName = p.file || p.name || 'unknown';
+            files.set(fileName, { 
+              loaded: p.loaded || 0, 
+              total: p.total || 0,
+              file: fileName
+            });
+            
+            let totalLoaded = 0, totalSize = 0;
+            files.forEach(f => { 
+              totalLoaded += f.loaded; 
+              if (f.total > 0) totalSize += f.total; 
+            });
+            
+            const pct = totalSize > 0 ? (totalLoaded / totalSize) * 100 : 0;
+            self.postMessage({ 
+              type: 'progress', 
+              pct,
+              loadedMB: (totalLoaded / 1024 / 1024).toFixed(1),
+              totalMB: totalSize > 0 ? (totalSize / 1024 / 1024).toFixed(1) : null,
+              model: msg.model
+            });
+          }
+        }
+      });
+      
+      ready = true;
+      self.postMessage({ type: 'ready' });
+    } catch (err) {
+      self.postMessage({ 
+        type: 'error', 
+        id: null, 
+        message: String(err && err.message || err) 
+      });
+    }
+    return;
+  }
+  
+  if (!ready) {
+    self.postMessage({ 
+      type: 'error', 
+      id: msg.id, 
+      message: 'model not loaded' 
+    });
+    return;
+  }
+  
+  if (msg.type === 'embed') {
+    try {
+      // Granite R2: [CLS] pooling + нормализация (согласно документации)
+      const out = await extractor(msg.text, { pooling: 'cls', normalize: true });
+      self.postMessage({ 
+        type: 'result', 
+        id: msg.id, 
+        vector: Array.from(out.data) 
+      });
+    } catch (err) {
+      self.postMessage({ 
+        type: 'error', 
+        id: msg.id, 
+        message: String(err && err.message || err) 
+      });
+    }
+  }
+};
+`;
+
+  /** @type {Worker|null} */
+  let worker = null;
+  /** @type {string|null} */
+  let workerUrl = null;
+  /** @type {'loading'|'model'|'demo'} */
+  let mode = 'loading';
+  let loadPromise = null;
+  let nextId = 0;
+  let lastPct = 0;
+  /** @type {Map<number, {resolve: Function, timer: number, text: string}>} */
+  const pending = new Map();
+  /** @type {Array<Function>} */
+  const progressFns = [];
+  /** @type {Map<string, Float32Array>} */
+  const cache = new Map();
+
+  function emitStatus() {
+    try {
+      bus.emit('ai:status', { mode, percent: lastPct });
+    } catch (_) {}
+  }
+
+  /**
+   * Fallback: детерминированный хеш-эмбеддинг (FNV-1a).
+   * Используется только если Worker/модель недоступны.
+   * Качество поиска при этом нулевое, но приложение не падает.
+   * @param {string} text - Текст.
+   * @returns {Float32Array} Нормализованный вектор размерности dim.
+   */
+  function hashEmbed(text) {
+    const DIM = Config.get('dim', 384);
+    const vec = new Float32Array(DIM);
+    const tokens = (text || '').toLowerCase().match(/[a-zа-яё0-9]+/gi) || [];
+
+    for (const tok of tokens) {
+      let h = 2166136261;
+      for (let i = 0; i < tok.length; i++) {
+        h ^= tok.charCodeAt(i);
+        h = Math.imul(h, 16777619);
+      }
+      vec[Math.abs(h) % DIM] += 1;
+
+      const h2 = Math.imul(h ^ 0x9e3779b9, 2654435761);
+      vec[Math.abs(h2) % DIM] += 0.5;
+    }
+
+    let norm = 0;
+    for (let i = 0; i < DIM; i++) norm += vec[i] * vec[i];
+    norm = Math.sqrt(norm) || 1;
+
+    for (let i = 0; i < DIM; i++) vec[i] /= norm;
+    return vec;
+  }
+
+  /**
+   * LRU-чтение из кэша.
+   * @param {string} key - Текст.
+   * @returns {Float32Array|undefined}
+   */
+  function cacheGet(key) {
+    if (!cache.has(key)) return undefined;
+    const v = cache.get(key);
+    cache.delete(key);
+    cache.set(key, v);
+    return v;
+  }
+
+  /**
+   * LRU-запись в кэш с вытеснением старых записей.
+   * @param {string} key - Текст.
+   * @param {Float32Array} v - Вектор.
+   */
+  function cacheSet(key, v) {
+    if (cache.has(key)) {
+      cache.delete(key);
+    } else if (cache.size >= Config.get('aiCacheLimit', 300)) {
+      cache.delete(cache.keys().next().value);
+    }
+    cache.set(key, v);
+  }
+
+  /**
+   * Аварийная очистка: завершает все ожидающие embed-запросы
+   * хеш-векторами, убивает Worker и revoke'ит Blob-URL.
+   */
+  function cleanup() {
+    pending.forEach(p => {
+      clearTimeout(p.timer);
+      const v = hashEmbed(p.text);
+      cacheSet(p.text, v);
+      p.resolve(v);
+    });
+    pending.clear();
+
+    if (worker) {
+      try { worker.terminate(); } catch (_) {}
+      worker = null;
+    }
+
+    if (workerUrl) {
+      try { URL.revokeObjectURL(workerUrl); } catch (_) {}
+      workerUrl = null;
+    }
+  }
+
+  /**
+   * Загрузка модели: создаёт Worker, шлёт 'load', ждёт 'ready'.
+   * Любой сбой (таймаут 120с, ошибка Worker, ошибка модели) → demo mode.
+   * @returns {Promise<void>}
+   */
+  function doLoad() {
+    return new Promise(resolve => {
+      if (typeof Worker === 'undefined') {
+        mode = 'demo';
+        emitStatus();
+        Logger.warn('Embedder: Worker не поддерживается, demo mode');
+        return resolve();
+      }
+
+      try {
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        workerUrl = URL.createObjectURL(blob);
+        worker = new Worker(workerUrl, { type: 'module' });
+      } catch (err) {
+        mode = 'demo';
+        emitStatus();
+        Logger.warn('Embedder: не создать Worker, demo mode', String(err));
+        return resolve();
+      }
+
+      // Таймаут загрузки модели: 120 секунд.
+      // Если Worker не прислал 'ready' за это время, переходим в demo mode.
+      // Это защищает от зависшего CDN или бесконечной загрузки.
+      const LOAD_TIMEOUT = 120000;
+      let resolved = false;
+
+      const loadTimer = setTimeout(() => {
+        if (resolved) return;
+        resolved = true;
+        Logger.warn('Embedder: таймаут загрузки модели (' + LOAD_TIMEOUT / 1000 + 'с), demo mode');
+        cleanup();
+        mode = 'demo';
+        emitStatus();
+        resolve();
+      }, LOAD_TIMEOUT);
+
+      worker.onerror = err => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(loadTimer);
+        Logger.warn('Embedder: ошибка Worker, demo mode', String(err && err.message || err));
+        cleanup();
+        mode = 'demo';
+        emitStatus();
+        resolve();
+      };
+
+      worker.onmessage = e => {
+        const msg = e.data;
+
+        if (msg.type === 'progress') {
+          lastPct = msg.pct;
+
+          for (const fn of progressFns) {
+            try { fn(msg); } catch (_) {}
+          }
+
+          try { bus.emit('ai:progress', msg); } catch (_) {}
+          try {
+            bus.emit('ai:status', {
+              mode: 'loading',
+              percent: msg.pct,
+              loadedMB: msg.loadedMB,
+              totalMB: msg.totalMB,
+              model: msg.model,
+            });
+          } catch (_) {}
+        }
+        else if (msg.type === 'ready') {
+          if (resolved) return;
+          resolved = true;
+          clearTimeout(loadTimer);
+          mode = 'model';
+          emitStatus();
+          Logger.info('Embedder: модель готова');
+          resolve();
+        }
+        else if (msg.type === 'error' && msg.id === null) {
+          if (resolved) return;
+          resolved = true;
+          clearTimeout(loadTimer);
+          Logger.warn('Embedder: ошибка загрузки модели, demo mode', msg.message);
+          cleanup();
+          mode = 'demo';
+          emitStatus();
+          resolve();
+        }
+        else if (msg.type === 'result') {
+          const p = pending.get(msg.id);
+          if (p) {
+            clearTimeout(p.timer);
+            pending.delete(msg.id);
+
+            const vec = Float32Array.from(msg.vector);
+            cacheSet(p.text, vec);
+            p.resolve(vec);
+          }
+        }
+        else if (msg.type === 'error' && msg.id != null) {
+          const p = pending.get(msg.id);
+          if (p) {
+            clearTimeout(p.timer);
+            pending.delete(msg.id);
+
+            Logger.warn('Embedder: ошибка embed, hash fallback', msg.message);
+            const v = hashEmbed(p.text);
+            cacheSet(p.text, v);
+            p.resolve(v);
+          }
+        }
+      };
+
+      worker.postMessage({
+        type: 'load',
+        model: Config.get('model', 'onnx-community/granite-embedding-97m-multilingual-r2-ONNX'),
+      });
+    });
+  }
+
+  return {
+    /**
+     * Загрузка модели. Повторные вызовы возвращают тот же промис /
+     * мгновенно резолвятся в режимах model/demo.
+     * @param {Function} [onProgress] - Колбэк прогресса ({pct, loadedMB, totalMB, model}).
+     * @returns {Promise<void>}
+     */
+    load(onProgress) {
+      if (typeof onProgress === 'function') {
+        progressFns.push(onProgress);
+      }
+
+      if (mode === 'model' || mode === 'demo') {
+        return Promise.resolve();
+      }
+
+      if (loadPromise) return loadPromise;
+
+      mode = 'loading';
+      emitStatus();
+      loadPromise = doLoad().then(() => {
+        loadPromise = null;
+      });
+
+      return loadPromise;
+    },
+
+    /**
+     * Эмбеддинг текста. Кэш LRU → Worker (с таймаутом) → hash-fallback.
+     * @param {string} text - Текст.
+     * @returns {Promise<Float32Array|null>} Вектор или null для пустого текста.
+     */
+    embed(text) {
+      const t = (text || '').trim();
+      if (!t) return Promise.resolve(null);
+
+      const cached = cacheGet(t);
+      if (cached) return Promise.resolve(cached);
+
+      if (mode === 'demo' || !worker) {
+        const v = hashEmbed(t);
+        cacheSet(t, v);
+        return Promise.resolve(v);
+      }
+
+      const id = nextId++;
+      return new Promise(resolve => {
+        const timer = setTimeout(() => {
+          if (pending.delete(id)) {
+            Logger.warn('Embedder: таймаут embed, hash fallback');
+            const v = hashEmbed(t);
+            cacheSet(t, v);
+            resolve(v);
+          }
+        }, Config.get('aiEmbedTimeout', 15000));
+
+        pending.set(id, { resolve, timer, text: t });
+        worker.postMessage({ type: 'embed', id, text: t });
+      });
+    },
+
+    /**
+     * Готов ли эмбеддер к работе (model или demo).
+     * @returns {boolean}
+     */
+    ready() {
+      return mode === 'model' || mode === 'demo';
+    },
+
+    /**
+     * Текущий режим: 'loading' | 'model' | 'demo'.
+     * @returns {string}
+     */
+    getMode() {
+      return mode;
+    },
+
+    /**
+     * Подписка на прогресс загрузки (для UI).
+     * @param {Function} fn - Колбэк.
+     */
+    onProgress(fn) {
+      if (typeof fn === 'function') {
+        progressFns.push(fn);
+      }
+    },
+  };
+}, ['Config', 'EventBus', 'Logger']);
 // ─── AI/Embedder ─── END ────────────────────────────────────────────────────
 
 // ─── AI/Ranker ─── START ────────────────────────────────────────────────────
 /**
- * [в4] Ранжирование: cosineBatch (+AbortSignal), split (relevant/seren),
- *      isSimilar (duplicateThreshold).
- *      ФИКС #4: докстринг синхронизирован с фактическим поведением
- *      (нижний порог = threshold − serendipity, без клампа).
- * Deps: Vec, Config
+ * Ранжирование заметок по косинусному сходству.
+ *
+ * Логика порогов (адаптирована под Granite R2, диапазон ~0.55–0.93):
+ *
+ *   >= threshold               → relevant («В тему»)
+ *   >= threshold - serendipity → serendipity («Озарение»)
+ *   <  threshold - serendipity → скрыто полностью
+ *
+ * Нижний порог = threshold − serendipity БЕЗ дополнительного клампа:
+ * пользователь сам отвечает за свои настройки через ползунки
+ * (жёсткий предел 0.40 был убран намеренно — экстремальные настройки
+ * дают экстремальные результаты, это ожидаемое поведение).
  */
+DI.register('Ranker', function (Vec, Config) {
+  /**
+   * Пакетное вычисление косинусного сходства.
+   * @param {Float32Array|number[]} queryVector - Вектор запроса.
+   * @param {Array<{id: string, vector: Array|Float32Array}>} items - Заметки с векторами.
+   * @param {AbortSignal} [signal] - Сигнал отмены.
+   * @returns {Promise<Array<{id: string, score: number}>>} Отсортировано по убыванию.
+   */
+  function cosineBatch(queryVector, items, signal) {
+    if (!queryVector || !items || !items.length) {
+      return Promise.resolve([]);
+    }
+
+    if (signal && signal.aborted) {
+      return Promise.reject(new Error('aborted'));
+    }
+
+    const out = [];
+    for (const it of items) {
+      if (signal && signal.aborted) {
+        return Promise.reject(new Error('aborted'));
+      }
+      out.push({ id: it.id, score: Vec.cosine(queryVector, it.vector) });
+    }
+
+    out.sort((a, b) => b.score - a.score);
+    return Promise.resolve(out);
+  }
+
+  /**
+   * Разделение результатов на relevant и serendipity.
+   * Пороги берутся из Config (настраиваются пользователем).
+   *
+   * @param {Array<{id: string, score: number}>} scored - Результаты cosineBatch.
+   * @returns {{relevant: Array, seren: Array}}
+   */
+  function split(scored) {
+    const threshold = Config.get('threshold', 0.81);
+    const serendipity = Config.get('serendipity', 0.07);
+
+    // Нижний порог = threshold - serendipity (без ограничений).
+    const lowerBound = threshold - serendipity;
+
+    const relevant = [];
+    const seren = [];
+
+    for (const s of scored) {
+      if (s.score < lowerBound) {
+        continue;
+      }
+
+      if (s.score >= threshold) {
+        relevant.push(s);
+      } else {
+        seren.push(s);
+      }
+    }
+
+    return { relevant, seren };
+  }
+
+  /**
+   * Проверка на дубликат: два вектора считаются одинаковыми,
+   * если их сходство >= duplicateThreshold.
+   * Используется для предотвращения повторных запросов в сеть.
+   *
+   * Для Granite R2 (диапазон ~0.55–0.93) порог 0.88 означает
+   * «практически идентичные по смыслу».
+   *
+   * @param {Float32Array|number[]} a
+   * @param {Float32Array|number[]} b
+   * @returns {boolean}
+   */
+  function isSimilar(a, b) {
+    return Vec.cosine(a, b) >= Config.get('duplicateThreshold', 0.88);
+  }
+
+  return { cosineBatch, split, isSimilar };
+}, ['Vec', 'Config']);
 // ─── AI/Ranker ─── END ──────────────────────────────────────────────────────
 
 // ═══════════════════════════════════════════════════════════════════════════════
