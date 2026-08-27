@@ -6023,30 +6023,523 @@ DI.register('Progress', function (bus) {
 
 // ─── UI/HeaderStatus ─── START ──────────────────────────────────────────────
 /**
- * [в11] Индикаторы шапки: сеть (5 состояний) и ИИ (3 режима), клик по
- *      статусу сети → переподключение, ре-рендер по i18n:change.
- *      ФИКС #5: показ/скрытие #offline-bar по net:status и online/offline.
- * Deps: EventBus, I18n, Embedder
+ * Индикаторы состояния в шапке: сеть (NetService) и ИИ (Embedder).
+ *
+ * Состояния сети:
+ * - disconnected (серый): не запущен
+ * - connecting (пульсирующий): попытка соединения
+ * - connected (зелёный): подписка активна
+ * - reconnecting (янтарный): пересоединение
+ * - failed (розовый): ошибка инициализации / офлайн
+ *
+ * Состояния ИИ:
+ * - loading (пульсирующий): загрузка модели
+ * - model (зелёный): модель готова
+ * - demo (янтарный): fallback на hash-эмбеддинг
+ *
+ * Фичи:
+ * - Клик по тексту статуса сети запускает stop/start цикл переподключения.
+ * - Офлайн-бар: показывается при net:status=failed + navigator.onLine=false,
+ *   скрывается при любом другом статусе (фикс #5 — в v0.6 разметка была мёртвой).
  */
+DI.register('HeaderStatus', function (bus, I18n, Embedder) {
+  let netDot, netTxt, aiDot, aiTxt, offlineBar;
+  let unsubs = [];
+  let currentNetStatus = 'disconnected';
+  let currentAiMode = 'loading';
+  let currentAiPercent = 0;
+
+  /** Привязка к DOM. */
+  function bind() {
+    netDot = document.getElementById('st-net-dot');
+    netTxt = document.getElementById('st-net-txt');
+    aiDot = document.getElementById('st-ai-dot');
+    aiTxt = document.getElementById('st-ai-txt');
+    offlineBar = document.getElementById('offline-bar');
+  }
+
+  /**
+   * Обновление индикатора ИИ.
+   * @param {'loading'|'model'|'demo'} mode - Режим эмбеддера.
+   * @param {number} [percent] - Прогресс загрузки (0–100).
+   */
+  function setAI(mode, percent) {
+    currentAiMode = mode;
+    currentAiPercent = percent || 0;
+
+    if (!aiDot || !aiTxt) return;
+
+    if (mode === 'model') {
+      aiDot.className = 'dot ok';
+      aiTxt.textContent = I18n.t('st.ai.ready');
+    } else if (mode === 'demo') {
+      aiDot.className = 'dot warn';
+      aiTxt.textContent = I18n.t('st.ai.demo');
+    } else {
+      aiDot.className = 'dot load';
+      aiTxt.textContent = I18n.t('st.ai.loading') + (currentAiPercent ? ' ' + Math.round(currentAiPercent) + '%' : '');
+    }
+  }
+
+  /**
+   * Обновление индикатора сети + офлайн-бара.
+   * @param {string} status - Состояние сети.
+   */
+  function setNet(status) {
+    currentNetStatus = status;
+
+    if (!netDot || !netTxt) return;
+
+    const map = {
+      connected: ['ok', 'st.net.online'],
+      connecting: ['load', 'st.net.connecting'],
+      reconnecting: ['warn', 'st.net.reconnecting'],
+      failed: ['err', 'st.net.failed'],
+      disconnected: ['', 'st.net'],
+    };
+
+    const [cls, key] = map[status] || ['', 'st.net'];
+    netDot.className = 'dot' + (cls ? ' ' + cls : '');
+    netTxt.textContent = I18n.t(key);
+
+    // Офлайн-бар: только реальный офлайн браузера. «Нет сети» из-за упавших
+    // релеев — не повод пугать пользователя офлайн-баннером.
+    if (offlineBar) {
+      const offline = status === 'failed' && typeof navigator !== 'undefined' && navigator.onLine === false;
+      offlineBar.classList.toggle('on', offline);
+    }
+  }
+
+  /**
+   * Инициализация: интерактивный статус, подписки, начальное состояние.
+   */
+  function init() {
+    bind();
+
+    // Интерактивный статус сети: клик запускает переподключение
+    if (netTxt) {
+      netTxt.style.cursor = 'pointer';
+      netTxt.addEventListener('click', () => {
+        try {
+          const NetService = DI.resolve('NetService');
+          if (NetService) {
+            NetService.stop(false);
+            setTimeout(() => NetService.start(), 500);
+          }
+        } catch (_) {}
+      });
+    }
+
+    // Офлайн-бар реагирует и на браузерные события (мгновенно),
+    // и на статусы сети (истина после online-листенера NetService).
+    window.addEventListener('offline', () => setNet('failed'));
+    window.addEventListener('online', () => {
+      // NetService поднимет статус через подписку; здесь только бар.
+      if (offlineBar) offlineBar.classList.remove('on');
+    });
+
+    // Подписки на изменения состояния
+    unsubs.push(bus.on('ai:status', e => setAI(e.mode, e.percent)));
+    unsubs.push(bus.on('net:status', e => setNet(e.status)));
+
+    // Обновление при смене языка
+    unsubs.push(bus.on('i18n:change', () => {
+      setAI(currentAiMode, currentAiPercent);
+      setNet(currentNetStatus);
+    }));
+
+    // Начальное состояние
+    setAI(Embedder.getMode());
+    setNet('disconnected');
+  }
+
+  /** Отписка от всех подписок. */
+  function destroy() {
+    unsubs.forEach(u => {
+      try { u(); } catch (_) {}
+    });
+    unsubs = [];
+  }
+
+  return { init, destroy };
+}, ['EventBus', 'I18n', 'Embedder']);
 // ─── UI/HeaderStatus ─── END ────────────────────────────────────────────────
 
 // ─── UI/Onboarding ─── START ────────────────────────────────────────────────
 /**
- * [в11] Онбординг: 7 секций + НОВЫЙ слайд «Ключ и устройства»
- *      (сохранение ключа, вход на новом устройстве). Показ после
- *      Embedder.load(), флажок «больше не показывать».
- * Deps: Config, Modal, I18n, Embedder
+ * Онбординг: первый запуск показывает объяснение механик приложения.
+ * Пользователь может отключить показ флажком "Больше не показывать".
+ *
+ * Восемь секций: что это, лента, пин, дрейф, режимы, ключ и устройства
+ * (новая — про аккаунт и синхронизацию), резонанс, удаление.
  */
+DI.register('Onboarding', function (Config, Modal, I18n, Embedder) {
+  /**
+   * Построение тела модалки онбординга.
+   * @param {boolean} firstRun - Если true, показывает флажок "Больше не показывать".
+   * @returns {{el: Element, checkbox: HTMLInputElement|null}}
+   */
+  function buildBody(firstRun) {
+    const el = document.createElement('div');
+    el.style.cssText = 'display:flex;flex-direction:column;gap:14px;';
+
+    const sections = [
+      ['◇ ' + I18n.t('onb.what.t'), I18n.t('onb.what.d')],
+      ['▤ ' + I18n.t('onb.stream.t'), I18n.t('onb.stream.d')],
+      ['◈ ' + I18n.t('onb.pin.t'), I18n.t('onb.pin.d')],
+      ['∿ ' + I18n.t('onb.drift.t'), I18n.t('onb.drift.d')],
+      ['⌘ ' + I18n.t('onb.modes.t'), I18n.t('onb.modes.d')],
+      ['⚿ ' + I18n.t('onb.key.t'), I18n.t('onb.key.d')],
+      ['◆ ' + I18n.t('onb.resonance.t'), I18n.t('onb.resonance.d')],
+      ['🗑 ' + I18n.t('onb.delete.t'), I18n.t('onb.delete.d')],
+    ];
+
+    sections.forEach(([title, desc]) => {
+      const s = document.createElement('div');
+      const t = document.createElement('div');
+      t.style.cssText = 'font-weight:700;font-size:13px;margin-bottom:3px;';
+      t.textContent = title;
+
+      const d = document.createElement('div');
+      d.style.cssText = 'font-size:13px;color:var(--text-2);line-height:1.5;';
+      d.textContent = desc;
+
+      s.appendChild(t);
+      s.appendChild(d);
+      el.appendChild(s);
+    });
+
+    let checkbox = null;
+
+    if (firstRun) {
+      const label = document.createElement('label');
+      label.style.cssText = 'display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2);cursor:pointer;margin-top:4px;';
+
+      checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+
+      label.appendChild(checkbox);
+
+      const span = document.createElement('span');
+      span.textContent = I18n.t('onb.dontshow');
+      label.appendChild(span);
+
+      el.appendChild(label);
+    }
+
+    return { el, checkbox };
+  }
+
+  /**
+   * Показать модалку «Как это работает».
+   * @param {boolean} [firstRun] - Режим первого запуска (с флажком).
+   */
+  function showHelp(firstRun) {
+    const { el, checkbox } = buildBody(!!firstRun);
+
+    Modal.open({
+      title: I18n.t('onb.title'),
+      body: el,
+      buttons: [{
+        text: I18n.t('onb.gotit'),
+        primary: true,
+        onClick: () => {
+          if (firstRun && checkbox && checkbox.checked) {
+            Config.set('onboarded', true);
+          }
+          Modal.close();
+        },
+      }],
+    });
+  }
+
+  /**
+   * Инициализация: показать онбординг при первом запуске.
+   * Ждёт загрузки модели, чтобы не перекрывать прогресс-бар.
+   */
+  function init() {
+    if (Config.get('onboarded', false)) return;
+
+    // Ждём загрузки модели, чтобы онбординг не перекрывал прогресс-бар
+    Embedder.load().then(() => {
+      showHelp(true);
+    });
+  }
+
+  return { init, showHelp };
+}, ['Config', 'Modal', 'I18n', 'Embedder']);
 // ─── UI/Onboarding ─── END ──────────────────────────────────────────────────
 
 // ─── UI/Composer ─── START ──────────────────────────────────────────────────
 /**
- * [в12] Композер: ввод, авто-рост, лимиты (soft/hard/max), тумблер
- *      Личное/Мир, Ctrl/Cmd+Enter, VisualViewport-обработка клавиатуры,
- *      стили лимитов — классы #ed-hint (см. style.css, секция 9).
- *      ФИКС #6: канал note:edit-request удалён (правка живёт в NoteView).
- * Deps: Context, Notes, Store, I18n, EventBus, Toast, Utils, Config
+ * Композер: поле ввода, счётчик символов, переключатель Личное/Мир, отправка.
+ *
+ * Лимиты длины поста (из Config):
+ * - softLimit: жёлтая подсветка, подсказка «пиши короче»
+ * - hardLimit: красная подсветка, подсказка «вектор обрезается»
+ * - maxPostLength: блокировка ввода через maxlength + блокировка кнопки
+ *
+ * Подсказка лимитов — элемент #ed-hint с классами .warn/.err
+ * (style.css, секция 9) — инлайн-стили v0.6 вынесены в CSS.
+ *
+ * Обработка виртуальной клавиатуры:
+ * При открытии клавиатуры сжимаем #app до видимой области через
+ * VisualViewport API, чтобы композер оставался в потоке.
+ *
+ * Отличие от v0.6: удалён мёртвый канал note:edit-request и режим
+ * редактирования (Composer.edit/cancelEdit) — редактирование заметок
+ * живёт в NoteView со своим редактором. Композер — всегда создание.
  */
+DI.register('Composer', function (Context, Notes, Store, I18n, bus, Toast, Utils, Config) {
+  let ta, cnt, sendBtn, toggle;
+  let sending = false;
+  let unsubs = [];
+  let vvCleanup = null;
+
+  // SVG-иконка отправки (paper plane). Единый источник — совпадает с HTML.
+  const SEND_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
+
+  /**
+   * Обновление счётчика символов, подсветки и состояния кнопки отправки.
+   */
+  function updateCounter() {
+    if (!cnt || !ta) return;
+
+    const len = ta.value.length;
+    const max = Config.get('maxPostLength', 2500);
+    const soft = Config.get('softLimit', 1200);
+    const hard = Config.get('hardLimit', 2000);
+
+    cnt.textContent = Utils.word('symbols', len, I18n.getLang());
+
+    let color = 'var(--text-3)';
+    let hint = null;
+    let hintLevel = null;
+
+    if (len >= max) {
+      color = 'var(--rose)';
+      hint = I18n.t('ed.limit.max', { max });
+      hintLevel = 'err';
+    } else if (len >= hard) {
+      color = 'var(--rose)';
+      hint = I18n.t('ed.limit.hard');
+      hintLevel = 'err';
+    } else if (len >= soft) {
+      color = 'var(--amber)';
+      hint = I18n.t('ed.limit.soft');
+      hintLevel = 'warn';
+    }
+
+    cnt.style.color = color;
+    updateHint(hint, hintLevel);
+
+    if (sendBtn) {
+      sendBtn.disabled = len >= max || sending;
+    }
+  }
+
+  /**
+   * Показ/скрытие/обновление подсказки лимитов (#ed-hint).
+   * Класс warn — янтарная, err — розовая (style.css, секция 9).
+   * @param {string|null} text - Текст подсказки или null для скрытия.
+   * @param {'warn'|'err'|null} [level] - Уровень (цвет).
+   */
+  function updateHint(text, level) {
+    let hintEl = document.getElementById('ed-hint');
+
+    if (!text) {
+      if (hintEl) hintEl.remove();
+      return;
+    }
+
+    if (!hintEl) {
+      hintEl = document.createElement('div');
+      hintEl.id = 'ed-hint';
+      cnt.parentNode.insertBefore(hintEl, cnt.nextSibling);
+    }
+
+    hintEl.textContent = text;
+    hintEl.className = level === 'err' ? 'err' : 'warn';
+  }
+
+  /**
+   * Отражение режима Личное/Мир в DOM тумблера.
+   * @param {string} mode - 'private' | 'world'.
+   */
+  function reflectMode(mode) {
+    if (!toggle) return;
+    toggle.setAttribute('data-mode', mode);
+    toggle.querySelectorAll('.mt-opt').forEach(o =>
+      o.classList.toggle('on', o.getAttribute('data-v') === mode)
+    );
+  }
+
+  /**
+   * Переключение кнопки отправки в состояние «отправляется» и обратно.
+   * @param {boolean} on - true — отправка идёт.
+   */
+  function setSendingUI(on) {
+    if (!sendBtn) return;
+    sendBtn.disabled = on;
+    sendBtn.classList.toggle('sending', on);
+
+    if (on) {
+      sendBtn.innerHTML = '<span style="font-size:16px;line-height:1;display:block;">…</span>';
+    } else {
+      sendBtn.innerHTML = SEND_SVG;
+    }
+  }
+
+  /**
+   * Отправка: создание заметки (uid родителя — из пина, если есть).
+   */
+  function send() {
+    if (sending) return;
+
+    const text = ta.value.trim();
+    if (!text) {
+      Toast.show('warn', I18n.t('toast.empty'));
+      return;
+    }
+
+    const max = Config.get('maxPostLength', 2500);
+    if (text.length > max) {
+      Toast.show('err', I18n.t('ed.limit.max', { max }));
+      return;
+    }
+
+    const mode = Store.get('sendMode');
+    sending = true;
+    setSendingUI(true);
+
+    const finish = () => {
+      sending = false;
+      setSendingUI(false);
+      ta.value = '';
+      ta.style.height = 'auto';
+      Context.setInput('');
+      updateCounter();
+    };
+
+    const pin = Context.getPin();
+    const parentId = pin ? (pin.eventId || pin.id) : null;
+
+    Notes.create(text, mode, parentId)
+      .then(note => {
+        Toast.show('ok', I18n.t(mode === 'world' ? 'toast.saved.public' : 'toast.saved.private')
+          + (note && note.parentId ? ' · ' + I18n.t('inf.linked') : ''));
+        try { bus.emit('editor:sent'); } catch (_) {}
+        finish();
+      })
+      .catch(e => {
+        Toast.show('err', String(e && e.message || e));
+        sending = false;
+        setSendingUI(false);
+      });
+  }
+
+  /**
+   * Обработка виртуальной клавиатуры через VisualViewport API.
+   * При открытии клавиатуры сжимаем #app до видимой области,
+   * чтобы композер оставался в потоке, а лента корректно скроллилась.
+   */
+  function setupKeyboardHandler() {
+    if (!window.visualViewport) return;
+
+    const vv = window.visualViewport;
+
+    const onResize = () => {
+      const app = document.getElementById('app');
+      if (!app) return;
+
+      const keyboardHeight = window.innerHeight - vv.height;
+
+      if (keyboardHeight > 100) {
+        app.style.height = vv.height + 'px';
+        app.style.maxHeight = vv.height + 'px';
+      } else {
+        app.style.height = '';
+        app.style.maxHeight = '';
+      }
+    };
+
+    vv.addEventListener('resize', onResize);
+    vv.addEventListener('scroll', onResize);
+
+    vvCleanup = () => {
+      vv.removeEventListener('resize', onResize);
+      vv.removeEventListener('scroll', onResize);
+    };
+  }
+
+  /**
+   * Инициализация: привязка DOM, слушатели, подписки.
+   */
+  function init() {
+    ta = document.getElementById('ed-ta');
+    cnt = document.getElementById('ed-cnt');
+    sendBtn = document.getElementById('btn-send');
+    toggle = document.getElementById('mode-toggle');
+
+    if (!ta) return;
+
+    // Блокировка ввода на уровне браузера
+    ta.setAttribute('maxlength', Config.get('maxPostLength', 2500));
+
+    ta.addEventListener('input', () => {
+      ta.style.height = 'auto';
+      ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
+
+      updateCounter();
+      Context.setInput(ta.value);
+    });
+
+    setupKeyboardHandler();
+
+    ta.addEventListener('keydown', e => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        send();
+      }
+    });
+
+    if (sendBtn) sendBtn.addEventListener('click', send);
+
+    if (toggle) {
+      toggle.addEventListener('click', e => {
+        const opt = e.target.closest('.mt-opt');
+        if (opt && opt.getAttribute('data-v')) {
+          Store.setState({ sendMode: opt.getAttribute('data-v') });
+        }
+      });
+    }
+
+    unsubs.push(Store.subscribe(s => s.sendMode, reflectMode));
+
+    unsubs.push(bus.on('i18n:change', () => {
+      updateCounter();
+      reflectMode(Store.get('sendMode'));
+    }));
+
+    reflectMode(Store.get('sendMode'));
+    updateCounter();
+  }
+
+  /** Отписки и очистка VisualViewport-листенеров. */
+  function destroy() {
+    unsubs.forEach(u => {
+      try { u(); } catch (_) {}
+    });
+    unsubs = [];
+
+    if (vvCleanup) {
+      try { vvCleanup(); } catch (_) {}
+      vvCleanup = null;
+    }
+  }
+
+  return { init, destroy, send };
+}, ['Context', 'Notes', 'Store', 'I18n', 'EventBus', 'Toast', 'Utils', 'Config']);
 // ─── UI/Composer ─── END ────────────────────────────────────────────────────
 
 // ─── UI/FeedView ─── START ──────────────────────────────────────────────────
