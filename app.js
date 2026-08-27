@@ -5285,19 +5285,412 @@ DI.register('Influence', function (DB, bus, Logger) {
 
 // ─── DOMAIN/Account ─── START ───────────────────────────────────────────────
 /**
- * [в9] НОВЫЙ. Аккаунт: состояние (ключ есть/сгенерирован, keyExported),
- *      обёртка ключа в ncryptsec (с паролем и без), импорт ключа
- *      (nsec/ncryptsec → замена), экспорт/импорт JSON-архива
- *      ({version, ncryptsec?, notes, config}, upsert по uid).
- * Deps: Config, Nostr, Crypto, DB, EventBus, Logger
+ * Аккаунт: ключ, экспорт/импорт, вход с другого устройства.
+ *
+ * Ответственность модуля:
+ * - состояние аккаунта (pubkey, keyExported, syncEnabled — снапшот);
+ * - показ ключа: npub (безопасен), ncryptsec (NIP-49, пароль опционален);
+ * - вход по ключу (nsec/hex/ncryptsec): замена ключа, сброс локальной базы,
+ *   перезапуск сети. Релеи НЕ чистятся — старые заметки принадлежат старому
+ *   ключу и остаются доступными при возврате к нему;
+ * - JSON-архив: экспорт ({version, app, pubkey, ncryptsec?, notes, config})
+ *   и импорт с upsert по uid (LWW по syncTs/updatedAt).
+ *
+ * Интеграция с сетью:
+ * - импортированные заметки эмитятся как note:created → существующий
+ *   слушатель NetService публикует приватный канон для каждой;
+ * - announceNote пропускает заметки с eventId из архива (повторный анонс
+ *   не нужен, replaceable-семантика дорезает конфликты).
+ *
+ * UI-оркестрация (подтверждения, тосты, скачивание файла) — AccountView.
  */
+DI.register('Account', function (Config, Nostr, Crypto, DB, bus, Logger) {
+  /** Whitelist параметров конфига, переносимых из архива. */
+  const CONFIG_WHITELIST = [
+    'threshold',
+    'serendipity',
+    'duplicateThreshold',
+    'similarityDisplay',
+    'lang',
+    'theme',
+  ];
+
+  /**
+   * Снапшот состояния аккаунта для UI.
+   * @returns {Promise<Object>} {pubkey, keyExported, syncEnabled}
+   */
+  async function getAccountInfo() {
+    await Nostr.init();
+    return {
+      pubkey: Nostr.getPubkey(),
+      keyExported: Config.get('keyExported', false),
+      syncEnabled: Config.get('syncEnabled', true),
+    };
+  }
+
+  /**
+   * Публичный адрес (npub, bech32). Безопасен для показа и передачи.
+   * @returns {Promise<string|null>}
+   */
+  async function getNpub() {
+    const pk = Nostr.getPubkey();
+    if (!pk) return null;
+    return Crypto.encodeNpub(pk);
+  }
+
+  /**
+   * Ключ в формате ncryptsec (NIP-49). Пароль опционален (пустая строка
+   * допустима). При успехе помечает keyExported = true.
+   * @param {string} [password] - Пароль (может быть пустым).
+   * @returns {Promise<string|null>} Строка ncryptsec1… или null при ошибке.
+   */
+  async function getWrappedKey(password) {
+    const sk = Nostr.getSecretKey();
+    if (!sk) return null;
+
+    const wrapped = await Crypto.encryptKey(sk, String(password || ''));
+    if (wrapped) {
+      Config.set('keyExported', true);
+    }
+    return wrapped;
+  }
+
+  /**
+   * Вход по ключу с другого устройства: замена ключа, сброс локальной базы,
+   * перезапуск сети. Релеи не чистятся (заметки старого ключа остаются).
+   *
+   * Вызывать только после подтверждения пользователя (UI).
+   *
+   * @param {string} input - nsec…, hex(64) или ncryptsec….
+   * @param {string} [password] - Пароль для ncryptsec.
+   * @returns {Promise<{ok: boolean, error?: string, pubkey?: string}>}
+   */
+  async function enterKey(input, password) {
+    const type = Crypto.classifyKeyInput(input);
+    if (!type) return { ok: false, error: 'bad' };
+
+    let sk = null;
+    try {
+      if (type === 'ncryptsec') {
+        sk = await Crypto.decryptKey(String(input || '').trim(), String(password || ''));
+      } else {
+        sk = await Crypto.decodeSecret(input);
+      }
+    } catch (e) {
+      Logger.warn('Account: enterKey decode', String(e && e.message || e));
+    }
+
+    if (!sk) return { ok: false, error: 'bad' };
+
+    try {
+      await Nostr.init();
+      const pk = Nostr.setKey(sk);
+
+      // Локальная база принадлежит старому ключу — сбрасываем.
+      await DB.reset();
+
+      Config.set('keyExported', false);
+
+      try { bus.emit('account:changed', { pubkey: pk }); } catch (_) {}
+
+      // Перезапуск сети: новая подписка на себя, restore канона.
+      try {
+        const NetService = DI.resolve('NetService');
+        NetService.stop(false);
+        setTimeout(() => { NetService.start(); }, 500);
+      } catch (_) {}
+
+      Logger.info('Account: ключ заменён, pubkey ' + pk.slice(0, 8) + '…');
+      return { ok: true, pubkey: pk };
+    } catch (e) {
+      Logger.error('Account: enterKey', String(e && e.message || e));
+      return { ok: false, error: 'failed' };
+    }
+  }
+
+  // ─── Экспорт архива ───────────────────────────────────────────────────────
+
+  /**
+   * Собрать JSON-архив: заметки + настройки + опционально ключ.
+   * @param {boolean} [includeKey] - Включить ncryptsec в архив.
+   * @param {string} [keyPassword] - Пароль для ключа в архиве.
+   * @returns {Promise<{json: string, filename: string}|null>}
+   */
+  async function exportArchive(includeKey, keyPassword) {
+    try {
+      await Nostr.init();
+
+      const notes = await DB.all();
+      const archive = {
+        version: 1,
+        app: 'noomium',
+        createdAt: Date.now(),
+        pubkey: Nostr.getPubkey(),
+        ncryptsec: null,
+        notes: notes.map(sanitizeNoteForArchive).filter(Boolean),
+        config: {},
+      };
+
+      CONFIG_WHITELIST.forEach(k => {
+        archive.config[k] = Config.get(k);
+      });
+
+      if (includeKey) {
+        archive.ncryptsec = await getWrappedKey(keyPassword);
+        if (!archive.ncryptsec) {
+          return null;
+        }
+      }
+
+      const d = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const filename = 'noomium-backup-'
+        + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate())
+        + '-' + pad(d.getHours()) + pad(d.getMinutes())
+        + '.json';
+
+      return { json: JSON.stringify(archive, null, 2), filename };
+    } catch (e) {
+      Logger.error('Account: exportArchive', String(e && e.message || e));
+      return null;
+    }
+  }
+
+  /**
+   * Валидация заметки перед записью в архив: копируем только известные поля.
+   * @param {Object} n - Заметка из DB.
+   * @returns {Object|null}
+   */
+  function sanitizeNoteForArchive(n) {
+    if (!n || typeof n.id !== 'string' || typeof n.text !== 'string') return null;
+    if (n.text.length > Config.get('maxNoteTextLength', 10000)) return null;
+
+    let vector = null;
+    if (Array.isArray(n.vector)) {
+      vector = n.vector.filter(x => typeof x === 'number' && isFinite(x));
+    }
+
+    return {
+      id: n.id,
+      text: n.text,
+      vector,
+      shared: n.shared === true,
+      parentId: (typeof n.parentId === 'string' && n.parentId) ? n.parentId : null,
+      eventId: (typeof n.eventId === 'string' && n.eventId) ? n.eventId : null,
+      createdAt: typeof n.createdAt === 'number' ? n.createdAt : Date.now(),
+      updatedAt: typeof n.updatedAt === 'number' ? n.updatedAt : null,
+      syncTs: typeof n.syncTs === 'number' ? n.syncTs : null,
+    };
+  }
+
+  // ─── Импорт архива ────────────────────────────────────────────────────────
+
+  /**
+   * Разобрать и валидировать текст архива (без применения).
+   * @param {string} text - Содержимое файла.
+   * @returns {{ok: boolean, error?: string, archive?: Object}}
+   *   archive: {version, pubkey, ncryptsec: string|null,
+   *             notes: Array, config: Object, noteCount: number}
+   */
+  function parseArchive(text) {
+    let data;
+    try {
+      data = JSON.parse(String(text || ''));
+    } catch (_) {
+      return { ok: false, error: 'bad' };
+    }
+
+    if (!data || typeof data !== 'object' || data.app !== 'noomium') {
+      return { ok: false, error: 'bad' };
+    }
+    if (!Array.isArray(data.notes)) {
+      return { ok: false, error: 'bad' };
+    }
+
+    const notes = [];
+    for (const raw of data.notes) {
+      const note = sanitizeNoteForArchive(raw);
+      if (note) notes.push(note);
+    }
+
+    const config = {};
+    if (data.config && typeof data.config === 'object') {
+      CONFIG_WHITELIST.forEach(k => {
+        if (k in data.config) config[k] = data.config[k];
+      });
+    }
+
+    return {
+      ok: true,
+      archive: {
+        version: typeof data.version === 'number' ? data.version : 1,
+        pubkey: typeof data.pubkey === 'string' ? data.pubkey : null,
+        ncryptsec: (typeof data.ncryptsec === 'string' && data.ncryptsec) ? data.ncryptsec : null,
+        notes,
+        config,
+        noteCount: notes.length,
+      },
+    };
+  }
+
+  /**
+   * Применить архив: upsert заметок по uid (LWW по syncTs/updatedAt),
+   * мердж whitelisted-конфига. Каждая применённая заметка эмитится как
+   * note:created → NetService публикует приватный канон.
+   *
+   * Ключ из архива НЕ применяется автоматически (для этого нужен пароль —
+   * оркестрация в AccountView: enterKey → importArchive).
+   *
+   * @param {Object} archive - Архив из parseArchive.
+   * @returns {Promise<number>} Число применённых заметок.
+   */
+  async function importArchive(archive) {
+    if (!archive || !Array.isArray(archive.notes)) return 0;
+
+    let applied = 0;
+
+    for (const note of archive.notes) {
+      try {
+        const cur = await DB.get(note.id);
+
+        if (cur) {
+          const curTs = cur.syncTs || cur.updatedAt || 0;
+          const newTs = note.syncTs || note.updatedAt || 0;
+          if (newTs <= curTs) continue;
+        }
+
+        await DB.put({
+          id: note.id,
+          text: note.text,
+          vector: note.vector,
+          shared: note.shared,
+          parentId: note.parentId,
+          parentPubkey: null,
+          authorPubkey: null,
+          eventId: note.eventId,
+          createdAt: note.createdAt,
+          updatedAt: note.updatedAt || note.createdAt,
+          syncTs: note.syncTs || note.updatedAt || note.createdAt,
+        });
+
+        // Канон должен узнать об этой заметке (слушатель NetService).
+        try { bus.emit('note:created', note); } catch (_) {}
+
+        applied++;
+      } catch (e) {
+        Logger.warn('Account: import note ' + note.id, String(e && e.message || e));
+      }
+    }
+
+    // Whitelisted-конфиг из архива.
+    const cfg = archive.config || {};
+    let cfgChanged = false;
+    CONFIG_WHITELIST.forEach(k => {
+      if (k in cfg) {
+        Config.set(k, cfg[k]);
+        cfgChanged = true;
+      }
+    });
+
+    if (cfgChanged) {
+      try { bus.emit('config:imported', { keys: Object.keys(cfg) }); } catch (_) {}
+    }
+
+    Logger.info('Account: импортировано заметок — ' + applied);
+    return applied;
+  }
+
+  /**
+   * Переключить синхронизацию (канон 30078). Эмитит sync:toggle —
+   * NetService переконфигурирует подписку и запустит backsweep при включении.
+   * @param {boolean} enabled
+   */
+  function setSyncEnabled(enabled) {
+    const v = enabled === true;
+    Config.set('syncEnabled', v);
+    try { bus.emit('sync:toggle', { enabled: v }); } catch (_) {}
+  }
+
+  return {
+    getAccountInfo,
+    getNpub,
+    getWrappedKey,
+    enterKey,
+    exportArchive,
+    parseArchive,
+    importArchive,
+    setSyncEnabled,
+  };
+}, ['Config', 'Nostr', 'Crypto', 'DB', 'EventBus', 'Logger']);
 // ─── DOMAIN/Account ─── END ─────────────────────────────────────────────────
 
 // ─── DOMAIN/NoteActions ─── START ───────────────────────────────────────────
 /**
- * [в9] UI-действия: remove (confirm), toggle, copy (Clipboard + fallback).
- * Deps: Notes, Modal, Toast, I18n
+ * UI-действия над заметками: удаление, переключение видимости, копирование.
+ * Модуль не содержит бизнес-логики — только связывает UI с DOMAIN/Notes.
  */
+DI.register('NoteActions', function (Notes, Modal, Toast, I18n) {
+  /**
+   * Удаление заметки с подтверждением.
+   * @param {string} id - uid заметки.
+   */
+  function remove(id) {
+    if (!id) return;
+
+    Modal.confirm(I18n.t('btn.del'), I18n.t('del.confirm'), () => {
+      Notes.remove(id).then(() => {
+        Toast.show('ok', I18n.t('toast.deleted'));
+      }).catch(() => {
+        Toast.show('err', I18n.t('toast.copy.fail'));
+      });
+    });
+  }
+
+  /**
+   * Переключение видимости: личное ↔ мир.
+   * @param {string} id - uid заметки.
+   */
+  function toggle(id) {
+    if (!id) return;
+
+    Notes.toggleShared(id).then(note => {
+      if (!note) return;
+      Toast.show('ok', I18n.t(note.shared ? 'toast.saved.public' : 'toast.saved.private'));
+    }).catch(() => {
+      Toast.show('err', I18n.t('toast.copy.fail'));
+    });
+  }
+
+  /**
+   * Копирование текста в буфер обмена.
+   * Использует Clipboard API с fallback на document.execCommand.
+   * @param {string} text - Текст для копирования.
+   */
+  function copy(text) {
+    const done = () => Toast.show('ok', I18n.t('toast.copied'));
+    const fail = () => Toast.show('err', I18n.t('toast.copy.fail'));
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text || '').then(done).catch(fail);
+    } else {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text || '';
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        done();
+      } catch (_) {
+        fail();
+      }
+    }
+  }
+
+  return { remove, toggle, copy };
+}, ['Notes', 'Modal', 'Toast', 'I18n']);
 // ─── DOMAIN/NoteActions ─── END ─────────────────────────────────────────────
 
 // ═══════════════════════════════════════════════════════════════════════════════
