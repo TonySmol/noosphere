@@ -5,7 +5,7 @@
 // Архитектура: DI-контейнер + EventBus. Слои: CORE / DATA / AI / NET / DOMAIN /
 // UI / PLATFORM / BOOT.
 //
-// МОДЕЛЬ ДАННЫХ (v0.7):
+// МОДЕЛЬ ДАННЫХ (v0.7.1):
 // - uid — единственный стабильный идентификатор своей заметки.
 // - Канон: зашифрованное NIP-44 событие kind 30078 (replaceable, d-tag = uid)
 //   — синхронизация между устройствами через релеи.
@@ -3274,21 +3274,18 @@ DI.register('Protocol', function (Config, Vec, Crypto) {
  *   входящего события;
  * - входящий 30078 применяется только при syncTs > локального
  *   (равенство = эхо собственной публикации → пропуск);
- * - удаление канона — tombstone (30078 с del:true), НЕ kind 5:
- *   replaceable-семантика гарантирует доставку всем устройствам.
+ * - удаление канона — tombstone (30078 с del:true), НЕ kind 5.
  *
- * Удалено из v0.6: migrateChildrenParentId (uid стабилен, миграция
- * идентификаторов больше не нужна).
+ * note.canonTs — время последней успешной публикации/приёма канона.
+ * Самолечение: заметки без canonTs (созданные в паузе сети: смена ключа,
+ * офлайн-старт, retry-гэп) ставятся в очередь при каждом старте.
  *
- * Outbox (localStorage «noomium:outbox») — четыре очереди:
- * - priv:     uid'ы заметок, ждущих публикации канона (30078);
- * - announce: uid'ы заметок, ждущих публичной проекции (kind 1);
- * - del:      eventId'ы для kind 5 (удаление проекций);
- * - privdel:  uid'ы для tombstone канона.
- *
- * ФИНАЛЬНАЯ РЕДАКЦИЯ: publishWipeAll переписан — tombstone'ы и kind 5
- * ставятся в персистентный outbox ДО попытки доставки (wipe корректен
- * и в офлайне), доставка сейчас — с бюджетом 15 секунд.
+ * ФИКСЫ финальной редакции:
+ * - unshare сбрасывает eventId СРАЗУ (иначе повторный «в мир» никогда
+ *   не публиковал новую проекцию — баг, унаследованный из v0.6);
+ * - account:changed чистит outbox и лимитеры (смена ключа);
+ * - flushOutbox фазы priv/privdel уважают syncEnabled;
+ * - parentId модели v0.7 — всегда uid своих / eventId чужих (см. Composer).
  */
 DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Config, Logger, bus) {
   let started = false;
@@ -3497,7 +3494,8 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
 
   /**
    * Сброс накопившихся офлайн-операций: priv → announce → del → privdel.
-   * Фазы независимы; сбой одной задачи не блокирует остальные.
+   * Фазы priv/privdel выполняются только при syncEnabled (иначе
+   * отключённый синк всё равно публиковал бы очередь).
    * @returns {Promise<void>}
    */
   async function flushOutbox() {
@@ -3509,22 +3507,24 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
 
     try {
       // Фаза 1: приватный канон — последовательно, мягко к релеям.
-      for (const uid of outbox.priv.slice()) {
-        const note = await DB.get(uid).catch(() => null);
-        if (!note) {
-          unqueuePrivate(uid);
-          continue;
-        }
-        try {
-          const tpl = await Protocol.privateEvent(note);
-          await Nostr.publish(tpl);
-          unqueuePrivate(uid);
-          if (!note.syncTs) {
-            note.syncTs = Date.now();
-            DB.put(note).catch(() => {});
+      if (Config.get('syncEnabled', true)) {
+        for (const uid of outbox.priv.slice()) {
+          const note = await DB.get(uid).catch(() => null);
+          if (!note) {
+            unqueuePrivate(uid);
+            continue;
           }
-        } catch (_) {
-          // Остаётся в очереди для повторной попытки.
+          try {
+            const tpl = await Protocol.privateEvent(note);
+            await Nostr.publish(tpl);
+            unqueuePrivate(uid);
+            const now = Date.now();
+            note.canonTs = now;
+            if (!note.syncTs) note.syncTs = now;
+            DB.put(note).catch(() => {});
+          } catch (_) {
+            // Остаётся в очереди для повторной попытки.
+          }
         }
       }
 
@@ -3571,13 +3571,15 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
       }
 
       // Фаза 4: tombstone канона — последовательно.
-      for (const uid of outbox.privdel.slice()) {
-        try {
-          const tpl = await Protocol.privateTombstone(uid);
-          await Nostr.publish(tpl);
-          unqueuePrivDel(uid);
-        } catch (_) {
-          // Остаётся в очереди.
+      if (Config.get('syncEnabled', true)) {
+        for (const uid of outbox.privdel.slice()) {
+          try {
+            const tpl = await Protocol.privateTombstone(uid);
+            await Nostr.publish(tpl);
+            unqueuePrivDel(uid);
+          } catch (_) {
+            // Остаётся в очереди.
+          }
         }
       }
     } catch (_) {} finally {
@@ -3590,18 +3592,23 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
   }
 
   /**
-   * Ищем локальные опубликованные заметки без eventId → очередь анонса.
-   * (Ремонт заметок, созданных офлайн или переживших перезагрузку.)
+   * Сканирование при старте:
+   * - shared без eventId → очередь анонса (ремонт офлайн-заметок);
+   * - без canonTs → очередь канона (самолечение: заметки, созданные в
+   *   паузе сети — смена ключа, офлайн, retry-гэп — публикуются здесь).
    * @returns {Promise<void>}
    */
   async function scanLocalUnpublished() {
     try {
       const notes = await DB.all();
+      const syncOn = Config.get('syncEnabled', true);
+
       notes.forEach(n => {
-        if (n && n.shared && n.vector && !n.eventId) {
-          queueAnnounce(n.id);
-        }
+        if (!n || !n.id) return;
+        if (n.shared && n.vector && !n.eventId) queueAnnounce(n.id);
+        if (syncOn && !n.canonTs) queuePrivate(n.id);
       });
+
       flushOutbox();
     } catch (_) {}
   }
@@ -3610,6 +3617,7 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
 
   /**
    * Опубликовать канон заметки (kind 30078). Очередь при офлайне/сбое.
+   * При успехе ставит canonTs (метка «канон на релее есть»).
    * @param {Object} note - Локальная заметка.
    * @returns {Promise<void>}
    */
@@ -3626,10 +3634,10 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
       const tpl = await Protocol.privateEvent(note);
       await Nostr.publish(tpl);
       unqueuePrivate(note.id);
-      if (!note.syncTs) {
-        note.syncTs = Date.now();
-        DB.put(note).catch(() => {});
-      }
+      const now = Date.now();
+      note.canonTs = now;
+      if (!note.syncTs) note.syncTs = now;
+      DB.put(note).catch(() => {});
     } catch (e) {
       Logger.warn('NetService: канон в очередь', String(e && e.message || e));
       queuePrivate(note.id);
@@ -3661,10 +3669,10 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
   }
 
   /**
-   * Резолв ссылки на родителя для публичной проекции: если родитель
-   * опубликован — его eventId (резолвимо сетью); иначе Protocol использует
-   * uid (orphan для чужих, но связь сохранена в приватном каноне —
-   * та же семантика, что в v0.6 для неопубликованных родителей).
+   * Резолв ссылки на родителя для публичной проекции: если родитель —
+   * своя опубликованная заметка, тег parent получает её eventId
+   * (резолвимо сетью). Иначе Protocol использует note.parentId как есть
+   * (uid своего неопубликованного родителя или eventId чужого).
    * @param {Object} note - Заметка.
    * @returns {Promise<Object>} Шаблон события kind 1.
    */
@@ -3686,7 +3694,7 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
   /**
    * Одноразовый backsweep: публикация канона для всех локальных заметок
    * (миграция v0.6 → v0.7). Флаг ставится после enqueue — недоставшее
-   * доедет через outbox.
+   * доедет через outbox и самолечение scanLocalUnpublished.
    * @returns {Promise<void>}
    */
   async function runBacksweep() {
@@ -3732,6 +3740,7 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
    * Применить входящий канон (от своего ключа с другого устройства).
    * LWW: применяется только при отсутствии локальной версии или при
    * строго большем syncTs (равенство = эхо своей публикации).
+   * Принятые заметки получают canonTs (канон на релее есть).
    * @param {Object} d - Результат Protocol.decodePrivate.
    * @returns {Promise<void>}
    */
@@ -3765,6 +3774,7 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
           createdAt: d.createdAt,
           updatedAt: d.updatedAt,
           syncTs: d.syncTs,
+          canonTs: Date.now(),
         });
         try { bus.emit('sync:applied', { uid: d.id }); } catch (_) {}
         return;
@@ -3783,6 +3793,7 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
           createdAt: cur.createdAt || d.createdAt,
           updatedAt: d.updatedAt,
           syncTs: d.syncTs,
+          canonTs: Date.now(),
         });
         try { bus.emit('sync:applied', { uid: d.id }); } catch (_) {}
       }
@@ -4209,7 +4220,7 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
 
   /**
    * Запрос удаления публичной проекции с рэлеев (kind 5).
-   * @param {Object} note
+   * @param {Object} note - Заметка (нужны id и eventId).
    * @returns {Promise<void>}
    */
   async function forgetNote(note) {
@@ -4434,8 +4445,30 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
           if (!note) return;
 
           if (note.id) unqueueAnnounce(note.id);
+
+          if (!note.shared && note.eventId) {
+            // ФИКС: сбрасываем eventId СРАЗУ — иначе повторный «в мир»
+            // никогда не опубликует новую проекцию (announceNote exit'ит
+            // по наличию eventId). Старую проекцию удаляем kind 5.
+            const oldEventId = note.eventId;
+
+            DB.get(note.id).then(cur => {
+              if (!cur) {
+                publishPrivate(note);
+                return;
+              }
+              cur.eventId = null;
+              return DB.put(cur).then(() => {
+                // Канон должен узнать, что eventId больше нет
+                publishPrivate(cur);
+                // Удаление старой проекции (kind 5, очередь при офлайне)
+                forgetNote({ id: cur.id, eventId: oldEventId });
+              });
+            }).catch(() => publishPrivate(note));
+            return;
+          }
+
           publishPrivate(note);
-          if (!note.shared && note.eventId) forgetNote(note);
         }));
 
         busUnsubs.push(bus.on('note:deleted', note => {
@@ -4447,6 +4480,20 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
         }));
 
         busUnsubs.push(bus.on('db:change', () => rebuildCentroids()));
+
+        // Смена ключа (вход с другого устройства): очереди и лимитеры
+        // принадлежат старому аккаунту — чистим, чтобы не публиковать
+        // мусор новым ключом и не блокировать restore дедупликацией.
+        busUnsubs.push(bus.on('account:changed', () => {
+          outbox = { announce: [], del: [], priv: [], privdel: [] };
+          saveOutbox();
+          seen.clear();
+          selfSeen.clear();
+          contentSeen.clear();
+          peers.clear();
+          peerQueryTimes.clear();
+          peerNoteBudgets.clear();
+        }));
 
         busUnsubs.push(bus.on('sync:toggle', p => {
           if (!p) return;
@@ -4558,13 +4605,10 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
    *
    * Надёжность:
    * - tombstone'ы и kind 5 СНАЧАЛА ставятся в персистентную очередь
-   *   (outbox в localStorage) — wipe корректен и в офлайне, всё доедет
-   *   при появлении сети;
+   *   (outbox в localStorage) — wipe корректен и в офлайне;
    * - доставка сейчас — с бюджетом 15 секунд; недоставленное в бюджет
    *   при wipe доедет из outbox позже, при fullReset — теряется
-   *   осознанно (пользователь стирает всё, включая аккаунт; это
-   *   соответствует best-effort природе удаления в Nostr, о чём
-   *   говорит онбординг).
+   *   осознанно (best-effort природа удаления в Nostr).
    *
    * @returns {Promise<void>}
    */
@@ -6310,15 +6354,21 @@ DI.register('Onboarding', function (Config, Modal, I18n, Embedder) {
  * - maxPostLength: блокировка ввода через maxlength + блокировка кнопки
  *
  * Подсказка лимитов — элемент #ed-hint с классами .warn/.err
- * (style.css, секция 9) — инлайн-стили v0.6 вынесены в CSS.
+ * (style.css, секция 9).
  *
  * Обработка виртуальной клавиатуры:
  * При открытии клавиатуры сжимаем #app до видимой области через
  * VisualViewport API, чтобы композер оставался в потоке.
  *
- * Отличие от v0.6: удалён мёртвый канал note:edit-request и режим
- * редактирования (Composer.edit/cancelEdit) — редактирование заметок
- * живёт в NoteView со своим редактором. Композер — всегда создание.
+ * Отличия от v0.6:
+ * - удалён мёртвый канал note:edit-request и режим редактирования
+ *   (правка живёт в NoteView со своим редактором);
+ * - ФИКС модели v0.7: parentId = pin.id (uid своей заметки или eventId
+ *   чужой). В v0.6 передавался pin.eventId || pin.id — для опубликованной
+ *   своей заметки это eventId, что противоречит uid-модели: после unshare
+ *   родителя (сброс eventId) дети оставались сиротами. pin.id всегда
+ *   стабилен; NetService сам резолвит uid → eventId при публикации
+ *   проекции (buildNoteEvent).
  */
 DI.register('Composer', function (Context, Notes, Store, I18n, bus, Toast, Utils, Config) {
   let ta, cnt, sendBtn, toggle;
@@ -6421,7 +6471,9 @@ DI.register('Composer', function (Context, Notes, Store, I18n, bus, Toast, Utils
   }
 
   /**
-   * Отправка: создание заметки (uid родителя — из пина, если есть).
+   * Отправка: создание заметки.
+   * parentId = pin.id: uid своей закреплённой заметки или eventId чужой
+   * (модель v0.7 — см. докстринг модуля).
    */
   function send() {
     if (sending) return;
@@ -6452,7 +6504,7 @@ DI.register('Composer', function (Context, Notes, Store, I18n, bus, Toast, Utils
     };
 
     const pin = Context.getPin();
-    const parentId = pin ? (pin.eventId || pin.id) : null;
+    const parentId = pin ? pin.id : null;
 
     Notes.create(text, mode, parentId)
       .then(note => {
