@@ -2405,32 +2405,856 @@ DI.register('Ranker', function (Vec, Config) {
 
 // ─── NET/Crypto ─── START ───────────────────────────────────────────────────
 /**
- * [в5] НОВЫЙ. Криптография аккаунта:
- *      - NIP-44 v2: encryptSelf/decryptSelf (ECDH с собственным ключом)
- *        для полезной нагрузки kind 30078;
- *      - NIP-49: ncryptsec-обёртка ключа паролем (показ/ввод ключа).
- * Deps: Nostr
+ * Криптография аккаунта (НОВЫЙ модуль).
+ *
+ * Две зоны ответственности:
+ *
+ * 1. NIP-44 v2 — шифрование «самому себе»: ECDH(sk, pk(sk)).
+ *    conversationKey, который может вычислить только владелец sk, —
+ *    на нём держится приватный канон (kind 30078).
+ *
+ * 2. Форматы ключа:
+ *    - nsec / hex — ввод (вход с другого устройства);
+ *    - npub — публичный адрес (безопасен для показа);
+ *    - ncryptsec (NIP-49) — ключ, обёрнутый паролем (scrypt + ChaCha20).
+ *
+ * Все методы ждут Nostr.init() — загрузка nostr-tools асинхронная.
+ * Методы форматов возвращают null при неудаче (UI показывает тост);
+ * encryptSelf/decryptSelf бросают исключение (вызовы обёрнуты в try/catch
+ * в Protocol).
+ *
+ * NIP-49 API-drift защита: nostr-tools в разных версиях возвращал из
+ * decrypt() то Uint8Array, то {data}, то {secretKey} — поддержаны все
+ * три формы.
  */
+DI.register('Crypto', function (Nostr, Logger) {
+  /**
+   * Дождаться загрузки nostr-tools и вернуть её пространство имён.
+   * @returns {Promise<Object>}
+   * @throws {Error} Если библиотека не загрузилась.
+   */
+  async function lib() {
+    await Nostr.init();
+    const n = Nostr.lib();
+    if (!n) throw new Error('nostr-tools not loaded');
+    return n;
+  }
+
+  /**
+   * Шифрование текста самому себе (NIP-44 v2).
+   * @param {string} plaintext - Открытый текст.
+   * @returns {Promise<string>} Шифртекст.
+   * @throws {Error} Если NIP-44 недоступен или нет ключа.
+   */
+  async function encryptSelf(plaintext) {
+    const n = await lib();
+    const nip44 = n.nip44 && n.nip44.v2;
+    if (!nip44 || !nip44.utils || typeof nip44.encrypt !== 'function') {
+      throw new Error('NIP-44 unavailable');
+    }
+
+    const sk = Nostr.getSecretKey();
+    const pk = Nostr.getPubkey();
+    if (!sk || !pk) throw new Error('no secret key');
+
+    const conversationKey = nip44.utils.getConversationKey(sk, pk);
+    return nip44.encrypt(plaintext, conversationKey);
+  }
+
+  /**
+   * Расшифровка своего шифртекста (NIP-44 v2).
+   * @param {string} ciphertext - Шифртекст.
+   * @returns {Promise<string>} Открытый текст.
+   * @throws {Error} При неудаче расшифровки.
+   */
+  async function decryptSelf(ciphertext) {
+    const n = await lib();
+    const nip44 = n.nip44 && n.nip44.v2;
+    if (!nip44 || !nip44.utils || typeof nip44.decrypt !== 'function') {
+      throw new Error('NIP-44 unavailable');
+    }
+
+    const sk = Nostr.getSecretKey();
+    const pk = Nostr.getPubkey();
+    if (!sk || !pk) throw new Error('no secret key');
+
+    const conversationKey = nip44.utils.getConversationKey(sk, pk);
+    return nip44.decrypt(ciphertext, conversationKey);
+  }
+
+  /**
+   * Классификация ввода ключа (синхронно, по префиксу).
+   * @param {*} input - Строка от пользователя.
+   * @returns {'nsec'|'ncryptsec'|'hex'|null} Тип или null.
+   */
+  function classifyKeyInput(input) {
+    const t = String(input || '').trim();
+    if (t.startsWith('ncryptsec1')) return 'ncryptsec';
+    if (t.startsWith('nsec1')) return 'nsec';
+    if (/^[0-9a-fA-F]{64}$/.test(t)) return 'hex';
+    return null;
+  }
+
+  /**
+   * Декодировать приватный ключ из nsec… или hex (без пароля).
+   * @param {*} input - Строка от пользователя.
+   * @returns {Promise<Uint8Array|null>} 32-байтный ключ или null.
+   */
+  async function decodeSecret(input) {
+    const t = String(input || '').trim();
+    if (!t) return null;
+
+    // Raw hex
+    if (/^[0-9a-fA-F]{64}$/.test(t)) {
+      return new Uint8Array(t.match(/.{2}/g).map(b => parseInt(b, 16)));
+    }
+
+    // nsec (bech32) — валидация библиотекой
+    try {
+      const n = await lib();
+      if (t.startsWith('nsec1') && n.nip19 && typeof n.nip19.decode === 'function') {
+        const dec = n.nip19.decode(t);
+        if (dec && dec.type === 'nsec' && dec.data instanceof Uint8Array && dec.data.length === 32) {
+          return dec.data;
+        }
+      }
+    } catch (_) {}
+
+    return null;
+  }
+
+  /**
+   * Обернуть ключ паролем → ncryptsec (NIP-49).
+   * scrypt с logn=16 (~1–2 сек на мобильном) — осознанная цена
+   * для экспорта ключа.
+   * @param {Uint8Array} sk - Приватный ключ.
+   * @param {string} password - Пароль.
+   * @returns {Promise<string|null>} Строка ncryptsec1… или null.
+   */
+  async function encryptKey(sk, password) {
+    try {
+      const n = await lib();
+      if (!n.nip49 || typeof n.nip49.encrypt !== 'function') return null;
+      return n.nip49.encrypt(sk, String(password || ''));
+    } catch (e) {
+      Logger.warn('Crypto: encryptKey', String(e && e.message || e));
+      return null;
+    }
+  }
+
+  /**
+   * Снять ncryptsec → приватный ключ (NIP-49).
+   * @param {string} ncryptsec - Строка ncryptsec1….
+   * @param {string} password - Пароль.
+   * @returns {Promise<Uint8Array|null>} 32-байтный ключ или null
+   *   (неверный пароль → null, не исключение).
+   */
+  async function decryptKey(ncryptsec, password) {
+    try {
+      const n = await lib();
+      if (!n.nip49 || typeof n.nip49.decrypt !== 'function') return null;
+
+      const res = n.nip49.decrypt(String(ncryptsec || '').trim(), String(password || ''));
+
+      // API-drift защита: три исторические формы возврата
+      if (res instanceof Uint8Array) return res.length === 32 ? res : null;
+      if (res && res.secretKey instanceof Uint8Array && res.secretKey.length === 32) return res.secretKey;
+      if (res && res.data instanceof Uint8Array && res.data.length === 32) return res.data;
+
+      return null;
+    } catch (_) {
+      // Неверный пароль или битая строка — тихий null
+      return null;
+    }
+  }
+
+  /**
+   * Кодировать ключ в nsec… (bech32).
+   * @param {Uint8Array} sk - Приватный ключ.
+   * @returns {Promise<string|null>}
+   */
+  async function encodeNsec(sk) {
+    try {
+      const n = await lib();
+      return n.nip19 ? n.nip19.nsecEncode(sk) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Кодировать публичный ключ в npub… (bech32).
+   * @param {string} pk - Публичный ключ (hex).
+   * @returns {Promise<string|null>}
+   */
+  async function encodeNpub(pk) {
+    try {
+      const n = await lib();
+      return n.nip19 ? n.nip19.npubEncode(pk) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  return {
+    encryptSelf,
+    decryptSelf,
+    classifyKeyInput,
+    decodeSecret,
+    encryptKey,
+    decryptKey,
+    encodeNsec,
+    encodeNpub,
+  };
+}, ['Nostr', 'Logger']);
 // ─── NET/Crypto ─── END ─────────────────────────────────────────────────────
 
 // ─── NET/Nostr ─── START ────────────────────────────────────────────────────
 /**
- * [в5] Транспорт: nostr-tools 2.7.2 (CDN), ключ в localStorage «noomium:sk»,
- *      SimplePool, publish (успех ≥1 релея, таймаут 30с), subscribe.
- *      НОВОЕ: экспорт загруженной библиотеки для NET/Crypto.
- * Deps: Config, EventBus, Logger
+ * Транспортный слой Nostr.
+ * Управляет ключами, пулом рэлеев, публикацией и подписками.
+ * Не содержит бизнес-логики — только отправка/приём.
+ *
+ * Отличие от v0.6: три новых метода для аккаунта и криптографии —
+ * lib() (доступ к загруженной nostr-tools для NET/Crypto),
+ * getSecretKey() и setKey() (замена ключа при входе с другого устройства).
  */
+DI.register('Nostr', function (Config, bus, Logger) {
+  const CDN = 'https://cdn.jsdelivr.net/npm/nostr-tools@2.7.2/+esm';
+  const SK_KEY = 'noomium:sk';
+
+  /** @type {Object|null} Загруженное пространство имён nostr-tools. */
+  let nostr = null;
+  /** @type {Object|null} Пул рэлеев. */
+  let pool = null;
+  /** @type {Uint8Array|null} Приватный ключ. */
+  let sk = null;
+  /** @type {string|null} Публичный ключ (hex). */
+  let pk = null;
+  /** @type {Promise|null} */
+  let initPromise = null;
+
+  /**
+   * Загрузить ключ из localStorage.
+   * @returns {Uint8Array|null}
+   */
+  function loadKey() {
+    try {
+      const hex = localStorage.getItem(SK_KEY);
+      if (hex && /^[0-9a-f]{64}$/i.test(hex)) {
+        return new Uint8Array(hex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /**
+   * Сохранить ключ в localStorage (hex).
+   * @param {Uint8Array} key
+   */
+  function saveKey(key) {
+    try {
+      localStorage.setItem(
+        SK_KEY,
+        Array.from(key).map(b => b.toString(16).padStart(2, '0')).join('')
+      );
+    } catch (_) {}
+  }
+
+  /**
+   * Инициализация: загрузка nostr-tools с CDN, восстановление/генерация
+   * ключа, создание пула. Идемпотентна.
+   * @returns {Promise<string>} Публичный ключ.
+   */
+  function init() {
+    if (initPromise) return initPromise;
+
+    initPromise = import(CDN).then(mod => {
+      nostr = (typeof mod.generateSecretKey === 'function')
+        ? mod
+        : (mod.default && typeof mod.default.generateSecretKey === 'function' ? mod.default : mod);
+
+      if (typeof nostr.generateSecretKey !== 'function') {
+        throw new Error('nostr-tools: несовместимый модуль');
+      }
+
+      sk = loadKey();
+      if (!sk) {
+        sk = nostr.generateSecretKey();
+        saveKey(sk);
+      }
+
+      pk = nostr.getPublicKey(sk);
+      pool = new nostr.SimplePool();
+
+      Logger.info('Nostr: готов, pubkey ' + pk.slice(0, 8) + '…');
+      return pk;
+    }).catch(err => {
+      initPromise = null;
+      Logger.error('Nostr: не загрузить nostr-tools', String(err && err.message || err));
+      try { bus.emit('net:status', { status: 'failed' }); } catch (_) {}
+      throw err;
+    });
+
+    return initPromise;
+  }
+
+  /**
+   * Доступ к загруженному пространству имён nostr-tools.
+   * Используется NET/Crypto (nip19/nip44/nip49) — не для транспорта.
+   * @returns {Object|null}
+   */
+  function lib() {
+    return nostr;
+  }
+
+  /**
+   * Текущий приватный ключ (для экспорта/шифрования).
+   * @returns {Uint8Array|null}
+   */
+  function getSecretKey() {
+    return sk;
+  }
+
+  /**
+   * Заменить ключ (вход с другого устройства). Пересчитывает pubkey,
+   * сохраняет новый ключ. Пул рэлеев не зависит от ключа и не пересоздаётся.
+   * Вызывать только после init().
+   * @param {Uint8Array} newSk - Новый приватный ключ (32 байта).
+   * @returns {string} Новый публичный ключ.
+   * @throws {Error} Если ключ невалиден или библиотека не загружена.
+   */
+  function setKey(newSk) {
+    if (!nostr) throw new Error('Nostr not ready');
+    if (!(newSk instanceof Uint8Array) || newSk.length !== 32) {
+      throw new Error('invalid secret key');
+    }
+
+    sk = newSk;
+    pk = nostr.getPublicKey(sk);
+    saveKey(sk);
+    Logger.info('Nostr: ключ заменён, pubkey ' + pk.slice(0, 8) + '…');
+    return pk;
+  }
+
+  /**
+   * Подписать шаблон события текущим ключом.
+   * @param {Object} template - Шаблон события.
+   * @returns {Object} Подписанное событие.
+   */
+  function sign(template) {
+    if (!nostr || !sk) throw new Error('Nostr not ready');
+    return nostr.finalizeEvent(template, sk);
+  }
+
+  /**
+   * Публикация события на все настроенные рэлеи.
+   * Резолвится при успехе хотя бы на одном рэлее, таймаут 30 секунд.
+   * @param {Object} template - Шаблон события.
+   * @returns {Promise<Object>} Подписанное опубликованное событие.
+   */
+  function publish(template) {
+    let ev;
+    try {
+      ev = sign(template);
+    } catch (e) {
+      return Promise.reject(e);
+    }
+
+    if (!pool) return Promise.reject(new Error('Nostr not ready'));
+
+    const urls = relays();
+    if (!urls.length) return Promise.reject(new Error('no relays configured'));
+
+    const PUBLISH_TIMEOUT = 30000;
+
+    const publishPromise = new Promise((resolve, reject) => {
+      let settled = false;
+      let failures = 0;
+
+      urls.forEach(url => {
+        pool.ensureRelay(url)
+          .then(relay => relay.publish(ev))
+          .then(() => {
+            if (!settled) {
+              settled = true;
+              resolve(ev);
+            }
+          })
+          .catch(err => {
+            failures++;
+            Logger.warn('Nostr: релей ' + url + ' не принял', String(err && err.message || err));
+
+            if (!settled && failures === urls.length) {
+              settled = true;
+              reject(new Error('no relay accepted'));
+            }
+          });
+      });
+    });
+
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('publish timeout')), PUBLISH_TIMEOUT);
+    });
+
+    return Promise.race([publishPromise, timeoutPromise]);
+  }
+
+  /**
+   * Подписка на события через пул.
+   * @param {Array<Object>} filters - Фильтры Nostr.
+   * @param {Object} handlers - {onevent, onclose}.
+   * @returns {Object|null} Объект подписки с методом close().
+   */
+  function subscribe(filters, handlers) {
+    if (!pool) return null;
+    return pool.subscribeMany(relays(), filters, handlers);
+  }
+
+  /**
+   * Список настроенных рэлеев.
+   * @returns {Array<string>}
+   */
+  function relays() {
+    return Config.get('relays', []);
+  }
+
+  /**
+   * Текущий публичный ключ.
+   * @returns {string|null}
+   */
+  function getPubkey() {
+    return pk;
+  }
+
+  /**
+   * Готовность к работе.
+   * @returns {boolean}
+   */
+  function isReady() {
+    return !!(nostr && sk && pool);
+  }
+
+  /** Закрыть соединения пула. */
+  function close() {
+    if (pool && typeof pool.close === 'function') {
+      try { pool.close(relays()); } catch (_) {}
+    }
+  }
+
+  return {
+    init,
+    sign,
+    publish,
+    subscribe,
+    ensureRelay(url) {
+      if (!pool) return Promise.reject(new Error('Nostr not ready'));
+      return pool.ensureRelay(url);
+    },
+    getPubkey,
+    getSecretKey,
+    setKey,
+    lib,
+    isReady,
+    relays,
+    close,
+  };
+}, ['Config', 'EventBus', 'Logger']);
 // ─── NET/Nostr ─── END ──────────────────────────────────────────────────────
 
 // ─── NET/Protocol ─── START ─────────────────────────────────────────────────
 /**
- * [в5] Кодек событий: kind 1 (заметка + НОВЫЙ тег uid), 21000 (запрос),
- *      21001 (ответ), 5 (удаление + НОВЫЙ тег uid).
- *      НОВОЕ: privateEvent(note) → kind 30078 (replaceable, d-tag = uid,
- *      NIP-44 payload {v, text, vec, parent, shared, eventId, ts}),
- *      decodePrivate(ev) → note. Валидация входящих данных.
- * Deps: Config, Vec, Crypto
+ * Сериализация/десериализация Nostr-событий NOOmium.
+ *
+ * Виды событий:
+ * - kind 1:     Публичная проекция заметки (текст + вектор + parent + uid)
+ * - kind 30078: Приватный канон (NIP-78, replaceable, d-tag = uid,
+ *               content = NIP-44-шифрованный JSON). Источник истины для
+ *               синхронизации между устройствами.
+ * - kind 21000: Запрос (вектор + параметры)
+ * - kind 21001: Ответ (заметка + скор)
+ * - kind 5:     Удаление публичных проекций (список event ID)
+ *
+ * Формат payload kind 30078 (до шифрования):
+ *   { v: 1, text, vec: base64|null, parent: uid|null, shared: bool,
+ *     ev: eventId|null, ts: ms }
+ * Tombstone (удаление через replaceable-семантику):
+ *   { v: 1, del: true, ts: ms }
+ *
+ * КРИТИЧНО: created_at для 30078 строго монотонен (счётчик ниже) —
+ * иначе релей не заменит предыдущую версию.
+ *
+ * Безопасность:
+ * - Все входящие тексты ограничены по длине (защита от переполнения)
+ * - Все входящие векторы валидируются (конечность, числовой тип)
  */
+DI.register('Protocol', function (Config, Vec, Crypto) {
+  /** Максимальная длина шифртекста 30078 (с запасом на NIP-44 оверхед). */
+  const MAX_PRIVATE_CONTENT = 65536;
+
+  /** Монотонный счётчик created_at для replaceable-событий. */
+  let lastPrivateTs = 0;
+
+  /**
+   * Следующий строго возрастающий timestamp (секунды).
+   * Два апдейта в одну секунду не коллизируют.
+   * @returns {number}
+   */
+  function nextPrivateTs() {
+    let t = Math.floor(Date.now() / 1000);
+    if (t <= lastPrivateTs) t = lastPrivateTs + 1;
+    lastPrivateTs = t;
+    return t;
+  }
+
+  /**
+   * Найти тег по имени.
+   * @param {Array} tags - Теги события.
+   * @param {string} name - Имя тега.
+   * @returns {Array|null}
+   */
+  function findTag(tags, name) {
+    if (!Array.isArray(tags)) return null;
+    for (const t of tags) {
+      if (Array.isArray(t) && t[0] === name) return t;
+    }
+    return null;
+  }
+
+  // ─── Публичная проекция (kind 1) ──────────────────────────────────────────
+
+  /**
+   * Событие публичной проекции заметки.
+   * @param {Object} note - Заметка (id = uid).
+   * @param {string} room - Имя комнаты (тег t).
+   * @param {string} [parentRef] - Ссылка на родителя для тега parent.
+   *   По умолчанию note.parentId. NetService передаёт eventId родителя,
+   *   если родитель опубликован (иначе сеть увидит неразрешимый uid).
+   * @param {string} [parentPubkey] - Публичный ключ автора родителя
+   *   (для чужих родителей). По умолчанию note.parentPubkey.
+   * @returns {Object} Шаблон события (без подписи).
+   */
+  function noteEvent(note, room, parentRef, parentPubkey) {
+    const tags = [['t', room], ['uid', note.id]];
+    if (note.vector) tags.push(['v', Vec.toB64(note.vector)]);
+    if (note.parentId) {
+      tags.push(['parent', parentRef || note.parentId, parentPubkey !== undefined ? parentPubkey : (note.parentPubkey || '')]);
+    }
+
+    return {
+      kind: Config.get('kNote', 1),
+      created_at: Math.floor((note.createdAt || Date.now()) / 1000),
+      tags,
+      content: note.text || '',
+    };
+  }
+
+  /**
+   * Декодирование чужой публичной заметки (kind 1).
+   * @param {Object} ev - Nostr-событие.
+   * @returns {Object|null} Заметка-кандидат для сетевого кэша.
+   */
+  function decodeNote(ev) {
+    if (!ev || ev.kind !== Config.get('kNote', 1)) return null;
+
+    const maxLen = Config.get('maxNoteTextLength', 10000);
+    if (typeof ev.content === 'string' && ev.content.length > maxLen) return null;
+
+    const vTag = findTag(ev.tags, 'v');
+    const pTag = findTag(ev.tags, 'parent');
+
+    return {
+      id: ev.id,
+      text: ev.content || '',
+      vector: vTag ? Vec.fromB64(vTag[1]) : null,
+      shared: true,
+      authorPubkey: ev.pubkey,
+      parentId: pTag ? pTag[1] : null,
+      parentPubkey: pTag ? (pTag[2] || null) : null,
+      createdAt: (ev.created_at || 0) * 1000,
+    };
+  }
+
+  // ─── Приватный канон (kind 30078, NIP-78) ────────────────────────────────
+
+  /**
+   * Событие приватного канона заметки. Полная версия (upsert).
+   * @param {Object} note - Локальная заметка (id = uid).
+   * @returns {Promise<Object>} Шаблон события с зашифрованным content.
+   * @throws {Error} При недоступности NIP-44.
+   */
+  async function privateEvent(note) {
+    const payload = {
+      v: 1,
+      text: note.text || '',
+      vec: note.vector ? Vec.toB64(note.vector) : null,
+      parent: note.parentId || null,
+      shared: note.shared === true,
+      ev: note.eventId || null,
+      ts: Number(note.updatedAt || note.createdAt) || Date.now(),
+    };
+
+    const content = await Crypto.encryptSelf(JSON.stringify(payload));
+
+    return {
+      kind: Config.get('kPrivate', 30078),
+      created_at: nextPrivateTs(),
+      tags: [['d', note.id], ['client', 'noomium']],
+      content,
+    };
+  }
+
+  /**
+   * Tombstone приватного канона: «заметка удалена».
+   * Заменяет собой последнюю версию 30078 на релеях — все устройства
+   * при синхронизации удалят локальную копию.
+   * @param {string} uid - Идентификатор заметки.
+   * @returns {Promise<Object>} Шаблон события.
+   * @throws {Error} При недоступности NIP-44.
+   */
+  async function privateTombstone(uid) {
+    const content = await Crypto.encryptSelf(JSON.stringify({ v: 1, del: true, ts: Date.now() }));
+
+    return {
+      kind: Config.get('kPrivate', 30078),
+      created_at: nextPrivateTs(),
+      tags: [['d', uid], ['client', 'noomium']],
+      content,
+    };
+  }
+
+  /**
+   * Декодирование приватного канона (kind 30078): расшифровка + парсинг.
+   * Чужие события не расшифруются (NIP-44 keys не совпадут) → null.
+   *
+   * @param {Object} ev - Nostr-событие kind 30078.
+   * @returns {Promise<Object|null>}
+   *   При полной версии: объект заметки для DB.put (id = uid, authorPubkey
+   *   = null — заметка своя, own-семантика сохранена) + syncTs для LWW.
+   *   При tombstone: {id, deleted: true, syncTs}.
+   *   null — событие невалидно или не наше.
+   */
+  async function decodePrivate(ev) {
+    if (!ev || ev.kind !== Config.get('kPrivate', 30078)) return null;
+
+    const dTag = findTag(ev.tags, 'd');
+    if (!dTag || typeof dTag[1] !== 'string' || !dTag[1]) return null;
+
+    if (typeof ev.content !== 'string' || !ev.content) return null;
+    if (ev.content.length > MAX_PRIVATE_CONTENT) return null;
+
+    let plaintext;
+    try {
+      plaintext = await Crypto.decryptSelf(ev.content);
+    } catch (_) {
+      return null;
+    }
+
+    let data;
+    try {
+      data = JSON.parse(plaintext);
+    } catch (_) {
+      return null;
+    }
+    if (!data || typeof data !== 'object') return null;
+
+    const syncTs = (ev.created_at || 0) * 1000;
+
+    // Tombstone — удаление
+    if (data.del === true) {
+      return { id: dTag[1], deleted: true, syncTs };
+    }
+
+    // Полная версия — валидация полей
+    if (typeof data.text !== 'string') return null;
+    if (data.text.length > Config.get('maxNoteTextLength', 10000)) return null;
+
+    let vector = null;
+    if (typeof data.vec === 'string') {
+      const v = Vec.fromB64(data.vec);
+      if (v) vector = Array.from(v);
+    }
+
+    const ts = typeof data.ts === 'number' && data.ts > 0 ? data.ts : syncTs;
+
+    return {
+      id: dTag[1],
+      text: data.text,
+      vector,
+      shared: data.shared === true,
+      parentId: (typeof data.parent === 'string' && data.parent) ? data.parent : null,
+      parentPubkey: null,
+      authorPubkey: null,
+      eventId: (typeof data.ev === 'string' && data.ev) ? data.ev : null,
+      createdAt: ts,
+      updatedAt: ts,
+      syncTs,
+    };
+  }
+
+  // ─── Запрос / ответ / удаление ────────────────────────────────────────────
+
+  /**
+   * Событие запроса (kind 21000).
+   * @param {Float32Array|Array<number>} vector - Вектор запроса.
+   * @param {number} maxResponses - Максимум ответов.
+   * @param {number} window - Окно ответа (мс).
+   * @returns {Object} Шаблон события.
+   */
+  function queryEvent(vector, maxResponses, window) {
+    return {
+      kind: Config.get('kQuery', 21000),
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [['t', Config.get('room', 'noomium-main')]],
+      content: JSON.stringify({ vector: Array.from(vector), maxResponses, window }),
+    };
+  }
+
+  /**
+   * Декодирование запроса (kind 21000).
+   * @param {Object} ev - Nostr-событие.
+   * @returns {Object|null}
+   */
+  function decodeQuery(ev) {
+    if (!ev || ev.kind !== Config.get('kQuery', 21000)) return null;
+
+    let data;
+    try {
+      data = JSON.parse(ev.content);
+    } catch (_) {
+      return null;
+    }
+
+    if (!data || !Array.isArray(data.vector) || !data.vector.length) return null;
+
+    for (const x of data.vector) {
+      if (typeof x !== 'number' || !isFinite(x)) return null;
+    }
+
+    return {
+      vector: data.vector,
+      maxResponses: typeof data.maxResponses === 'number' ? data.maxResponses : Config.get('maxResponses', 8),
+      window: typeof data.window === 'number' ? data.window : Config.get('responseWindow', 6000),
+      authorPubkey: ev.pubkey,
+      queryId: ev.id,
+    };
+  }
+
+  /**
+   * Событие ответа (kind 21001).
+   * @param {Object} note - Локальная заметка.
+   * @param {number} score - Скор сходства.
+   * @param {string} queryId - ID запроса.
+   * @param {string} room - Имя комнаты.
+   * @returns {Object} Шаблон события.
+   */
+  function answerEvent(note, score, queryId, room) {
+    return {
+      kind: Config.get('kAnswer', 21001),
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [['t', room], ['e', queryId]],
+      content: JSON.stringify({
+        noteId: note.id,
+        text: note.text,
+        vector: note.vector ? Array.from(note.vector) : null,
+        score,
+      }),
+    };
+  }
+
+  /**
+   * Декодирование ответа (kind 21001).
+   * @param {Object} ev - Nostr-событие.
+   * @returns {Object|null}
+   */
+  function decodeAnswer(ev) {
+    if (!ev || ev.kind !== Config.get('kAnswer', 21001)) return null;
+
+    const eTag = findTag(ev.tags, 'e');
+    if (!eTag) return null;
+
+    let data;
+    try {
+      data = JSON.parse(ev.content);
+    } catch (_) {
+      return null;
+    }
+
+    if (!data || typeof data.text !== 'string') return null;
+    if (data.text.length > Config.get('maxAnswerTextLength', 10000)) return null;
+
+    let vector = null;
+    if (Array.isArray(data.vector)) {
+      for (const x of data.vector) {
+        if (typeof x !== 'number' || !isFinite(x)) return null;
+      }
+      vector = data.vector;
+    }
+
+    return {
+      id: ev.id,
+      queryId: eTag[1],
+      noteId: data.noteId || ev.id,
+      text: data.text,
+      vector,
+      score: typeof data.score === 'number' ? data.score : 0,
+      authorPubkey: ev.pubkey,
+      createdAt: (ev.created_at || 0) * 1000,
+    };
+  }
+
+  /**
+   * Событие удаления публичных проекций (kind 5).
+   * @param {string|Array<string>} eventIds - ID удаляемых событий.
+   * @param {string} [room] - Имя комнаты (тег t).
+   * @returns {Object|null} Шаблон события или null при пустом списке.
+   */
+  function deleteEvent(eventIds, room) {
+    const ids = Array.isArray(eventIds) ? eventIds : [eventIds];
+    const tags = ids.filter(Boolean).map(id => ['e', id]);
+
+    if (!tags.length) return null;
+    if (room) tags.push(['t', room]);
+
+    return {
+      kind: Config.get('kDelete', 5),
+      created_at: Math.floor(Date.now() / 1000),
+      tags,
+      content: '',
+    };
+  }
+
+  /**
+   * Декодирование события удаления (kind 5).
+   * @param {Object} ev - Nostr-событие.
+   * @returns {Object|null} {eventIds, authorPubkey}.
+   */
+  function decodeDelete(ev) {
+    if (!ev || ev.kind !== Config.get('kDelete', 5)) return null;
+
+    const eTags = (ev.tags || []).filter(t => Array.isArray(t) && t[0] === 'e' && t[1]);
+    if (!eTags.length) return null;
+
+    return {
+      eventIds: eTags.map(t => t[1]),
+      authorPubkey: ev.pubkey,
+    };
+  }
+
+  return {
+    noteEvent,
+    decodeNote,
+    privateEvent,
+    privateTombstone,
+    decodePrivate,
+    queryEvent,
+    decodeQuery,
+    answerEvent,
+    decodeAnswer,
+    deleteEvent,
+    decodeDelete,
+  };
+}, ['Config', 'Vec', 'Crypto']);
 // ─── NET/Protocol ─── END ───────────────────────────────────────────────────
 
 // ─── NET/NetService ─── START ───────────────────────────────────────────────
