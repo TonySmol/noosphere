@@ -6544,31 +6544,945 @@ DI.register('Composer', function (Context, Notes, Store, I18n, bus, Toast, Utils
 
 // ─── UI/FeedView ─── START ──────────────────────────────────────────────────
 /**
- * [в13] Лента: 3 режима отображения, карточки (тег, ↳, ◆, индикатор
- *      сходства, дата, ✎), сегменты со счётчиками, баннер контекста,
- *      модалки предков/потомков, кнопка истории, rAF-коалесценция.
- *      ФИКС #8: обрезка текста по Config.truncateTextLength.
- * Deps: Store, Context, I18n, Utils, Config, EventBus, Influence,
- *       Provenance, Modal, NetService
+ * Рендеринг ленты заметок.
+ *
+ * Три режима отображения:
+ * 1. Без контекста: хронологический поток (все заметки)
+ * 2. Пин: все релевантные + озарения, отсортированные по убыванию скора
+ * 3. Ввод/дрейф: заметки из активного сегмента (Моё / Мир / Озарения)
+ *
+ * Карточка заметки содержит:
+ * - Текст
+ * - Тег (лично/открыто или сокращённый pubkey автора)
+ * - Кнопку «↳ по мотивам» (если есть parentId)
+ * - Кнопку «◆ резонанс» (если есть потомки)
+ * - Индикатор сходства (сигнал или проценты)
+ * - Дату
+ * - Кнопку «✎ открыть» (только для своих заметок)
+ *
+ * Отличие от v0.6: обрезка текста в модалках предков/потомков —
+ * по Config.truncateTextLength (было захардкожено 140).
  */
+DI.register('FeedView', function (Store, Context, I18n, Utils, Config, bus, Influence, Provenance, Modal, NetService) {
+  let feedEl, emptyEl, emptyT, segBar, ctxBanner, ctxSrc, ctxTxt, ctxX;
+  let cLocal, cWorld, cSeren, histBtn;
+  let unsubs = [];
+  let rafPending = false;
+
+  /** Привязка к DOM. */
+  function bind() {
+    feedEl = document.getElementById('feed');
+    emptyEl = document.getElementById('feed-empty');
+    emptyT = document.getElementById('feed-empty-t');
+    segBar = document.getElementById('seg');
+    ctxBanner = document.getElementById('ctx-banner');
+    ctxSrc = document.getElementById('ctx-src');
+    ctxTxt = document.getElementById('ctx-txt');
+    ctxX = document.getElementById('ctx-x');
+    cLocal = document.getElementById('c-local');
+    cWorld = document.getElementById('c-world');
+    cSeren = document.getElementById('c-seren');
+    histBtn = document.getElementById('btn-history');
+  }
+
+  /** Коалесценция рендеров через requestAnimationFrame. */
+  function scheduleRender() {
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => {
+      rafPending = false;
+      render();
+    });
+  }
+
+  /**
+   * @param {Object} n - Заметка.
+   * @returns {boolean} Является ли заметка закреплённой.
+   */
+  function isPinned(n) {
+    const ctx = Store.get('context');
+    return ctx.source === 'pin' && ctx.noteId === n.id;
+  }
+
+  /**
+   * Клик по карточке: повторный клик по закреплённой — снять пин,
+   * иначе — закрепить (если есть вектор).
+   * @param {Object} n - Заметка.
+   */
+  function onNoteClick(n) {
+    const ctx = Store.get('context');
+
+    if ((ctx.source === 'pin' || ctx.source === 'drift') && ctx.noteId === n.id) {
+      Context.clearPin();
+      return;
+    }
+
+    if (n.vector) Context.setPin(n);
+  }
+
+  /**
+   * Модалка «Потомки»: список заметок, порождённых данной.
+   * @param {Array<Object>} children - Прямые и непрямые потомки.
+   */
+  function renderChildrenModal(children) {
+    const truncate = Config.get('truncateTextLength', 140);
+    const body = document.createElement('div');
+    body.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+
+    if (!children.length) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'color:var(--text-3);font-size:13px;text-align:center;padding:12px;';
+      empty.textContent = I18n.t('inf.nochildren');
+      body.appendChild(empty);
+    } else {
+      children.forEach(c => {
+        const item = document.createElement('button');
+        item.className = 'nv-act';
+        item.style.cssText = 'text-align:left;justify-content:flex-start;white-space:normal;height:auto;min-height:40px;width:100%;';
+        item.textContent = (c.text || '').slice(0, truncate);
+
+        item.addEventListener('click', () => {
+          Modal.close();
+          try { bus.emit('note:open', { id: c.id }); } catch (_) {}
+        });
+
+        body.appendChild(item);
+      });
+    }
+
+    Modal.open({
+      title: I18n.t('inf.children') + (children.length ? ' · ' + children.length : ''),
+      body: body,
+      buttons: [{ text: I18n.t('btn.close'), onClick: () => Modal.close() }],
+    });
+  }
+
+  /**
+   * Открыть модалку потомков заметки (по uid и eventId).
+   * @param {Object} note - Заметка.
+   */
+  function showChildren(note) {
+    const ids = [note.id];
+    if (note.eventId) ids.push(note.eventId);
+
+    Promise.all(ids.map(id => Provenance.children(id))).then(results => {
+      const seenIds = new Set();
+      const children = [];
+
+      results.forEach(list => {
+        (list || []).forEach(c => {
+          if (c && !seenIds.has(c.id)) {
+            seenIds.add(c.id);
+            children.push(c);
+          }
+        });
+      });
+
+      renderChildrenModal(children);
+    }).catch(() => {});
+  }
+
+  /**
+   * Модалка «Линейка по мотивам»: цепочка предков с отступами.
+   * @param {Object} note - Заметка.
+   * @param {Array<Object>} chain - Цепочка предков.
+   */
+  function renderAncestorsModal(note, chain) {
+    const truncate = Config.get('truncateTextLength', 140);
+    const body = document.createElement('div');
+    body.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+
+    if (!chain.length) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'color:var(--text-3);font-size:13px;text-align:center;padding:12px;';
+      empty.textContent = I18n.t('inf.noancestors');
+      body.appendChild(empty);
+    } else {
+      chain.forEach((c, i) => {
+        const item = document.createElement('button');
+        item.className = 'nv-act';
+        item.style.cssText = 'text-align:left;justify-content:flex-start;white-space:normal;height:auto;min-height:40px;width:100%;';
+        item.style.paddingLeft = (16 + i * 14) + 'px';
+        item.textContent = '↳ ' + (c.text || '').slice(0, truncate);
+
+        item.addEventListener('click', () => {
+          Modal.close();
+          try { bus.emit('note:open', { id: c.id }); } catch (_) {}
+        });
+
+        body.appendChild(item);
+      });
+    }
+
+    Modal.open({
+      title: I18n.t('inf.lineage') + (chain.length ? ' · ' + chain.length : ''),
+      body: body,
+      buttons: [{ text: I18n.t('btn.close'), onClick: () => Modal.close() }],
+    });
+  }
+
+  /**
+   * Открыть модалку предков заметки.
+   * @param {Object} note - Заметка.
+   */
+  function showAncestors(note) {
+    Provenance.ancestors(note.id).then(chain => {
+      renderAncestorsModal(note, chain);
+    }).catch(() => {});
+  }
+
+  /**
+   * Создать разделитель мета-блока.
+   * @returns {HTMLSpanElement}
+   */
+  function createSep() {
+    const sep = document.createElement('span');
+    sep.className = 'note-meta-sep';
+    return sep;
+  }
+
+  /**
+   * Рендеринг одной карточки заметки.
+   * @param {Object} n - Заметка.
+   * @param {boolean} isRanked - Показывать ли индикатор сходства.
+   * @param {number} i - Индекс для анимации появления.
+   * @returns {HTMLDivElement}
+   */
+  function card(n, isRanked, i) {
+    const el = document.createElement('div');
+    el.className = 'note' + (isPinned(n) ? ' pinned' : '');
+    el.style.animationDelay = Math.min(i * 25, 300) + 'ms';
+    el.dataset.id = n.id;
+
+    const txt = document.createElement('div');
+    txt.className = 'note-txt';
+    txt.textContent = n.text || '';
+    el.appendChild(txt);
+
+    const meta = document.createElement('div');
+    meta.className = 'note-meta';
+
+    // Тег: лично/открыто для своих, «· pubkey» для чужих
+    const tag = document.createElement('span');
+    if (n.own) {
+      tag.className = 'note-tag ' + (n.shared ? 'world' : 'priv');
+      tag.textContent = n.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
+    } else {
+      tag.className = 'note-tag world';
+      tag.textContent = '· ' + Utils.shortPk(n.authorPubkey || '');
+    }
+    meta.appendChild(tag);
+
+    const hasNav = !!n.parentId;
+    const res = Influence.resonance(n.id) + Influence.resonance(n.eventId);
+    const hasResonance = res > 0;
+
+    if (hasNav || hasResonance) {
+      meta.appendChild(createSep());
+
+      // Кнопка «↳ по мотивам»
+      if (n.parentId) {
+        const link = document.createElement('button');
+        link.className = 'note-parent';
+        link.textContent = '↳';
+        link.title = I18n.t('inf.lineage');
+        link.setAttribute('aria-label', I18n.t('inf.openparent'));
+
+        Provenance.ancestors(n.id).then(chain => {
+          if (!chain.length) {
+            link.classList.add('orphan');
+            link.title = I18n.t('inf.orphan.hint');
+          } else {
+            link.addEventListener('click', e => {
+              e.stopPropagation();
+              showAncestors(n);
+            });
+          }
+        }).catch(() => {});
+
+        meta.appendChild(link);
+      }
+
+      // Кнопка «◆ резонанс»
+      if (hasResonance) {
+        const r = document.createElement('button');
+        r.className = 'note-sim';
+        r.textContent = '◆' + res;
+        r.title = I18n.t('inf.resonance');
+        r.setAttribute('aria-label', I18n.t('inf.resonance'));
+
+        r.addEventListener('click', e => {
+          e.stopPropagation();
+          showChildren(n);
+        });
+
+        meta.appendChild(r);
+      }
+    }
+
+    meta.appendChild(createSep());
+
+    // Индикатор сходства (сигнал или проценты)
+    if (isRanked && typeof n.score === 'number') {
+      const threshold = Config.get('threshold', 0.81);
+      const serendipity = Config.get('serendipity', 0.07);
+      // Середина диапазона озарений: делит на «сильные» и «слабые»
+      const serenMid = threshold - serendipity / 2;
+      const displayMode = Config.get('similarityDisplay', 'signal');
+      const pct = Math.round(n.score * 100);
+
+      const sim = document.createElement('span');
+      sim.className = 'note-sim-info';
+
+      if (displayMode === 'percent') {
+        // Режим отладки: сырые проценты
+        sim.textContent = pct + '%';
+        sim.title = I18n.t('sim.score');
+      } else {
+        // Режим сигнала: палочки + текстовая метка
+        if (n.score >= threshold) {
+          // ▰▰▰ В тему
+          sim.innerHTML = '<span class="sig-bar sig-full"></span><span class="sig-bar sig-full"></span><span class="sig-bar sig-full"></span>';
+          sim.title = I18n.t('sim.level.high') + ' (' + pct + '%)';
+        } else if (n.score >= serenMid) {
+          // ▰▰▱ Озарение (сильная связь, верхняя половина диапазона)
+          sim.innerHTML = '<span class="sig-bar sig-full"></span><span class="sig-bar sig-full"></span><span class="sig-bar sig-empty"></span>';
+          sim.title = I18n.t('sim.level.mid') + ' (' + pct + '%)';
+        } else {
+          // ▰▱▱ Проблеск (слабая связь, нижняя половина диапазона)
+          sim.innerHTML = '<span class="sig-bar sig-full"></span><span class="sig-bar sig-empty"></span><span class="sig-bar sig-empty"></span>';
+          sim.title = I18n.t('sim.level.low') + ' (' + pct + '%)';
+        }
+        const label = document.createElement('span');
+        label.className = 'sig-label';
+        label.textContent = n.score >= threshold
+          ? I18n.t('sim.level.high')
+          : (n.score >= serenMid ? I18n.t('sim.level.mid') : I18n.t('sim.level.low'));
+        sim.appendChild(label);
+      }
+
+      meta.appendChild(sim);
+    }
+
+    // Дата
+    const date = document.createElement('span');
+    date.className = 'note-date';
+    date.textContent = Utils.fmtRelativeTime(n.createdAt, I18n.getLang(), I18n.t);
+    meta.appendChild(date);
+
+    // Кнопка «✎ открыть» (только для своих заметок)
+    if (n.own) {
+      const openBtn = document.createElement('button');
+      openBtn.className = 'na';
+      openBtn.textContent = '✎';
+      openBtn.title = I18n.t('btn.open');
+      openBtn.setAttribute('aria-label', I18n.t('btn.open'));
+
+      openBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        try { bus.emit('note:open', { id: n.id }); } catch (_) {}
+      });
+
+      meta.appendChild(openBtn);
+    }
+
+    el.appendChild(meta);
+    el.addEventListener('click', () => onNoteClick(n));
+    return el;
+  }
+
+  /**
+   * Полный рендер ленты по текущему состоянию Store.
+   */
+  function render() {
+    if (!feedEl) return;
+
+    const state = Store.getState();
+    const ctx = state.context;
+    const isPinnedMode = ctx.source === 'pin';
+    const isTyping = ctx.source === 'input';
+    const isDrift = ctx.source === 'drift';
+    const isRanked = isPinnedMode || isTyping || isDrift;
+
+    segBar.classList.toggle('on', isTyping || isDrift);
+    ctxBanner.classList.toggle('on', isPinnedMode || isDrift);
+
+    if (isPinnedMode || isDrift) {
+      ctxSrc.textContent = isDrift ? I18n.t('ctx.drift') : I18n.t('ctx.pinned');
+      ctxTxt.textContent = isDrift ? (ctx.pinText || ctx.text) : ctx.text;
+    }
+
+    document.querySelectorAll('.seg-b').forEach(b => {
+      b.classList.toggle('on', b.getAttribute('data-k') === state.seg);
+    });
+
+    cLocal.textContent = state.lists.local.length;
+    cWorld.textContent = state.lists.world.length;
+    cSeren.textContent = state.lists.seren.length;
+
+    let notes;
+
+    if (isPinnedMode) {
+      // Пин: все релевантные + озарения, по убыванию скора
+      notes = [...state.lists.local, ...state.lists.world, ...state.lists.seren]
+        .filter(n => n.id !== ctx.noteId)
+        .sort((a, b) => (b.score || 0) - (a.score || 0));
+    } else if (isTyping || isDrift) {
+      // Ввод/дрейф: заметки из активного сегмента
+      notes = state.lists[state.seg] || [];
+    } else {
+      // Без контекста: хронологический поток
+      notes = state.feed;
+    }
+
+    feedEl.innerHTML = '';
+
+    if (!notes.length) {
+      emptyEl.classList.add('on');
+
+      emptyT.textContent = isPinnedMode
+        ? I18n.t('empty.world.t')
+        : ((isTyping || isDrift) ? I18n.t('empty.' + state.seg + '.t') : I18n.t('empty.local.t'));
+    } else {
+      emptyEl.classList.remove('on');
+
+      const frag = document.createDocumentFragment();
+      notes.forEach((n, i) => {
+        frag.appendChild(card(n, isRanked, i));
+      });
+      feedEl.appendChild(frag);
+    }
+  }
+
+  /**
+   * Инициализация: привязка DOM, подписки, слушатели, первичный рендер.
+   */
+  function init() {
+    bind();
+    if (!feedEl) return;
+
+    unsubs.push(Store.subscribe(s => s.context, scheduleRender, Store.shallowEqual));
+    unsubs.push(Store.subscribe(s => s.lists, scheduleRender));
+    unsubs.push(Store.subscribe(s => s.feed, scheduleRender));
+    unsubs.push(Store.subscribe(s => s.seg, scheduleRender));
+    unsubs.push(bus.on('i18n:change', scheduleRender));
+    unsubs.push(bus.on('db:change', scheduleRender));
+    unsubs.push(bus.on('db:cache', scheduleRender));
+    unsubs.push(bus.on('influence:updated', scheduleRender));
+
+    if (histBtn) {
+      histBtn.addEventListener('click', () => NetService.loadHistory());
+
+      unsubs.push(bus.on('net:history', e => {
+        if (!histBtn) return;
+
+        if (e && e.loading) {
+          histBtn.disabled = true;
+          histBtn.textContent = I18n.t('net.loading');
+        } else {
+          histBtn.disabled = false;
+          histBtn.textContent = I18n.t('net.loadmore');
+        }
+      }));
+    }
+
+    document.querySelectorAll('.seg-b').forEach(b => {
+      b.addEventListener('click', () => {
+        Store.setState({ seg: b.getAttribute('data-k') });
+      });
+    });
+
+    if (ctxX) {
+      ctxX.addEventListener('click', () => Context.clearPin());
+    }
+
+    render();
+  }
+
+  /** Отписка от всех подписок. */
+  function destroy() {
+    unsubs.forEach(u => {
+      try { u(); } catch (_) {}
+    });
+    unsubs = [];
+  }
+
+  return { init, destroy, render };
+}, ['Store', 'Context', 'I18n', 'Utils', 'Config', 'EventBus', 'Influence', 'Provenance', 'Modal', 'NetService']);
 // ─── UI/FeedView ─── END ────────────────────────────────────────────────────
 
 // ─── UI/BaseView ─── START ──────────────────────────────────────────────────
 /**
- * [в14] База: статистика, поиск (дебаунс 200мс), сортировка new/old/az,
- *      клик → note:open, рендер только при view === 'base'.
- * Deps: Store, DB, I18n, Utils, Config, EventBus
+ * Экран «База»: все локальные заметки пользователя.
+ * - Статистика: всего / открыто / лично
+ * - Текстовый поиск (дебаунс)
+ * - Сортировка: новые / старые / а-я
+ * - Клик по заметке → открывает NoteView
  */
+DI.register('BaseView', function (Store, DB, I18n, Utils, Config, bus) {
+  let listEl, statsTotal, statsOpen, statsPriv, qEl, sortEl;
+  let unsubs = [];
+  let rafPending = false;
+
+  /** Привязка к DOM. */
+  function bind() {
+    listEl = document.getElementById('base-list');
+    statsTotal = document.getElementById('bs-total');
+    statsOpen = document.getElementById('bs-open');
+    statsPriv = document.getElementById('bs-priv');
+    qEl = document.getElementById('base-q');
+    sortEl = document.getElementById('base-sort');
+  }
+
+  /** Коалесценция рендеров через requestAnimationFrame. */
+  function scheduleRender() {
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(() => {
+      rafPending = false;
+      render();
+    });
+  }
+
+  /**
+   * Рендер списка базы (только при активном экране 'base').
+   */
+  function render() {
+    if (!listEl) return;
+
+    const view = Store.get('view');
+    if (view !== 'base') return;
+
+    const q = (qEl && qEl.value || '').trim().toLowerCase();
+    const sort = (sortEl && sortEl.value) || 'new';
+
+    DB.all().then(notes => {
+      let arr = notes.slice();
+
+      if (q) arr = arr.filter(n => (n.text || '').toLowerCase().includes(q));
+
+      if (sort === 'old') {
+        arr.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      } else if (sort === 'az') {
+        arr.sort((a, b) => (a.text || '').localeCompare(b.text || '', I18n.getLang() === 'en' ? 'en' : 'ru'));
+      } else {
+        arr.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+      }
+
+      const shared = notes.filter(n => n.shared).length;
+
+      if (statsTotal) statsTotal.textContent = notes.length;
+      if (statsOpen) statsOpen.textContent = shared;
+      if (statsPriv) statsPriv.textContent = notes.length - shared;
+
+      listEl.innerHTML = '';
+
+      if (!arr.length) {
+        const empty = document.createElement('div');
+        empty.className = 'note';
+        empty.style.cursor = 'default';
+        empty.textContent = q ? I18n.t('empty.base.empty') : I18n.t('empty.base.t');
+        listEl.appendChild(empty);
+        return;
+      }
+
+      const frag = document.createDocumentFragment();
+      arr.forEach(n => frag.appendChild(row(n)));
+      listEl.appendChild(frag);
+    }).catch(() => {});
+  }
+
+  /**
+   * Рендер строки базы.
+   * @param {Object} n - Заметка.
+   * @returns {HTMLDivElement}
+   */
+  function row(n) {
+    const el = document.createElement('div');
+    el.className = 'bi';
+    el.dataset.id = n.id;
+
+    const t = document.createElement('div');
+    t.className = 'bi-t';
+    t.textContent = n.text || '';
+    el.appendChild(t);
+
+    const f = document.createElement('div');
+    f.className = 'bi-f';
+
+    const tag = document.createElement('span');
+    tag.className = 'note-tag ' + (n.shared ? 'world' : 'priv');
+    tag.textContent = n.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
+    f.appendChild(tag);
+
+    const date = document.createElement('span');
+    date.textContent = Utils.fmtDate(n.updatedAt || n.createdAt, I18n.getLang());
+    f.appendChild(date);
+
+    el.appendChild(f);
+    el.addEventListener('click', () => {
+      try { bus.emit('note:open', { id: n.id }); } catch (_) {}
+    });
+
+    return el;
+  }
+
+  /**
+   * Инициализация: привязка, слушатели поиска/сортировки, подписки.
+   */
+  function init() {
+    bind();
+    if (!listEl) return;
+
+    const debouncedRender = Utils.debounce(scheduleRender, Config.get('baseSearchDebounce', 200));
+
+    if (qEl) qEl.addEventListener('input', debouncedRender);
+    if (sortEl) sortEl.addEventListener('change', scheduleRender);
+
+    unsubs.push(bus.on('db:change', scheduleRender));
+    unsubs.push(bus.on('view:changed', scheduleRender));
+    unsubs.push(bus.on('i18n:change', scheduleRender));
+
+    render();
+  }
+
+  /** Отписка от всех подписок. */
+  function destroy() {
+    unsubs.forEach(u => {
+      try { u(); } catch (_) {}
+    });
+    unsubs = [];
+  }
+
+  return { init, destroy, render };
+}, ['Store', 'DB', 'I18n', 'Utils', 'Config', 'EventBus']);
 // ─── UI/BaseView ─── END ────────────────────────────────────────────────────
 
 // ─── UI/NoteView ─── START ──────────────────────────────────────────────────
 /**
- * [в14] Полноэкранный просмотр: свои (удалить/видимость/пин/правка —
- *      только личные), чужие (просмотр/пин), поиск DB → cache.
- *      ФИКС #1: один click-листенер на root (без накопления).
- *      ФИКС #9: ре-рендер при i18n:change.
- * Deps: DB, Notes, NoteActions, I18n, Utils, Toast, EventBus
+ * Полноэкранный просмотр заметки.
+ *
+ * Для своих заметок:
+ * - Удаление (с подтверждением)
+ * - Переключение видимости (лично ↔ открыто)
+ * - Пин (закрепление для контекстного поиска)
+ * - Редактирование (только для личных; публичные immutable в Nostr)
+ *
+ * Для чужих заметок:
+ * - Только просмотр + пин
+ *
+ * Текст в режиме чтения не выделяется (user-select: none из глобального стиля).
+ * В режиме редактирования (.nv-text-edit) выделение разрешено.
+ *
+ * Отличия от v0.6:
+ * - ФИКС #1: click-листенер на root вешается один раз в init()
+ *   (раньше — при каждом render(), с накоплением);
+ * - ФИКС #9: ре-рендер при смене языка (если экран открыт и не в режиме
+ *   редактирования — текст пользователя в textarea важнее перевода).
  */
+DI.register('NoteView', function (DB, Notes, NoteActions, I18n, Utils, Toast, bus) {
+  let root = null;
+  let currentId = null;
+  let currentNote = null;
+  let escHandler = null;
+  let editMode = false;
+  let editTextarea = null;
+  let i18nUnsub = null;
+
+  /** Ленивая привязка к DOM. */
+  function ensureRoot() {
+    if (!root) root = document.getElementById('noteview');
+    return root;
+  }
+
+  /** Закрыть экран просмотра. */
+  function close() {
+    const r = ensureRoot();
+    if (r) {
+      r.classList.remove('on');
+      r.innerHTML = '';
+    }
+
+    if (escHandler) {
+      document.removeEventListener('keydown', escHandler);
+      escHandler = null;
+    }
+
+    currentId = null;
+    currentNote = null;
+    editMode = false;
+    editTextarea = null;
+  }
+
+  /**
+   * Открыть заметку по id. Сначала ищем в локальной БД,
+   * потом в сетевом кэше (для чужих заметок).
+   * @param {string} id - uid или eventId заметки.
+   */
+  function open(id) {
+    if (!id) return;
+
+    DB.get(id).then(note => {
+      if (!note) {
+        return DB.cacheGet(id).then(cached => {
+          if (cached) render(cached);
+        });
+      }
+      render(note);
+    }).catch(() => {});
+  }
+
+  /**
+   * Переход в режим редактирования: текст заменяется на textarea.
+   * @param {Object} note - Заметка.
+   * @param {HTMLButtonElement} editBtn - Кнопка «Развить».
+   */
+  function enterEditMode(note, editBtn) {
+    if (editMode) return;
+
+    editMode = true;
+    const r = ensureRoot();
+    if (!r) return;
+
+    const txt = r.querySelector('.nv-text');
+
+    if (txt) {
+      const ta = document.createElement('textarea');
+      ta.className = 'nv-text-edit';
+      ta.value = note.text || '';
+      ta.placeholder = I18n.t('note.edit.placeholder');
+      txt.replaceWith(ta);
+      editTextarea = ta;
+      ta.focus();
+    }
+
+    if (editBtn) {
+      editBtn.textContent = I18n.t('btn.save');
+    }
+  }
+
+  /**
+   * Сохранение изменений при редактировании.
+   * Notes.edit обновляет syncTs → NetService публикует канон (синк).
+   * @param {Object} note - Заметка.
+   */
+  function saveEdit(note) {
+    if (!editMode || !editTextarea) return;
+
+    const newText = editTextarea.value.trim();
+
+    if (!newText) {
+      Toast.show('warn', I18n.t('toast.empty'));
+      return;
+    }
+
+    const editBtn = document.querySelector('[data-role="edit"]');
+
+    if (editBtn) {
+      editBtn.disabled = true;
+      editBtn.textContent = '…';
+    }
+
+    Notes.edit(note.id, newText).then(updatedNote => {
+      if (!updatedNote) {
+        Toast.show('err', I18n.t('toast.copy.fail'));
+        return;
+      }
+
+      Toast.show('ok', I18n.t('toast.edit.saved'));
+      currentNote = updatedNote;
+      render(updatedNote);
+    }).catch(() => {
+      Toast.show('err', I18n.t('toast.copy.fail'));
+
+      if (editBtn) {
+        editBtn.disabled = false;
+        editBtn.textContent = I18n.t('btn.save');
+      }
+    });
+  }
+
+  /** Пин текущей заметки + закрытие. */
+  function pinAndClose() {
+    if (!currentNote) {
+      close();
+      return;
+    }
+
+    try {
+      bus.emit('note:pin', currentNote);
+      Toast.show('ok', I18n.t('toast.pinned'));
+    } catch (_) {}
+
+    close();
+  }
+
+  /**
+   * Полный рендер экрана просмотра заметки.
+   * @param {Object} note - Заметка (своя из DB или чужая из кэша).
+   */
+  function render(note) {
+    const r = ensureRoot();
+    if (!r) return;
+
+    currentId = note.id;
+    currentNote = note;
+    r.innerHTML = '';
+    r.classList.add('on');
+    editMode = false;
+    editTextarea = null;
+
+    const isOwn = !!(note.id && !note.authorPubkey);
+
+    // Верхняя панель действий
+    const top = document.createElement('div');
+    top.className = 'nv-f';
+
+    if (isOwn) {
+      const del = document.createElement('button');
+      del.className = 'nv-act danger';
+      del.textContent = I18n.t('btn.del');
+      del.addEventListener('click', () => {
+        NoteActions.remove(note.id);
+        close();
+      });
+      top.appendChild(del);
+
+      const tog = document.createElement('button');
+      tog.className = 'nv-act';
+      tog.textContent = note.shared ? I18n.t('btn.toggle.priv') : I18n.t('btn.toggle.pub');
+      tog.addEventListener('click', () => {
+        NoteActions.toggle(note.id);
+        close();
+      });
+      top.appendChild(tog);
+    }
+
+    const pinBtn = document.createElement('button');
+    pinBtn.className = 'nv-act';
+    pinBtn.textContent = '◈ ' + I18n.t('btn.pin');
+    pinBtn.title = I18n.t('btn.pin.aria');
+    pinBtn.setAttribute('aria-label', I18n.t('btn.pin.aria'));
+    pinBtn.addEventListener('click', pinAndClose);
+    top.appendChild(pinBtn);
+
+    if (isOwn && !note.shared) {
+      // Редактирование доступно только для личных заметок
+      const edit = document.createElement('button');
+      edit.className = 'nv-act';
+      edit.setAttribute('data-role', 'edit');
+      edit.textContent = I18n.t('btn.edit');
+
+      edit.addEventListener('click', () => {
+        if (editMode) {
+          saveEdit(note);
+        } else {
+          enterEditMode(note, edit);
+        }
+      });
+
+      top.appendChild(edit);
+    } else if (isOwn && note.shared) {
+      // Публичные заметки нельзя редактировать (immutable в Nostr)
+      const hint = document.createElement('span');
+      hint.style.cssText = 'font-size:12px;color:var(--text-3);align-self:center;';
+      hint.textContent = I18n.t('note.public.noedit');
+      top.appendChild(hint);
+    }
+
+    r.appendChild(top);
+
+    // Тело: мета + текст
+    const body = document.createElement('div');
+    body.className = 'nv-b';
+
+    const info = document.createElement('div');
+    info.className = 'note-meta';
+    info.style.marginBottom = '12px';
+
+    const tag = document.createElement('span');
+
+    if (isOwn) {
+      tag.className = 'note-tag ' + (note.shared ? 'world' : 'priv');
+      tag.textContent = note.shared ? I18n.t('base.tag.shared') : I18n.t('base.tag.private');
+    } else {
+      tag.className = 'note-tag world';
+      tag.textContent = '· ' + Utils.shortPk(note.authorPubkey || '');
+    }
+
+    info.appendChild(tag);
+
+    const date = document.createElement('span');
+    date.textContent = Utils.fmtDate(note.updatedAt || note.createdAt, I18n.getLang()) + ' ' +
+                       Utils.fmtTime(note.updatedAt || note.createdAt, I18n.getLang());
+    info.appendChild(date);
+    body.appendChild(info);
+
+    const txt = document.createElement('div');
+    txt.className = 'nv-text';
+    txt.textContent = note.text || '';
+    body.appendChild(txt);
+
+    r.appendChild(body);
+
+    // Нижняя панель: кнопка закрытия
+    const bottom = document.createElement('div');
+    bottom.className = 'nv-f-bottom';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'nv-act';
+    closeBtn.textContent = I18n.t('btn.close');
+    closeBtn.addEventListener('click', close);
+    bottom.appendChild(closeBtn);
+
+    r.appendChild(bottom);
+
+    // Закрытие по Escape
+    if (escHandler) document.removeEventListener('keydown', escHandler);
+    escHandler = e => {
+      if (e.key === 'Escape') close();
+    };
+    document.addEventListener('keydown', escHandler);
+  }
+
+  /**
+   * Инициализация: root click-листенер (один раз, фикс #1),
+   * подписка на note:open, подписка на i18n:change (фикс #9).
+   */
+  function init() {
+    const r = ensureRoot();
+    if (!r) return;
+
+    // ФИКС #1: один листенер на root. Дети пересоздаются через
+    // innerHTML = '', слушатель живёт на корне — накопления нет.
+    r.addEventListener('click', e => {
+      if (e.target === r) close();
+    });
+
+    bus.on('note:open', p => {
+      if (p && p.id) open(p.id);
+    });
+
+    // ФИКС #9: смена языка при открытом экране. В режиме редактирования
+    // не трогаем — текст пользователя в textarea важнее.
+    i18nUnsub = bus.on('i18n:change', () => {
+      if (currentNote && !editMode && root && root.classList.contains('on')) {
+        render(currentNote);
+      }
+    });
+  }
+
+  /** Закрытие + отписка. */
+  function destroy() {
+    if (i18nUnsub) {
+      try { i18nUnsub(); } catch (_) {}
+      i18nUnsub = null;
+    }
+    close();
+  }
+
+  return { init, destroy, open, close };
+}, ['DB', 'Notes', 'NoteActions', 'I18n', 'Utils', 'Toast', 'EventBus']);
 // ─── UI/NoteView ─── END ────────────────────────────────────────────────────
 
 // ─── UI/AccountView ─── START ───────────────────────────────────────────────
