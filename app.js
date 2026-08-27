@@ -4904,29 +4904,383 @@ DI.register('Context', function (Store, Embedder, Config, Utils, bus) {
 
 // ─── DOMAIN/Feed ─── START ──────────────────────────────────────────────────
 /**
- * [в8] Формирование ленты: без контекста — хронология (local + dedup cache),
- *      с контекстом — cosineBatch + split → lists.local/world/seren.
- *      Триггеры: context, db:change, db:cache. seq-guard от гонок.
- * Deps: DB, Ranker, Store, EventBus, Logger
+ * Формирование ленты.
+ *
+ * Два режима:
+ * 1. Без контекста (source === null):
+ *    Все заметки (локальные + сетевые) в хронологическом порядке.
+ *
+ * 2. С контекстом (pin / drift / input):
+ *    Ранжирование по косинусному сходству с вектором контекста.
+ *    Разделение на relevant (>= threshold) и serendipity (ниже порога,
+ *    но в пределах окна озарений).
+ *
+ * Обновление триггерится:
+ * - Изменением контекста (подписка на Store)
+ * - Изменением локальной БД (db:change) — включая заметки, применённые
+ *   из приватного канона (sync)
+ * - Изменением сетевого кэша (db:cache)
  */
+DI.register('Feed', function (DB, Ranker, Store, bus, Logger) {
+  /** Счётчик поколений для защиты от гонок. */
+  let seq = 0;
+  /** @type {Array<Function>} */
+  let unsubs = [];
+
+  /**
+   * Пересборка ленты. Если за время асинхронной работы пришёл новый вызов,
+   * результат устаревшего отбрасывается (seq-guard).
+   * @returns {Promise<void>}
+   */
+  function refresh() {
+    const my = ++seq;
+    const ctx = Store.get('context');
+
+    return Promise.all([DB.all(), DB.cacheAll()]).then(([local, cached]) => {
+      if (my !== seq) return;
+
+      if (!ctx.source) {
+        // Режим 1: без контекста — хронологический поток
+
+        // Дедупликация: исключаем из cached заметки, уже существующие
+        // локально (по id или eventId). Вторая линия обороны после
+        // DB.hasLocal в NetService.
+        const localIds = new Set();
+        local.forEach(n => {
+          if (n && n.id) localIds.add(n.id);
+          if (n && n.eventId) localIds.add(n.eventId);
+        });
+
+        const filteredCached = cached.filter(n => {
+          if (!n || !n.id) return false;
+          return !localIds.has(n.id);
+        });
+
+        const merged = [
+          ...local.map(n => Object.assign({}, n, { own: true })),
+          ...filteredCached.map(n => Object.assign({}, n, { own: false })),
+        ].sort((x, y) => (y.createdAt || 0) - (x.createdAt || 0));
+
+        Store.setState({
+          feed: merged,
+          lists: { local: [], world: [], seren: [] },
+        });
+
+        return;
+      }
+
+      if (!ctx.vector) return;
+
+      // Режим 2: ранжирование по сходству
+      const items = [];
+      const dataMap = new Map();
+
+      for (const n of local) {
+        if (n && n.vector) {
+          items.push({ id: n.id, vector: n.vector });
+          dataMap.set(n.id, Object.assign({}, n, { own: true }));
+        }
+      }
+
+      for (const n of cached) {
+        if (n && n.vector) {
+          items.push({ id: n.id, vector: n.vector });
+          dataMap.set(n.id, Object.assign({}, n, { own: false }));
+        }
+      }
+
+      return Ranker.cosineBatch(ctx.vector, items).then(scored => {
+        if (my !== seq) return;
+
+        const { relevant, seren } = Ranker.split(scored);
+
+        const toRes = s => {
+          const n = dataMap.get(s.id);
+          return n ? Object.assign({}, n, { score: s.score }) : null;
+        };
+
+        const rel = relevant.map(toRes).filter(Boolean);
+
+        Store.setState({
+          lists: {
+            local: rel.filter(n => n.own),
+            world: rel.filter(n => !n.own),
+            seren: seren.map(toRes).filter(Boolean),
+          },
+          feed: [],
+        });
+      });
+    }).catch(err => {
+      Logger.warn('Feed: ошибка refresh', String(err && err.message || err));
+    });
+  }
+
+  /**
+   * Инициализация: подписки на триггеры + первичная сборка.
+   */
+  function init() {
+    unsubs.push(Store.subscribe(s => s.context, () => refresh(), Store.shallowEqual));
+    unsubs.push(bus.on('db:change', () => refresh()));
+    unsubs.push(bus.on('db:cache', () => refresh()));
+
+    refresh();
+  }
+
+  /** Отписка от всех триггеров. */
+  function destroy() {
+    unsubs.forEach(u => {
+      try { u(); } catch (_) {}
+    });
+    unsubs = [];
+  }
+
+  return { init, destroy, refresh };
+}, ['DB', 'Ranker', 'Store', 'EventBus', 'Logger']);
 // ─── DOMAIN/Feed ─── END ────────────────────────────────────────────────────
 
 // ─── DOMAIN/Provenance ─── START ────────────────────────────────────────────
 /**
- * [в8] Генеалогия: children / descendants (BFS) / ancestors (до корня).
- *      Свои ссылки — uid, чужие — eventId. Кэш предков 5с.
- *      УЛУЧШЕНИЕ: подписка на db:change/db:cache для очистки кэша
- *      перенесена внутрь модуля (было — внешний вызов из MenuView).
- * Deps: DB, EventBus
+ * Построение генеалогических связей между заметками.
+ *
+ * Заметки связаны через поле parentId:
+ * - свои заметки (в т.ч. пришедшие из приватного канона): parentId = uid;
+ * - чужие заметки: parentId = eventId публичной проекции родителя.
+ *
+ * Поэтому поиск родителя/детей всегда проверяет оба поля (id и eventId).
+ *
+ * Отличие от v0.6: кэш предков (TTL 5с) инвалидируется сам — модуль
+ * подписан на db:change / db:cache в теле фабрики. Внешний вызов
+ * clearCache из MenuView удалён (мёртвый код в новой версии).
+ *
+ * Модуль инстанцируется при резолве FeedView (BOOT, шаг 5) — до
+ * первого сетевого события, подписка безопасна.
  */
+DI.register('Provenance', function (DB, bus) {
+  /** @type {Map<string, {chain: Array, timestamp: number}>} */
+  const ancestorsCache = new Map();
+  const CACHE_TTL = 5000;
+
+  /**
+   * Все заметки: локальные + сетевой кэш.
+   * @returns {Promise<Array<Object>>}
+   */
+  function loadAll() {
+    return Promise.all([DB.all(), DB.cacheAll()]).then(([own, cached]) => own.concat(cached));
+  }
+
+  /**
+   * Прямые дети заметки по её id или eventId.
+   * @param {string} id - uid или eventId заметки.
+   * @returns {Promise<Array<Object>>}
+   */
+  function children(id) {
+    if (!id) return Promise.resolve([]);
+
+    return loadAll().then(all => all.filter(n => n && n.parentId === id));
+  }
+
+  /**
+   * Все потомки (BFS). Защита от циклов через seenIds.
+   * @param {string} id - uid или eventId заметки.
+   * @returns {Promise<Array<Object>>}
+   */
+  function descendants(id) {
+    if (!id) return Promise.resolve([]);
+
+    return loadAll().then(all => {
+      const out = [];
+      const seenIds = new Set([id]);
+      let frontier = [id];
+
+      while (frontier.length) {
+        const next = [];
+
+        for (const n of all) {
+          if (n && n.parentId && frontier.indexOf(n.parentId) !== -1 && !seenIds.has(n.id)) {
+            seenIds.add(n.id);
+            out.push(n);
+            next.push(n.id);
+          }
+        }
+
+        frontier = next;
+      }
+
+      return out;
+    });
+  }
+
+  /**
+   * Цепочка предков от текущей заметки до корня.
+   *
+   * Поиск родителя учитывает:
+   * 1. Точное совпадение по id (локальная/своя заметка, uid)
+   * 2. Совпадение по eventId (опубликованная проекция)
+   * 3. Локальная заметка с matching eventId
+   *
+   * Защита от циклов через seen.
+   *
+   * @param {string} id - uid или eventId заметки.
+   * @returns {Promise<Array<Object>>} Цепочка от непосредственного родителя к корню.
+   */
+  function ancestors(id) {
+    if (!id) return Promise.resolve([]);
+
+    const cached = ancestorsCache.get(id);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return Promise.resolve(cached.chain);
+    }
+
+    return loadAll().then(all => {
+      const byId = new Map();
+
+      all.forEach(n => {
+        if (!n) return;
+        if (n.id) byId.set(n.id, n);
+        if (n.eventId) byId.set(n.eventId, n);
+      });
+
+      function findNote(targetId) {
+        if (!targetId) return null;
+
+        // 1. Прямое совпадение по id или eventId
+        if (byId.has(targetId)) return byId.get(targetId);
+
+        // 2. Локальная заметка, которая была опубликована (имеет matching eventId)
+        const localPublished = all.find(n => n && n.id === targetId && n.eventId);
+        if (localPublished) return localPublished;
+
+        // 3. Сетевая заметка с matching eventId
+        const byEvent = all.find(n => n && n.eventId === targetId);
+        if (byEvent) return byEvent;
+
+        return null;
+      }
+
+      const chain = [];
+      const seen = new Set();
+      let current = findNote(id);
+
+      while (current && current.parentId) {
+        if (seen.has(current.parentId)) break;
+        seen.add(current.parentId);
+
+        const parent = findNote(current.parentId);
+        if (!parent) break;
+
+        chain.push(parent);
+        current = parent;
+      }
+
+      ancestorsCache.set(id, { chain, timestamp: Date.now() });
+      return chain;
+    });
+  }
+
+  /**
+   * Принудительная очистка кеша предков.
+   * @returns {void}
+   */
+  function clearCache() {
+    ancestorsCache.clear();
+  }
+
+  // Самоинвалидация кэша при любом изменении данных.
+  bus.on('db:change', clearCache);
+  bus.on('db:cache', clearCache);
+
+  return { children, descendants, ancestors, loadAll, clearCache };
+}, ['DB', 'EventBus']);
 // ─── DOMAIN/Provenance ─── END ──────────────────────────────────────────────
 
 // ─── DOMAIN/Influence ─── START ─────────────────────────────────────────────
 /**
- * [в8] Резонанс: число уникальных авторов потомков. rebuild + инкремент,
- *      событие influence:updated.
- * Deps: DB, EventBus, Logger
+ * Подсчёт резонанса: сколько уникальных авторов создали потомков заметки.
+ *
+ * Резонанс показывает влияние заметки на сеть. Если заметка A породила
+ * 5 заметок от 3 разных авторов, её резонанс = 3 (уникальные авторы).
+ * Свои потомки учитываются как автор 'self'.
+ *
+ * Карта resonanceMap перестраивается при изменении БД или создании/
+ * удалении заметок; инкрементальное обновление при создании/обновлении.
+ *
+ * Ключи карты — значения parentId детей (uid для своих, eventId для
+ * чужих). Consumers проверяют оба: resonance(n.id) + resonance(n.eventId).
  */
+DI.register('Influence', function (DB, bus, Logger) {
+  /** @type {Map<string, Set<string>>} uid/eventId → множество авторов. */
+  const resonanceMap = new Map();
+  /** Счётчик поколений для защиты от гонок. */
+  let seq = 0;
+
+  /**
+   * Полная перестройка карты резонанса.
+   * @returns {Promise<void>}
+   */
+  function rebuild() {
+    const my = ++seq;
+
+    return Promise.all([DB.all(), DB.cacheAll()]).then(([own, cached]) => {
+      if (my !== seq) return;
+
+      const map = new Map();
+
+      own.concat(cached).forEach(n => {
+        if (n && n.parentId) {
+          if (!map.has(n.parentId)) map.set(n.parentId, new Set());
+          map.get(n.parentId).add(n.authorPubkey || 'self');
+        }
+      });
+
+      resonanceMap.clear();
+      map.forEach((v, k) => resonanceMap.set(k, v));
+
+      try { bus.emit('influence:updated'); } catch (_) {}
+    }).catch(e => Logger.warn('Influence: ошибка rebuild', String(e)));
+  }
+
+  /**
+   * Инкрементальное обновление при создании/обновлении заметки.
+   * @param {Object} note - Заметка с parentId.
+   */
+  function updateForNote(note) {
+    if (!note || !note.parentId) return;
+
+    if (!resonanceMap.has(note.parentId)) {
+      resonanceMap.set(note.parentId, new Set());
+    }
+
+    resonanceMap.get(note.parentId).add(note.authorPubkey || 'self');
+
+    try { bus.emit('influence:updated'); } catch (_) {}
+  }
+
+  /**
+   * Резонанс заметки по id (uid).
+   * @param {string} id - uid заметки.
+   * @returns {number} Число уникальных авторов потомков.
+   */
+  function resonance(id) {
+    if (!id) return 0;
+    const s = resonanceMap.get(id);
+    return s ? s.size : 0;
+  }
+
+  /**
+   * Инициализация: подписки на изменения + первичная перестройка.
+   */
+  function init() {
+    bus.on('note:created', updateForNote);
+    bus.on('note:updated', updateForNote);
+    bus.on('note:deleted', () => rebuild());
+    bus.on('db:change', () => rebuild());
+    bus.on('db:cache', () => rebuild());
+
+    rebuild();
+  }
+
+  return { init, resonance, rebuild };
+}, ['DB', 'EventBus', 'Logger']);
 // ─── DOMAIN/Influence ─── END ───────────────────────────────────────────────
 
 // ─── DOMAIN/Account ─── START ───────────────────────────────────────────────
