@@ -1294,20 +1294,582 @@ DI.register('Store', function () {
 
 // ─── DATA/Vec ─── START ─────────────────────────────────────────────────────
 /**
- * [в3] Векторные операции: toB64/fromB64 (квантование Int16), cosine,
- *      normalize, kmeans (k-means++).
- * Deps: —
+ * Векторные операции: нормализация, cosine similarity, сжатие в base64, k-means.
+ * Все векторы ожидаются нормализованными (единичная длина).
  */
+DI.register('Vec', function () {
+  /**
+   * Приведение к Float32Array.
+   * @param {Float32Array|Array<number>} v - Входной вектор.
+   * @returns {Float32Array}
+   */
+  const f32 = v => (v instanceof Float32Array ? v : Float32Array.from(v || []));
+
+  /**
+   * Сериализация вектора в compact base64 (Int16 квантование).
+   * Используется для передачи векторов в Nostr-событиях.
+   * @param {Float32Array|Array<number>} vec - Нормализованный вектор.
+   * @returns {string} Base64-строка.
+   */
+  function toB64(vec) {
+    const f = f32(vec);
+    const i16 = new Int16Array(f.length);
+
+    for (let i = 0; i < f.length; i++) {
+      let x = f[i];
+      if (x > 1) x = 1;
+      else if (x < -1) x = -1;
+      i16[i] = Math.round(x * 32767);
+    }
+
+    const bytes = new Uint8Array(i16.buffer, i16.byteOffset, i16.byteLength);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) {
+      bin += String.fromCharCode(bytes[i]);
+    }
+
+    return btoa(bin);
+  }
+
+  /**
+   * Десериализация вектора из base64 + повторная нормализация.
+   * @param {string} b64 - Base64-строка.
+   * @returns {Float32Array|null} Нормализованный вектор или null при ошибке.
+   */
+  function fromB64(b64) {
+    try {
+      const bin = atob(String(b64 || ''));
+      if (!bin || bin.length < 2 || bin.length % 2 !== 0) return null;
+
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) {
+        bytes[i] = bin.charCodeAt(i);
+      }
+
+      const i16 = new Int16Array(bytes.buffer);
+      const out = new Float32Array(i16.length);
+      for (let i = 0; i < i16.length; i++) {
+        out[i] = i16[i] / 32767;
+      }
+
+      return normalize(out);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Косинусное сходство для нормализованных векторов (скалярное произведение).
+   * Если векторы разной длины, сравниваем по минимальной длине.
+   * @param {Float32Array|Array<number>} a - Первый вектор.
+   * @param {Float32Array|Array<number>} b - Второй вектор.
+   * @returns {number} Сходство в диапазоне [-1, 1].
+   */
+  function cosine(a, b) {
+    if (!a || !b) return 0;
+    const n = Math.min(a.length, b.length);
+    if (!n) return 0;
+
+    let s = 0;
+    for (let i = 0; i < n; i++) {
+      s += a[i] * b[i];
+    }
+
+    return s;
+  }
+
+  /**
+   * Нормализация вектора к единичной длине.
+   * @param {Float32Array|Array<number>} v - Входной вектор.
+   * @returns {Float32Array} Нормализованный вектор (нулевой при нулевой норме).
+   */
+  function normalize(v) {
+    const f = f32(v);
+    let norm = 0;
+
+    for (let i = 0; i < f.length; i++) {
+      norm += f[i] * f[i];
+    }
+
+    norm = Math.sqrt(norm);
+    const out = new Float32Array(f.length);
+    if (!norm) return out;
+
+    for (let i = 0; i < f.length; i++) {
+      out[i] = f[i] / norm;
+    }
+
+    return out;
+  }
+
+  /**
+   * Квадрат евклидова расстояния (внутренняя для k-means).
+   * @param {Float32Array|Array<number>} a
+   * @param {Float32Array|Array<number>} b
+   * @returns {number}
+   */
+  function sqDist(a, b) {
+    const n = Math.min(a.length, b.length);
+    let s = 0;
+
+    for (let i = 0; i < n; i++) {
+      const d = a[i] - b[i];
+      s += d * d;
+    }
+
+    return s;
+  }
+
+  /**
+   * Упрощённый k-means с инициализацией k-means++.
+   * Используется для центроидов префильтра входящих запросов.
+   * @param {Array<Float32Array|Array<number>>} vectors - Набор векторов.
+   * @param {number} k - Число кластеров.
+   * @param {number} [iterations] - Число итераций (по умолчанию 10).
+   * @returns {Array<Float32Array>} Центроиды.
+   */
+  function kmeans(vectors, k, iterations) {
+    const iters = iterations || 10;
+    const n = vectors.length;
+
+    if (!n || !k) return [];
+    if (n <= k) return vectors.map(v => f32(v));
+
+    const dim = vectors[0].length;
+
+    const cents = [f32(vectors[0])];
+    while (cents.length < k) {
+      let bestI = 0, bestD = -1;
+
+      for (let i = 0; i < n; i++) {
+        let minD = Infinity;
+
+        for (const c of cents) {
+          const d = sqDist(vectors[i], c);
+          if (d < minD) minD = d;
+        }
+
+        if (minD > bestD) {
+          bestD = minD;
+          bestI = i;
+        }
+      }
+
+      cents.push(f32(vectors[bestI]));
+    }
+
+    for (let it = 0; it < iters; it++) {
+      const sums = Array.from({ length: k }, () => new Float32Array(dim));
+      const counts = new Array(k).fill(0);
+
+      for (let i = 0; i < n; i++) {
+        let best = 0, bestD = Infinity;
+
+        for (let c = 0; c < k; c++) {
+          const d = sqDist(vectors[i], cents[c]);
+          if (d < bestD) {
+            bestD = d;
+            best = c;
+          }
+        }
+
+        counts[best]++;
+        for (let d = 0; d < dim; d++) {
+          sums[best][d] += vectors[i][d];
+        }
+      }
+
+      for (let c = 0; c < k; c++) {
+        if (counts[c]) {
+          for (let d = 0; d < dim; d++) {
+            cents[c][d] = sums[c][d] / counts[c];
+          }
+        }
+      }
+    }
+
+    return cents;
+  }
+
+  return { toB64, fromB64, cosine, normalize, kmeans };
+});
 // ─── DATA/Vec ─── END ───────────────────────────────────────────────────────
 
 // ─── DATA/DB ─── START ──────────────────────────────────────────────────────
 /**
- * [в3] IndexedDB + memory-fallback, сторы «notes»/«cache», события
- *      db:change / db:cache.
- *      ФИКС #10: ин-мемори индексы (O(1)-проверки id/eventId вместо
- *      полного скана DB.all() на каждое входящее событие).
- * Deps: Config, EventBus, Logger
+ * Слой хранения: IndexedDB с fallback в память.
+ * Два хранилища:
+ * - notes: локальные заметки пользователя
+ * - cache: сетевые заметки/ответы
+ *
+ * Отличие от v0.6: ин-мемори индексы идентификаторов.
+ * Строятся один раз при открытии БД, поддерживаются инкрементально
+ * на каждой операции. Методы hasLocal()/hasCache() дают O(1)-проверку
+ * «есть ли заметка локально» — вместо полного скана DB.all() на каждое
+ * входящее сетевое событие (фикс #10).
+ *
+ * КОНТРАКТ: сетевые обработчики (NetService) должны дождаться
+ * DB.ready() перед началом приёма событий — иначе индексы могут
+ * быть ещё не построены.
  */
+DI.register('DB', function (Config, bus, Logger) {
+  let db = null;
+  let mem = null;
+  let memCache = null;
+  let openPromise = null;
+
+  const NOTES = () => Config.get('storeName', 'notes');
+  const CACHE = () => Config.get('cacheStoreName', 'cache');
+
+  // ─── Ин-мемори индексы ─────────────────────────────────────────────────────
+
+  /** @type {Set<string>} id всех локальных заметок. */
+  const localIds = new Set();
+  /** @type {Set<string>} eventId всех опубликованных локальных заметок. */
+  const localEventIds = new Set();
+  /** @type {Set<string>} id всех заметок в сетевом кэше. */
+  const cacheIds = new Set();
+
+  function emitChange() {
+    try { bus.emit('db:change'); } catch (_) {}
+  }
+
+  function emitCache() {
+    try { bus.emit('db:cache'); } catch (_) {}
+  }
+
+  /**
+   * Обёртка IDBRequest → Promise.
+   * @param {IDBRequest} req - Запрос.
+   * @returns {Promise<*>}
+   */
+  function reqPromise(req) {
+    return new Promise((res, rej) => {
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+    });
+  }
+
+  /**
+   * Открытие БД. При успешном открытии ДО резолва строит индексы
+   * (один полный проход по notes + чтение ключей cache).
+   * При недоступности IndexedDB — fallback в память (индексы
+   * поддерживаются инкрементально с пустого состояния).
+   * @returns {Promise<IDBDatabase|null>}
+   */
+  function open() {
+    if (openPromise) return openPromise;
+
+    openPromise = new Promise(resolve => {
+      if (!window.indexedDB) {
+        mem = new Map();
+        memCache = new Map();
+        Logger.warn('DB: IndexedDB недоступен, in-memory fallback');
+        return resolve(null);
+      }
+
+      try {
+        const req = indexedDB.open(Config.get('dbName', 'noomium_v2'), 1);
+
+        req.onupgradeneeded = e => {
+          const d = e.target.result;
+
+          if (!d.objectStoreNames.contains(NOTES())) {
+            d.createObjectStore(NOTES(), { keyPath: 'id' });
+          }
+
+          if (!d.objectStoreNames.contains(CACHE())) {
+            d.createObjectStore(CACHE(), { keyPath: 'id' });
+          }
+        };
+
+        req.onsuccess = e => {
+          db = e.target.result;
+          buildIndexes().then(() => resolve(db)).catch(() => resolve(db));
+        };
+
+        req.onerror = () => {
+          mem = new Map();
+          memCache = new Map();
+          Logger.warn('DB: ошибка открытия, fallback');
+          resolve(null);
+        };
+
+        req.onblocked = () => {
+          mem = new Map();
+          memCache = new Map();
+          Logger.warn('DB: open blocked, fallback');
+          resolve(null);
+        };
+      } catch (err) {
+        mem = new Map();
+        memCache = new Map();
+        Logger.warn('DB: не поддерживается, fallback', String(err));
+        resolve(null);
+      }
+    });
+
+    return openPromise;
+  }
+
+  /**
+   * Полная перестройка индексов из БД (однократно при открытии).
+   * @returns {Promise<void>}
+   */
+  function buildIndexes() {
+    const t = db.transaction([NOTES(), CACHE()], 'readonly');
+
+    return Promise.all([
+      reqPromise(t.objectStore(NOTES()).getAll()).catch(() => []),
+      reqPromise(t.objectStore(CACHE()).getAllKeys()).catch(() => []),
+    ]).then(([notes, keys]) => {
+      localIds.clear();
+      localEventIds.clear();
+      cacheIds.clear();
+
+      (notes || []).forEach(n => {
+        if (n && n.id) {
+          localIds.add(n.id);
+          if (n.eventId) localEventIds.add(n.eventId);
+        }
+      });
+
+      (keys || []).forEach(k => cacheIds.add(k));
+
+      Logger.info('DB: индексы построены (' + localIds.size + ' локальных, ' + cacheIds.size + ' в кэше)');
+    });
+  }
+
+  /**
+   * Универсальная обёртка транзакции с memory-fallback.
+   * @param {string} store - Имя object store.
+   * @param {string} mode - 'readonly' | 'readwrite'.
+   * @param {Function} fn - (objectStore) => IDBRequest.
+   * @param {Function} memFn - Синхронный fallback в памяти.
+   * @returns {Promise<*>}
+   */
+  function withStore(store, mode, fn, memFn) {
+    return open().then(d => {
+      if (!d) return memFn();
+
+      return new Promise((res, rej) => {
+        try {
+          const r = fn(d.transaction(store, mode).objectStore(store));
+          r.onsuccess = () => res(r.result);
+          r.onerror = () => rej(r.error);
+        } catch (e) {
+          rej(e);
+        }
+      });
+    });
+  }
+
+  // ─── Локальные заметки ─────────────────────────────────────────────────────
+
+  /**
+   * Сохранить/обновить заметку.
+   * @param {Object} note - Заметка с полем id.
+   * @returns {Promise<string>} id заметки.
+   */
+  function put(note) {
+    return withStore(
+      NOTES(),
+      'readwrite',
+      s => s.put(note),
+      () => { mem.set(note.id, note); return note.id; }
+    ).then(res => {
+      if (note && note.id) {
+        localIds.add(note.id);
+        if (note.eventId) localEventIds.add(note.eventId);
+      }
+      emitChange();
+      return res;
+    });
+  }
+
+  /**
+   * Получить заметку по id.
+   * @param {string} id
+   * @returns {Promise<Object|undefined>}
+   */
+  function get(id) {
+    return withStore(
+      NOTES(),
+      'readonly',
+      s => s.get(id),
+      () => mem.get(id)
+    );
+  }
+
+  /**
+   * Удалить заметку. Перед удалением читает заметку, чтобы вычистить
+   * из индекса и её eventId.
+   * @param {string} id
+   * @returns {Promise<*>}
+   */
+  function del(id) {
+    return get(id).then(note => {
+      return withStore(
+        NOTES(),
+        'readwrite',
+        s => s.delete(id),
+        () => { mem.delete(id); }
+      ).then(res => {
+        localIds.delete(id);
+        if (note && note.eventId) localEventIds.delete(note.eventId);
+        emitChange();
+        return res;
+      });
+    });
+  }
+
+  /**
+   * Все локальные заметки.
+   * @returns {Promise<Array<Object>>}
+   */
+  function all() {
+    return withStore(
+      NOTES(),
+      'readonly',
+      s => s.getAll(),
+      () => Array.from(mem.values())
+    );
+  }
+
+  /**
+   * Полная очистка обоих хранилищ + индексов.
+   * @returns {Promise<void>}
+   */
+  function reset() {
+    return open().then(d => {
+      if (!d) {
+        mem.clear();
+        memCache.clear();
+        return;
+      }
+
+      return new Promise((res, rej) => {
+        const t = d.transaction([NOTES(), CACHE()], 'readwrite');
+        t.objectStore(NOTES()).clear();
+        t.objectStore(CACHE()).clear();
+
+        t.oncomplete = () => res();
+        t.onerror = () => rej(t.error);
+      });
+    }).then(() => {
+      localIds.clear();
+      localEventIds.clear();
+      cacheIds.clear();
+      emitChange();
+      emitCache();
+    });
+  }
+
+  // ─── Сетевой кэш ───────────────────────────────────────────────────────────
+
+  /**
+   * Сохранить/обновить заметку в кэше.
+   * @param {Object} note - Заметка с полем id.
+   * @returns {Promise<string>}
+   */
+  function cachePut(note) {
+    return withStore(
+      CACHE(),
+      'readwrite',
+      s => s.put(note),
+      () => { memCache.set(note.id, note); return note.id; }
+    ).then(res => {
+      if (note && note.id) cacheIds.add(note.id);
+      emitCache();
+      return res;
+    });
+  }
+
+  /**
+   * Получить заметку из кэша.
+   * @param {string} id
+   * @returns {Promise<Object|undefined>}
+   */
+  function cacheGet(id) {
+    return withStore(
+      CACHE(),
+      'readonly',
+      s => s.get(id),
+      () => memCache.get(id)
+    );
+  }
+
+  /**
+   * Все заметки кэша.
+   * @returns {Promise<Array<Object>>}
+   */
+  function cacheAll() {
+    return withStore(
+      CACHE(),
+      'readonly',
+      s => s.getAll(),
+      () => Array.from(memCache.values())
+    );
+  }
+
+  /**
+   * Удалить заметку из кэша.
+   * @param {string} id
+   * @returns {Promise<*>}
+   */
+  function cacheDel(id) {
+    return withStore(
+      CACHE(),
+      'readwrite',
+      s => s.delete(id),
+      () => { memCache.delete(id); }
+    ).then(res => {
+      cacheIds.delete(id);
+      emitCache();
+      return res;
+    });
+  }
+
+  return {
+    put,
+    get,
+    del,
+    all,
+    reset,
+    cachePut,
+    cacheGet,
+    cacheAll,
+    cacheDel,
+
+    /**
+     * Готовность БД (индексы построены). NetService обязан дождаться
+     * этого перед открытием подписки на входящие события.
+     * @returns {Promise<IDBDatabase|null>}
+     */
+    ready: open,
+
+    /**
+     * Есть ли заметка с таким id ИЛИ eventId среди ЛОКАЛЬНЫХ (O(1)).
+     * Используется для отсечения дублей своих заметок, приходящих
+     * из сети.
+     * @param {string} idOrEventId - Локальный id или eventId.
+     * @returns {boolean}
+     */
+    hasLocal(idOrEventId) {
+      if (!idOrEventId) return false;
+      return localIds.has(idOrEventId) || localEventIds.has(idOrEventId);
+    },
+
+    /**
+     * Есть ли заметка с таким id в сетевом кэше (O(1)).
+     * @param {string} id
+     * @returns {boolean}
+     */
+    hasCache(id) {
+      return !!id && cacheIds.has(id);
+    },
+  };
+}, ['Config', 'EventBus', 'Logger']);
 // ─── DATA/DB ─── END ────────────────────────────────────────────────────────
 
 // ═══════════════════════════════════════════════════════════════════════════════
