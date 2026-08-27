@@ -3270,8 +3270,8 @@ DI.register('Protocol', function (Config, Vec, Crypto) {
  *    заметки + публичная проекция (kind 1) для shared.
  *
  * LWW-модель канона:
- * - note.syncTs ставится при локальной правке (Notes, волна 7) и при
- *   применении входящего события;
+ * - note.syncTs ставится при локальной правке (Notes) и при применении
+ *   входящего события;
  * - входящий 30078 применяется только при syncTs > локального
  *   (равенство = эхо собственной публикации → пропуск);
  * - удаление канона — tombstone (30078 с del:true), НЕ kind 5:
@@ -3285,6 +3285,10 @@ DI.register('Protocol', function (Config, Vec, Crypto) {
  * - announce: uid'ы заметок, ждущих публичной проекции (kind 1);
  * - del:      eventId'ы для kind 5 (удаление проекций);
  * - privdel:  uid'ы для tombstone канона.
+ *
+ * ФИНАЛЬНАЯ РЕДАКЦИЯ: publishWipeAll переписан — tombstone'ы и kind 5
+ * ставятся в персистентный outbox ДО попытки доставки (wipe корректен
+ * и в офлайне), доставка сейчас — с бюджетом 15 секунд.
  */
 DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Config, Logger, bus) {
   let started = false;
@@ -3366,6 +3370,10 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
     try { bus.emit('net:status', { status: s }); } catch (_) {}
   }
 
+  /**
+   * Фаза синка для AccountView: 'off' | 'active' | 'idle'.
+   * @param {string} phase
+   */
   function emitSync(phase) {
     try { bus.emit('sync:status', { phase }); } catch (_) {}
   }
@@ -3658,7 +3666,7 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
    * uid (orphan для чужих, но связь сохранена в приватном каноне —
    * та же семантика, что в v0.6 для неопубликованных родителей).
    * @param {Object} note - Заметка.
-   * @returns {Promise<{tpl: Object}|null>} Шаблон kind 1.
+   * @returns {Promise<Object>} Шаблон события kind 1.
    */
   async function buildNoteEvent(note) {
     let parentRef;
@@ -4546,17 +4554,30 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
   }
 
   /**
-   * Публичный wipe для Boot: tombstone всех канонов + kind 5 всех
-   * публичных проекций (перед DB.reset). Best-effort.
+   * Публичный wipe для Boot/MenuView: удаление всего канона и проекций.
+   *
+   * Надёжность:
+   * - tombstone'ы и kind 5 СНАЧАЛА ставятся в персистентную очередь
+   *   (outbox в localStorage) — wipe корректен и в офлайне, всё доедет
+   *   при появлении сети;
+   * - доставка сейчас — с бюджетом 15 секунд; недоставленное в бюджет
+   *   при wipe доедет из outbox позже, при fullReset — теряется
+   *   осознанно (пользователь стирает всё, включая аккаунт; это
+   *   соответствует best-effort природе удаления в Nostr, о чём
+   *   говорит онбординг).
+   *
    * @returns {Promise<void>}
    */
   async function publishWipeAll() {
-    if (!canPublish()) return;
-
+    let notes = [];
     try {
-      const notes = await DB.all();
+      notes = await DB.all();
+    } catch (_) {
+      return;
+    }
 
-      // Публичные проекции — одним kind 5.
+    // Публичные проекции: kind 5 пачкой (или в очередь при офлайне).
+    if (canPublish()) {
       const pubIds = notes.filter(n => n && n.eventId).map(n => n.eventId);
       if (pubIds.length) {
         const ev = Protocol.deleteEvent(pubIds, room());
@@ -4564,18 +4585,27 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
           await Nostr.publish(ev).catch(() => {});
         }
       }
+    } else {
+      notes.forEach(n => {
+        if (n && n.eventId) queueDelete(n.eventId);
+      });
+    }
 
-      // Каноны — tombstone последовательно.
-      if (Config.get('syncEnabled', true)) {
-        for (const n of notes) {
-          if (!n || !n.id) continue;
-          try {
-            const tpl = await Protocol.privateTombstone(n.id);
-            await Nostr.publish(tpl);
-          } catch (_) {}
-        }
-      }
-    } catch (_) {}
+    // Tombstone'ы канона — в персистентную очередь (независимо от сети).
+    if (Config.get('syncEnabled', true)) {
+      notes.forEach(n => {
+        if (n && n.id) queuePrivDel(n.id);
+      });
+    }
+
+    // Попытка доставить сейчас — с бюджетом.
+    if (canPublish()) {
+      const WIPE_BUDGET = 15000;
+      await Promise.race([
+        flushOutbox().catch(() => {}),
+        new Promise(res => setTimeout(res, WIPE_BUDGET)),
+      ]);
+    }
   }
 
   return { start, stop, loadHistory, publishWipeAll };
@@ -7495,14 +7525,18 @@ DI.register('NoteView', function (DB, Notes, NoteActions, I18n, Utils, Toast, bu
  * Разделы экрана:
  * 1. Публичный адрес (npub) — всегда виден, безопасен.
  * 2. Ключ: маска по умолчанию; «Показать» → опциональный пароль →
- *    ncryptsec в key-box + кнопка «Копировать» (ставит keyExported).
- * 3. Вход по ключу: textarea/input → nsec/hex/ncryptsec (+пароль) →
- *    подтверждение замены аккаунта → Account.enterKey.
+ *    ncryptsec в key-box + автокопирование (ставит keyExported).
+ * 3. Вход по ключу: nsec/hex/ncryptsec (+пароль) → подтверждение
+ *    замены аккаунта → Account.enterKey.
  * 4. Экспорт: файл JSON (с ключом или без); импорт: файл → предпросмотр →
- *    применение (при ключе в архиве — сначала замена ключа, потом заметки).
- * 5. Синк: переключатель, статус.
+ *    применение (при ключе в архиве — сначала замена ключа, потом заметки;
+ *    если ключ архива совпадает с текущим — аккаунт не трогаем).
+ * 5. Синк: переключатель, статус (живая подписка sync:status — одна
+ *    на всё время работы, в init, без накопления при переоткрытиях).
  *
  * Стили — секции 16–17 style.css (.acc-*, .key-box, .field-*).
+ * Класс .acc-sync-txt — только JS-хук для поиска элемента, CSS-правила
+ * не требует (наследование от .acc-sync).
  */
 DI.register('AccountView', function (Account, Modal, Toast, I18n, Config, bus) {
   let unsubs = [];
@@ -7558,8 +7592,6 @@ DI.register('AccountView', function (Account, Modal, Toast, I18n, Config, bus) {
     keyBox.textContent = I18n.t('account.nsec.masked');
     body.appendChild(keyBox);
 
-    let shown = null;
-
     const reveal = () => {
       keyBox.textContent = '…';
       Account.getWrappedKey(pwInput.value).then(wrapped => {
@@ -7568,13 +7600,11 @@ DI.register('AccountView', function (Account, Modal, Toast, I18n, Config, bus) {
           Toast.show('err', I18n.t('toast.copy.fail'));
           return;
         }
-        shown = wrapped;
         keyBox.textContent = wrapped;
         keyBox.classList.remove('masked');
         keyBox.classList.add('focused');
-        Toast.show('ok', I18n.t('toast.key.copied'));
-        // getWrappedKey уже скопировал не будет; копируем сами:
         copyText(wrapped);
+        Toast.show('ok', I18n.t('toast.key.copied'));
       });
     };
 
@@ -7596,7 +7626,7 @@ DI.register('AccountView', function (Account, Modal, Toast, I18n, Config, bus) {
   }
 
   /**
-   * Копирование текста в буфер (дубль NoteActions.copy без его зависимостей).
+   * Копирование текста в буфер (тихое, без тостов — тосты у вызывающих).
    * @param {string} text
    */
   function copyText(text) {
@@ -7636,7 +7666,7 @@ DI.register('AccountView', function (Account, Modal, Toast, I18n, Config, bus) {
     keyField.appendChild(keyInput);
     body.appendChild(keyField);
 
-    // Поле пароля (показывается только для ncryptsec — логика ниже)
+    // Поле пароля (показывается только для ncryptsec)
     const pwField = document.createElement('div');
     pwField.className = 'field';
     pwField.style.display = 'none';
@@ -7697,7 +7727,8 @@ DI.register('AccountView', function (Account, Modal, Toast, I18n, Config, bus) {
   // ─── Раздел: экспорт / импорт ──────────────────────────────────────────────
 
   /**
-   * Модалка экспорта: с ключом или без, скачивание файла.
+   * Модалка экспорта: без ключа или с ключом (пароль опционален),
+   * скачивание файла.
    */
   function openExport() {
     const body = document.createElement('div');
@@ -7767,7 +7798,7 @@ DI.register('AccountView', function (Account, Modal, Toast, I18n, Config, bus) {
   }
 
   /**
-   * Импорт архива: выбор файла → предпросмотр → применение.
+   * Импорт архива: выбор файла → предпросмотр → подтверждение → применение.
    */
   function openImport() {
     const input = document.createElement('input');
@@ -7794,7 +7825,6 @@ DI.register('AccountView', function (Account, Modal, Toast, I18n, Config, bus) {
         confirmImport(parsed.archive);
       };
       reader.onerror = () => {
-        input.remove();
         Toast.show('err', I18n.t('account.import.bad'));
       };
       reader.readAsText(file);
@@ -7805,35 +7835,122 @@ DI.register('AccountView', function (Account, Modal, Toast, I18n, Config, bus) {
 
   /**
    * Подтверждение импорта с предпросмотром количества заметок.
-   * Если в архиве есть ключ — сначала замена ключа, потом заметки.
+   *
+   * Порядок применения:
+   * - без ключа в архиве — сразу заметки (upsert по LWW);
+   * - с ключом, если он ОТЛИЧАЕТСЯ от текущего — сначала замена аккаунта
+   *   (сброс базы через enterKey), затем заметки;
+   * - с ключом, если он СОВПАДАЕТ с текущим — аккаунт и базу НЕ трогаем
+   *   (иначе повторный импорт своего бэкапа на том же устройстве стёр бы
+   *   заметки, созданные после бэкапа); upsert дорезолит новое/старое.
+   *
    * @param {Object} archive - Архив из Account.parseArchive.
    */
   function confirmImport(archive) {
-    Modal.confirm(
-      I18n.t('account.import.file'),
-      I18n.t('account.import.confirm.d') + ' (' + archive.noteCount + ')',
-      async () => {
-        // Ключ в архиве: замена аккаунта (сброс базы) → затем заметки.
-        if (archive.ncryptsec && archive.pubkey) {
-          Toast.show('info', I18n.t('account.enter.done'));
-          const enter = await Account.enterKey(archive.ncryptsec, importPasswordPrompt);
-        }
+    /**
+     * @param {string} password - Пароль ncryptsec (может быть пустым).
+     */
+    const apply = async (password) => {
+      if (archive.ncryptsec && archive.pubkey) {
+        let currentPk = null;
+        try {
+          currentPk = (await Account.getAccountInfo()).pubkey;
+        } catch (_) {}
 
-        const count = await Account.importArchive(archive);
-        Toast.show('ok', I18n.t('account.import.done', { count }));
-      },
-      I18n.t('btn.import')
-    );
+        if (currentPk !== archive.pubkey) {
+          const enter = await Account.enterKey(archive.ncryptsec, password);
+          if (!enter.ok) {
+            Toast.show('err', I18n.t('account.enter.bad'));
+            return;
+          }
+          Toast.show('ok', I18n.t('account.enter.done'));
+        }
+      }
+
+      const count = await Account.importArchive(archive);
+      Toast.show('ok', I18n.t('account.import.done', { count }));
+    };
+
+    // Без ключа — обычное подтверждение.
+    if (!archive.ncryptsec) {
+      Modal.confirm(
+        I18n.t('account.import.file'),
+        I18n.t('account.import.confirm.d') + ' (' + archive.noteCount + ')',
+        () => { apply(''); },
+        I18n.t('btn.import')
+      );
+      return;
+    }
+
+    // С ключом — сначала пароль, затем применение.
+    const body = document.createElement('div');
+    body.className = 'acc-body';
+
+    const desc = document.createElement('div');
+    desc.className = 'acc-desc';
+    desc.textContent = I18n.t('account.import.confirm.d') + ' (' + archive.noteCount + ')';
+    body.appendChild(desc);
+
+    const pwField = document.createElement('div');
+    pwField.className = 'field';
+
+    const pwLabel = document.createElement('span');
+    pwLabel.className = 'field-label';
+    pwLabel.textContent = I18n.t('account.password.set');
+    pwField.appendChild(pwLabel);
+
+    const pwInput = document.createElement('input');
+    pwInput.type = 'password';
+    pwInput.className = 'field-input';
+    pwField.appendChild(pwInput);
+    body.appendChild(pwField);
+
+    const hint = document.createElement('div');
+    hint.className = 'field-hint';
+    hint.textContent = I18n.t('account.nsec.hint');
+    body.appendChild(hint);
+
+    Modal.open({
+      title: I18n.t('account.import.file'),
+      body,
+      buttons: [
+        { text: I18n.t('btn.cancel'), onClick: () => Modal.close() },
+        {
+          text: I18n.t('btn.import'),
+          primary: true,
+          onClick: () => {
+            Modal.close();
+            apply(pwInput.value);
+          },
+        },
+      ],
+    });
   }
 
-  /**
-   * Захват пароля для ncryptsec из архива через inline-модалку.
-   * Упрощение: запрашиваем пароль ДО применения — отдельной модалкой.
-   * (Реализация ниже: openImport сначала спрашивает пароль при ncryptsec.)
-   */
-  let importPasswordPrompt = '';
-
   // ─── Раздел: синк ─────────────────────────────────────────────────────────
+
+  /**
+   * Обновление индикатора статуса синка в ОТКРЫТОМ экране аккаунта.
+   * Подписка на sync:status живёт в init() — одна на всё время работы,
+   * листенеры не накапливаются при повторных открытиях экрана.
+   * @param {string} phase - 'off' | 'active' | 'idle'.
+   */
+  function paintSyncStatus(phase) {
+    const wrap = document.querySelector('.acc-sync');
+    if (!wrap) return;
+
+    const dot = wrap.querySelector('.dot');
+    const txt = wrap.querySelector('.acc-sync-txt');
+    if (!dot || !txt) return;
+
+    dot.className = 'dot '
+      + (phase === 'off' ? 'err'
+        : phase === 'active' ? 'load'
+        : 'ok');
+    txt.textContent = phase === 'off' ? I18n.t('account.sync.off')
+      : phase === 'active' ? I18n.t('account.sync.running')
+      : I18n.t('account.sync.on');
+  }
 
   /**
    * Ряд синка: переключатель + статус.
@@ -7861,18 +7978,17 @@ DI.register('AccountView', function (Account, Modal, Toast, I18n, Config, bus) {
     syncLine.appendChild(dot);
 
     const statusTxt = document.createElement('span');
+    statusTxt.className = 'acc-sync-txt';
     syncLine.appendChild(statusTxt);
 
     const toggleBtn = document.createElement('button');
     toggleBtn.className = 'nv-act';
     toggleBtn.style.cssText = 'flex:1;font-size:12px;';
-    row.appendChild(syncLine);
 
     function paint() {
       const enabled = Config.get('syncEnabled', true);
       toggleBtn.textContent = enabled ? I18n.t('account.sync.on') : I18n.t('account.sync.off');
       toggleBtn.classList.toggle('danger', !enabled);
-      syncLine.appendChild(toggleBtn);
     }
 
     toggleBtn.addEventListener('click', () => {
@@ -7880,24 +7996,19 @@ DI.register('AccountView', function (Account, Modal, Toast, I18n, Config, bus) {
       Account.setSyncEnabled(next);
       Toast.show('ok', I18n.t(next ? 'toast.sync.enabled' : 'toast.sync.disabled'));
       paint();
+      paintSyncStatus(next ? 'idle' : 'off');
     });
 
-    function paintStatus(phase) {
-      dot.className = 'dot '
-        + (phase === 'off' ? 'err'
-          : phase === 'active' ? 'load'
-          : 'ok');
-      statusTxt.textContent = phase === 'off' ? I18n.t('account.sync.off')
-        : phase === 'active' ? I18n.t('account.sync.running')
-        : I18n.t('account.sync.on');
-    }
-
-    unsubs.push(bus.on('sync:status', e => {
-      if (e && e.phase) paintStatus(e.phase);
-    }));
+    syncLine.appendChild(toggleBtn);
+    row.appendChild(syncLine);
 
     paint();
-    paintStatus(Config.get('syncEnabled', true) ? 'idle' : 'off');
+
+    // Начальный статус — красим локально (экран ещё не в DOM,
+    // paintSyncStatus его не найдёт; дальше живёт подписка из init).
+    const phase = Config.get('syncEnabled', true) ? 'idle' : 'off';
+    dot.className = 'dot ' + (phase === 'off' ? 'err' : phase === 'active' ? 'load' : 'ok');
+    statusTxt.textContent = phase === 'off' ? I18n.t('account.sync.off') : I18n.t('account.sync.on');
 
     return row;
   }
@@ -7911,7 +8022,7 @@ DI.register('AccountView', function (Account, Modal, Toast, I18n, Config, bus) {
     const body = document.createElement('div');
     body.className = 'acc-body';
 
-    // Секция 1: публичный адрес
+    // Секция 1: публичный адрес (npub) — асинхронно, вставляется первым.
     Account.getNpub().then(npub => {
       if (!npub) return;
 
@@ -8001,10 +8112,15 @@ DI.register('AccountView', function (Account, Modal, Toast, I18n, Config, bus) {
   }
 
   /**
-   * Инициализация: ничего тяжёлого — экран строится по требованию.
-   * Слушатель account:changed обновляет открытый экран.
+   * Инициализация: подписка на sync:status (одна, навсегда — статус
+   * красится только если экран аккаунта сейчас открыт) и на
+   * account:changed (пересборка открытого экрана после замены ключа).
    */
   function init() {
+    unsubs.push(bus.on('sync:status', e => {
+      if (e && e.phase) paintSyncStatus(e.phase);
+    }));
+
     unsubs.push(bus.on('account:changed', () => {
       // Ключ заменили — пересобираем экран, если открыт.
       const overlay = document.getElementById('overlay');
