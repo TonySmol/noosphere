@@ -5699,27 +5699,326 @@ DI.register('NoteActions', function (Notes, Modal, Toast, I18n) {
 
 // ─── UI/Modal ─── START ─────────────────────────────────────────────────────
 /**
- * [в10] Модалки: open/close/confirm, Escape, клик по overlay, возврат
- *      фокуса, автофокус, модификаторы primary/danger, класс .selected.
- * Deps: I18n
+ * Универсальная система модальных окон.
+ * Поддерживает: текстовые body, DOM-элементы, кнопки с primary/danger
+ * модификаторами.
+ *
+ * Доступность:
+ * - Закрытие по Escape
+ * - Закрытие по клику на overlay
+ * - Возврат фокуса на элемент, открывший модалку
+ * - Автофокус на первый интерактивный элемент
  */
+DI.register('Modal', function (I18n) {
+  let overlay, modal, titleEl, bodyEl, footEl, closeBtn;
+  let escHandler = null;
+  let lastFocus = null;
+
+  /** Ленивая привязка к DOM (однократно). */
+  function bind() {
+    if (overlay) return;
+
+    overlay = document.getElementById('overlay');
+    modal = document.getElementById('modal');
+    titleEl = document.getElementById('modal-t');
+    bodyEl = document.getElementById('modal-b');
+    footEl = document.getElementById('modal-f');
+    closeBtn = document.getElementById('modal-x');
+
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    if (overlay) overlay.addEventListener('click', e => {
+      if (e.target === overlay) close();
+    });
+  }
+
+  /**
+   * Открыть модальное окно.
+   * @param {Object} opts - Параметры модалки.
+   * @param {string} [opts.title] - Заголовок.
+   * @param {string|Element} [opts.body] - Тело: строка или DOM-элемент.
+   * @param {Array<{text: string, primary?: boolean, danger?: boolean, onClick: Function}>} [opts.buttons] - Кнопки футера.
+   */
+  function open(opts) {
+    bind();
+    if (!overlay) return;
+
+    opts = opts || {};
+    lastFocus = document.activeElement;
+
+    if (titleEl) titleEl.textContent = opts.title || '';
+
+    if (bodyEl) {
+      bodyEl.innerHTML = '';
+
+      if (opts.body) {
+        if (typeof opts.body === 'string') {
+          bodyEl.textContent = opts.body;
+        } else {
+          bodyEl.appendChild(opts.body);
+        }
+      }
+    }
+
+    if (footEl) {
+      footEl.innerHTML = '';
+
+      (opts.buttons || []).forEach(b => {
+        const btn = document.createElement('button');
+        btn.className = 'mbtn' + (b.primary ? ' primary' : '') + (b.danger ? ' danger' : '');
+        btn.textContent = b.text || 'OK';
+        btn.addEventListener('click', () => {
+          if (b.onClick) b.onClick();
+        });
+        footEl.appendChild(btn);
+      });
+    }
+
+    overlay.classList.add('on');
+
+    if (escHandler) document.removeEventListener('keydown', escHandler);
+    escHandler = e => {
+      if (e.key === 'Escape') close();
+    };
+    document.addEventListener('keydown', escHandler);
+
+    // Автофокус на первый интерактивный элемент после анимации появления
+    setTimeout(() => {
+      if (!modal) return;
+      const focusable = modal.querySelectorAll('button, input, textarea, [tabindex]:not([tabindex="-1"])');
+      if (focusable.length) focusable[0].focus();
+    }, 50);
+  }
+
+  /** Закрыть модальное окно. */
+  function close() {
+    if (!overlay) return;
+
+    overlay.classList.remove('on');
+
+    if (escHandler) {
+      document.removeEventListener('keydown', escHandler);
+      escHandler = null;
+    }
+
+    // Возврат фокуса на элемент, открывший модалку
+    if (lastFocus && lastFocus.focus) {
+      try { lastFocus.focus(); } catch (_) {}
+    }
+  }
+
+  /**
+   * Модальное окно подтверждения (2 кнопки: Отмена / OK).
+   * @param {string} title - Заголовок.
+   * @param {string} text - Текст.
+   * @param {Function} onOk - Колбэк подтверждения.
+   * @param {string} [okText] - Текст кнопки OK (по умолчанию 'OK').
+   */
+  function confirm(title, text, onOk, okText) {
+    open({
+      title,
+      body: text,
+      buttons: [
+        { text: I18n.t('btn.cancel'), onClick: close },
+        {
+          text: okText || 'OK',
+          primary: true,
+          danger: true,
+          onClick: () => {
+            close();
+            if (onOk) onOk();
+          },
+        },
+      ],
+    });
+  }
+
+  return { open, close, confirm };
+}, ['I18n']);
 // ─── UI/Modal ─── END ───────────────────────────────────────────────────────
 
 // ─── UI/Toast ─── START ─────────────────────────────────────────────────────
 /**
- * [в10] Тосты: 4 типа, лимит 3, автоудаление, fade-out, haptic
- *      (TelegramAdapter через runtime DI.resolve). Стили — классы .t-ic
- *      вместо инлайн (см. style.css, секция 12).
- * Deps: Config
+ * Всплывающие уведомления (тосты).
+ * - Держит не более `toastMaxVisible` уведомлений, старые вытесняет
+ * - Haptic feedback для Telegram Mini Apps (если доступен)
+ * - Автоудаление после `toastDefaultDuration` мс
+ *
+ * Типы: ok (зелёный), err (розовый), warn (янтарный), info (бирюзовый).
+ * Иконка — span.t-ic, цвета через классы .toast.ok/.err/.warn/.info
+ * (style.css, секция 12) — инлайн-стили v0.6 вынесены в CSS.
  */
+DI.register('Toast', function (Config) {
+  /** @type {Object<string, string>} */
+  const ICONS = { ok: '✓', err: '✕', warn: '!', info: '◆' };
+
+  /** @type {HTMLElement|null} */
+  let container = null;
+
+  /**
+   * Отправка haptic feedback через TelegramAdapter, если приложение
+   * запущено внутри Telegram. Безопасно: если TelegramAdapter не загружен
+   * или DI.resolve падает, ничего не происходит.
+   * @param {'ok'|'err'|'warn'|'info'} type - Тип уведомления.
+   */
+  function haptic(type) {
+    try {
+      const tg = DI.resolve('TelegramAdapter');
+      if (tg && tg.isTelegram()) {
+        if (type === 'ok') tg.hapticFeedback('success');
+        else if (type === 'err') tg.hapticFeedback('error');
+        else tg.hapticFeedback('light');
+      }
+    } catch (_) {}
+  }
+
+  /**
+   * Показать тост.
+   * @param {'ok'|'err'|'warn'|'info'} type - Тип уведомления.
+   * @param {string} msg - Текст сообщения.
+   * @param {number} [ms] - Длительность показа (по умолчанию из Config).
+   */
+  function show(type, msg, ms) {
+    if (!container) container = document.getElementById('toasts');
+    if (!container) return;
+
+    const cls = ICONS[type] ? type : 'info';
+    haptic(type);
+
+    const el = document.createElement('div');
+    el.className = 'toast ' + cls;
+
+    const ic = document.createElement('span');
+    ic.className = 't-ic';
+    ic.textContent = ICONS[cls];
+
+    const m = document.createElement('span');
+    m.textContent = String(msg || '');
+
+    el.appendChild(ic);
+    el.appendChild(m);
+    container.appendChild(el);
+
+    // Лимит количества видимых тостов: вытесняем старые
+    const limit = Config.get('toastMaxVisible', 3);
+    while (container.children.length > limit) {
+      container.removeChild(container.firstChild);
+    }
+
+    // Анимация исчезновения и удаление из DOM
+    setTimeout(() => {
+      el.style.transition = 'opacity .25s, transform .25s';
+      el.style.opacity = '0';
+      el.style.transform = 'translateY(6px)';
+
+      setTimeout(() => {
+        try { el.remove(); } catch (_) {}
+      }, 260);
+    }, ms || Config.get('toastDefaultDuration', 2200));
+  }
+
+  return { show };
+}, ['Config']);
 // ─── UI/Toast ─── END ───────────────────────────────────────────────────────
 
 // ─── UI/Progress ─── START ──────────────────────────────────────────────────
 /**
- * [в10] Оверлей загрузки модели: задержка показа 500мс, прогресс по
- *      ai:progress, скрытие по ai:status (model/demo).
- * Deps: EventBus
+ * Полноэкранный оверлей прогресса загрузки модели.
+ *
+ * Логика показа:
+ * - Показывается только если загрузка длится дольше SHOW_DELAY (500мс)
+ * - Это предотвращает мелькание при быстром кэшированном запуске
+ * - Скрывается автоматически при переходе в режим 'model' или 'demo'
+ *
+ * События:
+ * - 'ai:progress' — обновление прогресс-бара (pct, loadedMB, totalMB, model)
+ * - 'ai:status' — смена режима (loading/model/demo)
  */
+DI.register('Progress', function (bus) {
+  let overlay, fill, pctEl, infoEl;
+  let showTimer = null;
+  const SHOW_DELAY = 500;
+
+  /** Привязка к DOM. */
+  function bind() {
+    overlay = document.getElementById('progress');
+    fill = document.getElementById('prog-fill');
+    pctEl = document.getElementById('prog-pct');
+    infoEl = document.getElementById('prog-info');
+  }
+
+  /** Показать оверлей. */
+  function show() {
+    if (overlay) overlay.classList.add('on');
+  }
+
+  /** Скрыть оверлей. */
+  function hide() {
+    if (overlay) overlay.classList.remove('on');
+  }
+
+  /**
+   * Обновление прогресс-бара и подписей.
+   * @param {Object} data - {pct|percent, loadedMB, totalMB, model}.
+   */
+  function update(data) {
+    if (!data) return;
+
+    const p = Math.max(0, Math.min(100, Math.round(data.pct || data.percent || 0)));
+
+    if (fill) {
+      fill.style.width = p + '%';
+    }
+
+    if (pctEl) {
+      let text = p + '%';
+
+      if (data.loadedMB) {
+        text = data.loadedMB + ' MB';
+        if (data.totalMB) text += ' / ' + data.totalMB + ' MB';
+      }
+
+      pctEl.textContent = text;
+    }
+
+    if (infoEl && data.model) {
+      infoEl.textContent = data.model;
+    }
+  }
+
+  /**
+   * Инициализация: подписки на события эмбеддера.
+   */
+  function init() {
+    bind();
+
+    bus.on('ai:progress', e => update(e));
+
+    bus.on('ai:status', e => {
+      if (!e) return;
+
+      if (e.mode === 'loading') {
+        update(e);
+
+        // Показываем прогресс только если загрузка затянулась
+        if (!showTimer && overlay && !overlay.classList.contains('on')) {
+          showTimer = setTimeout(() => {
+            show();
+            showTimer = null;
+          }, SHOW_DELAY);
+        }
+      } else {
+        // Загрузка завершена (успех или fallback): скрываем
+        if (showTimer) {
+          clearTimeout(showTimer);
+          showTimer = null;
+        }
+        hide();
+      }
+    });
+  }
+
+  return { init, show, hide, update };
+}, ['EventBus']);
 // ─── UI/Progress ─── END ────────────────────────────────────────────────────
 
 // ─── UI/HeaderStatus ─── START ──────────────────────────────────────────────
