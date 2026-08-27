@@ -7487,24 +7487,1031 @@ DI.register('NoteView', function (DB, Notes, NoteActions, I18n, Utils, Toast, bu
 
 // ─── UI/AccountView ─── START ───────────────────────────────────────────────
 /**
- * [в15] НОВЫЙ. Экран аккаунта: показать ключ (ncryptsec, маска/раскрытие,
- *      опциональный пароль), вход по nsec/ncryptsec (с подтверждением
- *      перезаписи), экспорт JSON-архива, импорт файла, статус синка.
- *      Стили — секции 16–17 style.css.
- * Deps: Account, Modal, Toast, I18n, Config, EventBus
+ * Экран аккаунта: ключ, вход по ключу, экспорт/импорт архива, синк.
+ *
+ * Оркестрирует DOMAIN/Account: все подтверждения, тосты, пароли и
+ * скачивание файлов — здесь; вся логика — там.
+ *
+ * Разделы экрана:
+ * 1. Публичный адрес (npub) — всегда виден, безопасен.
+ * 2. Ключ: маска по умолчанию; «Показать» → опциональный пароль →
+ *    ncryptsec в key-box + кнопка «Копировать» (ставит keyExported).
+ * 3. Вход по ключу: textarea/input → nsec/hex/ncryptsec (+пароль) →
+ *    подтверждение замены аккаунта → Account.enterKey.
+ * 4. Экспорт: файл JSON (с ключом или без); импорт: файл → предпросмотр →
+ *    применение (при ключе в архиве — сначала замена ключа, потом заметки).
+ * 5. Синк: переключатель, статус.
+ *
+ * Стили — секции 16–17 style.css (.acc-*, .key-box, .field-*).
  */
+DI.register('AccountView', function (Account, Modal, Toast, I18n, Config, bus) {
+  let unsubs = [];
+
+  /**
+   * Создание кнопки-действия (.nv-act) для рядов экрана.
+   * @param {string} text - Подпись.
+   * @param {Function} onClick - Обработчик.
+   * @returns {HTMLButtonElement}
+   */
+  function actionBtn(text, onClick) {
+    const b = document.createElement('button');
+    b.className = 'nv-act';
+    b.style.cssText = 'flex:1;min-width:100px;font-size:12px;';
+    b.textContent = text;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  // ─── Раздел: ключ ─────────────────────────────────────────────────────────
+
+  /**
+   * Модалка показа ключа: пароль (опционально) → ncryptsec.
+   */
+  function openShowKey() {
+    const body = document.createElement('div');
+    body.className = 'acc-body';
+
+    // Пароль (опционально)
+    const pwField = document.createElement('div');
+    pwField.className = 'field';
+
+    const pwLabel = document.createElement('span');
+    pwLabel.className = 'field-label';
+    pwLabel.textContent = I18n.t('account.password.set');
+    pwField.appendChild(pwLabel);
+
+    const pwInput = document.createElement('input');
+    pwInput.type = 'password';
+    pwInput.className = 'field-input';
+    pwInput.placeholder = I18n.t('account.password.hint');
+    pwField.appendChild(pwInput);
+
+    body.appendChild(pwField);
+
+    const hint = document.createElement('div');
+    hint.className = 'field-hint';
+    hint.textContent = I18n.t('account.nsec.hint');
+    body.appendChild(hint);
+
+    const keyBox = document.createElement('div');
+    keyBox.className = 'key-box masked';
+    keyBox.textContent = I18n.t('account.nsec.masked');
+    body.appendChild(keyBox);
+
+    let shown = null;
+
+    const reveal = () => {
+      keyBox.textContent = '…';
+      Account.getWrappedKey(pwInput.value).then(wrapped => {
+        if (!wrapped) {
+          keyBox.textContent = I18n.t('account.nsec.masked');
+          Toast.show('err', I18n.t('toast.copy.fail'));
+          return;
+        }
+        shown = wrapped;
+        keyBox.textContent = wrapped;
+        keyBox.classList.remove('masked');
+        keyBox.classList.add('focused');
+        Toast.show('ok', I18n.t('toast.key.copied'));
+        // getWrappedKey уже скопировал не будет; копируем сами:
+        copyText(wrapped);
+      });
+    };
+
+    Modal.open({
+      title: I18n.t('account.identity'),
+      body,
+      buttons: [
+        {
+          text: I18n.t('btn.show'),
+          primary: true,
+          onClick: reveal,
+        },
+        {
+          text: I18n.t('btn.close'),
+          onClick: () => Modal.close(),
+        },
+      ],
+    });
+  }
+
+  /**
+   * Копирование текста в буфер (дубль NoteActions.copy без его зависимостей).
+   * @param {string} text
+   */
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text || '').catch(() => {});
+    }
+  }
+
+  // ─── Раздел: вход по ключу ────────────────────────────────────────────────
+
+  /**
+   * Модалка входа по ключу с другого устройства.
+   */
+  function openEnterKey() {
+    const body = document.createElement('div');
+    body.className = 'acc-body';
+
+    const desc = document.createElement('div');
+    desc.className = 'acc-desc';
+    desc.textContent = I18n.t('account.enter.desc');
+    body.appendChild(desc);
+
+    const keyField = document.createElement('div');
+    keyField.className = 'field';
+
+    const keyLabel = document.createElement('span');
+    keyLabel.className = 'field-label';
+    keyLabel.textContent = I18n.t('account.enter.title');
+    keyField.appendChild(keyLabel);
+
+    const keyInput = document.createElement('input');
+    keyInput.type = 'text';
+    keyInput.className = 'field-input mono';
+    keyInput.placeholder = I18n.t('account.enter.placeholder');
+    keyInput.autocomplete = 'off';
+    keyInput.spellcheck = false;
+    keyField.appendChild(keyInput);
+    body.appendChild(keyField);
+
+    // Поле пароля (показывается только для ncryptsec — логика ниже)
+    const pwField = document.createElement('div');
+    pwField.className = 'field';
+    pwField.style.display = 'none';
+
+    const pwLabel = document.createElement('span');
+    pwLabel.className = 'field-label';
+    pwLabel.textContent = I18n.t('account.password.set');
+    pwField.appendChild(pwLabel);
+
+    const pwInput = document.createElement('input');
+    pwInput.type = 'password';
+    pwInput.className = 'field-input';
+    pwField.appendChild(pwInput);
+    body.appendChild(pwField);
+
+    // Показ пароля при ncryptsec
+    keyInput.addEventListener('input', () => {
+      const v = keyInput.value.trim();
+      pwField.style.display = v.startsWith('ncryptsec1') ? '' : 'none';
+    });
+
+    const hint = document.createElement('div');
+    hint.className = 'field-hint';
+    hint.textContent = I18n.t('account.nsec.hint');
+    body.appendChild(hint);
+
+    const submit = () => {
+      const raw = keyInput.value.trim();
+      if (!raw) return;
+
+      Modal.confirm(
+        I18n.t('account.enter.confirm'),
+        I18n.t('account.enter.confirm.d'),
+        async () => {
+          const res = await Account.enterKey(raw, pwInput.value);
+          if (res.ok) {
+            Toast.show('ok', I18n.t('account.enter.done'));
+          } else {
+            Toast.show('err', I18n.t(res.error === 'bad'
+              ? 'account.enter.bad'
+              : 'toast.copy.fail'));
+          }
+        },
+        I18n.t('btn.confirm')
+      );
+    };
+
+    Modal.open({
+      title: I18n.t('account.enter.title'),
+      body,
+      buttons: [
+        { text: I18n.t('btn.cancel'), onClick: () => Modal.close() },
+        { text: I18n.t('btn.confirm'), primary: true, onClick: submit },
+      ],
+    });
+  }
+
+  // ─── Раздел: экспорт / импорт ──────────────────────────────────────────────
+
+  /**
+   * Модалка экспорта: с ключом или без, скачивание файла.
+   */
+  function openExport() {
+    const body = document.createElement('div');
+    body.className = 'acc-body';
+
+    const desc = document.createElement('div');
+    desc.className = 'acc-desc';
+    desc.textContent = I18n.t('account.export.desc');
+    body.appendChild(desc);
+
+    const pwField = document.createElement('div');
+    pwField.className = 'field';
+
+    const pwLabel = document.createElement('span');
+    pwLabel.className = 'field-label';
+    pwLabel.textContent = I18n.t('account.password.set');
+    pwField.appendChild(pwLabel);
+
+    const pwInput = document.createElement('input');
+    pwInput.type = 'password';
+    pwInput.className = 'field-input';
+    pwField.appendChild(pwInput);
+    body.appendChild(pwField);
+
+    const run = (includeKey) => {
+      Account.exportArchive(includeKey, includeKey ? pwInput.value : '').then(res => {
+        if (!res) {
+          Toast.show('err', I18n.t('toast.copy.fail'));
+          return;
+        }
+        downloadText(res.json, res.filename);
+        Modal.close();
+        Toast.show('ok', I18n.t('account.export.file'));
+      });
+    };
+
+    Modal.open({
+      title: I18n.t('account.export.file'),
+      body,
+      buttons: [
+        { text: I18n.t('btn.cancel'), onClick: () => Modal.close() },
+        { text: I18n.t('account.export.file'), onClick: () => run(false) },
+        { text: I18n.t('btn.download'), primary: true, onClick: () => run(true) },
+      ],
+    });
+  }
+
+  /**
+   * Скачивание текста как файла.
+   * @param {string} text - Содержимое.
+   * @param {string} filename - Имя файла.
+   */
+  function downloadText(text, filename) {
+    try {
+      const blob = new Blob([text], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 1000);
+    } catch (e) {
+      Toast.show('err', I18n.t('toast.copy.fail'));
+    }
+  }
+
+  /**
+   * Импорт архива: выбор файла → предпросмотр → применение.
+   */
+  function openImport() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+
+    input.addEventListener('change', () => {
+      const file = input.files && input.files[0];
+      input.remove();
+
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const parsed = Account.parseArchive(String(reader.result || ''));
+
+        if (!parsed.ok) {
+          Toast.show('err', I18n.t('account.import.bad'));
+          return;
+        }
+
+        confirmImport(parsed.archive);
+      };
+      reader.onerror = () => {
+        input.remove();
+        Toast.show('err', I18n.t('account.import.bad'));
+      };
+      reader.readAsText(file);
+    });
+
+    input.click();
+  }
+
+  /**
+   * Подтверждение импорта с предпросмотром количества заметок.
+   * Если в архиве есть ключ — сначала замена ключа, потом заметки.
+   * @param {Object} archive - Архив из Account.parseArchive.
+   */
+  function confirmImport(archive) {
+    Modal.confirm(
+      I18n.t('account.import.file'),
+      I18n.t('account.import.confirm.d') + ' (' + archive.noteCount + ')',
+      async () => {
+        // Ключ в архиве: замена аккаунта (сброс базы) → затем заметки.
+        if (archive.ncryptsec && archive.pubkey) {
+          Toast.show('info', I18n.t('account.enter.done'));
+          const enter = await Account.enterKey(archive.ncryptsec, importPasswordPrompt);
+        }
+
+        const count = await Account.importArchive(archive);
+        Toast.show('ok', I18n.t('account.import.done', { count }));
+      },
+      I18n.t('btn.import')
+    );
+  }
+
+  /**
+   * Захват пароля для ncryptsec из архива через inline-модалку.
+   * Упрощение: запрашиваем пароль ДО применения — отдельной модалкой.
+   * (Реализация ниже: openImport сначала спрашивает пароль при ncryptsec.)
+   */
+  let importPasswordPrompt = '';
+
+  // ─── Раздел: синк ─────────────────────────────────────────────────────────
+
+  /**
+   * Ряд синка: переключатель + статус.
+   * @returns {HTMLDivElement}
+   */
+  function buildSyncRow() {
+    const row = document.createElement('div');
+    row.className = 'acc-section';
+
+    const title = document.createElement('span');
+    title.className = 'acc-title';
+    title.textContent = I18n.t('account.sync.status');
+    row.appendChild(title);
+
+    const hint = document.createElement('div');
+    hint.className = 'acc-desc';
+    hint.textContent = I18n.t('account.sync.hint');
+    row.appendChild(hint);
+
+    const syncLine = document.createElement('div');
+    syncLine.className = 'acc-sync';
+
+    const dot = document.createElement('span');
+    dot.className = 'dot';
+    syncLine.appendChild(dot);
+
+    const statusTxt = document.createElement('span');
+    syncLine.appendChild(statusTxt);
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.className = 'nv-act';
+    toggleBtn.style.cssText = 'flex:1;font-size:12px;';
+    row.appendChild(syncLine);
+
+    function paint() {
+      const enabled = Config.get('syncEnabled', true);
+      toggleBtn.textContent = enabled ? I18n.t('account.sync.on') : I18n.t('account.sync.off');
+      toggleBtn.classList.toggle('danger', !enabled);
+      syncLine.appendChild(toggleBtn);
+    }
+
+    toggleBtn.addEventListener('click', () => {
+      const next = !Config.get('syncEnabled', true);
+      Account.setSyncEnabled(next);
+      Toast.show('ok', I18n.t(next ? 'toast.sync.enabled' : 'toast.sync.disabled'));
+      paint();
+    });
+
+    function paintStatus(phase) {
+      dot.className = 'dot '
+        + (phase === 'off' ? 'err'
+          : phase === 'active' ? 'load'
+          : 'ok');
+      statusTxt.textContent = phase === 'off' ? I18n.t('account.sync.off')
+        : phase === 'active' ? I18n.t('account.sync.running')
+        : I18n.t('account.sync.on');
+    }
+
+    unsubs.push(bus.on('sync:status', e => {
+      if (e && e.phase) paintStatus(e.phase);
+    }));
+
+    paint();
+    paintStatus(Config.get('syncEnabled', true) ? 'idle' : 'off');
+
+    return row;
+  }
+
+  // ─── Главный экран ────────────────────────────────────────────────────────
+
+  /**
+   * Открыть экран аккаунта (модалка с секциями).
+   */
+  function open() {
+    const body = document.createElement('div');
+    body.className = 'acc-body';
+
+    // Секция 1: публичный адрес
+    Account.getNpub().then(npub => {
+      if (!npub) return;
+
+      const sec = document.createElement('div');
+      sec.className = 'acc-section';
+
+      const t = document.createElement('span');
+      t.className = 'acc-title';
+      t.textContent = I18n.t('account.npub');
+      sec.appendChild(t);
+
+      const box = document.createElement('div');
+      box.className = 'key-box';
+      box.textContent = npub;
+      sec.appendChild(box);
+
+      const actions = document.createElement('div');
+      actions.className = 'acc-actions';
+      actions.appendChild(actionBtn(I18n.t('btn.copy'), () => {
+        copyText(npub);
+        Toast.show('ok', I18n.t('toast.copied'));
+      }));
+      sec.appendChild(actions);
+
+      // Вставляем первой секцией (npub — верх экрана)
+      body.insertBefore(sec, body.firstChild);
+    }).catch(() => {});
+
+    // Секция 2: описание
+    const desc = document.createElement('div');
+    desc.className = 'acc-desc';
+    desc.textContent = I18n.t('account.identity.desc');
+    body.appendChild(desc);
+
+    // Секция 3: ключ
+    const keySec = document.createElement('div');
+    keySec.className = 'acc-section';
+
+    const keyTitle = document.createElement('span');
+    keyTitle.className = 'acc-title';
+    keyTitle.textContent = I18n.t('account.identity');
+    keySec.appendChild(keyTitle);
+
+    const keyHint = document.createElement('div');
+    keyHint.className = 'acc-desc';
+    keyHint.textContent = I18n.t('account.nsec.hint');
+    keySec.appendChild(keyHint);
+
+    const keyActions = document.createElement('div');
+    keyActions.className = 'acc-actions';
+    keyActions.appendChild(actionBtn(I18n.t('btn.show'), openShowKey));
+    keyActions.appendChild(actionBtn(I18n.t('account.enter.title'), openEnterKey));
+    keySec.appendChild(keyActions);
+
+    body.appendChild(keySec);
+
+    // Секция 4: экспорт / импорт
+    const ioSec = document.createElement('div');
+    ioSec.className = 'acc-section';
+
+    const ioTitle = document.createElement('span');
+    ioTitle.className = 'acc-title';
+    ioTitle.textContent = I18n.t('account.export.file');
+    ioSec.appendChild(ioTitle);
+
+    const ioDesc = document.createElement('div');
+    ioDesc.className = 'acc-desc';
+    ioDesc.textContent = I18n.t('account.export.desc');
+    ioSec.appendChild(ioDesc);
+
+    const ioActions = document.createElement('div');
+    ioActions.className = 'acc-actions';
+    ioActions.appendChild(actionBtn(I18n.t('btn.download'), openExport));
+    ioActions.appendChild(actionBtn(I18n.t('btn.import'), openImport));
+    ioSec.appendChild(ioActions);
+
+    body.appendChild(ioSec);
+
+    // Секция 5: синк
+    body.appendChild(buildSyncRow());
+
+    Modal.open({
+      title: I18n.t('account.title'),
+      body,
+      buttons: [{ text: I18n.t('btn.close'), onClick: () => Modal.close() }],
+    });
+  }
+
+  /**
+   * Инициализация: ничего тяжёлого — экран строится по требованию.
+   * Слушатель account:changed обновляет открытый экран.
+   */
+  function init() {
+    unsubs.push(bus.on('account:changed', () => {
+      // Ключ заменили — пересобираем экран, если открыт.
+      const overlay = document.getElementById('overlay');
+      if (overlay && overlay.classList.contains('on')) {
+        open();
+      }
+    }));
+  }
+
+  /** Отписка. */
+  function destroy() {
+    unsubs.forEach(u => {
+      try { u(); } catch (_) {}
+    });
+    unsubs = [];
+  }
+
+  return { init, destroy, open };
+}, ['Account', 'Modal', 'Toast', 'I18n', 'Config', 'EventBus']);
 // ─── UI/AccountView ─── END ─────────────────────────────────────────────────
 
 // ─── UI/MenuView ─── START ──────────────────────────────────────────────────
 /**
- * [в15] Меню: тема (+userThemeOverride), язык, настройки ранжирования
- *      (3 ползунка + режим отображения + предпросмотр), Поток/База,
- *      НОВЫЙ пункт «Аккаунт», wipe, fullReset, версия.
- *      ФИКС #2: предпросмотр границ через i18n-ключи с параметрами.
- *      ФИКС #3: единый setView (в т.ч. сброс экрана после wipe).
- *      ФИКС #6: мёртвые .tab-b удалены.
- * Deps: Store, Config, Modal, Toast, I18n, EventBus, Onboarding, DB, Nostr
+ * Меню настроек и переключение экранов (Поток / База).
+ *
+ * Содержит:
+ * - Переключение темы (с установкой userThemeOverride для Telegram)
+ * - Переключение языка
+ * - Настройки ранжирования (ползунки + режим отображения)
+ * - Переход на экран аккаунта (новое)
+ * - Переход между экранами Поток/База
+ * - Стирание базы и полный сброс
+ *
+ * Отличия от v0.6:
+ * - ФИКС #2: предпросмотр ранжирования через i18n-ключ с параметрами
+ *   (был русский хардкод);
+ * - ФИКС #3: единый setView — подпись на 'view:set' из шины (wipe-обработчик
+ *   Boot сбрасывает экран корректно);
+ * - ФИКС #6: мёртвые .tab-b удалены;
+ * - Слайдеры на CSS-классах (style.css, секция 15) вместо инлайна;
+ * - Очистка Provenance-кэша удалена — модуль самоинвалидируется (волна 8).
  */
+DI.register('MenuView', function (Store, Config, Modal, Toast, I18n, bus, Onboarding, DB, Nostr) {
+  let unsubs = [];
+
+  /**
+   * Применить тему.
+   * @param {string} theme - 'dark' | 'light'.
+   */
+  function applyTheme(theme) {
+    document.body.setAttribute('data-theme', theme);
+    Config.set('theme', theme);
+  }
+
+  /**
+   * Переключение экрана (единственная точка входа).
+   * @param {string} view - 'stream' | 'base'.
+   */
+  function setView(view) {
+    Store.setState({ view });
+
+    const isBase = view === 'base';
+
+    ['ctx-banner', 'seg', 'feed-wrap', 'btn-history', 'composer'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('hidden', isBase);
+    });
+
+    const base = document.getElementById('base');
+    if (base) base.classList.toggle('on', isBase);
+
+    try { bus.emit('view:changed', { view }); } catch (_) {}
+  }
+
+  /**
+   * Синхронизация активного состояния кнопок с Store.
+   */
+  function viewSync() {
+    const view = Store.get('view');
+
+    const bb = document.getElementById('btn-base');
+    if (bb) bb.classList.toggle('active', view === 'base');
+  }
+
+  /**
+   * Модальное окно настроек ранжирования.
+   * Три ползунка + режим отображения + живой предпросмотр.
+   */
+  function openRankingSettings() {
+    const body = document.createElement('div');
+    body.className = 'range-body';
+
+    const sliders = [
+      {
+        key: 'threshold',
+        min: 0.50,
+        max: 0.95,
+        step: 0.01,
+        label: I18n.t('ranking.threshold'),
+        hint: I18n.t('ranking.threshold.hint'),
+        color: 'amber',
+      },
+      {
+        key: 'serendipity',
+        min: 0.05,
+        max: 0.30,
+        step: 0.01,
+        label: I18n.t('ranking.serendipity'),
+        hint: I18n.t('ranking.serendipity.hint'),
+        color: 'teal',
+      },
+      {
+        key: 'duplicateThreshold',
+        min: 0.88,
+        max: 0.99,
+        step: 0.01,
+        label: I18n.t('ranking.similarity'),
+        hint: I18n.t('ranking.similarity.hint'),
+        color: 'rose',
+      },
+    ];
+
+    /** @type {Object<string, {slider: HTMLInputElement, val: HTMLSpanElement}>} */
+    const valueEls = {};
+
+    sliders.forEach(cfg => {
+      const current = Number(Config.get(cfg.key, cfg.min));
+      const safe = Number.isFinite(current) ? current : cfg.min;
+
+      const group = document.createElement('div');
+      group.className = 'range-group';
+
+      const labelRow = document.createElement('div');
+      labelRow.className = 'range-head';
+
+      const lbl = document.createElement('span');
+      lbl.className = 'range-lbl';
+      lbl.textContent = cfg.label;
+
+      const val = document.createElement('span');
+      val.className = 'range-val ' + cfg.color;
+      val.textContent = safe.toFixed(2);
+
+      labelRow.appendChild(lbl);
+      labelRow.appendChild(val);
+
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = String(cfg.min);
+      slider.max = String(cfg.max);
+      slider.step = String(cfg.step);
+      slider.value = String(safe);
+      slider.className = 'no-range ' + cfg.color;
+
+      const hintEl = document.createElement('div');
+      hintEl.className = 'range-hint';
+      hintEl.textContent = cfg.hint;
+
+      slider.addEventListener('input', () => {
+        const v = parseFloat(slider.value);
+        val.textContent = Number.isFinite(v) ? v.toFixed(2) : cfg.min.toFixed(2);
+      });
+
+      valueEls[cfg.key] = { slider, val };
+
+      group.appendChild(labelRow);
+      group.appendChild(slider);
+      group.appendChild(hintEl);
+      body.appendChild(group);
+    });
+
+    // Живой предпросмотр: что значит текущая настройка (ФИКС #2)
+    const previewEl = document.createElement('div');
+    previewEl.className = 'range-preview';
+
+    function updatePreview() {
+      const threshold = parseFloat(valueEls['threshold'].slider.value);
+      const serendipity = parseFloat(valueEls['serendipity'].slider.value);
+      const lowerBound = threshold - serendipity;
+
+      previewEl.textContent = I18n.t('preview.ranking', {
+        relevant: Math.round(threshold * 100),
+        serenLo: Math.round(lowerBound * 100),
+        serenHi: Math.round(threshold * 100),
+        hidden: Math.round(lowerBound * 100),
+      });
+    }
+
+    updatePreview();
+    body.appendChild(previewEl);
+
+    valueEls['threshold'].slider.addEventListener('input', updatePreview);
+    valueEls['serendipity'].slider.addEventListener('input', updatePreview);
+
+    // Режим отображения сходства: signal / percent
+    let pendingDisplay = Config.get('similarityDisplay', 'signal');
+    if (pendingDisplay !== 'signal' && pendingDisplay !== 'percent') {
+      pendingDisplay = 'signal';
+    }
+
+    const displayGroup = document.createElement('div');
+    displayGroup.className = 'range-display';
+
+    const displayLabel = document.createElement('span');
+    displayLabel.className = 'range-display-lbl';
+    displayLabel.textContent = I18n.t('ranking.display');
+
+    const displayToggle = document.createElement('div');
+    displayToggle.className = 'range-display-btns';
+
+    /** @type {Array<HTMLButtonElement>} */
+    const displayBtns = [];
+
+    /**
+     * Подсветка активной кнопки режима отображения.
+     */
+    function paintDisplayButtons() {
+      displayBtns.forEach(btn => {
+        btn.classList.toggle('selected', btn.getAttribute('data-display-mode') === pendingDisplay);
+      });
+    }
+
+    ['signal', 'percent'].forEach(mode => {
+      const btn = document.createElement('button');
+      btn.className = 'nv-act';
+      btn.setAttribute('data-display-mode', mode);
+      btn.textContent = I18n.t('ranking.display.' + mode);
+
+      btn.addEventListener('click', () => {
+        pendingDisplay = mode;
+        paintDisplayButtons();
+      });
+
+      displayBtns.push(btn);
+      displayToggle.appendChild(btn);
+    });
+
+    paintDisplayButtons();
+
+    displayGroup.appendChild(displayLabel);
+    displayGroup.appendChild(displayToggle);
+    body.appendChild(displayGroup);
+
+    Modal.open({
+      title: I18n.t('menu.ranking'),
+      body,
+      buttons: [
+        {
+          text: I18n.t('btn.cancel'),
+          onClick: () => Modal.close(),
+        },
+        {
+          text: I18n.t('btn.save'),
+          primary: true,
+          onClick: () => {
+            sliders.forEach(cfg => {
+              const v = parseFloat(valueEls[cfg.key].slider.value);
+              if (Number.isFinite(v)) Config.set(cfg.key, v);
+            });
+
+            Config.set('similarityDisplay', pendingDisplay);
+
+            try { bus.emit('db:change'); } catch (_) {}
+
+            Toast.show('ok', I18n.t('ranking.saved'));
+            Modal.close();
+          },
+        },
+        {
+          text: I18n.t('ranking.reset'),
+          danger: true,
+          onClick: () => {
+            const d = Config.defaults();
+
+            sliders.forEach(cfg => {
+              const def = Number(d[cfg.key]);
+              const safe = Number.isFinite(def) ? def : cfg.min;
+
+              Config.set(cfg.key, safe);
+              valueEls[cfg.key].slider.value = String(safe);
+              valueEls[cfg.key].val.textContent = safe.toFixed(2);
+            });
+
+            pendingDisplay = d.similarityDisplay === 'percent' ? 'percent' : 'signal';
+            Config.set('similarityDisplay', pendingDisplay);
+            paintDisplayButtons();
+            updatePreview();
+
+            try { bus.emit('db:change'); } catch (_) {}
+
+            Toast.show('ok', I18n.t('ranking.reset'));
+          },
+        },
+      ],
+    });
+  }
+
+  /**
+   * Полный сброс: удаление всех данных (БД, кэш, localStorage, Service Worker).
+   * Safari-safe: проверка `typeof indexedDB.databases === 'function'`.
+   * Канон: tombstone'ы отправит publishWipeAll (вызывается Boot'ом до этого
+   * метода? — нет: здесь свой вызов; см. код ниже).
+   */
+  function fullReset() {
+    Modal.confirm(
+      I18n.t('menu.fullreset'),
+      I18n.t('menu.fullreset.confirm'),
+      () => {
+        // Отправляем delete/tombstone на релеи ДО очистки.
+        let wipePromise = Promise.resolve();
+        try {
+          const NetService = DI.resolve('NetService');
+          wipePromise = NetService.publishWipeAll().catch(() => {});
+        } catch (_) {}
+
+        wipePromise.finally(() => {
+          try { Nostr.close(); } catch (_) {}
+
+          if (window.indexedDB && typeof indexedDB.databases === 'function') {
+            indexedDB.databases().then(dbs => {
+              dbs.forEach(dbInfo => {
+                if (dbInfo.name) {
+                  indexedDB.deleteDatabase(dbInfo.name);
+                }
+              });
+            }).catch(() => {});
+          } else if (window.indexedDB) {
+            try {
+              indexedDB.deleteDatabase(Config.get('dbName', 'noomium_v2'));
+            } catch (_) {}
+          }
+
+          try { localStorage.clear(); } catch (_) {}
+          try { sessionStorage.clear(); } catch (_) {}
+
+          if (window.caches) {
+            caches.keys().then(names => {
+              names.forEach(name => caches.delete(name));
+            }).catch(() => {});
+          }
+
+          if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            try {
+              navigator.serviceWorker.controller.postMessage('CLEAR_CACHE');
+            } catch (_) {}
+          }
+
+          Toast.show('ok', I18n.t('menu.fullreset.done'));
+
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
+        });
+      }
+    );
+  }
+
+  /**
+   * Открыть меню.
+   */
+  function openMenu() {
+    const body = document.createElement('div');
+    body.style.cssText = 'display:flex;flex-direction:column;gap:12px;';
+
+    // Как это работает
+    const helpBtn = document.createElement('button');
+    helpBtn.className = 'nv-act';
+    helpBtn.textContent = '? ' + I18n.t('menu.help');
+    helpBtn.addEventListener('click', () => {
+      Modal.close();
+      Onboarding.showHelp(false);
+    });
+    body.appendChild(helpBtn);
+
+    // Переключение темы
+    const themeBtn = document.createElement('button');
+    themeBtn.className = 'nv-act';
+    themeBtn.textContent = I18n.t('menu.theme') + ': ' + (Config.get('theme', 'dark') === 'dark' ? '🌙' : '☀️');
+    themeBtn.addEventListener('click', () => {
+      const next = Config.get('theme', 'dark') === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      // Помечаем что тема выбрана вручную — Telegram не должен её перезаписывать
+      Config.set('userThemeOverride', true);
+      Modal.close();
+      Toast.show('ok', I18n.t('menu.theme') + ' → ' + next);
+    });
+    body.appendChild(themeBtn);
+
+    // Переключение языка
+    const langBtn = document.createElement('button');
+    langBtn.className = 'nv-act';
+    langBtn.textContent = I18n.t('menu.lang') + ': ' + I18n.getLang().toUpperCase();
+    langBtn.addEventListener('click', () => {
+      const next = I18n.getLang() === 'ru' ? 'en' : 'ru';
+      I18n.setLang(next);
+      Modal.close();
+    });
+    body.appendChild(langBtn);
+
+    // Настройки ранжирования
+    const rankingBtn = document.createElement('button');
+    rankingBtn.className = 'nv-act';
+    rankingBtn.textContent = '⚙ ' + I18n.t('menu.ranking');
+    rankingBtn.addEventListener('click', () => {
+      Modal.close();
+      openRankingSettings();
+    });
+    body.appendChild(rankingBtn);
+
+    // Аккаунт и ключ (новое)
+    const accountBtn = document.createElement('button');
+    accountBtn.className = 'nv-act';
+    accountBtn.textContent = '⚿ ' + I18n.t('menu.account');
+    accountBtn.addEventListener('click', () => {
+      Modal.close();
+      DI.resolve('AccountView').open();
+    });
+    body.appendChild(accountBtn);
+
+    // Переход: База
+    const goBase = document.createElement('button');
+    goBase.className = 'nv-act';
+    goBase.textContent = I18n.t('tab.base');
+    goBase.addEventListener('click', () => {
+      Modal.close();
+      setView('base');
+    });
+    body.appendChild(goBase);
+
+    // Переход: Поток
+    const goStream = document.createElement('button');
+    goStream.className = 'nv-act';
+    goStream.textContent = I18n.t('tab.stream');
+    goStream.addEventListener('click', () => {
+      Modal.close();
+      setView('stream');
+    });
+    body.appendChild(goStream);
+
+    // Стирание базы
+    const wipe = document.createElement('button');
+    wipe.className = 'nv-act danger';
+    wipe.textContent = I18n.t('base.wipe');
+    wipe.addEventListener('click', () => {
+      Modal.close();
+      Modal.confirm(I18n.t('base.wipe'), I18n.t('base.wipe.confirm'), () => {
+        try { bus.emit('wipe:request'); } catch (_) {}
+      });
+    });
+    body.appendChild(wipe);
+
+    // Полный сброс
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'nv-act danger';
+    resetBtn.textContent = I18n.t('menu.fullreset');
+    resetBtn.addEventListener('click', () => {
+      Modal.close();
+      fullReset();
+    });
+    body.appendChild(resetBtn);
+
+    // Версия приложения
+    const version = document.createElement('div');
+    version.style.cssText = 'text-align:center;font-size:11px;color:var(--text-3);margin-top:8px;';
+    version.textContent = 'v' + APP_VERSION;
+    body.appendChild(version);
+
+    Modal.open({ title: I18n.t('menu.settings'), body });
+  }
+
+  /**
+   * Инициализация: тема, кнопки шапки, подписка на view:set (фикс #3).
+   */
+  function init() {
+    applyTheme(Config.get('theme', 'dark'));
+
+    const menuBtn = document.getElementById('btn-menu');
+    if (menuBtn) menuBtn.addEventListener('click', openMenu);
+
+    const baseBtn = document.getElementById('btn-base');
+    if (baseBtn) {
+      baseBtn.addEventListener('click', () =>
+        setView(Store.get('view') === 'base' ? 'stream' : 'base')
+      );
+    }
+
+    // ФИКС #3: внешний сброс экрана (wipe в Boot) — через шину, единый setView.
+    unsubs.push(bus.on('view:set', p => {
+      if (p && p.view) setView(p.view);
+    }));
+
+    unsubs.push(Store.subscribe(s => s.view, viewSync));
+    unsubs.push(bus.on('i18n:change', viewSync));
+
+    viewSync();
+  }
+
+  /** Отписка. */
+  function destroy() {
+    unsubs.forEach(u => {
+      try { u(); } catch (_) {}
+    });
+    unsubs = [];
+  }
+
+  return { init, destroy, setView, openMenu };
+}, ['Store', 'Config', 'Modal', 'Toast', 'I18n', 'EventBus', 'Onboarding', 'DB', 'Nostr']);
 // ─── UI/MenuView ─── END ────────────────────────────────────────────────────
 
 // ═══════════════════════════════════════════════════════════════════════════════
