@@ -4588,20 +4588,318 @@ DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Con
 
 // ─── DOMAIN/Notes ─── START ─────────────────────────────────────────────────
 /**
- * [в7] CRUD заметок: create/edit/remove/toggleShared. uid стабилен,
- *      parentId — uid (при наличии пина). События note:created/updated/
- *      deleted/shared/unshared (NetService слушает и публикует 30078,
- *      для shared — дополнительно kind 1).
- * Deps: DB, Embedder, EventBus, Logger, Utils
+ * CRUD для локальных заметок.
+ * Каждая заметка при создании/редактировании получает вектор через Embedder.
+ * События: note:created, note:updated, note:deleted, note:shared, note:unshared.
+ *
+ * Модель v0.7:
+ * - id — стабильный uid (Utils.uid('n')), никогда не меняется;
+ * - parentId — всегда uid родителя (никаких eventId в ссылках);
+ * - syncTs — метка последнего локального изменения; NetService использует
+ *   её для LWW при синхронизации канона (kind 30078). Ставится при каждом
+ *   изменении: равенство syncTs у входящего события = эхо собственной
+ *   публикации, событие не применяется;
+ * - eventId — ссылка на публичную проекцию (kind 1), проставляется
+ *   NetService'ом после анонса.
  */
+DI.register('Notes', function (DB, Embedder, bus, Logger, Utils) {
+  /**
+   * Эмит события в шину (никогда не бросает).
+   * @param {string} event - Имя события.
+   * @param {*} payload - Полезная нагрузка.
+   */
+  function emit(event, payload) {
+    try { bus.emit(event, payload); } catch (_) {}
+  }
+
+  /**
+   * Создание заметки.
+   * @param {string} text - Текст заметки.
+   * @param {string} mode - 'private' или 'world'.
+   * @param {string|null} parentId - uid родительской заметки (связь «по мотивам»).
+   * @returns {Promise<Object|null>} Созданная заметка или null при пустом тексте.
+   */
+  function create(text, mode, parentId) {
+    const t = (text || '').trim();
+    if (!t) return Promise.resolve(null);
+
+    return Embedder.embed(t).then(vector => {
+      const now = Date.now();
+      const note = {
+        id: Utils.uid('n'),
+        text: t,
+        vector: vector ? Array.from(vector) : null,
+        shared: mode === 'world',
+        parentId: parentId || null,
+        parentPubkey: null,
+        createdAt: now,
+        updatedAt: now,
+        syncTs: now,
+      };
+
+      return DB.put(note).then(() => {
+        emit('note:created', note);
+        return note;
+      });
+    });
+  }
+
+  /**
+   * Редактирование заметки. Пересчитывает вектор.
+   * Публичные заметки редактировать нельзя (immutable в Nostr) —
+   * проверяется на уровне UI (NoteView), здесь не блокируется.
+   * @param {string} id - uid заметки.
+   * @param {string} newText - Новый текст.
+   * @returns {Promise<Object|null>} Обновлённая заметка или null.
+   */
+  function edit(id, newText) {
+    const t = (newText || '').trim();
+    if (!t) return Promise.resolve(null);
+
+    return DB.get(id).then(note => {
+      if (!note) return null;
+
+      return Embedder.embed(t).then(vector => {
+        const now = Date.now();
+        note.text = t;
+        note.vector = vector ? Array.from(vector) : null;
+        note.updatedAt = now;
+        note.syncTs = now;
+
+        return DB.put(note).then(() => {
+          emit('note:updated', note);
+          return note;
+        });
+      });
+    });
+  }
+
+  /**
+   * Удаление заметки.
+   * @param {string} id - uid заметки.
+   * @returns {Promise<Object|null>} Удалённая заметка (для NetService) или null.
+   */
+  function remove(id) {
+    return DB.get(id).then(note => {
+      if (!note) return null;
+
+      return DB.del(id).then(() => {
+        emit('note:deleted', note);
+        return note;
+      });
+    });
+  }
+
+  /**
+   * Переключение видимости: личное ↔ мир.
+   * При публикации NetService (слушает note:shared/note:unshared)
+   * обновляет канон и анонсирует/удаляет публичную проекцию.
+   * @param {string} id - uid заметки.
+   * @returns {Promise<Object|null>} Обновлённая заметка или null.
+   */
+  function toggleShared(id) {
+    return DB.get(id).then(note => {
+      if (!note) return null;
+
+      note.shared = !note.shared;
+      note.updatedAt = Date.now();
+      note.syncTs = Date.now();
+
+      return DB.put(note).then(() => {
+        emit(note.shared ? 'note:shared' : 'note:unshared', note);
+        return note;
+      });
+    });
+  }
+
+  /**
+   * Получить заметку по uid.
+   * @param {string} id
+   * @returns {Promise<Object|undefined>}
+   */
+  function get(id) {
+    return DB.get(id);
+  }
+
+  return { create, edit, remove, toggleShared, get };
+}, ['DB', 'Embedder', 'EventBus', 'Logger', 'Utils']);
 // ─── DOMAIN/Notes ─── END ───────────────────────────────────────────────────
 
 // ─── DOMAIN/Context ─── START ───────────────────────────────────────────────
 /**
- * [в7] Контекст поиска: pin / drift / input / none, приоритет drift > pin >
- *      input. Дебаунс-эмбеддинг 350мс с race-guard. Событие note:pin.
- * Deps: Store, Embedder, Config, Utils, EventBus
+ * Управление текущим контекстом поиска.
+ *
+ * Состояния контекста:
+ * - 'pin':   Заметка закреплена (клик по карточке). Лента показывает созвучное.
+ * - 'drift': Закреплённая заметка + пользователь печатает. Контекст плавно
+ *            смещается от закреплённой мысли к вводимому тексту.
+ * - 'input': Пользователь печатает без закреплённой заметки.
+ * - null:    Контекста нет. Лента в хронологическом порядке.
+ *
+ * Событие 'note:pin' от NoteView/FeedView активирует пин.
+ *
+ * pinNote хранит eventId, если родитель опубликован: Composer передаёт
+ * parentId = eventId || id (v0.6-семантика), NetService дополнительно
+ * резолвит ссылку родителя при публикации проекции.
  */
+DI.register('Context', function (Store, Embedder, Config, Utils, bus) {
+  /** @type {string} */
+  let inputText = '';
+  /** @type {Float32Array|null} */
+  let inputVector = null;
+  /** @type {Object|null} */
+  let pinNote = null;
+
+  /**
+   * Вычисление активного контекста на основе текущего состояния.
+   * Приоритет: drift > pin > input > none.
+   * @returns {Object} Контекст для Store.
+   */
+  function activeContext() {
+    const hasInput = !!inputText.trim();
+
+    if (pinNote && hasInput) {
+      return {
+        source: 'drift',
+        noteId: pinNote.id,
+        text: inputText.trim(),
+        vector: inputVector,
+        pinText: pinNote.text,
+      };
+    }
+
+    if (pinNote) {
+      return {
+        source: 'pin',
+        noteId: pinNote.id,
+        text: pinNote.text,
+        vector: pinNote.vector,
+      };
+    }
+
+    if (hasInput) {
+      return {
+        source: 'input',
+        noteId: null,
+        text: inputText.trim(),
+        vector: inputVector,
+      };
+    }
+
+    return {
+      source: null,
+      noteId: null,
+      text: '',
+      vector: null,
+      pinText: null,
+    };
+  }
+
+  /** Пуш активного контекста в Store. */
+  function push() {
+    Store.setState({ context: activeContext() });
+  }
+
+  /**
+   * Дебаунс для эмбеддинга вводимого текста.
+   * Если пользователь быстро печатает, вектор пересчитывается
+   * только после паузы в `debounce` мс.
+   */
+  const debouncedEmbed = Utils.debounce(() => {
+    const t = inputText.trim();
+    if (!t) {
+      inputVector = null;
+      push();
+      return;
+    }
+
+    Embedder.embed(t).then(v => {
+      // Защита от race condition: если текст изменился пока считался вектор,
+      // не применяем устаревший результат.
+      if (inputText.trim() === t) {
+        inputVector = v;
+        push();
+      }
+    });
+  }, Config.get('debounce', 350));
+
+  return {
+    /**
+     * Обновить вводимый текст (из Composer).
+     * @param {string} text - Текущее значение поля ввода.
+     */
+    setInput(text) {
+      inputText = text || '';
+      if (!inputText.trim()) inputVector = null;
+      push();
+      debouncedEmbed();
+    },
+
+    /**
+     * Закрепить заметку (пин).
+     * @param {Object} note - Заметка с вектором.
+     */
+    setPin(note) {
+      if (!note || !note.vector) return;
+      pinNote = {
+        id: note.id,
+        eventId: note.eventId || null,
+        text: note.text,
+        vector: note.vector,
+      };
+      push();
+    },
+
+    /** Снять пин. */
+    clearPin() {
+      pinNote = null;
+      push();
+    },
+
+    /** Полная очистка (ввод + пин). */
+    clear() {
+      inputText = '';
+      inputVector = null;
+      pinNote = null;
+      debouncedEmbed.cancel();
+      push();
+    },
+
+    /**
+     * Вектор активного контекста.
+     * @returns {Float32Array|Array<number>|null}
+     */
+    getVector() {
+      return activeContext().vector;
+    },
+
+    /**
+     * Активный контекст (снапшот).
+     * @returns {Object}
+     */
+    getActive() {
+      return activeContext();
+    },
+
+    /**
+     * Текущий пин (для Composer).
+     * @returns {Object|null}
+     */
+    getPin() {
+      return pinNote;
+    },
+
+    /**
+     * Инициализация: подписка на note:pin из шины.
+     * Вызывается через Context.init() (метод, не деструктуризация).
+     */
+    init() {
+      bus.on('note:pin', note => {
+        if (note) this.setPin(note);
+      });
+    },
+  };
+}, ['Store', 'Embedder', 'Config', 'Utils', 'EventBus']);
 // ─── DOMAIN/Context ─── END ─────────────────────────────────────────────────
 
 // ─── DOMAIN/Feed ─── START ──────────────────────────────────────────────────
