@@ -3259,17 +3259,1327 @@ DI.register('Protocol', function (Config, Vec, Crypto) {
 
 // ─── NET/NetService ─── START ───────────────────────────────────────────────
 /**
- * [в6] Оркестрация сети: подписка на комнату, outbox (announce/del,
- *      localStorage), token bucket входящих, центроиды + префильтр,
- *      heartbeat, online/offline, обработка 21000/21001/5.
- *      НОВОЕ: подписка на себя (authors = pk, kinds 30078/1/5) — живой синк;
- *      расшифровка входящих 30078 → DB.put; backsweep локальных заметок →
- *      30078 (одноразово, флаг syncMigrated); публикация 30078 на все
- *      операции из note:*; экспоненциальный реконнект
- *      (reconnectMaxAttempts / reconnectMaxDelay из Config).
- *      УДАЛЕНО: migrateChildrenParentId (uid стабилен).
- * Deps: Nostr, Protocol, Crypto, DB, Ranker, Vec, Store, Config, Logger, EventBus
+ * Оркестрация Nostr-сети: подписки, публикация, обработка входящих событий.
+ *
+ * Три канала:
+ * 1. Комнатная подписка (kind 1/21000/21001/5 по тегу t) — как в v0.6.
+ * 2. Подписка на себя (kind 30078, authors = свой pk) — живой синк между
+ *    устройствами. NIP-01: для replaceable-событий релей отдаёт только
+ *    последнюю версию каждого d-тега → restore = один дешёвый REQ.
+ * 3. Исходящая публикация: приватный канон (30078) на каждое изменение
+ *    заметки + публичная проекция (kind 1) для shared.
+ *
+ * LWW-модель канона:
+ * - note.syncTs ставится при локальной правке (Notes, волна 7) и при
+ *   применении входящего события;
+ * - входящий 30078 применяется только при syncTs > локального
+ *   (равенство = эхо собственной публикации → пропуск);
+ * - удаление канона — tombstone (30078 с del:true), НЕ kind 5:
+ *   replaceable-семантика гарантирует доставку всем устройствам.
+ *
+ * Удалено из v0.6: migrateChildrenParentId (uid стабилен, миграция
+ * идентификаторов больше не нужна).
+ *
+ * Outbox (localStorage «noomium:outbox») — четыре очереди:
+ * - priv:     uid'ы заметок, ждущих публикации канона (30078);
+ * - announce: uid'ы заметок, ждущих публичной проекции (kind 1);
+ * - del:      eventId'ы для kind 5 (удаление проекций);
+ * - privdel:  uid'ы для tombstone канона.
  */
+DI.register('NetService', function (Nostr, Protocol, DB, Ranker, Vec, Store, Config, Logger, bus) {
+  let started = false;
+  let startPromise = null;
+  let subscription = null;
+  let selfSubscription = null;
+  let hbTimer = null;
+  let activeQueryId = null;
+  let lastQueryVec = null;
+  let lastQueryTime = 0;
+  let centroids = [];
+  let contextUnsub = null;
+  let hasReceivedEvent = false;
+  let flushing = false;
+  let flushTimer = null;
+  let startRetryTimer = null;
+  let onlineListenerAdded = false;
+  let reconnectAttempts = 0;
+  let busUnsubs = [];
+
+  /** @type {Set<string>} seen для комнатной подписки. */
+  const seen = new Set();
+  /** @type {Set<string>} seen для подписки на себя (оптимизация расшифровки). */
+  const selfSeen = new Set();
+  /** @type {Map<string, boolean>} дедупликация контента pubkey::text. */
+  const contentSeen = new Map();
+  /** @type {Map<string, number>} активные пиры (последний контакт). */
+  const peers = new Map();
+  /** @type {Map<string, number>} время последнего запроса от пира. */
+  const peerQueryTimes = new Map();
+  /** @type {Map<string, {tokens:number, ts:number}>} token bucket'ы пиров. */
+  const peerNoteBudgets = new Map();
+
+  let currentWindow = Config.get('subWindow', 300);
+  let historyLoading = false;
+  let subEpoch = 0;
+
+  const OUTBOX_KEY = 'noomium:outbox';
+
+  /**
+   * Загрузка outbox из localStorage (четыре очереди, устойчиво к старому
+   * формату v0.6 без priv/privdel).
+   * @returns {{announce: string[], del: string[], priv: string[], privdel: string[]}}
+   */
+  function loadOutbox() {
+    try {
+      const raw = localStorage.getItem(OUTBOX_KEY);
+      if (raw) {
+        const o = JSON.parse(raw);
+        return {
+          announce: Array.isArray(o.announce) ? o.announce.filter(Boolean) : [],
+          del: Array.isArray(o.del) ? o.del.filter(Boolean) : [],
+          priv: Array.isArray(o.priv) ? o.priv.filter(Boolean) : [],
+          privdel: Array.isArray(o.privdel) ? o.privdel.filter(Boolean) : [],
+        };
+      }
+    } catch (_) {}
+
+    return { announce: [], del: [], priv: [], privdel: [] };
+  }
+
+  /** Сохранить outbox в localStorage. */
+  function saveOutbox() {
+    try {
+      localStorage.setItem(OUTBOX_KEY, JSON.stringify(outbox));
+    } catch (_) {}
+  }
+
+  let outbox = loadOutbox();
+
+  const kNote = () => Config.get('kNote', 1);
+  const kPrivate = () => Config.get('kPrivate', 30078);
+  const kQuery = () => Config.get('kQuery', 21000);
+  const kAnswer = () => Config.get('kAnswer', 21001);
+  const kDelete = () => Config.get('kDelete', 5);
+  const room = () => Config.get('room', 'noomium-main');
+
+  function setStatus(s) {
+    try { bus.emit('net:status', { status: s }); } catch (_) {}
+  }
+
+  function emitSync(phase) {
+    try { bus.emit('sync:status', { phase }); } catch (_) {}
+  }
+
+  function notifyPeers() {
+    try { bus.emit('net:peers', { count: peers.size }); } catch (_) {}
+  }
+
+  /**
+   * @param {boolean} loading
+   * @param {number} [windowSec]
+   */
+  function emitHistory(loading, windowSec) {
+    try { bus.emit('net:history', { loading: loading, window: windowSec }); } catch (_) {}
+  }
+
+  /** @returns {boolean} Браузер считает себя офлайн. */
+  function isOffline() {
+    return typeof navigator !== 'undefined' && navigator.onLine === false;
+  }
+
+  /** @returns {boolean} Можно ли публиковать. */
+  function canPublish() {
+    return Nostr.isReady() && !isOffline();
+  }
+
+  // ─── Outbox: очереди ──────────────────────────────────────────────────────
+
+  /** @param {string} id */
+  function queueAnnounce(id) {
+    if (!id) return;
+    if (outbox.announce.indexOf(id) === -1) {
+      outbox.announce.push(id);
+      saveOutbox();
+    }
+    scheduleFlush();
+  }
+
+  /** @param {string} id */
+  function unqueueAnnounce(id) {
+    if (!id) return;
+    const i = outbox.announce.indexOf(id);
+    if (i > -1) {
+      outbox.announce.splice(i, 1);
+      saveOutbox();
+    }
+  }
+
+  /** @param {string} id */
+  function queuePrivate(id) {
+    if (!id) return;
+    if (outbox.priv.indexOf(id) === -1) {
+      outbox.priv.push(id);
+      saveOutbox();
+    }
+    scheduleFlush();
+  }
+
+  /** @param {string} id */
+  function unqueuePrivate(id) {
+    if (!id) return;
+    const i = outbox.priv.indexOf(id);
+    if (i > -1) {
+      outbox.priv.splice(i, 1);
+      saveOutbox();
+    }
+  }
+
+  /** @param {string} id */
+  function queuePrivDel(id) {
+    if (!id) return;
+    if (outbox.privdel.indexOf(id) === -1) {
+      outbox.privdel.push(id);
+      saveOutbox();
+    }
+    scheduleFlush();
+  }
+
+  /** @param {string} id */
+  function unqueuePrivDel(id) {
+    if (!id) return;
+    const i = outbox.privdel.indexOf(id);
+    if (i > -1) {
+      outbox.privdel.splice(i, 1);
+      saveOutbox();
+    }
+  }
+
+  /** @param {string} id */
+  function queueDelete(id) {
+    if (!id) return;
+    if (outbox.del.indexOf(id) === -1) {
+      outbox.del.push(id);
+      saveOutbox();
+    }
+    scheduleFlush();
+  }
+
+  /** @param {string} id */
+  function unqueueDelete(id) {
+    if (!id) return;
+    const i = outbox.del.indexOf(id);
+    if (i > -1) {
+      outbox.del.splice(i, 1);
+      saveOutbox();
+    }
+  }
+
+  /**
+   * Отложить сброс outbox.
+   * @param {number} [delay]
+   */
+  function scheduleFlush(delay) {
+    if (flushTimer) return;
+
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      flushOutbox();
+    }, delay || 5000);
+  }
+
+  /**
+   * Сброс накопившихся офлайн-операций: priv → announce → del → privdel.
+   * Фазы независимы; сбой одной задачи не блокирует остальные.
+   * @returns {Promise<void>}
+   */
+  async function flushOutbox() {
+    if (flushing) return;
+    if (!canPublish()) return;
+    if (!outbox.announce.length && !outbox.del.length && !outbox.priv.length && !outbox.privdel.length) return;
+
+    flushing = true;
+
+    try {
+      // Фаза 1: приватный канон — последовательно, мягко к релеям.
+      for (const uid of outbox.priv.slice()) {
+        const note = await DB.get(uid).catch(() => null);
+        if (!note) {
+          unqueuePrivate(uid);
+          continue;
+        }
+        try {
+          const tpl = await Protocol.privateEvent(note);
+          await Nostr.publish(tpl);
+          unqueuePrivate(uid);
+          if (!note.syncTs) {
+            note.syncTs = Date.now();
+            DB.put(note).catch(() => {});
+          }
+        } catch (_) {
+          // Остаётся в очереди для повторной попытки.
+        }
+      }
+
+      // Фаза 2: публичные проекции — параллельно, allSettled.
+      const announceIds = outbox.announce.slice();
+      const tasks = announceIds.map(async noteId => {
+        const note = await DB.get(noteId).catch(() => null);
+        if (!note || !note.shared || !note.vector || note.eventId) {
+          unqueueAnnounce(noteId);
+          return;
+        }
+        try {
+          const tpl = await buildNoteEvent(note);
+          const ev = await Nostr.publish(tpl);
+          unqueueAnnounce(noteId);
+
+          if (ev && ev.id && note.id) {
+            const cur = await DB.get(note.id).catch(() => null);
+            if (cur && cur.eventId !== ev.id) {
+              cur.eventId = ev.id;
+              await DB.put(cur).catch(() => {});
+              // eventId должен доехать в канон на другие устройства
+              publishPrivate(cur);
+            }
+          }
+        } catch (_) {
+          // Остаётся в очереди.
+        }
+      });
+      await Promise.allSettled(tasks);
+
+      // Фаза 3: kind 5 — пачкой одним событием.
+      if (outbox.del.length) {
+        const ev = Protocol.deleteEvent(outbox.del.slice(), room());
+        if (ev) {
+          try {
+            await Nostr.publish(ev);
+            outbox.del = [];
+            saveOutbox();
+          } catch (_) {
+            // Остаётся в очереди.
+          }
+        }
+      }
+
+      // Фаза 4: tombstone канона — последовательно.
+      for (const uid of outbox.privdel.slice()) {
+        try {
+          const tpl = await Protocol.privateTombstone(uid);
+          await Nostr.publish(tpl);
+          unqueuePrivDel(uid);
+        } catch (_) {
+          // Остаётся в очереди.
+        }
+      }
+    } catch (_) {} finally {
+      flushing = false;
+
+      if (outbox.announce.length || outbox.del.length || outbox.priv.length || outbox.privdel.length) {
+        scheduleFlush(10000);
+      }
+    }
+  }
+
+  /**
+   * Ищем локальные опубликованные заметки без eventId → очередь анонса.
+   * (Ремонт заметок, созданных офлайн или переживших перезагрузку.)
+   * @returns {Promise<void>}
+   */
+  async function scanLocalUnpublished() {
+    try {
+      const notes = await DB.all();
+      notes.forEach(n => {
+        if (n && n.shared && n.vector && !n.eventId) {
+          queueAnnounce(n.id);
+        }
+      });
+      flushOutbox();
+    } catch (_) {}
+  }
+
+  // ─── Приватный канон: публикация ──────────────────────────────────────────
+
+  /**
+   * Опубликовать канон заметки (kind 30078). Очередь при офлайне/сбое.
+   * @param {Object} note - Локальная заметка.
+   * @returns {Promise<void>}
+   */
+  async function publishPrivate(note) {
+    if (!Config.get('syncEnabled', true)) return;
+    if (!note || !note.id) return;
+
+    if (!canPublish()) {
+      queuePrivate(note.id);
+      return;
+    }
+
+    try {
+      const tpl = await Protocol.privateEvent(note);
+      await Nostr.publish(tpl);
+      unqueuePrivate(note.id);
+      if (!note.syncTs) {
+        note.syncTs = Date.now();
+        DB.put(note).catch(() => {});
+      }
+    } catch (e) {
+      Logger.warn('NetService: канон в очередь', String(e && e.message || e));
+      queuePrivate(note.id);
+    }
+  }
+
+  /**
+   * Опубликовать tombstone канона (удаление заметки из синка).
+   * @param {string} uid - Идентификатор заметки.
+   * @returns {Promise<void>}
+   */
+  async function tombstoneNote(uid) {
+    if (!Config.get('syncEnabled', true)) return;
+    if (!uid) return;
+
+    if (!canPublish()) {
+      queuePrivDel(uid);
+      return;
+    }
+
+    try {
+      const tpl = await Protocol.privateTombstone(uid);
+      await Nostr.publish(tpl);
+      unqueuePrivDel(uid);
+    } catch (e) {
+      Logger.warn('NetService: tombstone в очередь', String(e && e.message || e));
+      queuePrivDel(uid);
+    }
+  }
+
+  /**
+   * Резолв ссылки на родителя для публичной проекции: если родитель
+   * опубликован — его eventId (резолвимо сетью); иначе Protocol использует
+   * uid (orphan для чужих, но связь сохранена в приватном каноне —
+   * та же семантика, что в v0.6 для неопубликованных родителей).
+   * @param {Object} note - Заметка.
+   * @returns {Promise<{tpl: Object}|null>} Шаблон kind 1.
+   */
+  async function buildNoteEvent(note) {
+    let parentRef;
+    let parentPubkey;
+
+    if (note.parentId) {
+      const parent = await DB.get(note.parentId).catch(() => null);
+      if (parent && parent.eventId) {
+        parentRef = parent.eventId;
+        parentPubkey = note.parentPubkey || '';
+      }
+    }
+
+    return Protocol.noteEvent(note, room(), parentRef, parentPubkey);
+  }
+
+  /**
+   * Одноразовый backsweep: публикация канона для всех локальных заметок
+   * (миграция v0.6 → v0.7). Флаг ставится после enqueue — недоставшее
+   * доедет через outbox.
+   * @returns {Promise<void>}
+   */
+  async function runBacksweep() {
+    if (!Config.get('syncEnabled', true)) {
+      emitSync('off');
+      return;
+    }
+    if (Config.get('syncMigrated', false)) {
+      emitSync('idle');
+      return;
+    }
+
+    emitSync('active');
+
+    try {
+      const notes = await DB.all();
+      let queued = 0;
+
+      for (const n of notes) {
+        if (n && n.id) {
+          if (canPublish()) {
+            await publishPrivate(n);
+          } else {
+            queuePrivate(n.id);
+          }
+          queued++;
+        }
+      }
+
+      Config.set('syncMigrated', true);
+      Logger.info('NetService: backsweep — ' + queued + ' заметок в канон');
+    } catch (e) {
+      Logger.warn('NetService: backsweep ошибка', String(e && e.message || e));
+    }
+
+    emitSync('idle');
+    flushOutbox();
+  }
+
+  // ─── Приватный канон: приём ───────────────────────────────────────────────
+
+  /**
+   * Применить входящий канон (от своего ключа с другого устройства).
+   * LWW: применяется только при отсутствии локальной версии или при
+   * строго большем syncTs (равенство = эхо своей публикации).
+   * @param {Object} d - Результат Protocol.decodePrivate.
+   * @returns {Promise<void>}
+   */
+  async function applyIncomingPrivate(d) {
+    if (!d || !d.id) return;
+
+    try {
+      const cur = await DB.get(d.id);
+
+      // Tombstone — удаление
+      if (d.deleted) {
+        if (!cur) return;
+        if (!cur.syncTs || d.syncTs > cur.syncTs) {
+          await DB.del(d.id);
+          try { bus.emit('sync:applied', { uid: d.id, deleted: true }); } catch (_) {}
+        }
+        return;
+      }
+
+      // Полная версия
+      if (!cur) {
+        await DB.put({
+          id: d.id,
+          text: d.text,
+          vector: d.vector,
+          shared: d.shared,
+          parentId: d.parentId,
+          parentPubkey: d.parentPubkey,
+          authorPubkey: null,
+          eventId: d.eventId,
+          createdAt: d.createdAt,
+          updatedAt: d.updatedAt,
+          syncTs: d.syncTs,
+        });
+        try { bus.emit('sync:applied', { uid: d.id }); } catch (_) {}
+        return;
+      }
+
+      if (!cur.syncTs || d.syncTs > cur.syncTs) {
+        await DB.put({
+          id: d.id,
+          text: d.text,
+          vector: d.vector,
+          shared: d.shared,
+          parentId: d.parentId,
+          parentPubkey: d.parentPubkey,
+          authorPubkey: null,
+          eventId: d.eventId,
+          createdAt: cur.createdAt || d.createdAt,
+          updatedAt: d.updatedAt,
+          syncTs: d.syncTs,
+        });
+        try { bus.emit('sync:applied', { uid: d.id }); } catch (_) {}
+      }
+    } catch (e) {
+      Logger.warn('NetService: applyIncomingPrivate', String(e && e.message || e));
+    }
+  }
+
+  // ─── Подписка на себя ─────────────────────────────────────────────────────
+
+  /** Подписка на собственный приватный канон (живой синк + restore). */
+  function subscribeSelf() {
+    const pk = Nostr.getPubkey();
+    if (!pk) return;
+
+    if (!Config.get('syncEnabled', true)) {
+      emitSync('off');
+      return;
+    }
+
+    if (selfSubscription && typeof selfSubscription.close === 'function') {
+      try { selfSubscription.close(); } catch (_) {}
+    }
+
+    selfSubscription = Nostr.subscribe(
+      [{ authors: [pk], kinds: [kPrivate()] }],
+      {
+        onevent: ev => {
+          if (!ev || !ev.id) return;
+
+          // Оптимизация: не расшифровывать повторно одно и то же событие.
+          if (selfSeen.has(ev.id)) return;
+          selfSeen.add(ev.id);
+          if (selfSeen.size > 500) {
+            const arr = Array.from(selfSeen);
+            selfSeen.clear();
+            for (let i = Math.floor(arr.length / 2); i < arr.length; i++) {
+              selfSeen.add(arr[i]);
+            }
+          }
+
+          Protocol.decodePrivate(ev)
+            .then(d => { if (d) applyIncomingPrivate(d); })
+            .catch(() => {});
+        },
+        onclose: () => {
+          // Синк критичен: переподписка с фиксированной задержкой, без статусов.
+          setTimeout(() => {
+            if (started && Config.get('syncEnabled', true)) {
+              subscribeSelf();
+            }
+          }, 5000);
+        },
+      }
+    );
+  }
+
+  // ─── Вспомогательные сети ─────────────────────────────────────────────────
+
+  function ensureOnlineListener() {
+    if (onlineListenerAdded) return;
+    onlineListenerAdded = true;
+
+    window.addEventListener('online', () => {
+      if (!started) {
+        start();
+        return;
+      }
+
+      if (!isOffline()) {
+        if (!subscription) subscribeToRoom();
+        if (!selfSubscription && Config.get('syncEnabled', true)) subscribeSelf();
+      }
+
+      flushOutbox();
+    });
+
+    window.addEventListener('offline', () => {
+      if (!started) return;
+
+      setStatus('failed');
+
+      // Инвалидируем подписки, чтобы onclose не запускал переподключение.
+      subEpoch++;
+
+      if (subscription && typeof subscription.close === 'function') {
+        try { subscription.close(); } catch (_) {}
+      }
+      subscription = null;
+    });
+  }
+
+  /** Обрезка seen-множества (комнатного). */
+  function trimSeen() {
+    const max = Config.get('seenMaxSize', 1000);
+    if (seen.size <= max) return;
+
+    const arr = Array.from(seen);
+    seen.clear();
+
+    for (let i = arr.length - Math.floor(max / 2); i < arr.length; i++) {
+      seen.add(arr[i]);
+    }
+  }
+
+  /**
+   * Дедупликация контента от одного автора.
+   * @param {string} pubkey
+   * @param {string} text
+   * @returns {boolean} true, если уже видели такой же текст.
+   */
+  function isContentDuplicate(pubkey, text) {
+    const key = pubkey + '::' + String(text || '').trim();
+    if (contentSeen.has(key)) return true;
+
+    contentSeen.set(key, true);
+
+    if (contentSeen.size > 2000) {
+      const first = contentSeen.keys().next().value;
+      contentSeen.delete(first);
+    }
+
+    return false;
+  }
+
+  /**
+   * Token bucket для входящих заметок от одного автора.
+   * Стартовый бюджет позволяет загрузить историю при первичной
+   * синхронизации, но защищает от флуда.
+   * @param {string} pubkey
+   * @returns {boolean}
+   */
+  function allowIncomingNote(pubkey) {
+    const now = Date.now();
+    const capacity = Math.max(1, Number(Config.get('maxIncomingNotesPerPeer', 20)) || 20);
+    const refillPerSec = 2;
+
+    let bucket = peerNoteBudgets.get(pubkey);
+
+    if (!bucket) {
+      bucket = { tokens: capacity, ts: now };
+      peerNoteBudgets.set(pubkey, bucket);
+    }
+
+    const elapsedSec = Math.max(0, (now - bucket.ts) / 1000);
+    if (elapsedSec > 0) {
+      bucket.tokens = Math.min(capacity, bucket.tokens + elapsedSec * refillPerSec);
+      bucket.ts = now;
+    }
+
+    if (bucket.tokens >= 1) {
+      bucket.tokens -= 1;
+      return true;
+    }
+
+    return false;
+  }
+
+  /** Перестройка центроидов префильтра (k-means по публичным заметкам). */
+  function rebuildCentroids() {
+    DB.all().then(notes => {
+      const vecs = notes.filter(n => n.shared && n.vector).map(n => n.vector);
+      if (!vecs.length) {
+        centroids = [];
+        return;
+      }
+
+      centroids = Vec.kmeans(
+        vecs,
+        Math.min(Config.get('centroidCount', 12), vecs.length),
+        8
+      );
+    }).catch(() => {});
+  }
+
+  /**
+   * @param {Float32Array|Array<number>} queryVector
+   * @returns {boolean}
+   */
+  function passesPrefilter(queryVector) {
+    if (!centroids.length) return true;
+
+    const floor = Config.get('threshold', 0.81) - 0.20;
+    for (const c of centroids) {
+      if (Vec.cosine(queryVector, c) >= floor) return true;
+    }
+
+    return false;
+  }
+
+  // ─── Входящие события (комната) ───────────────────────────────────────────
+
+  /**
+   * @param {boolean} hard - true при реальном получении события
+   *   (сбрасывает счётчик реконнектов); false — по 5с-таймауту.
+   */
+  function markConnected(hard) {
+    if (!started) return;
+
+    if (hard) {
+      hasReceivedEvent = true;
+      reconnectAttempts = 0;
+    }
+
+    setStatus('connected');
+    flushOutbox();
+  }
+
+  /** Обработчик событий комнатной подписки. */
+  function onEvent(ev) {
+    if (!ev) return;
+
+    // Любое полученное событие подтверждает, что сеть жива.
+    if (!hasReceivedEvent) {
+      markConnected(true);
+    }
+
+    if (seen.has(ev.id)) return;
+
+    // Свои события комнаты игнорируем, но помечаем как виденные.
+    // (30078 сюда не попадает — отдельная подписка на себя.)
+    if (ev.pubkey === Nostr.getPubkey()) {
+      seen.add(ev.id);
+      trimSeen();
+      return;
+    }
+
+    let accepted = false;
+
+    if (ev.kind === kNote()) {
+      accepted = handleIncomingNote(ev);
+    } else if (ev.kind === kQuery()) {
+      accepted = handleIncomingQuery(ev);
+    } else if (ev.kind === kAnswer()) {
+      accepted = handleIncomingAnswer(ev);
+    } else if (ev.kind === kDelete()) {
+      accepted = handleIncomingDelete(ev);
+    }
+
+    if (accepted) {
+      seen.add(ev.id);
+      trimSeen();
+    }
+  }
+
+  /**
+   * @param {Object} ev
+   * @returns {boolean} true — пометить seen; false — оставить для повторной обработки.
+   */
+  function handleIncomingNote(ev) {
+    const note = Protocol.decodeNote(ev);
+
+    if (!note) return true;
+
+    // Rate-limit: НЕ помечаем seen, чтобы событие могло пройти позже.
+    if (!allowIncomingNote(note.authorPubkey)) {
+      return false;
+    }
+
+    if (isContentDuplicate(note.authorPubkey, note.text)) {
+      return true;
+    }
+
+    peers.set(note.authorPubkey, Date.now());
+
+    // O(1): своя заметка, вернувшаяся от релея (по id или eventId).
+    if (DB.hasLocal(note.id)) return true;
+
+    DB.cacheGet(note.id).then(existing => {
+      if (existing && existing.createdAt && note.createdAt && existing.createdAt > note.createdAt) {
+        return;
+      }
+
+      DB.cachePut(note);
+      notifyPeers();
+    }).catch(() => {});
+
+    return true;
+  }
+
+  /**
+   * @param {Object} ev
+   * @returns {boolean}
+   */
+  function handleIncomingQuery(ev) {
+    const q = Protocol.decodeQuery(ev);
+
+    if (!q) return true;
+
+    const now = Date.now();
+    const last = peerQueryTimes.get(ev.pubkey) || 0;
+
+    if (now - last < Config.get('queryRateLimit', 3000)) {
+      return true;
+    }
+
+    peerQueryTimes.set(ev.pubkey, now);
+
+    if (!passesPrefilter(q.vector)) {
+      return true;
+    }
+
+    DB.all().then(notes => {
+      const candidates = notes.filter(n => n.shared && n.vector);
+      if (!candidates.length) return null;
+
+      const byId = new Map(candidates.map(n => [n.id, n]));
+      const items = candidates.map(n => ({ id: n.id, vector: n.vector }));
+
+      return Ranker.cosineBatch(q.vector, items).then(scored => {
+        const top = scored
+          .filter(s => s.score >= Config.get('threshold', 0.81))
+          .slice(0, q.maxResponses || Config.get('maxResponses', 8));
+
+        top.forEach((s, i) => {
+          const note = byId.get(s.id);
+          if (!note) return;
+
+          setTimeout(() => {
+            Nostr.publish(Protocol.answerEvent(note, s.score, q.queryId, room()))
+              .catch(e => Logger.warn('NetService: не отправить ответ', String(e)));
+          }, i * 250);
+        });
+      });
+    }).catch(e => Logger.warn('NetService: ошибка обработки запроса', String(e)));
+
+    return true;
+  }
+
+  /**
+   * @param {Object} ev
+   * @returns {boolean}
+   */
+  function handleIncomingAnswer(ev) {
+    const a = Protocol.decodeAnswer(ev);
+
+    if (!a) return true;
+
+    if (a.queryId !== activeQueryId) {
+      return true;
+    }
+
+    if (isContentDuplicate(a.authorPubkey, a.text)) {
+      return true;
+    }
+
+    peers.set(a.authorPubkey, Date.now());
+
+    DB.cachePut({
+      id: a.id,
+      text: a.text,
+      vector: a.vector,
+      shared: true,
+      authorPubkey: a.authorPubkey,
+      createdAt: a.createdAt,
+      score: a.score,
+    });
+
+    notifyPeers();
+
+    return true;
+  }
+
+  /**
+   * @param {Object} ev
+   * @returns {boolean}
+   */
+  function handleIncomingDelete(ev) {
+    const del = Protocol.decodeDelete(ev);
+
+    if (!del) return true;
+
+    del.eventIds.forEach(eventId => {
+      if (eventId) DB.cacheDel(eventId);
+    });
+
+    if (del.authorPubkey) peers.set(del.authorPubkey, Date.now());
+    notifyPeers();
+
+    return true;
+  }
+
+  // ─── Исходящие операции ───────────────────────────────────────────────────
+
+  /**
+   * Анонс публичной проекции заметки (kind 1). При успехе eventId
+   * сохраняется и уезжает в канон (чтобы другие устройства могли
+   * удалить проекцию при необходимости).
+   * @param {Object} note
+   * @returns {Promise<void>}
+   */
+  async function announceNote(note) {
+    if (!note || !note.shared || !note.vector) return;
+
+    if (note.eventId) {
+      unqueueAnnounce(note.id);
+      return;
+    }
+
+    if (!canPublish()) {
+      queueAnnounce(note.id);
+      return;
+    }
+
+    try {
+      const tpl = await buildNoteEvent(note);
+      const ev = await Nostr.publish(tpl);
+      unqueueAnnounce(note.id);
+      Logger.info('NetService: анонс заметки ' + note.id);
+
+      if (ev && ev.id && note.id) {
+        const cur = await DB.get(note.id).catch(() => null);
+        if (cur && cur.eventId !== ev.id) {
+          cur.eventId = ev.id;
+          await DB.put(cur).catch(() => {});
+          publishPrivate(cur);
+        }
+      }
+    } catch (e) {
+      Logger.warn('NetService: не анонсировать, поставлено в очередь', String(e && e.message || e));
+      queueAnnounce(note.id);
+    }
+  }
+
+  /**
+   * Запрос удаления публичной проекции с рэлеев (kind 5).
+   * @param {Object} note
+   * @returns {Promise<void>}
+   */
+  async function forgetNote(note) {
+    if (!note || !note.eventId) return;
+
+    if (!canPublish()) {
+      queueDelete(note.eventId);
+      return;
+    }
+
+    const ev = Protocol.deleteEvent(note.eventId, room());
+    if (!ev) return;
+
+    try {
+      await Nostr.publish(ev);
+      unqueueDelete(note.eventId);
+      Logger.info('NetService: запрос удаления с рэлеев ' + note.id);
+    } catch (e) {
+      Logger.warn('NetService: не удалить с рэлеев, поставлено в очередь', String(e && e.message || e));
+      queueDelete(note.eventId);
+    }
+  }
+
+  /**
+   * Отправка запроса в сеть при изменении контекста.
+   * В офлайне запросы не отправляем.
+   */
+  function maybeSendQuery() {
+    const ctx = Store.get('context');
+
+    if ((ctx.source !== 'pin' && ctx.source !== 'drift') || !ctx.vector) {
+      lastQueryVec = null;
+      return;
+    }
+
+    if (!canPublish()) {
+      lastQueryVec = null;
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastQueryTime < Config.get('queryRateLimit', 3000)) return;
+
+    if (lastQueryVec && Ranker.isSimilar(lastQueryVec, ctx.vector)) return;
+
+    lastQueryVec = ctx.vector;
+    lastQueryTime = now;
+
+    const tpl = Protocol.queryEvent(
+      ctx.vector,
+      Config.get('maxResponses', 8),
+      Config.get('responseWindow', 6000)
+    );
+
+    Nostr.publish(tpl)
+      .then(ev => {
+        activeQueryId = ev.id;
+        Logger.info('NetService: запрос ' + ev.id.slice(0, 8) + '…');
+      })
+      .catch(e => {
+        lastQueryVec = null;
+        lastQueryTime = 0;
+        Logger.warn('NetService: не отправить запрос', String(e && e.message || e));
+      });
+  }
+
+  // ─── Подписка на комнату ──────────────────────────────────────────────────
+
+  /** Подписка на комнату с экспоненциальным реконнектом. */
+  function subscribeToRoom() {
+    const since = Math.floor(Date.now() / 1000) - currentWindow;
+    const filters = [{
+      kinds: [kNote(), kQuery(), kAnswer(), kDelete()],
+      '#t': [room()],
+      since,
+    }];
+
+    const myEpoch = ++subEpoch;
+
+    if (subscription && typeof subscription.close === 'function') {
+      try { subscription.close(); } catch (_) {}
+    }
+
+    subscription = Nostr.subscribe(filters, {
+      onevent: onEvent,
+      onclose: () => {
+        if (myEpoch !== subEpoch) return;
+
+        setStatus('reconnecting');
+
+        // Экспоненциальный реконнект: base * 2^(n-1), максимум maxDelay,
+        // джиттер ±25% против синхронных штормов.
+        const maxAttempts = Config.get('reconnectMaxAttempts', 10);
+        const baseDelay = Config.get('reconnectBaseDelay', 1000);
+        const maxDelay = Config.get('reconnectMaxDelay', 60000);
+
+        reconnectAttempts++;
+
+        if (reconnectAttempts > maxAttempts) {
+          Logger.warn('NetService: ' + maxAttempts + ' неудачных подключений, жду сеть/пользователя');
+          setStatus('failed');
+          return;
+        }
+
+        const delay = Math.min(baseDelay * Math.pow(2, reconnectAttempts - 1), maxDelay);
+        const jitter = delay * 0.25 * Math.random();
+
+        setTimeout(() => {
+          if (started && myEpoch === subEpoch && !isOffline()) {
+            subscribeToRoom();
+          }
+        }, delay + jitter);
+      },
+    });
+
+    if (subscription) {
+      setStatus('connecting');
+
+      // Пустая комната: через 5 секунд считаем подключение установленным
+      // (без сброса счётчика реконнектов — только реальное событие его сбрасывает).
+      setTimeout(() => {
+        if (myEpoch === subEpoch && started && !isOffline()) {
+          markConnected(false);
+        }
+      }, 5000);
+    }
+  }
+
+  /** Расширение окна истории («Загрузить ещё»). */
+  function loadHistory() {
+    if (!started || historyLoading) return;
+
+    const maxWindow = Config.get('historyMaxWindow', 2592000);
+    if (currentWindow >= maxWindow) {
+      emitHistory(false, currentWindow);
+      return;
+    }
+
+    historyLoading = true;
+    emitHistory(true, currentWindow);
+
+    currentWindow = Math.min(maxWindow, Math.max(currentWindow * 4, 86400));
+
+    try {
+      subscribeToRoom();
+      Logger.info('NetService: окно истории → ' + currentWindow + 's');
+    } finally {
+      setTimeout(() => {
+        historyLoading = false;
+        emitHistory(false, currentWindow);
+      }, 1200);
+    }
+  }
+
+  /** Heartbeat: чистка пиров и лимитеров. */
+  function startHeartbeat() {
+    if (hbTimer) clearInterval(hbTimer);
+
+    hbTimer = setInterval(() => {
+      const now = Date.now();
+      const ttl = Config.get('peerTTL', 60000);
+      let changed = false;
+
+      peers.forEach((ts, pk) => {
+        if (now - ts > ttl) {
+          peers.delete(pk);
+          changed = true;
+        }
+      });
+
+      peerQueryTimes.forEach((ts, pk) => {
+        if (now - ts > 60000) peerQueryTimes.delete(pk);
+      });
+
+      peerNoteBudgets.forEach((bucket, pk) => {
+        if (now - bucket.ts > 300000) peerNoteBudgets.delete(pk);
+      });
+
+      if (changed) notifyPeers();
+      trimSeen();
+    }, Config.get('heartbeat', 30000));
+  }
+
+  // ─── Старт/стоп ───────────────────────────────────────────────────────────
+
+  function start() {
+    if (started) return Promise.resolve();
+    if (startPromise) return startPromise;
+
+    ensureOnlineListener();
+
+    startPromise = Nostr.init()
+      .then(() => DB.ready())
+      .then(() => {
+        started = true;
+        hasReceivedEvent = false;
+        reconnectAttempts = 0;
+
+        busUnsubs.forEach(u => {
+          try { u(); } catch (_) {}
+        });
+        busUnsubs = [];
+
+        busUnsubs.push(bus.on('note:created', note => {
+          if (!note) return;
+          publishPrivate(note);
+          if (note.shared) announceNote(note);
+        }));
+
+        busUnsubs.push(bus.on('note:updated', note => {
+          // Правки только личных заметок; канон должен узнать новую версию.
+          if (note) publishPrivate(note);
+        }));
+
+        busUnsubs.push(bus.on('note:shared', note => {
+          if (!note || !note.shared) return;
+          publishPrivate(note);
+          announceNote(note);
+        }));
+
+        busUnsubs.push(bus.on('note:unshared', note => {
+          if (!note) return;
+
+          if (note.id) unqueueAnnounce(note.id);
+          publishPrivate(note);
+          if (!note.shared && note.eventId) forgetNote(note);
+        }));
+
+        busUnsubs.push(bus.on('note:deleted', note => {
+          if (!note) return;
+
+          if (note.id) unqueueAnnounce(note.id);
+          tombstoneNote(note.id);
+          if (note.shared && note.eventId) forgetNote(note);
+        }));
+
+        busUnsubs.push(bus.on('db:change', () => rebuildCentroids()));
+
+        busUnsubs.push(bus.on('sync:toggle', p => {
+          if (!p) return;
+          if (p.enabled) {
+            subscribeSelf();
+            runBacksweep();
+          } else {
+            if (selfSubscription && typeof selfSubscription.close === 'function') {
+              try { selfSubscription.close(); } catch (_) {}
+            }
+            selfSubscription = null;
+            emitSync('off');
+          }
+        }));
+
+        contextUnsub = Store.subscribe(s => s.context, () => maybeSendQuery());
+
+        startHeartbeat();
+        rebuildCentroids();
+        scanLocalUnpublished();
+
+        if (isOffline()) {
+          setStatus('failed');
+          Logger.warn('NetService: офлайн, ожидаем появление сети');
+        } else {
+          subscribeToRoom();
+        }
+
+        subscribeSelf();
+        runBacksweep();
+
+        Logger.info('NetService: запущен, комната #' + room());
+      }).catch(e => {
+        Logger.error('NetService: не стартовать', String(e && e.message || e));
+        setStatus('failed');
+
+        if (startRetryTimer) clearTimeout(startRetryTimer);
+        startRetryTimer = setTimeout(() => {
+          if (!started) start();
+        }, 10000);
+      }).finally(() => {
+        startPromise = null;
+      });
+
+    return startPromise;
+  }
+
+  /**
+   * @param {boolean} full - Полная остановка с очисткой лимитеров.
+   */
+  function stop(full) {
+    started = false;
+    hasReceivedEvent = false;
+
+    if (subscription && typeof subscription.close === 'function') {
+      try { subscription.close(); } catch (_) {}
+    }
+    subscription = null;
+
+    if (selfSubscription && typeof selfSubscription.close === 'function') {
+      try { selfSubscription.close(); } catch (_) {}
+    }
+    selfSubscription = null;
+
+    if (hbTimer) {
+      clearInterval(hbTimer);
+      hbTimer = null;
+    }
+
+    if (contextUnsub) {
+      try { contextUnsub(); } catch (_) {}
+      contextUnsub = null;
+    }
+
+    busUnsubs.forEach(u => {
+      try { u(); } catch (_) {}
+    });
+    busUnsubs = [];
+
+    if (flushTimer) {
+      clearTimeout(flushTimer);
+      flushTimer = null;
+    }
+
+    if (startRetryTimer) {
+      clearTimeout(startRetryTimer);
+      startRetryTimer = null;
+    }
+
+    activeQueryId = null;
+    lastQueryVec = null;
+    lastQueryTime = 0;
+    reconnectAttempts = 0;
+
+    if (full) {
+      peers.clear();
+      seen.clear();
+      selfSeen.clear();
+      contentSeen.clear();
+      peerQueryTimes.clear();
+      peerNoteBudgets.clear();
+    }
+
+    setStatus('disconnected');
+  }
+
+  /**
+   * Публичный wipe для Boot: tombstone всех канонов + kind 5 всех
+   * публичных проекций (перед DB.reset). Best-effort.
+   * @returns {Promise<void>}
+   */
+  async function publishWipeAll() {
+    if (!canPublish()) return;
+
+    try {
+      const notes = await DB.all();
+
+      // Публичные проекции — одним kind 5.
+      const pubIds = notes.filter(n => n && n.eventId).map(n => n.eventId);
+      if (pubIds.length) {
+        const ev = Protocol.deleteEvent(pubIds, room());
+        if (ev) {
+          await Nostr.publish(ev).catch(() => {});
+        }
+      }
+
+      // Каноны — tombstone последовательно.
+      if (Config.get('syncEnabled', true)) {
+        for (const n of notes) {
+          if (!n || !n.id) continue;
+          try {
+            const tpl = await Protocol.privateTombstone(n.id);
+            await Nostr.publish(tpl);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
+
+  return { start, stop, loadHistory, publishWipeAll };
+}, ['Nostr', 'Protocol', 'DB', 'Ranker', 'Vec', 'Store', 'Config', 'Logger', 'EventBus']);
 // ─── NET/NetService ─── END ─────────────────────────────────────────────────
 
 // ═══════════════════════════════════════════════════════════════════════════════
