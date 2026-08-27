@@ -8520,10 +8520,141 @@ DI.register('MenuView', function (Store, Config, Modal, Toast, I18n, bus, Onboar
 
 // ─── PLATFORM/TelegramAdapter ─── START ─────────────────────────────────────
 /**
- * [в16] Telegram Mini Apps: ready/expand, тема (с уважением
- *      userThemeOverride), haptic, showAlert/showConfirm с fallback.
- * Deps: Config, EventBus, Logger
+ * Интеграция с Telegram Mini Apps.
+ *
+ * Определяет, открыто ли приложение в Telegram, применяет тему, даёт
+ * haptic feedback для тостов.
+ *
+ * Защита от конфликта тем:
+ * Если пользователь вручную выбрал тему в настройках (userThemeOverride = true),
+ * событие themeChanged от Telegram игнорируется.
  */
+DI.register('TelegramAdapter', function (Config, bus, Logger) {
+  /** @type {Object|null} window.Telegram.WebApp. */
+  let tg = null;
+  /** @type {boolean} */
+  let isActive = false;
+
+  /**
+   * Инициализация: если открыты в Telegram — ready/expand/тема/события.
+   * Вне Telegram — тихий выход.
+   */
+  function init() {
+    if (!window.Telegram || !window.Telegram.WebApp) {
+      Logger.info('TelegramAdapter: не в Telegram, пропускаем');
+      return;
+    }
+
+    tg = window.Telegram.WebApp;
+
+    try {
+      tg.ready();
+      tg.expand();
+      isActive = true;
+      Logger.info('TelegramAdapter: активирован');
+    } catch (e) {
+      Logger.warn('TelegramAdapter: ошибка инициализации', String(e));
+      return;
+    }
+
+    applyTheme();
+
+    tg.onEvent('themeChanged', () => {
+      applyTheme();
+    });
+
+    try {
+      tg.setHeaderColor(tg.colorScheme === 'dark' ? '#0a0a0b' : '#fafafa');
+      tg.setBackgroundColor(tg.colorScheme === 'dark' ? '#0a0a0b' : '#fafafa');
+    } catch (_) {}
+  }
+
+  /**
+   * Применение темы из Telegram.
+   * Если пользователь вручную выбрал тему (userThemeOverride), пропускаем.
+   */
+  function applyTheme() {
+    if (!tg) return;
+
+    // Защита от конфликта: ручная тема имеет приоритет
+    if (Config.get('userThemeOverride', false)) {
+      return;
+    }
+
+    const scheme = tg.colorScheme || 'dark';
+    document.body.setAttribute('data-theme', scheme);
+
+    try {
+      tg.setHeaderColor(scheme === 'dark' ? '#0a0a0b' : '#fafafa');
+      tg.setBackgroundColor(scheme === 'dark' ? '#0a0a0b' : '#fafafa');
+    } catch (_) {}
+
+    try {
+      bus.emit('telegram:theme', { scheme });
+    } catch (_) {}
+  }
+
+  /**
+   * @returns {boolean} Запущено ли приложение внутри Telegram.
+   */
+  function isTelegram() {
+    return isActive;
+  }
+
+  /**
+   * Тактильный отклик.
+   * @param {'success'|'error'|'light'} type - Тип воздействия.
+   */
+  function hapticFeedback(type) {
+    if (!tg || !tg.HapticFeedback) return;
+
+    try {
+      if (type === 'success') {
+        tg.HapticFeedback.notificationOccurred('success');
+      } else if (type === 'error') {
+        tg.HapticFeedback.notificationOccurred('error');
+      } else {
+        tg.HapticFeedback.impactOccurred('light');
+      }
+    } catch (_) {}
+  }
+
+  /**
+   * Нативный alert с браузерным fallback.
+   * @param {string} message - Текст.
+   */
+  function showAlert(message) {
+    if (!tg) return;
+
+    try {
+      tg.showAlert(message);
+    } catch (_) {
+      alert(message);
+    }
+  }
+
+  /**
+   * Нативный confirm с браузерным fallback.
+   * @param {string} message - Текст.
+   * @param {Function} callback - Колбэк(true) при подтверждении.
+   */
+  function showConfirm(message, callback) {
+    if (!tg) {
+      if (confirm(message)) callback();
+      return;
+    }
+
+    try {
+      tg.showConfirm(message, confirmed => {
+        if (confirmed) callback();
+      });
+    } catch (_) {
+      if (confirm(message)) callback();
+    }
+  }
+
+  return { init, isTelegram, hapticFeedback, showAlert, showConfirm };
+}, ['Config', 'EventBus', 'Logger']);
 // ─── PLATFORM/TelegramAdapter ─── END ───────────────────────────────────────
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -8532,11 +8663,82 @@ DI.register('MenuView', function (Store, Config, Modal, Toast, I18n, bus, Onboar
 
 // ─── BOOT ─── START ─────────────────────────────────────────────────────────
 /**
- * [в16] Инициализация в порядке: тема/i18n → подписчики → Telegram →
- *      Context → DOM-модули → wipe-обработчик → показ → Embedder +
- *      NetService → онбординг. Плюс запуск backsweep-миграции v0.6 → v0.7.
- * Deps: —
+ * Точка входа. Инициализирует все модули в правильном порядке.
+ *
+ * Порядок инициализации:
+ * 1. Тема + переводы статических элементов (до показа)
+ * 2. Подписчики событий (без DOM): Progress, HeaderStatus, Feed, Influence
+ * 3. TelegramAdapter (до Context, чтобы тема применилась вовремя)
+ * 4. Context (подписывается на 'note:pin')
+ * 5. DOM-модули: Composer, FeedView, NoteView, BaseView, MenuView,
+ *    AccountView (FeedView резолвит Provenance — подписка на db:change
+ *    существует до старта сети в шаге 8)
+ * 6. Обработчик стирания данных: publishWipeAll (tombstone'ы в outbox)
+ *    → DB.reset → view:set (единый setView в MenuView, фикс #3)
+ * 7. Показ приложения (body.ready)
+ * 8. Запуск AI и сети (NetService.start: подписки, backsweep v0.6 → v0.7)
+ * 9. Онбординг (последним, ждёт загрузки модели)
  */
+DI.register('Boot', function () {
+  function mount() {
+    // 1. Тема и перевод статических элементов до показа
+    const Config = DI.resolve('Config');
+    document.body.setAttribute('data-theme', Config.get('theme', 'dark'));
+    DI.resolve('I18n').init();
+
+    // 2. Подписчики событий (без DOM)
+    DI.resolve('Progress').init();
+    DI.resolve('HeaderStatus').init();
+    DI.resolve('Feed').init();
+    DI.resolve('Influence').init();
+
+    // 3. Telegram адаптер ДО Context, чтобы тема применилась вовремя
+    DI.resolve('TelegramAdapter').init();
+
+    // 4. Context.init подписывается на 'note:pin' от NoteView/FeedView
+    DI.resolve('Context').init();
+
+    // 5. DOM-модули
+    DI.resolve('Composer').init();
+    DI.resolve('FeedView').init();
+    DI.resolve('NoteView').init();
+    DI.resolve('BaseView').init();
+    DI.resolve('MenuView').init();
+    DI.resolve('AccountView').init();
+
+    // 6. Слушатель стирания данных
+    const bus = DI.resolve('EventBus');
+    const DB = DI.resolve('DB');
+    const Toast = DI.resolve('Toast');
+    const I18n = DI.resolve('I18n');
+    const NetService = DI.resolve('NetService');
+
+    bus.on('wipe:request', () => {
+      // Tombstone'ы канона + kind 5 проекций: в персистентный outbox,
+      // попытка доставки с бюджетом (см. NetService.publishWipeAll).
+      NetService.publishWipeAll()
+        .catch(() => {})
+        .finally(() => DB.reset())
+        .then(() => {
+          Toast.show('ok', I18n.t('toast.base.wiped'));
+          // ФИКС #3: единый setView — DOM-переключение, а не только Store.
+          try { bus.emit('view:set', { view: 'stream' }); } catch (_) {}
+        });
+    });
+
+    // 7. Показ приложения
+    document.body.classList.add('ready');
+
+    // 8. Запуск AI и сети
+    DI.resolve('Embedder').load();
+    DI.resolve('NetService').start();
+
+    // 9. Онбординг последним (ждёт загрузки модели)
+    DI.resolve('Onboarding').init();
+  }
+
+  return { mount };
+});
 // ─── BOOT ─── END ───────────────────────────────────────────────────────────
 
 // ═══════════════════════════════════════════════════════════════════════════════
